@@ -1,0 +1,656 @@
+# Edgion Controller 架构设计文档
+
+> 版本: v1.0  
+> 日期: 2024-12-25  
+> 状态: 设计阶段
+
+## 📋 目录
+
+- [1. 概述](#1-概述)
+- [2. 技术栈选型](#2-技术栈选型)
+- [3. 架构设计](#3-架构设计)
+- [4. 功能模块](#4-功能模块)
+- [5. 数据流设计](#5-数据流设计)
+- [6. API 接口规范](#6-api-接口规范)
+- [7. 部署方案](#7-部署方案)
+
+---
+
+## 1. 概述
+
+### 1.1 项目背景
+
+Edgion 是一个基于 Rust 和 Pingora 的高性能 API 网关，实现了完整的 Kubernetes Gateway API 标准。为了提升运维效率和用户体验，需要为 `edgion-controller` 添加 Web 管理界面，支持可视化的资源管理。
+
+### 1.2 设计目标
+
+- **易用性**：直观的用户界面，降低运维门槛
+- **完整性**：支持所有 Gateway API 资源的 CRUD 操作
+- **安全性**：数据验证、错误处理、（后续）权限控制
+- **性能**：前端优化、后端高效、大量资源场景下流畅
+- **部署简便**：嵌入式部署，单一二进制文件
+
+### 1.3 参考项目
+
+基于业界主流 API 网关的实践经验：
+
+| 项目 | 前端技术栈 | 优点借鉴 |
+|-----|-----------|---------|
+| **Apache APISIX** | React + Ant Design Pro | 完整的 CRUD 界面、Monaco 编辑器、插件配置表单化 |
+| **Kong (Konga)** | Angular/Vue | 资源关系图谱、健康检查可视化、配置快照 |
+| **Traefik** | 原生 JS | 极简设计、嵌入式部署、实时流量可视化 |
+
+---
+
+## 2. 技术栈选型
+
+### 2.1 前端技术栈
+
+| 技术 | 版本 | 用途 | 选型理由 |
+|-----|------|------|---------|
+| **React** | 18.x | UI 框架 | 生态成熟、性能优秀、团队熟悉 |
+| **TypeScript** | 5.x | 类型系统 | 类型安全、IDE 支持好、减少错误 |
+| **Vite** | 5.x | 构建工具 | 快速 HMR、开发体验好、构建速度快 |
+| **Ant Design** | 5.x | UI 组件库 | 企业级组件丰富、中文文档好、开箱即用 |
+| **Monaco Editor** | 4.x | 代码编辑器 | VS Code 内核、YAML 支持好、智能提示 |
+| **React Router** | 6.x | 路由管理 | 标准路由库、声明式路由 |
+| **React Query** | 5.x | 服务端状态 | 自动缓存、后台刷新、请求去重 |
+| **Zustand** | 4.x | 客户端状态 | 轻量级、API 简洁、TypeScript 友好 |
+| **Axios** | 1.x | HTTP 客户端 | 拦截器、错误处理、取消请求 |
+| **js-yaml** | 4.x | YAML 解析 | 标准 YAML 库、K8s 场景必备 |
+| **dayjs** | 1.x | 时间处理 | 轻量级、API 友好 |
+
+### 2.2 后端技术栈
+
+| 技术 | 版本 | 用途 |
+|-----|------|------|
+| **Axum** | 0.8.x | Web 框架 |
+| **tower-http** | - | CORS 中间件 |
+| **rust-embed** | - | 静态文件嵌入 |
+| **serde_json** | - | JSON 序列化 |
+
+---
+
+## 3. 架构设计
+
+### 3.1 整体架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  浏览器 (Browser)                    │
+│               http://localhost:12101                 │
+└────────────────────┬────────────────────────────────┘
+                     │ HTTP/REST
+                     │
+┌────────────────────▼────────────────────────────────┐
+│           Edgion Controller (Rust)                   │
+│  ┌──────────────────────────────────────────────┐  │
+│  │  Axum HTTP Server (0.0.0.0:12101)           │  │
+│  ├──────────────────────────────────────────────┤  │
+│  │  ┌─────────────┐  ┌──────────────────────┐  │  │
+│  │  │ Static      │  │  RESTful API         │  │  │
+│  │  │ Files       │  │  /api/v1/*           │  │  │
+│  │  │ (Embedded)  │  │  - CRUD Handlers     │  │  │
+│  │  └─────────────┘  │  - CORS Middleware   │  │  │
+│  │                   └──────────┬───────────┘  │  │
+│  └──────────────────────────────┼──────────────┘  │
+│                                  │                  │
+│  ┌──────────────────────────────▼──────────────┐  │
+│  │          Core Services                      │  │
+│  │  ┌──────────────┐  ┌────────────────────┐  │  │
+│  │  │ ConfigServer │  │ ResourceMgrAPI     │  │  │
+│  │  │ (Runtime)    │  │ (Persistence)      │  │  │
+│  │  └──────────────┘  └────────────────────┘  │  │
+│  │  ┌──────────────────────────────────────┐  │  │
+│  │  │      SchemaValidator                 │  │  │
+│  │  └──────────────────────────────────────┘  │  │
+│  └─────────────────────┬────────────────────┘  │
+└────────────────────────┼───────────────────────┘
+                         │
+        ┌────────────────┴────────────────┐
+        │                                  │
+┌───────▼────────┐              ┌─────────▼─────────┐
+│  Local Files   │              │   Etcd Cluster    │
+│  (YAML/JSON)   │              │   (Key-Value)     │
+└────────────────┘              └───────────────────┘
+```
+
+### 3.2 前端架构
+
+```
+edgion-dashboard/
+├── src/
+│   ├── api/                    # API 客户端封装
+│   │   ├── client.ts          # Axios 实例配置
+│   │   ├── resources.ts       # 资源 CRUD 函数
+│   │   └── types.ts           # API 类型定义
+│   ├── components/            # 可复用组件
+│   │   ├── ResourceTable/     # 资源表格组件
+│   │   ├── YamlEditor/        # YAML 编辑器封装
+│   │   ├── StatusBadge/       # 状态标识组件
+│   │   └── Layout/            # 布局组件
+│   ├── pages/                 # 页面组件
+│   │   ├── Dashboard/         # 首页仪表盘
+│   │   ├── Routes/            # 路由管理
+│   │   │   ├── HTTPRouteList.tsx
+│   │   │   ├── GRPCRouteList.tsx
+│   │   │   └── ...
+│   │   ├── Services/          # 服务管理
+│   │   └── Security/          # 安全配置
+│   ├── stores/                # Zustand 状态管理
+│   │   ├── authStore.ts
+│   │   └── uiStore.ts
+│   ├── hooks/                 # 自定义 Hooks
+│   │   ├── useResource.ts     # 资源 CRUD Hook
+│   │   └── useDebounce.ts
+│   ├── utils/                 # 工具函数
+│   │   ├── yaml.ts            # YAML 处理
+│   │   ├── validator.ts       # 前端验证
+│   │   └── formatter.ts       # 格式化工具
+│   ├── i18n/                  # 国际化
+│   │   ├── zh-CN.ts
+│   │   └── en-US.ts
+│   ├── App.tsx
+│   └── main.tsx
+```
+
+### 3.3 后端架构（Controller API 层）
+
+```
+Edgion/src/core/api/controller/
+├── mod.rs                     # 路由注册 + CORS 配置
+├── types.rs                   # 类型定义 (AdminState, ApiResponse)
+├── common.rs                  # 通用工具函数
+├── cluster_handlers.rs        # Cluster-scoped 资源 CRUD
+├── namespaced_handlers.rs     # Namespace-scoped 资源 CRUD
+└── static_files.rs            # 静态文件服务 (rust-embed)
+```
+
+---
+
+## 4. 功能模块
+
+### 4.1 功能清单
+
+#### Phase 1 - MVP（3-4 天）✅
+
+| 功能模块 | 功能点 | 优先级 |
+|---------|-------|--------|
+| **Dashboard 首页** | 资源统计卡片 | P0 |
+|  | 健康检查状态 | P0 |
+|  | 最近变更记录 | P1 |
+| **路由管理** | HTTPRoute CRUD | P0 |
+|  | GRPCRoute CRUD | P0 |
+|  | TCPRoute CRUD | P0 |
+|  | UDPRoute CRUD | P0 |
+|  | TLSRoute CRUD | P0 |
+| **服务管理** | Service 列表/详情 | P0 |
+|  | EndpointSlice 列表/详情 | P0 |
+| **安全配置** | EdgionTls CRUD | P0 |
+|  | Secret 列表/详情 | P1 |
+| **插件管理** | EdgionPlugins CRUD | P0 |
+|  | PluginMetaData CRUD | P0 |
+| **通用功能** | 搜索/过滤 | P0 |
+|  | 批量删除 | P0 |
+|  | 手动刷新 | P0 |
+|  | YAML 编辑器 | P0 |
+|  | 中英双语 | P0 |
+
+#### Phase 2 - 增强（后续）⏳
+
+- 表单化编辑模式
+- 资源关系图谱
+- 配置导入/导出
+- 实时日志流
+- WebSocket 实时推送 (Pending)
+
+#### Phase 3 - 高级（长期）⏳
+
+- RBAC 权限控制
+- 审计日志
+- 配置 Diff 对比
+- 多集群管理
+
+### 4.2 页面布局设计
+
+#### 主布局（Main Layout）
+
+```
+┌────────────────────────────────────────────────────┐
+│  Edgion Controller    [用户]  [语言: 🇨🇳/🇺🇸]  [刷新] │
+├──────────┬─────────────────────────────────────────┤
+│          │                                          │
+│ 📊 Dashboard                                       │
+│          │  ┌─────────┐ ┌─────────┐ ┌─────────┐  │
+│ 🛣️ 路由管理 │  │  10     │ │  25     │ │  5      │  │
+│  HTTPRoute│  │ Routes  │ │ Services│ │ Gateways│  │
+│  GRPCRoute│  └─────────┘ └─────────┘ └─────────┘  │
+│  TCPRoute │                                        │
+│  UDPRoute │  健康状态: ✅ Running                  │
+│  TLSRoute │  gRPC: 0.0.0.0:12151                   │
+│          │  Config: Synced                         │
+│ 🔧 服务管理│                                         │
+│  Service │                                         │
+│  Endpoint│                                         │
+│          │                                         │
+│ 🔒 安全配置│                                         │
+│  TLS     │                                         │
+│  Secret  │                                         │
+│          │                                         │
+│ 🔌 插件管理│                                         │
+│  Plugins │                                         │
+│  Metadata│                                         │
+│          │                                         │
+└──────────┴─────────────────────────────────────────┘
+```
+
+#### 资源列表页
+
+```
+┌─ HTTPRoute 列表 ────────────────────────────────────┐
+│ [🔍 搜索名称/命名空间] [🔄 刷新] [➕ 创建]           │
+├─────────────────────────────────────────────────────┤
+│ ☑️  Name          Namespace   Status      Actions   │
+│ ☐  test-route    edge        ✅ Active   👁️ ✏️ 🗑️    │
+│ ☐  api-route     default     ⚠️ Error    👁️ ✏️ 🗑️    │
+│ ☐  web-route     prod        ✅ Active   👁️ ✏️ 🗑️    │
+│ ...                                                  │
+├─────────────────────────────────────────────────────┤
+│ [已选 2 项] [批量删除]              < 1 2 3 4 5 >   │
+└─────────────────────────────────────────────────────┘
+```
+
+#### 资源编辑页（YAML 模式）
+
+```
+┌─ 编辑 HTTPRoute: test-route ────────────────────────┐
+│ [← 返回列表]                 [取消] [保存]           │
+├─────────────────────────────────────────────────────┤
+│  1  apiVersion: gateway.networking.k8s.io/v1       │
+│  2  kind: HTTPRoute                                 │
+│  3  metadata:                                       │
+│  4    name: test-route                              │
+│  5    namespace: edge                               │
+│  6  spec:                                           │
+│  7    parentRefs:                                   │
+│  8    - name: example-gateway                       │
+│  9    hostnames:                                    │
+│ 10    - "api.example.com"                           │
+│ 11    rules:                                        │
+│ ...                                                  │
+│                                                      │
+│ [Monaco Editor with YAML syntax highlighting]       │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. 数据流设计
+
+### 5.1 资源创建流程
+
+```
+┌─────────┐     ┌─────────┐     ┌──────────┐     ┌───────────┐
+│ 用户输入 │ --> │ 前端验证 │ --> │ POST API │ --> │ Schema 验证│
+│  YAML   │     │ (js-yaml)│     │          │     │ (Rust)    │
+└─────────┘     └─────────┘     └──────────┘     └─────┬─────┘
+                                                        │
+                                                        ▼
+                                     ┌──────────────────────────┐
+                                     │  ResourceMgr 持久化      │
+                                     │  (写入 File/Etcd)        │
+                                     └─────────┬────────────────┘
+                                               │
+                                               ▼
+                                     ┌──────────────────────────┐
+                                     │  ConfigServer 更新缓存   │
+                                     └─────────┬────────────────┘
+                                               │
+                                               ▼
+                                     ┌──────────────────────────┐
+                                     │  返回 200 OK             │
+                                     └─────────┬────────────────┘
+                                               │
+                                               ▼
+                                     ┌──────────────────────────┐
+                                     │  前端显示成功提示        │
+                                     │  自动刷新列表            │
+                                     └──────────────────────────┘
+```
+
+### 5.2 资源查询流程
+
+```
+┌────────────┐     ┌──────────────┐     ┌─────────────────┐
+│  页面加载  │ --> │  GET API     │ --> │ ConfigServer    │
+│  useQuery  │     │  /api/v1/... │     │ 读取缓存        │
+└────────────┘     └──────────────┘     └────────┬────────┘
+                                                  │
+                                                  ▼
+                                        ┌─────────────────┐
+                                        │ 返回 JSON 数据  │
+                                        └────────┬────────┘
+                                                 │
+                                                 ▼
+                                        ┌─────────────────┐
+                                        │ React Query     │
+                                        │ 缓存 + 渲染     │
+                                        └─────────────────┘
+```
+
+---
+
+## 6. API 接口规范
+
+### 6.1 统一 API 路径格式
+
+#### Cluster-scoped 资源
+
+```
+GET    /api/v1/cluster/{kind}              # 列出所有资源
+GET    /api/v1/cluster/{kind}/{name}       # 获取单个资源
+POST   /api/v1/cluster/{kind}              # 创建资源
+PUT    /api/v1/cluster/{kind}/{name}       # 更新资源
+DELETE /api/v1/cluster/{kind}/{name}       # 删除资源
+```
+
+**支持的 kind**：`gatewayclass`, `edgiongatewayconfig`
+
+#### Namespace-scoped 资源
+
+```
+GET    /api/v1/namespaced/{kind}                      # 列出所有 namespace 的资源
+GET    /api/v1/namespaced/{kind}/{namespace}          # 列出指定 namespace 的资源
+GET    /api/v1/namespaced/{kind}/{namespace}/{name}   # 获取单个资源
+POST   /api/v1/namespaced/{kind}/{namespace}          # 创建资源
+PUT    /api/v1/namespaced/{kind}/{namespace}/{name}   # 更新资源
+DELETE /api/v1/namespaced/{kind}/{namespace}/{name}   # 删除资源
+```
+
+**支持的 kind**：
+- `gateway`, `httproute`, `grpcroute`, `tcproute`, `udproute`, `tlsroute`
+- `service`, `endpointslice`
+- `edgiontls`, `edgionplugins`, `pluginmetadata`, `linksys`, `secret`
+
+### 6.2 请求/响应格式
+
+#### 创建资源（POST）
+
+**请求**：
+```http
+POST /api/v1/namespaced/httproute/edge
+Content-Type: application/yaml
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: test-route
+  namespace: edge
+spec:
+  ...
+```
+
+**响应**（成功）：
+```json
+{
+  "success": true,
+  "data": "HTTPRoute created"
+}
+```
+
+**响应**（失败）：
+```json
+{
+  "success": false,
+  "error": "Schema validation failed: spec.hostnames is required"
+}
+```
+
+#### 列出资源（GET List）
+
+**响应**：
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "apiVersion": "gateway.networking.k8s.io/v1",
+      "kind": "HTTPRoute",
+      "metadata": { "name": "test-route", "namespace": "edge" },
+      "spec": { ... }
+    },
+    ...
+  ],
+  "count": 25
+}
+```
+
+### 6.3 错误码规范
+
+| HTTP 状态码 | 说明 | 示例场景 |
+|-----------|------|---------|
+| 200 | 成功 | 查询、创建、更新、删除成功 |
+| 400 | 请求错误 | YAML 格式错误、缺少必需参数 |
+| 404 | 资源不存在 | 查询或删除不存在的资源 |
+| 422 | 验证失败 | Schema 验证失败 |
+| 500 | 服务器错误 | 持久化失败、内部错误 |
+
+---
+
+## 7. 部署方案
+
+### 7.1 开发环境部署
+
+#### 后端（Controller）
+```bash
+cd Edgion
+cargo run --bin edgion-controller
+# 监听: http://0.0.0.0:12101
+```
+
+#### 前端（Vite Dev Server）
+```bash
+cd edgion-dashboard
+npm run dev
+# 监听: http://localhost:5173
+# 通过 CORS 访问后端 API
+```
+
+**配置 Vite 代理**（`vite.config.ts`）：
+```typescript
+export default defineConfig({
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:12101',
+        changeOrigin: true
+      }
+    }
+  }
+})
+```
+
+### 7.2 生产环境部署
+
+#### 构建流程
+
+```bash
+# 1. 构建前端
+cd edgion-dashboard
+npm run build
+# 输出: dist/
+
+# 2. 编译后端（包含嵌入的前端）
+cd ../Edgion
+cargo build --release --bin edgion-controller
+# 输出: target/release/edgion-controller
+```
+
+#### 运行
+
+```bash
+./edgion-controller --config config/edgion-controller.toml
+```
+
+访问：`http://<server-ip>:12101/` 自动加载嵌入式前端
+
+### 7.3 嵌入式部署实现
+
+**使用 `rust-embed`**：
+
+```rust
+use rust_embed::RustEmbed;
+
+#[derive(RustEmbed)]
+#[folder = "../edgion-dashboard/dist"]
+struct Assets;
+
+async fn serve_static(path: &str) -> Response {
+    match Assets::get(path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            Response::builder()
+                .header(header::CONTENT_TYPE, mime.as_ref())
+                .body(Body::from(content.data))
+                .unwrap()
+        }
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("404 Not Found"))
+            .unwrap(),
+    }
+}
+```
+
+---
+
+## 8. 性能优化
+
+### 8.1 前端优化
+
+- **代码拆分**：React.lazy() + Suspense
+- **虚拟滚动**：大量资源时使用 react-window
+- **请求去重**：React Query 自动处理
+- **缓存策略**：staleTime: 5min, cacheTime: 10min
+- **防抖节流**：搜索框使用 debounce(300ms)
+
+### 8.2 后端优化
+
+- **分页**：默认每页 50 条，避免一次返回大量数据
+- **缓存读取**：优先从 ConfigServer 缓存读取，避免频繁 I/O
+- **并发控制**：RwLock 保证读多写少场景性能
+
+---
+
+## 9. 安全考虑
+
+### 9.1 当前阶段（MVP）
+
+- ✅ CORS 配置（限制来源）
+- ✅ Schema 验证（防止非法数据）
+- ✅ 输入验证（YAML 格式检查）
+- ✅ 错误信息脱敏（不暴露内部路径）
+
+### 9.2 后续增强
+
+- ⏳ HTTPS 支持（TLS 证书）
+- ⏳ JWT 认证
+- ⏳ RBAC 权限控制
+- ⏳ 审计日志
+- ⏳ Rate Limiting
+
+---
+
+## 10. 监控与日志
+
+### 10.1 前端监控
+
+- 错误边界（Error Boundary）捕获渲染错误
+- Axios 拦截器记录 API 错误
+- 关键操作埋点（创建、删除）
+
+### 10.2 后端监控
+
+- Tracing 日志（已有）
+- API 访问日志
+- （后续）Prometheus metrics
+
+---
+
+## 11. 国际化（i18n）
+
+### 11.1 支持语言
+
+- 中文（简体）zh-CN
+- 英文 en-US
+
+### 11.2 实现方式
+
+使用 `react-i18next` 或 Ant Design 的 ConfigProvider：
+
+```typescript
+// zh-CN.ts
+export default {
+  'dashboard.title': '仪表盘',
+  'route.httproute': 'HTTP 路由',
+  'action.create': '创建',
+  'action.delete': '删除',
+  'message.deleteConfirm': '确定要删除 {name} 吗？',
+}
+
+// en-US.ts
+export default {
+  'dashboard.title': 'Dashboard',
+  'route.httproute': 'HTTP Route',
+  'action.create': 'Create',
+  'action.delete': 'Delete',
+  'message.deleteConfirm': 'Are you sure to delete {name}?',
+}
+```
+
+---
+
+## 12. 后续演进路线
+
+### Phase 1 - MVP（当前）✅
+- 基础 CRUD 功能
+- YAML 编辑器
+- 批量操作
+- 中英双语
+
+### Phase 2 - 增强⏳
+- 表单化编辑
+- 资源关系图谱
+- 配置导入/导出
+- WebSocket 实时推送
+
+### Phase 3 - 高级⏳
+- RBAC 权限控制
+- 审计日志
+- 多集群管理
+- 插件市场
+
+---
+
+## 附录
+
+### A. 相关资源
+
+- Kubernetes Gateway API: https://gateway-api.sigs.k8s.io/
+- Apache APISIX Dashboard: https://github.com/apache/apisix-dashboard
+- Kong Konga: https://github.com/pantsel/konga
+- Traefik Dashboard: https://doc.traefik.io/traefik/operations/dashboard/
+
+### B. 技术文档
+
+- React 官方文档: https://react.dev/
+- Ant Design: https://ant.design/
+- Monaco Editor: https://microsoft.github.io/monaco-editor/
+- React Query: https://tanstack.com/query/latest
+
+### C. 变更历史
+
+| 版本 | 日期 | 变更内容 | 作者 |
+|-----|------|---------|------|
+| v1.0 | 2024-12-25 | 初始版本 | Edgion Team |
+

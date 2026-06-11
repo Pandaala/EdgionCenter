@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The Edgion repo that provides the shared `edgion-resources` crate. Override
+  # via repo/org variable `EDGION_REPO` if it lives under a different owner.
+  EDGION_REPO: ${{ vars.EDGION_REPO || format('{0}/Edgion', github.repository_owner) }}
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      # Lay the two repos out side by side so the Cargo path dependency
+      # `edgion-resources = { path = "../Edgion/edgion-resources" }` resolves.
+      - name: Checkout EdgionCenter
+        uses: actions/checkout@v4
+        with:
+          path: EdgionCenter
+      - name: Checkout Edgion (shared edgion-resources)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.EDGION_REPO }}
+          path: Edgion
+          # A token with read access to the Edgion repo when it is private.
+          token: ${{ secrets.EDGION_REPO_TOKEN || github.token }}
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: EdgionCenter
+
+      - name: Format check
+        working-directory: EdgionCenter
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: EdgionCenter
+        # TODO: tighten to `-- -D warnings` once the dead-code warnings from the
+        # copied-but-unused common helpers are cleaned up.
+        run: cargo clippy --all-targets
+
+      - name: Check (embed-dashboard feature)
+        working-directory: EdgionCenter
+        run: cargo check --features embed-dashboard
+
+      - name: Test
+        working-directory: EdgionCenter
+        run: cargo test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout EdgionCenter
+        uses: actions/checkout@v4
+        with:
+          path: EdgionCenter
+      - name: Checkout Edgion (shared edgion-resources)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.EDGION_REPO }}
+          path: Edgion
+          token: ${{ secrets.EDGION_REPO_TOKEN || github.token }}
+      # build.sh stages the two repos into a temp context and runs docker build.
+      - name: Build image
+        working-directory: EdgionCenter
+        run: docker/build.sh -t edgion/edgion-center:ci -r ../Edgion

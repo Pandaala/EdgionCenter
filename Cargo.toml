@@ -1,0 +1,101 @@
+[package]
+name = "edgion-center"
+version = "0.1.0"
+edition = "2021"
+authors = ["pandalaa"]
+description = "Edgion federation Hub (Center) — standalone binary extracted from the Edgion monorepo"
+
+[[bin]]
+name = "edgion-center"
+path = "src/main.rs"
+
+[features]
+# Embed the edgion-dashboard web UI (`web/dist/`) into the binary. Off by
+# default so a plain `cargo build` stays slim; when off, the dashboard can still
+# be served at runtime from a filesystem directory (`web.dir` / `EDGION_WEB_DIR`).
+embed-dashboard = ["dep:rust-embed"]
+
+[dependencies]
+# Embedded web UI assets (feature `embed-dashboard`). Optional so the default
+# build does not compile them in.
+rust-embed = { version = "8", optional = true }
+# Shared resource/config schema crate.
+#
+# TODO(release): convert to a git-rev pin before publishing, per the extraction
+# decision — `edgion-resources = { git = "<Edgion repo>", rev = "<sha>" }`.
+# During local cross-repo development we use a path dependency so edits to the
+# shared crate are picked up immediately and the build stays green without
+# committing/pushing the Edgion repo first.
+edgion-resources = { path = "../Edgion/edgion-resources" }
+
+# Async runtime + errors
+tokio = { version = "1.49", features = ["full"] }
+tokio-util = "0.7"
+tokio-stream = "0.1"
+anyhow = "1.0"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# HTTP server / admin API
+axum = { version = "0.8.8", features = ["macros", "ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+tower = { version = "0.5", features = ["util"] }
+http = "1.4.0"
+
+# Fed-sync gRPC wire contract (copied proto, regenerated here).
+tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
+prost = "0.13"
+rustls = { version = "0.23", features = ["ring"] }
+tokio-rustls = "0.26"
+
+# SPIFFE peer-identity verification (mTLS certificate SAN parsing).
+x509-parser = { version = "0.18", features = ["verify"] }
+
+# Auth (local users + OIDC bearer validation)
+bcrypt = "0.18"
+jsonwebtoken = "9"
+# 3rd-party OIDC: discovery + JWKS + JWS signature verification (resource-server
+# bearer-token validation; claims checks are done explicitly on top).
+openidconnect = "4"
+# JWT compact-form base64url (openidconnect does not re-export base64).
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "http2", "stream"] }
+sha2 = "0.10"
+
+# Persistence (Center metadata store)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# TLS cert helpers
+rcgen = { version = "0.14.7", features = ["x509-parser"] }
+time = { version = "0.3", features = ["std"] }
+
+# Concurrency / utils
+parking_lot = "0.12"
+arc-swap = "1.8"
+uuid = { version = "1.19", features = ["v4"] }
+chrono = "0.4"
+futures = "0.3.31"
+
+# Observability
+metrics = "0.24"
+metrics-exporter-prometheus = "0.18"
+metrics-util = { version = "0.20", features = ["debugging"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"
+# Mint RSA keypairs + JWKS for OIDC validation tests (sign test tokens with
+# jsonwebtoken, publish the matching public JWK via a mock IdP).
+rsa = "0.9"

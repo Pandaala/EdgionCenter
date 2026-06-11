@@ -1,0 +1,7 @@
+/target
+
+# Dashboard build artifacts (the React source under web/ is committed; the
+# vite build output and node deps are not). build.rs writes a placeholder
+# index.html here when building --features embed-dashboard without a real build.
+/web/dist
+/web/node_modules
