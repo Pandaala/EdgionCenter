@@ -1,11 +1,11 @@
 ---
 name: infrastructure-resources
-description: 基础设施资源开发指南——Gateway/GatewayClass/Service/EndpointSlice/ReferenceGrant（基于 feature-04-06 用户文档）
+description: Infrastructure resource development guide — Gateway/GatewayClass/Service/EndpointSlice/ReferenceGrant (based on feature-04-06 user documentation)
 ---
 
-# 基础设施资源
+# Infrastructure Resources
 
-## Gateway（待开发）
+## Gateway (Pending Development)
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -14,17 +14,17 @@ metadata:
   name: my-gateway
   namespace: default
   annotations:
-    edgion.io/enable-http2: "true"                   # HTTP/2 支持（默认 true）
-    edgion.io/http-to-https-redirect: "true"         # HTTP→HTTPS 自动跳转
-    edgion.io/https-redirect-port: "443"             # HTTPS 跳转端口
-    edgion.io/edgion-stream-plugins: "ns/name"       # Gateway 级 StreamPlugins
+    edgion.io/enable-http2: "true"                   # HTTP/2 support (default true)
+    edgion.io/http-to-https-redirect: "true"         # HTTP→HTTPS automatic redirect
+    edgion.io/https-redirect-port: "443"             # HTTPS redirect port
+    edgion.io/edgion-stream-plugins: "ns/name"       # Gateway-level StreamPlugins
 spec:
-  gatewayClassName: edgion                           # 必填：关联 GatewayClass
+  gatewayClassName: edgion                           # Required: associate GatewayClass
   listeners:
     - name: http
       port: 80
       protocol: HTTP                                 # HTTP | HTTPS | TCP | TLS | UDP
-      hostname: "*.example.com"                      # 可选：主机名过滤
+      hostname: "*.example.com"                      # Optional: hostname filter
       allowedRoutes:
         namespaces:
           from: Same                                 # Same | All | Selector
@@ -35,16 +35,16 @@ spec:
     - name: https
       port: 443
       protocol: HTTPS
-      tls:                                           # HTTPS/TLS 协议必填
+      tls:                                           # Required for HTTPS/TLS protocol
         mode: Terminate                              # Terminate | Passthrough
         certificateRefs:
           - name: my-cert-secret
-            namespace: default                       # 跨命名空间需要 ReferenceGrant
-        frontendValidation:                          # 可选：客户端证书验证
+            namespace: default                       # Cross-namespace requires ReferenceGrant
+        frontendValidation:                          # Optional: client certificate validation
           caCertificateRefs:
             - name: client-ca
         options:
-          edgion.io/cert-provider: "edgion-tls"      # "secret"(默认) | "edgion-tls"
+          edgion.io/cert-provider: "edgion-tls"      # "secret" (default) | "edgion-tls"
 
     - name: tcp-redis
       port: 6379
@@ -61,11 +61,11 @@ spec:
       port: 5353
       protocol: UDP
 
-  addresses:                                         # 可选
+  addresses:                                         # Optional
     - type: IPAddress
       value: "10.0.0.1"
 
-status:                                              # 只读
+status:                                              # Read-only
   addresses: [...]
   conditions:
     - type: Accepted
@@ -76,22 +76,22 @@ status:                                              # 只读
       conditions: [...]
 ```
 
-**开发要点**：
-- 命名空间资源，kind: `gateway`
-- 核心是 `listeners` 数组管理
-- protocol 枚举：HTTP, HTTPS, TCP, TLS, UDP
-- TLS 配置仅在 HTTPS/TLS 时出现（条件渲染）
-- annotations 控制 HTTP/2、HTTPS 跳转、StreamPlugins
-- status 只读展示（listener 状态、attachedRoutes、地址）
-- 列表页重点展示：name, namespace, listener 数量/端口, 绑定路由数
+**Development Notes**:
+- Namespaced resource, kind: `gateway`
+- Core is `listeners` array management
+- Protocol enum: HTTP, HTTPS, TCP, TLS, UDP
+- TLS configuration only appears for HTTPS/TLS (conditional rendering)
+- annotations control HTTP/2, HTTPS redirect, and StreamPlugins
+- status is read-only display (listener status, attachedRoutes, addresses)
+- List page highlights: name, namespace, listener count/ports, attached route count
 
-**表单区段**：
-- MetadataSection + AnnotationsSection（HTTP/2, HTTPS redirect 开关）
-- GatewayClassName 选择器
-- ListenersSection（动态增删 listener）
-  - ListenerEditor（name + protocol + port + hostname + TLS + allowedRoutes）
+**Form Sections**:
+- MetadataSection + AnnotationsSection (HTTP/2, HTTPS redirect toggles)
+- GatewayClassName selector
+- ListenersSection (dynamically add/remove listeners)
+  - ListenerEditor (name + protocol + port + hostname + TLS + allowedRoutes)
 
-## GatewayClass（待开发）
+## GatewayClass (Pending Development)
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -99,23 +99,23 @@ kind: GatewayClass
 metadata:
   name: edgion
 spec:
-  controllerName: edgion.io/gateway-controller       # 必填
-  parametersRef:                                      # 可选：关联 EdgionGatewayConfig
+  controllerName: edgion.io/gateway-controller       # Required
+  parametersRef:                                      # Optional: associate EdgionGatewayConfig
     group: edgion.io
     kind: EdgionGatewayConfig
     name: default-config
-  description: "Edgion Gateway Controller"            # 可选
+  description: "Edgion Gateway Controller"            # Optional
 ```
 
-**开发要点**：
-- **集群级资源**，用 `clusterResourceApi`，kind: `gatewayclass`
-- 结构简单：controllerName + parametersRef + description
-- 通常只有一个实例
-- parametersRef 关联 EdgionGatewayConfig
-- 列表页展示关联的 Gateway 数量
-- YAML 编辑为主 + 基础信息展示
+**Development Notes**:
+- **Cluster-scoped resource**, uses `clusterResourceApi`, kind: `gatewayclass`
+- Simple structure: controllerName + parametersRef + description
+- Typically only one instance
+- parametersRef associates EdgionGatewayConfig
+- List page displays the count of associated Gateways
+- Primarily YAML editing + basic information display
 
-## Service（待开发 — 只读）
+## Service (Pending Development — Read-only)
 
 ```yaml
 apiVersion: v1
@@ -134,14 +134,14 @@ spec:
       protocol: TCP
 ```
 
-**开发要点**：
-- 命名空间资源，kind: `service`
-- **只读展示**（Service 由 K8s 管理或用户通过 YAML 创建）
-- 列表页展示：name, namespace, type, ports(Tags), selector
-- 支持 YAML 查看和编辑
-- 关联展示：引用该 Service 的 Route、关联的 EndpointSlice
+**Development Notes**:
+- Namespaced resource, kind: `service`
+- **Read-only display** (Service is managed by K8s or created by the user via YAML)
+- List page displays: name, namespace, type, ports (Tags), selector
+- Supports YAML viewing and editing
+- Association display: Routes that reference this Service, associated EndpointSlices
 
-## EndpointSlice（待开发 — 只读）
+## EndpointSlice (Pending Development — Read-only)
 
 ```yaml
 apiVersion: discovery.k8s.io/v1
@@ -163,33 +163,33 @@ endpoints:
       serving: true
 ```
 
-**开发要点**：
-- 命名空间资源，kind: `endpointslice`
-- **纯只读展示**
-- 列表页展示：name, namespace, 关联 service, endpoint 数量, ready 状态
-- 详情展示 endpoints 列表
+**Development Notes**:
+- Namespaced resource, kind: `endpointslice`
+- **Purely read-only display**
+- List page displays: name, namespace, associated service, endpoint count, ready status
+- Detail view shows endpoint list
 
-## ReferenceGrant（待开发）
+## ReferenceGrant (Pending Development)
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: ReferenceGrant
 metadata:
   name: allow-gateway-secret
-  namespace: security          # 必须在目标资源的命名空间
+  namespace: security          # Must be in the target resource's namespace
 spec:
   from:
     - group: gateway.networking.k8s.io
       kind: Gateway
-      namespace: gateway-system     # 允许来源命名空间
+      namespace: gateway-system     # Allowed source namespace
   to:
     - group: ""                     # core/v1
-      kind: Secret                  # 允许引用 Secret
+      kind: Secret                  # Allow referencing Secret
 ```
 
-**开发要点**：
-- 命名空间资源，kind: `referencegrant`（需要添加到 ResourceKind）
-- 控制跨命名空间资源引用权限
-- 表单：from（group + kind + namespace 列表）+ to（group + kind 列表）
-- 列表页展示：name, namespace, from 资源类型/命名空间, to 资源类型
-- 需要在侧边栏添加菜单项
+**Development Notes**:
+- Namespaced resource, kind: `referencegrant` (must be added to ResourceKind)
+- Controls cross-namespace resource reference permissions
+- Form: from (group + kind + namespace list) + to (group + kind list)
+- List page displays: name, namespace, from resource type/namespace, to resource type
+- Needs to add a menu item in the sidebar

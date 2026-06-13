@@ -1,22 +1,22 @@
 ---
 name: center-region-route-page
-description: Center 联邦 RegionRoute 页面设计：Global PM 页 + Service PM 页、数据获取策略、Failover 操作、冲突检测。
+description: Center federation RegionRoute page design: Global PM page + Service PM page, data fetching strategy, Failover operation, conflict detection.
 ---
 
-# Center RegionRoute 页面设计
+# Center RegionRoute Page Design
 
-## 相关文件
+## Related Files
 
-| 文件 | 说明 |
+| File | Description |
 |------|------|
-| `src/pages/Center/ClusterRegionRoutePage.tsx` | Cluster PM 页面 |
-| `src/pages/Center/RegionRoutePage.tsx` | Service PM 页面（含 Failover） |
-| `src/api/center.ts` | Center API 层 |
-| `src/components/Layout/CenterLayout.tsx` | 侧栏导航 |
+| `src/pages/Center/ClusterRegionRoutePage.tsx` | Cluster PM page |
+| `src/pages/Center/RegionRoutePage.tsx` | Service PM page (includes Failover) |
+| `src/api/center.ts` | Center API layer |
+| `src/components/Layout/CenterLayout.tsx` | Sidebar navigation |
 
-## 页面结构
+## Page Structure
 
-侧栏 RegionRoute 下有两个子菜单：
+The RegionRoute sidebar entry has two sub-menus:
 
 ```
 RegionRoute
@@ -24,72 +24,72 @@ RegionRoute
 └── Service  → /region-routes/service  (RegionRoutePage)
 ```
 
-## 后端 API
+## Backend API
 
-### Center 聚合端点
+### Center Aggregation Endpoints
 
-| 方法 | 路径 | 返回 |
+| Method | Path | Returns |
 |------|------|------|
 | GET | `center/cluster-region-pms` | `{ namespace, name, controllers[] }[]` |
 | GET | `center/service-region-pms` | `{ namespace, name, controllers[] }[]` |
 | POST | `center/cluster-region-pms/failover` | `{ namespace, name, regionName, failoverTo }` → `{ modified, failed }` |
-| POST | `center/service-region-pms/failover` | 同上 |
+| POST | `center/service-region-pms/failover` | Same as above |
 
-### Controller 端点（通过 `proxy/{ctrlId}/api/v1/...`）
+### Controller Endpoints (via `proxy/{ctrlId}/api/v1/...`)
 
-| 路径 | 返回 |
+| Path | Returns |
 |------|------|
-| `cluster-region-pms` | 完整拓扑：`{ namespace, name, myRegion, regions[], keyGet[], hashCalc, routeRules[] }` |
+| `cluster-region-pms` | Full topology: `{ namespace, name, myRegion, regions[], keyGet[], hashCalc, routeRules[] }` |
 | `service-region-pms` | `{ namespace, name, clusterRef: {ns, name}, regions: [{name, failoverTo?}], refPlugins[] }` |
 
-## Cluster PM 页面
+## Cluster PM Page
 
-**数据源**：`center/cluster-region-pms`（主表）+ proxy 到 controller 的 `cluster-region-pms`（详情）
+**Data source**: `center/cluster-region-pms` (main table) + proxy to controller's `cluster-region-pms` (details)
 
-**列**：Namespace | Name | Regions
+**Columns**: Namespace | Name | Regions
 
-**展开行**：从每个 controller proxy 获取 ClusterRegionRoute 详情，展示 region 拓扑表、冲突检测、routeRules、hashCalc。
+**Expanded row**: Fetches ClusterRegionRoute details from each controller proxy; displays the region topology table, conflict detection, routeRules, and hashCalc.
 
-**RegionsCell**：从第一个 controller 获取 region 预览（lightweight，每行一个 proxy 请求）。
+**RegionsCell**: Fetches a region preview from the first controller (lightweight, one proxy request per row).
 
-## Service PM 页面
+## Service PM Page
 
-**数据源**：`center/service-region-pms`（主表）+ proxy 到 controller 的 `service-region-pms` + `cluster-region-pms`（详情）
+**Data source**: `center/service-region-pms` (main table) + proxy to controller's `service-region-pms` + `cluster-region-pms` (details)
 
-**列**：Service PM Name | Namespace | Controllers | Regions | Failover
+**Columns**: Service PM Name | Namespace | Controllers | Regions | Failover
 
-**数据获取优化**：
-- 主表的 RegionsCell 使用 `FirstControllerCtx`（React Context），从一个 controller 拉一次所有 service PM + cluster PM，共享给所有行。全页面只发 2 个 proxy 请求。
-- 展开行按需从所有 controller 拉数据做冲突检测。
+**Data fetching optimization**:
+- The main table's RegionsCell uses `FirstControllerCtx` (React Context) to fetch all service PM + cluster PM from one controller once, shared across all rows. Only 2 proxy requests per full page load.
+- Expanded rows fetch data from all controllers on demand for conflict detection.
 
 ```
 RegionRoutePage
-├── FirstControllerCtx.Provider       ← 单次获取，context 共享
+├── FirstControllerCtx.Provider       ← fetched once, shared via context
 │   ├── Table
-│   │   ├── RegionsCell               ← 从 context 查找，无额外请求
-│   │   └── RowActions → FailoverPanel  ← 从 context 获取 canonicalRegions + clusterRef
-│   └── ExpandedDetail                ← 按需从所有 controller proxy 获取
+│   │   ├── RegionsCell               ← looks up from context, no extra requests
+│   │   └── RowActions → FailoverPanel  ← gets canonicalRegions + clusterRef from context
+│   └── ExpandedDetail                ← fetches from all controller proxies on demand
 ```
 
-## Failover 操作
+## Failover Operation
 
-使用 Center 的扇出端点，不再逐个 proxy PUT 到每个 controller：
+Uses Center's fan-out endpoint instead of proxying individual PUT requests to each controller:
 
 ```typescript
 centerApi.clusterPmFailover(namespace, name, regionName, failoverTo)
-// POST center/cluster-region-pms/failover → 自动扇出到所有 controller
-// 返回 { modified: N, failed: N }
+// POST center/cluster-region-pms/failover → automatically fans out to all controllers
+// returns { modified: N, failed: N }
 ```
 
-**流程**：
-1. FailoverPanel 展示 canonicalRegions（从 context 获取）
-2. 用户修改 failoverTo 下拉框
-3. 点击 Apply → 只对变更的 region 发 POST
-4. 成功后 invalidate React Query 缓存 → 自动刷新 + 关闭 Popover
+**Flow**:
+1. FailoverPanel displays canonicalRegions (fetched from context)
+2. User modifies the failoverTo dropdown
+3. Click Apply → POST only for changed regions
+4. On success, invalidate React Query cache → auto-refresh + close Popover
 
-## 冲突检测
+## Conflict Detection
 
-跨 controller 对比 ClusterRegionRoute 的 regions 字段：
+Compares the regions field of ClusterRegionRoute across controllers:
 
 ```typescript
 interface RegionConflict {
@@ -99,10 +99,10 @@ interface RegionConflict {
 }
 ```
 
-同一 region 在不同 controller 上的 hashRange/endpoint/failoverTo 不一致时产生冲突。
-冲突在 ExpandedDetail 展开行中以 Warning Alert 展示。
+A conflict is detected when the same region has inconsistent hashRange/endpoint/failoverTo values across different controllers.
+Conflicts are displayed as a Warning Alert in the ExpandedDetail expanded row.
 
-## 关键类型
+## Key Types
 
 ```typescript
 // center.ts

@@ -1,48 +1,48 @@
 ---
 name: api-layer
-description: Edgion Controller API 层设计——Axios 客户端、resourceApi/clusterResourceApi、错误处理
+description: Edgion Center API layer design — Axios client, resourceApi/clusterResourceApi, error handling
 ---
 
-# API 层设计
+# API Layer Design
 
-## authApi（认证）
+## authApi (Authentication)
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| `authApi.login(req)` | POST `auth/login` | 登录，后端设置 httpOnly Cookie |
-| `authApi.logout()` | POST `auth/logout` | 退出，清除 Cookie |
-| `authApi.me()` | GET `auth/me` | 获取当前用户信息 |
+| `authApi.login(req)` | POST `auth/login` | Login; backend sets httpOnly Cookie |
+| `authApi.logout()` | POST `auth/logout` | Logout; clears Cookie |
+| `authApi.me()` | GET `auth/me` | Get current user info |
 
-### Cookie 认证模式
+### Cookie Authentication Pattern
 
-前端不存储 token（不用 localStorage）。登录后后端设置 `Set-Cookie: edgion_token=<jwt>; HttpOnly; SameSite=Strict`，浏览器自动携带。
+The frontend does not store the token (no localStorage). After login, the backend sets `Set-Cookie: edgion_token=<jwt>; HttpOnly; SameSite=Strict`; the browser attaches it automatically.
 
-- `src/utils/auth.ts` — `sessionStorage` 标记登录态（`setLoggedIn`/`clearLoggedIn`/`isLoggedIn`）
-- `src/api/auth.ts` — authApi（login/logout/me）
-- `src/pages/Login/LoginPage.tsx` — 登录页
-- `src/App.tsx` — `RequireAuth` 路由守卫
+- `src/utils/auth.ts` — `sessionStorage` login state flag (`setLoggedIn`/`clearLoggedIn`/`isLoggedIn`)
+- `src/api/auth.ts` — authApi (login/logout/me)
+- `src/pages/Login/LoginPage.tsx` — login page
+- `src/App.tsx` — `RequireAuth` route guard
 
-## 双 API 客户端
+## Dual API Clients
 
-根据资源 Scope 选择：
+Select based on resource scope:
 
-### resourceApi（命名空间资源）
+### resourceApi (Namespaced Resources)
 
 ```typescript
-// 路径模式: /api/v1/namespaced/{kind}/{namespace}/{name}
+// path pattern: /api/v1/namespaced/{kind}/{namespace}/{name}
 resourceApi.listAll<T>(kind)                    // GET /namespaced/{kind}
 resourceApi.list<T>(kind, namespace)            // GET /namespaced/{kind}/{namespace}
 resourceApi.get<T>(kind, namespace, name)       // GET /namespaced/{kind}/{ns}/{name}
 resourceApi.create<T>(kind, namespace, resource) // POST + Content-Type: application/yaml
 resourceApi.update<T>(kind, namespace, name, resource) // PUT + Content-Type: application/yaml
 resourceApi.delete(kind, namespace, name)       // DELETE
-resourceApi.batchDelete(kind, resources[])      // 并行 DELETE
+resourceApi.batchDelete(kind, resources[])      // parallel DELETE
 ```
 
-### clusterResourceApi（集群级资源）
+### clusterResourceApi (Cluster-Scoped Resources)
 
 ```typescript
-// 路径模式: /api/v1/cluster/{kind}/{name}
+// path pattern: /api/v1/cluster/{kind}/{name}
 clusterResourceApi.listAll<T>(kind)            // GET /cluster/{kind}
 clusterResourceApi.get<T>(kind, name)          // GET /cluster/{kind}/{name}
 clusterResourceApi.create<T>(kind, resource)    // POST
@@ -50,9 +50,9 @@ clusterResourceApi.update<T>(kind, name, resource) // PUT
 clusterResourceApi.delete(kind, name)          // DELETE
 ```
 
-## ResourceKind 类型
+## ResourceKind Type
 
-在 `src/api/types.ts` 中定义，新增资源时需要在这里添加新的 kind 值：
+Defined in `src/api/types.ts`. When adding a new resource, add the new kind value here:
 
 ```typescript
 export type ResourceKind =
@@ -62,38 +62,38 @@ export type ResourceKind =
   | 'secret' | 'gatewayclass' | 'edgiongatewayconfig' | 'gateway'
 ```
 
-## YAML 序列化约定
+## YAML Serialization Convention
 
-创建和更新操作发送 YAML 格式：
-- `resourceApi.create/update` 接受 `T | string`
-- 如果传入对象，内部用 `yaml.dump()` 序列化
-- 请求头设置 `Content-Type: application/yaml`
+Create and update operations send YAML format:
+- `resourceApi.create/update` accepts `T | string`
+- If an object is passed, it is serialized internally with `yaml.dump()`
+- Request header sets `Content-Type: application/yaml`
 
-## 错误处理
+## Error Handling
 
-Axios 拦截器自动处理常见错误码：
-- 401 Unauthorized → 自动跳转 `/login`（token 过期或未登录）
-- 409 Conflict → 资源已存在
-- 404 Not Found → 资源不存在
-- 400 Bad Request → 请求参数错误（显示后端 message）
-- 500/503 → 服务器错误
-- 所有错误通过 `message.error()` 展示
+Axios interceptors automatically handle common error codes:
+- 401 Unauthorized → auto-redirect to `/login` (token expired or not logged in)
+- 409 Conflict → resource already exists
+- 404 Not Found → resource not found
+- 400 Bad Request → invalid request parameters (shows backend message)
+- 500/503 → server error
+- All errors are displayed via `message.error()`
 
-## React Query 集成模式
+## React Query Integration Pattern
 
 ```typescript
-// 列表页查询
+// list page query
 const { data, isLoading, refetch } = useQuery({
   queryKey: [kind],
   queryFn: () => resourceApi.listAll<T>(kind),
 })
 
-// 创建/更新 Mutation
+// create/update Mutation
 const createMutation = useMutation({
   mutationFn: ({ namespace, yamlContent }: { namespace: string; yamlContent: string }) =>
     resourceApi.create(kind, namespace, yamlContent),
   onSuccess: () => {
-    message.success('创建成功')
+    message.success('Created successfully')
     queryClient.invalidateQueries({ queryKey: [kind] })
   },
 })

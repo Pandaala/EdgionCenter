@@ -1,15 +1,15 @@
 ---
 name: list-page-pattern
-description: 列表页开发模式——以 HTTPRouteList 和 EdgionPluginsList 为参考的标准列表页模板
+description: List page development pattern — standard list page template based on HTTPRouteList and EdgionPluginsList
 ---
 
-# 列表页模式
+# List Page Pattern
 
-参考实现：
-- `src/pages/Routes/HTTPRouteList.tsx`（210 行）
-- `src/pages/Plugins/EdgionPluginsList.tsx`（265 行）
+Reference implementations:
+- `src/pages/Routes/HTTPRouteList.tsx` (210 lines)
+- `src/pages/Plugins/EdgionPluginsList.tsx` (265 lines)
 
-## 标准结构
+## Standard Structure
 
 ```typescript
 import { useState } from 'react'
@@ -33,41 +33,41 @@ const ResourceList = () => {
   
   const queryClient = useQueryClient()
 
-  // 查询
+  // Data query
   const { data, isLoading, refetch } = useQuery({
     queryKey: [RESOURCE_KIND],
     queryFn: () => resourceApi.listAll<ResourceType>(RESOURCE_KIND),
   })
 
-  // 删除 Mutation
+  // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
       resourceApi.delete(RESOURCE_KIND, namespace, name),
     onSuccess: () => {
-      message.success('删除成功')
+      message.success('Deleted successfully')
       queryClient.invalidateQueries({ queryKey: [RESOURCE_KIND] })
     },
   })
 
-  // 过滤数据
+  // Filter data
   const filteredData = (data?.data || []).filter(item =>
     item.metadata.name.includes(searchText) ||
     item.metadata.namespace?.includes(searchText)
   )
 
-  // 表格列定义
+  // Table column definitions
   const columns = [
-    { title: '名称', dataIndex: ['metadata', 'name'], key: 'name' },
-    { title: '命名空间', dataIndex: ['metadata', 'namespace'], key: 'namespace' },
-    // ... 资源特有列
+    { title: 'Name', dataIndex: ['metadata', 'name'], key: 'name' },
+    { title: 'Namespace', dataIndex: ['metadata', 'namespace'], key: 'namespace' },
+    // ... resource-specific columns
     {
-      title: '操作',
+      title: 'Actions',
       key: 'actions',
       render: (_, record) => (
         <Space>
-          <Button size="small" onClick={() => openEditor('view', record)}>查看</Button>
-          <Button size="small" onClick={() => openEditor('edit', record)}>编辑</Button>
-          <Button size="small" danger onClick={() => confirmDelete(record)}>删除</Button>
+          <Button size="small" onClick={() => openEditor('view', record)}>View</Button>
+          <Button size="small" onClick={() => openEditor('edit', record)}>Edit</Button>
+          <Button size="small" danger onClick={() => confirmDelete(record)}>Delete</Button>
         </Space>
       ),
     },
@@ -75,25 +75,25 @@ const ResourceList = () => {
 
   return (
     <div>
-      {/* 工具栏 */}
+      {/* Toolbar */}
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>
-            创建
+            Create
           </Button>
           <Button danger icon={<DeleteOutlined />} disabled={!selectedRowKeys.length}
             onClick={batchDelete}>
-            批量删除
+            Batch Delete
           </Button>
         </Space>
         <Space>
-          <Input prefix={<SearchOutlined />} placeholder="搜索..." value={searchText}
+          <Input prefix={<SearchOutlined />} placeholder="Search..." value={searchText}
             onChange={e => setSearchText(e.target.value)} allowClear />
           <Button icon={<ReloadOutlined />} onClick={() => refetch()} />
         </Space>
       </div>
 
-      {/* 表格 */}
+      {/* Table */}
       <Table
         rowKey={record => `${record.metadata.namespace}/${record.metadata.name}`}
         columns={columns}
@@ -103,7 +103,7 @@ const ResourceList = () => {
         pagination={{ pageSize: 20 }}
       />
 
-      {/* 编辑器 */}
+      {/* Editor */}
       <ResourceEditor
         visible={editorState.visible}
         mode={editorState.mode}
@@ -115,11 +115,11 @@ const ResourceList = () => {
 }
 ```
 
-## 关键要点
+## Key Points
 
-1. **React Query 管理数据获取**：queryKey 用 kind 值，mutation 成功后 invalidateQueries
-2. **搜索过滤在前端**：简单 includes 过滤 name 和 namespace
-3. **批量删除**：用 rowSelection 收集选中项，确认后并行删除
-4. **编辑器状态**：`{ visible, mode, resource? }` 三态管理 create/edit/view
-5. **rowKey**：用 `{namespace}/{name}` 组合确保唯一
-6. **加载状态**：Table 的 `loading` 属性绑定 `isLoading`
+1. **React Query for data fetching**: use the resource kind as the queryKey; call invalidateQueries after a successful mutation
+2. **Client-side search filtering**: simple `includes` filter on name and namespace
+3. **Bulk delete**: collect selected items via rowSelection, then delete in parallel after confirmation
+4. **Editor state**: `{ visible, mode, resource? }` — three-state management for create/edit/view
+5. **rowKey**: use `{namespace}/{name}` combination to ensure uniqueness
+6. **Loading state**: bind `isLoading` to the Table's `loading` prop

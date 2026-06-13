@@ -1,15 +1,15 @@
 ---
 name: editor-modal-pattern
-description: 资源编辑器 Modal 模式——Form/YAML 双标签、双向同步、Zod 验证
+description: Resource editor Modal pattern — Form/YAML dual tabs, bidirectional sync, Zod validation
 ---
 
-# 编辑器 Modal 模式
+# Editor Modal Pattern
 
-参考实现：
-- `src/components/ResourceEditor/HTTPRoute/HTTPRouteEditor.tsx`（230 行）
-- `src/components/ResourceEditor/EdgionPlugins/EdgionPluginsEditor.tsx`（208 行）
+Reference implementations:
+- `src/components/ResourceEditor/HTTPRoute/HTTPRouteEditor.tsx` (230 lines)
+- `src/components/ResourceEditor/EdgionPlugins/EdgionPluginsEditor.tsx` (208 lines)
 
-## 标准结构
+## Standard Structure
 
 ```typescript
 interface ResourceEditorProps {
@@ -25,7 +25,7 @@ const ResourceEditor: React.FC<ResourceEditorProps> = ({ visible, mode, resource
   const [yamlContent, setYamlContent] = useState('')
   const queryClient = useQueryClient()
 
-  // 初始化数据
+  // Initialize data
   useEffect(() => {
     if (visible) {
       if (mode === 'create') {
@@ -40,7 +40,7 @@ const ResourceEditor: React.FC<ResourceEditorProps> = ({ visible, mode, resource
     }
   }, [visible, mode, resource])
 
-  // Form → YAML 同步（切换到 YAML 标签时）
+  // Form → YAML sync (when switching to YAML tab)
   const handleTabChange = (key: string) => {
     if (key === 'yaml') {
       setYamlContent(resourceToYaml(formData))
@@ -49,40 +49,40 @@ const ResourceEditor: React.FC<ResourceEditorProps> = ({ visible, mode, resource
         const parsed = yamlToResource(yamlContent)
         setFormData(parsed)
       } catch (e) {
-        message.error('YAML 解析失败')
-        return // 不切换标签
+        message.error('YAML parse failed')
+        return // do not switch tab
       }
     }
     setActiveTab(key)
   }
 
-  // 创建 Mutation
+  // Create mutation
   const createMutation = useMutation({
     mutationFn: (yamlStr: string) =>
       resourceApi.create(RESOURCE_KIND, formData.metadata.namespace || 'default', yamlStr),
     onSuccess: () => {
-      message.success('创建成功')
+      message.success('Created successfully')
       queryClient.invalidateQueries({ queryKey: [RESOURCE_KIND] })
       onClose()
     },
   })
 
-  // 更新 Mutation
+  // Update mutation
   const updateMutation = useMutation({
     mutationFn: (yamlStr: string) =>
       resourceApi.update(RESOURCE_KIND, formData.metadata.namespace || 'default',
         formData.metadata.name, yamlStr),
     onSuccess: () => {
-      message.success('更新成功')
+      message.success('Updated successfully')
       queryClient.invalidateQueries({ queryKey: [RESOURCE_KIND] })
       onClose()
     },
   })
 
-  // 提交
+  // Submit
   const handleSubmit = () => {
     const yamlStr = activeTab === 'yaml' ? yamlContent : resourceToYaml(formData)
-    // 可选：Zod 验证
+    // Optional: Zod validation
     if (mode === 'create') {
       createMutation.mutate(yamlStr)
     } else {
@@ -92,20 +92,20 @@ const ResourceEditor: React.FC<ResourceEditorProps> = ({ visible, mode, resource
 
   return (
     <Modal
-      title={mode === 'create' ? '创建资源' : mode === 'edit' ? '编辑资源' : '查看资源'}
+      title={mode === 'create' ? 'Create Resource' : mode === 'edit' ? 'Edit Resource' : 'View Resource'}
       open={visible}
       onCancel={onClose}
       width={900}
       footer={mode === 'view' ? null : [
-        <Button key="cancel" onClick={onClose}>取消</Button>,
+        <Button key="cancel" onClick={onClose}>Cancel</Button>,
         <Button key="submit" type="primary" onClick={handleSubmit}
           loading={createMutation.isPending || updateMutation.isPending}>
-          {mode === 'create' ? '创建' : '保存'}
+          {mode === 'create' ? 'Create' : 'Save'}
         </Button>,
       ]}
     >
       <Tabs activeKey={activeTab} onChange={handleTabChange}>
-        <Tabs.TabPane tab="表单" key="form">
+        <Tabs.TabPane tab="Form" key="form">
           <ResourceForm data={formData} onChange={setFormData} readOnly={mode === 'view'} />
         </Tabs.TabPane>
         <Tabs.TabPane tab="YAML" key="yaml">
@@ -117,28 +117,28 @@ const ResourceEditor: React.FC<ResourceEditorProps> = ({ visible, mode, resource
 }
 ```
 
-## 关键要点
+## Key Points
 
-1. **双标签切换同步**：Form→YAML 在切换时序列化，YAML→Form 在切换时解析
-2. **三种模式**：create（空表单）、edit（填充数据）、view（只读，无提交按钮）
-3. **Mutation 分离**：create 和 update 用不同 mutation（不同 API 端点）
-4. **YAML 优先提交**：如果当前在 YAML 标签，直接提交 YAML 内容
-5. **Modal 宽度**：900px（适合左右布局表单）
-6. **加载状态**：提交按钮显示 `isPending` loading
+1. **Dual-tab bidirectional sync**: Form→YAML serializes on tab switch; YAML→Form parses on tab switch
+2. **Three modes**: create (empty form), edit (pre-filled data), view (read-only, no submit button)
+3. **Separate mutations**: create and update use different mutations (different API endpoints)
+4. **YAML-first submission**: if the active tab is YAML, submit the YAML content directly
+5. **Modal width**: 900px (suitable for side-by-side form layout)
+6. **Loading state**: submit button shows `isPending` as loading
 
-## 表单区段模式
+## Form Section Pattern
 
-复杂资源的表单按功能分拆为 Section 组件：
+Complex resource forms are split into Section components by feature:
 
 ```
 ResourceForm.tsx
 ├── MetadataSection.tsx       # name, namespace, labels, annotations
-├── ParentRefsSection.tsx     # Gateway 绑定（路由类资源）
-├── HostnamesSection.tsx      # 主机名列表
-├── RulesSection.tsx          # 路由规则
-│   ├── MatchesEditor.tsx     # 匹配条件
-│   └── BackendRefsEditor.tsx # 后端引用
+├── ParentRefsSection.tsx     # Gateway binding (route-type resources)
+├── HostnamesSection.tsx      # hostname list
+├── RulesSection.tsx          # routing rules
+│   ├── MatchesEditor.tsx     # match conditions
+│   └── BackendRefsEditor.tsx # backend references
 └── ...
 ```
 
-每个 Section 接收 `data`, `onChange`, `readOnly` props。
+Each Section receives `data`, `onChange`, and `readOnly` props.

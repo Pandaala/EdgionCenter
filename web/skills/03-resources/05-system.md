@@ -1,11 +1,11 @@
 ---
 name: system-resources
-description: 系统配置资源开发指南——EdgionGatewayConfig/LinkSys/EdgionAcme（基于 feature-04-06 用户文档）
+description: System configuration resource development guide — EdgionGatewayConfig/LinkSys/EdgionAcme (based on feature-04-06 user documentation)
 ---
 
-# 系统配置资源
+# System Configuration Resources
 
-## EdgionGatewayConfig（待开发）
+## EdgionGatewayConfig (Pending Development)
 
 ```yaml
 apiVersion: edgion.io/v1alpha1
@@ -13,17 +13,17 @@ kind: EdgionGatewayConfig
 metadata:
   name: default-config
 spec:
-  # Pingora 服务器配置
+  # Pingora server configuration
   server:
-    threads: 0                              # uint32, 默认 CPU 核数
+    threads: 0                              # uint32, default: number of CPU cores
     workStealing: true                      # bool
     gracePeriodSeconds: 30                  # uint64
     gracefulShutdownTimeoutS: 10            # uint64
     upstreamKeepalivePoolSize: 128          # uint32
-    enableCompression: false                # bool, 下游响应压缩
-    downstreamKeepaliveRequestLimit: 1000   # uint32, 0=无限
+    enableCompression: false                # bool, downstream response compression
+    downstreamKeepaliveRequestLimit: 1000   # uint32, 0=unlimited
 
-  # HTTP 超时配置
+  # HTTP timeout configuration
   httpTimeout:
     client:
       readTimeout: "60s"
@@ -34,52 +34,52 @@ spec:
       defaultRequestTimeout: "60s"
       defaultIdleTimeout: "300s"
 
-  # 最大重试次数（从 annotation 迁移到此处）
+  # Maximum retry count (migrated from annotation)
   maxRetries: 3                             # uint32
 
-  # Real IP 提取
+  # Real IP extraction
   realIp:
-    trustedIps: []                          # 可信代理 IP/CIDR
-    realIpHeader: "X-Forwarded-For"         # 提取 Real IP 的 Header
-    recursive: true                         # 从右向左遍历，跳过 trustedIps
+    trustedIps: []                          # Trusted proxy IP/CIDR
+    realIpHeader: "X-Forwarded-For"         # Header used to extract the Real IP
+    recursive: true                         # Traverse right-to-left, skipping trustedIps
 
-  # 安全保护
+  # Security protection
   securityProtect:
-    xForwardedForLimit: 200                 # XFF 最大字节
-    requireSniHostMatch: true               # HTTPS 421 Misdirected Request 检测
-    fallbackSni: ""                         # 客户端无 SNI 时的兜底
-    tlsProxyLogRecord: true                 # 记录 TLS 代理连接日志
+    xForwardedForLimit: 200                 # Maximum XFF bytes
+    requireSniHostMatch: true               # HTTPS 421 Misdirected Request detection
+    fallbackSni: ""                         # Fallback when client sends no SNI
+    tlsProxyLogRecord: true                 # Log TLS proxy connection records
 
-  # 全局插件引用
-  globalPluginsRef:                         # 应用到所有路由的全局插件
+  # Global plugin reference
+  globalPluginsRef:                         # Global plugins applied to all routes
     - name: "global-cors"
       namespace: "edgion-system"
 
-  # 预检策略
+  # Preflight policy
   preflightPolicy:
     mode: "cors-standard"                   # "cors-standard" | "all-options"
-    statusCode: 204                         # 无 CORS 插件时的响应码
+    statusCode: 204                         # Response code when no CORS plugin is present
 
-  # ReferenceGrant 验证
+  # ReferenceGrant validation
   enableReferenceGrantValidation: false     # bool
 ```
 
-**开发要点**：
-- **集群级资源**，用 `clusterResourceApi`，kind: `edgiongatewayconfig`
-- apiVersion: `edgion.io/v1alpha1`（注意不是 v1）
-- 通过 GatewayClass.spec.parametersRef 关联
-- 通常只有一个实例（考虑单例编辑页）
-- 表单区段（按功能分组）：
+**Development Notes**:
+- **Cluster-scoped resource**, uses `clusterResourceApi`, kind: `edgiongatewayconfig`
+- apiVersion: `edgion.io/v1alpha1` (note: not v1)
+- Associated via GatewayClass.spec.parametersRef
+- Typically only one instance (consider a singleton edit page)
+- Form sections (grouped by function):
   - **Server** — threads, workStealing, gracePeriod, keepalive, compression
   - **HTTP Timeout** — client(read/write/keepalive) + backend(connect/request/idle)
-  - **Max Retries** — 全局上游最大重试
-  - **Real IP** — trustedIps 列表 + header + recursive
-  - **Security** — XFF limit, SNI/Host 匹配, fallback SNI, TLS 日志
-  - **Global Plugins** — 全局插件引用列表
-  - **Preflight** — mode 选择 + statusCode
-  - **ReferenceGrant** — 开关
+  - **Max Retries** — global upstream maximum retries
+  - **Real IP** — trustedIps list + header + recursive
+  - **Security** — XFF limit, SNI/Host matching, fallback SNI, TLS logging
+  - **Global Plugins** — global plugin reference list
+  - **Preflight** — mode selector + statusCode
+  - **ReferenceGrant** — toggle
 
-## LinkSys（待开发）
+## LinkSys (Pending Development)
 
 ```yaml
 apiVersion: edgion.io/v1
@@ -99,15 +99,15 @@ spec:
       enable: false
 ```
 
-**开发要点**：
-- 命名空间资源，kind: `linksys`
-- type 决定 spec 具体结构（条件渲染）
-- 四种类型：redis, elasticsearch, etcd, webhook
-- **安全敏感**：password 字段用密码输入框
-- 表单按 type 切换不同配置区段
-- 列表页展示：name, namespace, type, 连接地址
+**Development Notes**:
+- Namespaced resource, kind: `linksys`
+- type determines the specific spec structure (conditional rendering)
+- Four types: redis, elasticsearch, etcd, webhook
+- **Security sensitive**: password field uses a password input
+- Form switches between different configuration sections based on type
+- List page displays: name, namespace, type, connection address
 
-## EdgionAcme（待开发）
+## EdgionAcme (Pending Development)
 
 ```yaml
 apiVersion: edgion.io/v1
@@ -116,43 +116,43 @@ metadata:
   name: lets-encrypt
   namespace: default
 spec:
-  email: "admin@example.com"                    # 必填：ACME 账户邮箱
-  domains:                                       # 必填：证书域名
+  email: "admin@example.com"                    # Required: ACME account email
+  domains:                                       # Required: certificate domains
     - "example.com"
-    - "*.example.com"                            # DNS-01 支持通配符
-  server: "https://acme-v02.api.letsencrypt.org/directory"  # 可选
-  keyType: "ecdsa-p256"                          # 可选：ecdsa-p256(默认) | ecdsa-p384
+    - "*.example.com"                            # DNS-01 supports wildcards
+  server: "https://acme-v02.api.letsencrypt.org/directory"  # Optional
+  keyType: "ecdsa-p256"                          # Optional: ecdsa-p256 (default) | ecdsa-p384
 
-  challenge:                                     # 必填
+  challenge:                                     # Required
     type: http-01                                # http-01 | dns-01
     http01:
-      gatewayRef:                                # http-01 必填
+      gatewayRef:                                # Required for http-01
         name: my-gateway
         namespace: default
-    dns01:                                       # dns-01 必填
+    dns01:                                       # Required for dns-01
       provider: cloudflare                       # cloudflare | alidns
-      credentialRef:                             # DNS API 凭据 Secret
+      credentialRef:                             # DNS API credential Secret
         name: cloudflare-api-token
         namespace: default
-      propagationTimeout: 120                    # DNS 传播超时（秒）
-      propagationCheckInterval: 5                # DNS 检查间隔（秒）
+      propagationTimeout: 120                    # DNS propagation timeout (seconds)
+      propagationCheckInterval: 5                # DNS check interval (seconds)
 
-  storage:                                       # 必填：证书存储
+  storage:                                       # Required: certificate storage
     secretName: "acme-cert"
     secretNamespace: default
 
-  renewal:                                       # 可选：续期配置
-    renewBeforeDays: 30                          # 到期前多少天续期
-    checkInterval: 86400                         # 检查间隔（秒）
-    failBackoff: 300                             # 失败重试延迟（秒）
+  renewal:                                       # Optional: renewal configuration
+    renewBeforeDays: 30                          # Days before expiry to renew
+    checkInterval: 86400                         # Check interval (seconds)
+    failBackoff: 300                             # Failure retry delay (seconds)
 
-  autoEdgionTls:                                 # 可选：自动创建 EdgionTls
+  autoEdgionTls:                                 # Optional: auto-create EdgionTls
     enabled: true
-    name: "acme-lets-encrypt"                    # EdgionTls 名称
-    parentRefs:                                  # 绑定 Gateway
+    name: "acme-lets-encrypt"                    # EdgionTls name
+    parentRefs:                                  # Bind Gateway
       - name: my-gateway
 
-status:                                          # 只读
+status:                                          # Read-only
   phase: Ready                                   # Pending|Issuing|Ready|Renewing|Failed
   certificateSerial: "xxx"
   certificateNotAfter: "2026-07-10T00:00:00Z"
@@ -161,19 +161,19 @@ status:                                          # 只读
   edgionTlsName: "acme-lets-encrypt"
 ```
 
-**开发要点**：
-- 命名空间资源，kind 需添加到 ResourceKind: `edgionacme`
-- 表单区段：
-  - 基本信息（email, server, keyType）
-  - 域名列表编辑
-  - Challenge 配置（http-01/dns-01 条件渲染）
-    - http-01: gatewayRef 选择
-    - dns-01: provider + credentialRef + propagation 配置
-  - Storage 配置
-  - Renewal 配置
-  - AutoEdgionTls 配置（开关 + 名称 + parentRefs）
-- Status 只读展示：phase 状态徽章、证书到期时间、失败原因
-- **安全敏感**：DNS API 凭据
-- 支持手动触发签发：`POST /api/v1/services/acme/{namespace}/{name}/trigger`
-- 列表页展示：name, namespace, phase(Tag), domains, challenge type, 到期时间
-- 需要在侧边栏添加菜单项
+**Development Notes**:
+- Namespaced resource, kind must be added to ResourceKind: `edgionacme`
+- Form sections:
+  - Basic info (email, server, keyType)
+  - Domain list editing
+  - Challenge configuration (http-01/dns-01 conditional rendering)
+    - http-01: gatewayRef selection
+    - dns-01: provider + credentialRef + propagation configuration
+  - Storage configuration
+  - Renewal configuration
+  - AutoEdgionTls configuration (toggle + name + parentRefs)
+- Status read-only display: phase status badge, certificate expiry time, failure reason
+- **Security sensitive**: DNS API credentials
+- Supports manual certificate issuance trigger: `POST /api/v1/services/acme/{namespace}/{name}/trigger`
+- List page displays: name, namespace, phase (Tag), domains, challenge type, expiry time
+- Needs to add a menu item in the sidebar

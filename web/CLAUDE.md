@@ -1,74 +1,78 @@
-# Edgion Controller — AI Agent 项目指令
+# EdgionCenter Dashboard — AI Agent Project Guide
 
-## 项目概要
+## Project Overview
 
-Edgion Controller 是 Edgion 网关的前端管理界面，基于 React 18 + TypeScript + Ant Design 5 + Vite 5。
-通过 REST API 与 Edgion Controller（端口 12101）交互，管理 Gateway API 资源和 Edgion 自定义资源。
+The EdgionCenter dashboard is the web management UI for EdgionCenter, built on React 18 +
+TypeScript + Ant Design 5 + Vite 5. It talks to the Center Admin API (port 12201) over REST
+to manage multi-cluster federation and the per-controller resources proxied through Center.
 
-**技术栈**：React 18、TypeScript 5、Ant Design 5、Vite 5、React Router 6、React Query 5、Monaco Editor、Zod 验证、Axios。
+**Stack:** React 18, TypeScript 5, Ant Design 5, Vite 5, React Router 6, React Query 5,
+Monaco Editor, Zod, Axios.
 
-**开发服务器**：`npm run dev`（端口 5173，自动代理 `/api` 到 `localhost:12101`）。
+**Dev server:** `npm run dev` (port 5173, proxies `/api` to `localhost:12201`).
 
-## 知识体系
+## Knowledge System
 
-当任务需要项目上下文时，从 `skills/SKILL.md` 开始，**按需渐进加载**，不要一次全部读取。
+When a task requires project context, start from `skills/SKILL.md` and **load progressively on demand** — do not read everything at once.
 
-### Skills 导航规则
+### Skills Navigation Rules
 
-1. **渐进式加载**：`skills/SKILL.md` → 分类 SKILL.md → 具体文件。只加载当前任务需要的最小子树。
-2. **三层定位**：
-   - **理解架构** → `01-architecture/` — 项目结构、数据流、API 层
-   - **组件模式** → `02-patterns/` — 列表页、编辑器、表单、YAML 模式
-   - **资源开发** → `03-resources/` — 每种资源的开发指南和 Schema
-3. **新资源页面**：先到 `02-patterns/` 理解现有模式，再到 `03-resources/` 找目标资源的 Schema，最后参考已完成的 HTTPRoute/EdgionPlugins 实现。
+1. **Progressive loading:** `skills/SKILL.md` → category SKILL.md → specific file. Load only the minimum subtree needed for the current task.
+2. **Three-tier lookup:**
+   - **Understand architecture** → `01-architecture/` — project structure, data flow, API layer
+   - **Component patterns** → `02-patterns/` — list pages, editors, forms, YAML mode
+   - **Resource development** → `03-resources/` — per-resource dev guides and Schema
+3. **New resource page:** first read `02-patterns/` to understand existing patterns, then `03-resources/` for the target resource Schema, then reference the completed HTTPRoute/EdgionPlugins implementations.
 
-## 核心开发模式
+## Core Development Patterns
 
-### 新增资源管理页面（标准流程）
+### Adding a New Resource Management Page (Standard Flow)
 
-每种新资源都遵循 HTTPRoute 和 EdgionPlugins 建立的模式：
+Every new resource follows the pattern established by HTTPRoute and EdgionPlugins:
 
-1. **类型定义** `src/types/{resource}/index.ts`
-   - TypeScript 接口，匹配后端 YAML Schema
-   - 导出主类型和子类型
+1. **Type definitions** `src/types/{resource}/index.ts`
+   - TypeScript interfaces matching the backend YAML Schema
+   - Export primary type and sub-types
 
-2. **工具函数** `src/utils/{resource}.ts`
-   - `createEmpty{Resource}()` — 创建空对象
-   - `normalize{Resource}(raw)` — 规范化后端返回数据
-   - `{resource}ToYaml(obj)` — 对象转 YAML
-   - `yamlTo{Resource}(str)` — YAML 转对象
-   - 计数/统计辅助函数
+2. **Utility functions** `src/utils/{resource}.ts`
+   - `createEmpty{Resource}()` — create an empty object
+   - `normalize{Resource}(raw)` — normalize data returned from the backend
+   - `{resource}ToYaml(obj)` — convert object to YAML
+   - `yamlTo{Resource}(str)` — convert YAML to object
+   - Count / statistics helpers
 
-3. **编辑器组件** `src/components/ResourceEditor/{Resource}/`
-   - `{Resource}Editor.tsx` — Modal 容器（Form/YAML 双标签）
-   - `{Resource}Form.tsx` — 表单容器
-   - `sections/` — 按功能分拆的表单区段
+3. **Editor component** `src/components/ResourceEditor/{Resource}/`
+   - `{Resource}Editor.tsx` — Modal container (Form / YAML dual tabs)
+   - `{Resource}Form.tsx` — form container
+   - `sections/` — form sections split by feature
 
-4. **列表页面** `src/pages/{Category}/{Resource}List.tsx`
-   - Ant Design Table + 搜索 + 批量操作
-   - React Query `useQuery` 获取数据
-   - `useMutation` 处理 CRUD
+4. **List page** `src/pages/{Category}/{Resource}List.tsx`
+   - Ant Design Table + search + bulk operations
+   - React Query `useQuery` for data fetching
+   - `useMutation` for CRUD
 
-5. **路由注册** `src/App.tsx`
-   - 添加 `<Route>` 元素
+5. **Route registration** `src/App.tsx`
+   - Add `<Route>` element
 
-### API 调用约定
+### API Call Conventions
 
-- 命名空间资源：`resourceApi`（`src/api/resources.ts`）
-- 集群级资源：`clusterResourceApi`
-- Content-Type: `application/yaml`（创建/更新）
-- React Query staleTime: 5 分钟
+- Namespaced resources: `resourceApi` (`src/api/resources.ts`)
+- Cluster-scoped resources: `clusterResourceApi`
+- Content-Type: `application/yaml` (create / update)
+- React Query staleTime: 5 minutes
 
-### 验证约定
+### Validation Conventions
 
-- Zod Schema 在 `src/schemas/` 下
-- 表单提交前用 Zod 验证
-- DNS-1123 子域名、主机名等复用 `src/constants/gateway-api.ts` 中的正则
+- Zod schemas live under `src/schemas/`
+- Validate with Zod before form submission
+- Reuse regexes from `src/constants/gateway-api.ts` for DNS-1123 subdomains, hostnames, etc.
 
-## 资源 Scope 速查
+## Resource Scope Reference
 
-| 资源 | Scope | API | Kind 值 | apiVersion |
-|------|-------|-----|---------|-----------|
+> **Note:** Kind/apiVersion values are upstream Edgion facts; treat the upstream Schema as authoritative.
+
+| Resource | Scope | API | Kind value | apiVersion |
+|----------|-------|-----|------------|-----------|
 | HTTPRoute | namespaced | resourceApi | `httproute` | gateway.networking.k8s.io/v1 |
 | GRPCRoute | namespaced | resourceApi | `grpcroute` | gateway.networking.k8s.io/v1 |
 | TCPRoute | namespaced | resourceApi | `tcproute` | gateway.networking.k8s.io/v1alpha2 |
@@ -89,131 +93,128 @@ Edgion Controller 是 Edgion 网关的前端管理界面，基于 React 18 + Typ
 | LinkSys | namespaced | resourceApi | `linksys` | edgion.io/v1 |
 | EdgionAcme | namespaced | resourceApi | `edgionacme` | edgion.io/v1 |
 
-**注意**：`edgionstreamplugins`、`referencegrant`、`edgionacme` 需要添加到 `src/api/types.ts` 的 ResourceKind 类型中。
+**Note:** `edgionstreamplugins`, `referencegrant`, and `edgionacme` must be added to the `ResourceKind` type in `src/api/types.ts`.
 
-### API 响应格式（feature-04-06 统一）
+### API Response Format (unified since feature-04-06)
 
 ```typescript
-// 标准响应
+// Standard response
 interface ApiResponse<T> {
   success: boolean
   data?: T
   error?: string
 }
 
-// 列表响应（新增 continue_token 分页支持）
+// List response (added continue_token pagination support)
 interface ListResponse<T> {
   success: boolean
   data?: T[]
   count: number
-  continue_token?: string  // 分页令牌
+  continue_token?: string  // pagination token
   error?: string
 }
 ```
 
-### Controller API 端点
+### Center API endpoints
 
 ```
-GET  /health                                    # 存活检查（独立 probe 监听器 :12100，非 Admin 端口）
-GET  /ready                                     # 就绪检查（独立 probe 监听器 :12100，非 Admin 端口）
-GET  /api/v1/server-info                        # 服务器信息（Admin :12101；前端用其 ready 字段判断健康/就绪，避免依赖同源 /health）
-POST /api/v1/reload                             # 重新加载所有资源
-GET  /api/v1/namespaced/{kind}                  # 列出所有命名空间资源
-GET  /api/v1/namespaced/{kind}/{namespace}      # 列出指定命名空间资源
-*    /api/v1/namespaced/{kind}/{ns}/{name}      # 单个资源 CRUD
-GET  /api/v1/cluster/{kind}                     # 列出集群级资源
-*    /api/v1/cluster/{kind}/{name}              # 单个集群资源 CRUD
-POST /api/v1/services/acme/{ns}/{name}/trigger  # 手动触发 ACME 签发
+GET  /health                                    # liveness probe (dedicated probe listener :12200, not the Admin port)
+GET  /ready                                     # readiness probe (dedicated probe listener :12200, not the Admin port)
+GET  /api/v1/server-info                        # server info (Admin :12201; frontend uses the ready field to check health/readiness instead of relying on same-origin /health)
+POST /api/v1/reload                             # reload all resources
+GET  /api/v1/namespaced/{kind}                  # list all namespaced resources
+GET  /api/v1/namespaced/{kind}/{namespace}      # list resources in a specific namespace
+*    /api/v1/namespaced/{kind}/{ns}/{name}      # single resource CRUD
+GET  /api/v1/cluster/{kind}                     # list cluster-scoped resources
+*    /api/v1/cluster/{kind}/{name}              # single cluster resource CRUD
+POST /api/v1/services/acme/{ns}/{name}/trigger  # manually trigger ACME certificate issuance
 ```
 
-### 认证
+### Authentication
 
-- 登录页: `/login`，使用 httpOnly Cookie 认证
-- 认证 API: `authApi`（`src/api/auth.ts`）— login/logout/me
-- 登录态: `sessionStorage`（`src/utils/auth.ts`）— 不使用 localStorage 存 token
-- 路由守卫: `RequireAuth` 组件（`src/App.tsx`）
-- 401 处理: 自动跳转 `/login`（`src/api/client.ts`）
+- Login page: `/login`, authenticated via httpOnly Cookie
+- Auth API: `authApi` (`src/api/auth.ts`) — login / logout / me
+- Session state: `sessionStorage` (`src/utils/auth.ts`) — token is NOT stored in localStorage
+- Route guard: `RequireAuth` component (`src/App.tsx`)
+- 401 handling: auto-redirect to `/login` (`src/api/client.ts`)
 
-## 常用命令
+## Common Commands
 
 ```bash
-# 开发
-npm run dev              # 启动开发服务器 (port 5173)
-npm run build            # TypeScript 编译 + Vite 构建
-npm run lint             # ESLint 检查
-npm run preview          # 预览生产构建
+# Development
+npm run dev              # start dev server (port 5173)
+npm run build            # TypeScript compile + Vite build
+npm run lint             # ESLint check
+npm run preview          # preview production build
 
-# 后端测试环境（在 edgion 项目目录下执行）
-cd ../edgion
-./examples/test/scripts/utils/start_all_with_conf.sh    # 启动 Controller + Gateway
-./examples/test/scripts/utils/load_conf.sh all           # 加载全部测试数据
-# Controller Admin API: http://localhost:12101
-# Gateway Admin API: http://localhost:12001
+# Backend (run from the EdgionCenter repo root)
+cargo run --bin edgion-center -- --config-file config/edgion-center.yaml
+# Center Admin API: http://localhost:12201
 ```
 
-## 目录结构
+## Directory Structure
 
 ```
 src/
-├── api/                  # HTTP 客户端层（Axios + 通用 CRUD）
+├── api/                  # HTTP client layer (Axios + generic CRUD)
 ├── components/
-│   ├── Layout/           # MainLayout 主布局
-│   ├── ResourceEditor/   # 资源编辑器（按资源类型分目录）
-│   └── YamlEditor/       # Monaco YAML 编辑器
-├── constants/            # 常量、枚举、正则、默认值
-├── pages/                # 页面组件（按功能分类）
+│   ├── Layout/           # MainLayout
+│   ├── ResourceEditor/   # resource editors (one directory per resource type)
+│   └── YamlEditor/       # Monaco YAML editor
+├── constants/            # constants, enums, regexes, defaults
+├── pages/                # page components (grouped by feature)
 │   ├── Dashboard/
 │   ├── Routes/           # HTTPRoute, GRPCRoute, ...
 │   └── Plugins/          # EdgionPlugins, ...
-├── schemas/              # Zod 验证 Schema
-├── types/                # TypeScript 类型定义
-│   ├── gateway-api/      # Gateway API 标准资源类型
-│   └── edgion-plugins/   # Edgion 自定义资源类型
-├── utils/                # 工具函数（YAML 转换、验证等）
-├── App.tsx               # 路由定义
-└── main.tsx              # 入口（React/Router/Query/Ant Design）
+├── schemas/              # Zod validation schemas
+├── types/                # TypeScript type definitions
+│   ├── gateway-api/      # Gateway API standard resource types
+│   └── edgion-plugins/   # Edgion custom resource types
+├── utils/                # utility functions (YAML conversion, validation, etc.)
+├── App.tsx               # route definitions
+└── main.tsx              # entry point (React / Router / Query / Ant Design)
 ```
 
-## 多语言（i18n）规范 — 强制
+## Internationalization (i18n) — Mandatory Rules
 
-> **禁止在组件中硬编码中文或双语混合字符串。所有 UI 文字必须通过 `t()` 输出。**
+> **Never hard-code Chinese or bilingual mixed strings in components. All UI text must be output via `t()`.**
 
-### 快速用法
+### Quick Usage
 
 ```typescript
 import { useT } from '@/i18n'
-const t = useT()  // 在 React 组件函数体内调用
+const t = useT()  // call inside a React component function body
 
-t('btn.create')                              // "Create" / "创建"
-t('col.name')                               // "Name" / "名称"
-t('msg.deleteOk')                           // "Deleted successfully" / "删除成功"
-t('modal.create', { resource: 'Gateway' })  // "Create Gateway" / "创建 Gateway"
-t('msg.batchDeleteOk', { n: 5 })            // "5 resources deleted" / "成功删除 5 个资源"
-t('table.totalItems', { n: total })         // "Total: 42" / "共 42 条"
-t('confirm.deleteMsg', { name })            // 带资源名的确认文字
-t('msg.createFailed', { err: e.message })   // 带错误信息的失败提示
+t('btn.create')                              // "Create"
+t('col.name')                               // "Name"
+t('msg.deleteOk')                           // "Deleted successfully"
+t('modal.create', { resource: 'Gateway' })  // "Create Gateway"
+t('msg.batchDeleteOk', { n: 5 })            // "5 resources deleted"
+t('table.totalItems', { n: total })         // "Total: 42"
+t('confirm.deleteMsg', { name })            // confirmation text with resource name
+t('msg.createFailed', { err: e.message })   // failure message with error info
 ```
 
-### 技术名词不翻译
+### Technical Terms Are Not Translated
 
-`HTTPRoute`、`GRPCRoute`、`Gateway`、`EdgionTls`、`YAML`、`HTTP`、`HTTPS`、`TCP`、`Exact` 等直接写字面量：
+`HTTPRoute`, `GRPCRoute`, `Gateway`, `EdgionTls`, `YAML`, `HTTP`, `HTTPS`, `TCP`, `Exact`, etc. are written as literals:
 ```typescript
-`${t('btn.create')} Gateway`   // ✅ "Create Gateway" / "创建 Gateway"
+`${t('btn.create')} Gateway`   // "Create Gateway"
 ```
 
-### 新增 key 规则
+### Rules for Adding New Keys
 
-1. 先查 `skills/02-patterns/SKILL.md`（i18n 快速参考）或 `ws2/skills/02-dashboard/04-i18n.md`（完整清单）
-2. **同时**更新 `src/i18n/en.ts` 和 `src/i18n/zh.ts`（两文件 key 必须完全一致）
-3. 翻译文件位置：`src/i18n/en.ts`（英文，默认）、`src/i18n/zh.ts`（中文）
+1. Check `skills/02-patterns/SKILL.md` (i18n quick reference) or `skills/02-patterns/04-i18n-rules.md` (full key list) first.
+2. **Simultaneously** update `src/i18n/en.ts` and `src/i18n/zh.ts` — the keys in both files must be exactly in sync.
+3. Translation file locations: `src/i18n/en.ts` (English, default), `src/i18n/zh.ts` (Chinese).
 
-### 分页标准写法
+### Standard Pagination
 
 ```typescript
 pagination={{ showTotal: (n) => t('table.totalItems', { n }) }}
 ```
 
-### 确认删除标准写法
+### Standard Delete Confirmation
 
 ```typescript
 Modal.confirm({
@@ -226,11 +227,11 @@ Modal.confirm({
 })
 ```
 
-## 编码规范
+## Coding Conventions
 
-- 组件文件用 PascalCase，工具文件用 camelCase
-- 列表页命名：`{Resource}List.tsx`，编辑器命名：`{Resource}Editor.tsx`
-- 新组件参考 HTTPRouteList / HTTPRouteEditor 的模式
-- 使用 Ant Design 组件，不引入额外 UI 库
-- **所有 UI 文字走 i18n（见上方 i18n 规范）**
-- 类型定义单独文件，不内联在组件中
+- Component files use PascalCase; utility files use camelCase
+- List page naming: `{Resource}List.tsx`; editor naming: `{Resource}Editor.tsx`
+- Reference HTTPRouteList / HTTPRouteEditor patterns for new components
+- Use Ant Design components; do not introduce additional UI libraries
+- **All UI text goes through i18n (see i18n rules above)**
+- Type definitions live in separate files — do not inline them in components

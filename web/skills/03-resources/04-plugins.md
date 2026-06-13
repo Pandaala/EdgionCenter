@@ -1,24 +1,24 @@
 ---
 name: plugin-resources
-description: 插件资源开发指南——EdgionPlugins/EdgionStreamPlugins/PluginMetaData（基于 feature-04-06 用户文档）
+description: Plugin resource development guide — EdgionPlugins/EdgionStreamPlugins/PluginMetaData (based on feature-04-06 user documentation)
 ---
 
-# 插件资源
+# Plugin Resources
 
-## EdgionPlugins ✅ 已完成
+## EdgionPlugins ✅ Completed
 
 - apiVersion: `edgion.io/v1`
 - Kind: `edgionplugins`
-- 参考代码：`src/pages/Plugins/EdgionPluginsList.tsx`
+- Reference code: `src/pages/Plugins/EdgionPluginsList.tsx`
 
-25+ 内置 HTTP 插件：
-- **认证类**：Basic Auth, JWT Auth, Key Auth, HMAC Auth, LDAP Auth, Forward Auth, OpenID Connect, JWE Decrypt, Header Cert Auth
-- **安全类**：CORS, CSRF, IP Restriction, Request Restriction
-- **流量控制**：Rate Limit, Rate Limit(Redis), Proxy Rewrite, Response Rewrite, Bandwidth Limit, Request Mirror, Direct Endpoint, Dynamic Upstream, **Region Route（新增）**
-- **可观测**：Real IP, Ctx Setter, Mock, DSL, Debug Access Log
-- **Gateway API Filters**：Request Header Modifier, Response Header Modifier, Request Redirect, URL Rewrite
+25+ built-in HTTP plugins:
+- **Authentication**: Basic Auth, JWT Auth, Key Auth, HMAC Auth, LDAP Auth, Forward Auth, OpenID Connect, JWE Decrypt, Header Cert Auth
+- **Security**: CORS, CSRF, IP Restriction, Request Restriction
+- **Traffic Control**: Rate Limit, Rate Limit(Redis), Proxy Rewrite, Response Rewrite, Bandwidth Limit, Request Mirror, Direct Endpoint, Dynamic Upstream, **Region Route (new)**
+- **Observability**: Real IP, Ctx Setter, Mock, DSL, Debug Access Log
+- **Gateway API Filters**: Request Header Modifier, Response Header Modifier, Request Redirect, URL Rewrite
 
-## EdgionStreamPlugins（待开发）
+## EdgionStreamPlugins (Pending Development)
 
 ```yaml
 apiVersion: edgion.io/v1
@@ -30,43 +30,43 @@ spec:
   plugins:
     - type: IpRestriction
       config:
-        ipSource: remoteAddr              # IP 来源：remoteAddr（连接 IP）
-        allow:                            # IP 白名单（CIDR 格式）
+        ipSource: remoteAddr              # IP source: remoteAddr (connection IP)
+        allow:                            # IP allowlist (CIDR format)
           - "10.0.0.0/8"
           - "172.16.0.0/12"
-        deny:                             # IP 黑名单（优先级高于 allow）
+        deny:                             # IP blocklist (higher priority than allow)
           - "10.0.0.100/32"
-        defaultAction: allow              # 默认动作：allow | deny
-        message: "Access denied"          # 拒绝时的消息
+        defaultAction: allow              # Default action: allow | deny
+        message: "Access denied"          # Message on denial
 ```
 
-**IP 过滤逻辑**：deny 列表匹配 → 拒绝 → allow 列表匹配 → 允许 → defaultAction
+**IP filter logic**: deny list match → reject → allow list match → allow → defaultAction
 
-**路由绑定方式**（通过 annotation）：
+**Route binding** (via annotation):
 ```yaml
-# 同命名空间
+# Same namespace
 annotations:
   edgion.io/edgion-stream-plugins: "my-stream-plugins"
 
-# 跨命名空间
+# Cross-namespace
 annotations:
   edgion.io/edgion-stream-plugins: "other-namespace/my-stream-plugins"
 ```
 
-**支持协议**：Gateway listener 级连接过滤、TCPRoute、TLSRoute
+**Supported protocols**: Gateway listener-level connection filtering, TCPRoute, TLSRoute
 
-**开发要点**：
-- 命名空间资源，kind 需添加到 ResourceKind: `edgionstreamplugins`
-- 比 EdgionPlugins 简单——**没有四阶段**，只有一个 plugins 列表
-- 当前只有一个插件类型：IpRestriction
-- 表单：metadata + plugins 列表编辑
-  - type 选择（目前只有 IpRestriction）
-  - config 编辑（ipSource, allow, deny, defaultAction, message）
-- 列表页展示：name, namespace, 插件数量, 插件类型列表
-- IP check 在连接建立时执行，性能影响小
-- 插件配置支持热更新
+**Development Notes**:
+- Namespaced resource, kind must be added to ResourceKind: `edgionstreamplugins`
+- Simpler than EdgionPlugins — **no four-phase pipeline**, just a single plugins list
+- Currently only one plugin type: IpRestriction
+- Form: metadata + plugins list editing
+  - type selection (currently only IpRestriction)
+  - config editing (ipSource, allow, deny, defaultAction, message)
+- List page displays: name, namespace, plugin count, plugin type list
+- IP check runs at connection establishment time, with minimal performance impact
+- Plugin configuration supports hot reload
 
-## PluginMetaData（待开发）
+## PluginMetaData (Pending Development)
 
 ```yaml
 apiVersion: edgion.io/v1
@@ -88,9 +88,9 @@ spec:
   defaultConfig: {}
 ```
 
-**开发要点**：
-- **集群级资源**，用 `clusterResourceApi`，kind: `pluginmetadata`
-- 插件元数据和 JSON Schema 定义
-- YAML 编辑为主
-- 列表页展示：name, description
-- 列表页不需要 namespace 列
+**Development Notes**:
+- **Cluster-scoped resource**, uses `clusterResourceApi`, kind: `pluginmetadata`
+- Plugin metadata and JSON Schema definition
+- Primarily YAML editing
+- List page displays: name, description
+- List page does not need a namespace column
