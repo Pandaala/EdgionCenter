@@ -33,11 +33,13 @@ business routes returning 503 until configured. `/health`, `/ready`, `/metrics`,
 `/api/v1/auth/status` remain reachable. See
 [01-architecture/06-center/SKILL.md](../01-architecture/06-center/SKILL.md) §Authentication.
 
-## Access control (lite / full)
+## Access control (three orthogonal axes)
 
-Two config-selected access-control tiers (`access.mode`): **lite** (login = admin) and
-**full** (DB-backed users + page/API RBAC). Covers the `access:` / `database:` / `audit:`
-config, the permission catalog, RBAC enforcement, admin bootstrap, and known limitations.
+Three independent, freely-combinable axes: **authentication** (OIDC `auth:`, single admin
+`local_auth:`, DB users `db_auth.enabled` — any subset), **authorization** (`authz.mode`:
+`allow_all` default or `rbac`), and **storage** (`database.backend`: sqlite/mysql). Covers the
+`authz:` / `auth:` / `local_auth:` / `db_auth:` / `database:` / `audit:` config, the
+permission catalog, RBAC enforcement, unified login, admin bootstrap, and known limitations.
 See [access-control.md](access-control.md).
 
 ## Admin API

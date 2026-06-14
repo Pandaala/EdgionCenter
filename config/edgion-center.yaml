@@ -28,31 +28,55 @@ sync:
   ping_interval_secs: 30
 
 # ============================================================================
-# Access control (`access:`) — tier selector
+# Access control — three orthogonal axes (full reference:
+# skills/02-features/access-control.md)
 # ============================================================================
-# Selects which access-control tier Center runs in. See the full reference at
-# skills/02-features/access-control.md.
+# Access control is NOT a single "mode" anymore. It is three independent axes
+# that combine freely:
 #
-#   lite (default) — Login = admin. Authentication via OIDC (`auth:`) and/or a
-#                    single shared admin (`local_auth:`); every authenticated
-#                    caller is treated as a full admin (no per-user RBAC). The
-#                    audit log still attributes actions to the caller.
-#   full           — DB-backed local users (username + bcrypt password) with
-#                    page + API RBAC managed from the dashboard (Users + Roles).
-#                    REQUIRES a usable database (see `database:` below) AND a
-#                    `local_auth.jwt_secret`. See the full-mode notes under
-#                    `local_auth:` further down.
-access:
-  mode: lite
-  # mode: full
+#   1. Authentication — WHO you are. Any subset of three providers, all active
+#      simultaneously:
+#        - OIDC / Okta            (`auth:`)
+#        - single shared admin    (`local_auth:`)
+#        - DB-backed users        (`db_auth.enabled`)
+#   2. Authorization — WHAT you may do (`authz.mode`): `allow_all` (default) or
+#      `rbac`.
+#   3. Storage — WHERE state lives (`database.backend`): `sqlite` or `mysql`.
+#
+# The defaults below (authz.mode = allow_all, db_auth disabled) reproduce the
+# old lightweight "login = admin" behavior. Turn on `rbac` and/or `db_auth` for
+# per-user, database-driven permissions.
+
+# ----------------------------------------------------------------------------
+# Authorization (`authz:`)
+# ----------------------------------------------------------------------------
+# Selects which authorization store is installed. Orthogonal to authentication:
+# whichever provider issued the token, RBAC resolves permissions from the DB by
+# the authenticated subject.
+#
+#   allow_all (default) — Every authenticated caller is a full admin (no
+#                         per-user permissions). The audit log still attributes
+#                         actions to the caller.
+#   rbac                — Database-backed page + API RBAC. Permissions resolved
+#                         per subject from the `users`/`roles` tables, managed
+#                         from the dashboard (Users + Roles pages). REQUIRES a
+#                         usable database (see `database:` below) — startup fails
+#                         without one. Identities with no matching `users` row
+#                         get ZERO permissions (403 everywhere): fail-closed, no
+#                         default role. Permission changes take up to ~30s to
+#                         apply (authz cache TTL).
+authz:
+  mode: allow_all
+  # mode: rbac
 
 # ============================================================================
 # Persistence (`database:`)
 # ============================================================================
-# Backing store for the controller registry, audit log, and (in full mode) the
-# users/roles tables. The `backend` defaults to SQLite in both modes; `full`
-# mode REQUIRES a usable database and refuses to start without one (MySQL is
-# recommended for full mode, but is not selected automatically).
+# Backing store for the controller registry, audit log, and (under rbac /
+# db_auth) the users/roles tables. The `backend` defaults to SQLite. Both
+# `authz.mode: rbac` and `db_auth.enabled: true` REQUIRE a usable database and
+# refuse to start without one (MySQL is recommended at scale, but is never
+# selected automatically).
 database:
   enabled: true
   # Storage backend: sqlite (default, embedded) or mysql (external).
@@ -61,7 +85,7 @@ database:
   # the working directory.
   sqlite_path: "data/center.db"
   #
-  # --- External MySQL (recommended for full mode) ---
+  # --- External MySQL ---
   # backend: mysql
   # mysql_url: "mysql://user:pass@host:3306/edgion_center"
 
@@ -84,42 +108,62 @@ audit:
   retention_days: 0
 
 # ============================================================================
-# Admin API Authentication
+# Admin API Authentication — three providers, freely combined
 # ============================================================================
-# Authentication is mandatory. Configure a `local_auth` or `auth` provider;
-# omitting both leaves business routes returning 503 until configured.
+# Authentication is mandatory. Enable ANY subset of the three providers below;
+# they coexist (all active simultaneously). With NONE enabled, business routes
+# fail-close with 503 until configured (`/health`, `/ready`, `/metrics`,
+# `/api/v1/auth/status` stay reachable). A unified `POST /api/v1/auth/login`
+# authenticates DB users first, then the single shared admin.
+#
+# Session-secret precedence (required for ANY password login — single admin
+# and/or db_auth): `local_auth.jwt_secret` is used if set, otherwise
+# `db_auth.jwt_secret`. If a password-login provider is enabled but NEITHER
+# secret is set, startup fails. OIDC (`auth:`) needs no session secret.
 #
 # --- OIDC / Okta (`auth:`) ---
-# Used in LITE mode for SSO login. IGNORED in FULL mode (DB users only; a WARN
-# is logged if `auth:` is set alongside `access.mode: full`).
+# SSO login via an OIDC provider. Coexists with rbac and db_auth (no
+# force-disable). Under rbac, the OIDC subject (`sub`) must already have a
+# matching `users` row, or it gets zero permissions (403 everywhere).
 #
 # auth:
 #   enabled: true
 #   discovery: "https://your-idp.example.com/.well-known/openid-configuration"
+#   audiences: ["edgion-admin"]   # optional; empty = skip audience check
 #
-# --- Local auth (`local_auth:`) ---
-# In LITE mode: a single shared admin (username + password) plus the JWT signing
-# secret. In FULL mode: ONLY `jwt_secret` is used (to sign/validate DB-user login
-# tokens); `username`/`password` are IGNORED. A `local_auth:` block WITH a
-# non-empty `jwt_secret` is REQUIRED in full mode (startup fails otherwise).
+# --- Single shared admin (`local_auth:`) ---
+# One username + password plus the JWT signing secret. The `jwt_secret` here is
+# also the preferred session secret for db_auth tokens (see precedence above).
 #
 # local_auth:
-#   username: "admin"                 # lite mode only; ignored in full mode
-#   password: "change-me"             # lite mode only; ignored in full mode
-#   jwt_secret: "change-me-in-production"   # required; reused as the signer in full mode
+#   username: "admin"
+#   password: "change-me"
+#   jwt_secret: "change-me-in-production"   # preferred session secret
 #   jwt_expiry_hours: 24
 #   cookie_secure: true
 #
-# --- Full-mode first-run bootstrap ---
-# When `access.mode: full` and the `users` table is empty, set BOTH env vars to
-# create the initial `admin` user (bound to a built-in `admin` role holding every
-# permission key):
+# --- DB-backed users (`db_auth:`) ---
+# Username + bcrypt-password accounts stored in the `users` table. REQUIRES a
+# usable database (startup fails without one). `jwt_secret` here is used only
+# when `local_auth.jwt_secret` is unset. `jwt_expiry_hours` / `cookie_secure`
+# apply on the DB-users-only path (when no `local_auth` admin supplies them).
+# Typically paired with `authz.mode: rbac` for per-user permissions, but it also
+# works under allow_all (any authenticated DB user is a full admin).
+#
+# db_auth:
+#   enabled: true
+#   jwt_secret: "change-me-in-production"   # used only if local_auth.jwt_secret is unset
+#   jwt_expiry_hours: 24
+#   cookie_secure: true
+#
+# --- First-run admin bootstrap (db_auth) ---
+# When `db_auth.enabled` is true AND the `users` table is empty, set BOTH env
+# vars to create the initial admin user:
 #   EDGION_ADMIN_USERNAME=admin
 #   EDGION_ADMIN_PASSWORD=<strong-password>
-# If unset, a WARN is logged and no login is possible until a user is provisioned.
-# The JWT signing secret comes solely from the `local_auth.jwt_secret` field above
-# (the same field lite uses); there is no environment override for it.
-# Note: permission changes take up to ~30s to take effect (authz cache TTL).
+# Under rbac this also creates a built-in `admin` role holding every permission
+# key, bound to that user. If either var is unset, a WARN is logged and no DB
+# user can log in until one is provisioned.
 
 # ============================================================================
 # Federation gRPC Channel Security (mTLS)

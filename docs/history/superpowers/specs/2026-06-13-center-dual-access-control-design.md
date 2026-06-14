@@ -1,7 +1,15 @@
 # Design: Center dual-tier access control (lite / full, config-selected)
 
+> **SUPERSEDED (2026-06-14):** The bundled `access.mode: lite | full` switch introduced here
+> has been replaced by the **orthogonal** model in
+> [`2026-06-14-center-orthogonal-access-control-design.md`](2026-06-14-center-orthogonal-access-control-design.md):
+> three independent axes — authentication (OIDC / single-admin / DB users, any subset),
+> authorization (`authz.mode: allow_all | rbac`), and storage (`database.backend`). Only the
+> `access.mode` tier selector is retired; the rest of this design (sqlx Store, audit log, RBAC
+> permission-key engine, dashboard Users/Roles) still stands and was carried forward.
+
 **Profile:** design / feature (multi-task)
-**Status:** approved — ready for implementation plan
+**Status:** approved — ready for implementation plan (access.mode tier selector superseded; see note above)
 **Date:** 2026-06-13
 **Supersedes / consolidates:** `docs/history/tasks/center-auth-rbac-design.md`,
 `docs/history/tasks/center-audit-log.md` (those drafts pushed RBAC into a separate
