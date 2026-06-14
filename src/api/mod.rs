@@ -189,7 +189,7 @@ async fn health_check() -> impl IntoResponse {
 
 /// Readiness check endpoint - returns 200 OK only when Center is fully operational.
 ///
-/// Returns 503 when `database.enabled = true` but the SQLite database failed to open
+/// Returns 503 when `database.enabled = true` but the metadata store failed to open
 /// at startup, leaving DB-backed endpoints permanently degraded.
 async fn ready_check(State(state): State<ApiState>) -> impl IntoResponse {
     if state.is_ready() {

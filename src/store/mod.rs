@@ -38,9 +38,14 @@ impl Store {
                         std::fs::create_dir_all(parent).ok();
                     }
                 }
+                // WAL + a busy_timeout let concurrent spawned upsert/mark_offline
+                // tasks against a file DB wait out a writer lock instead of failing
+                // fast with SQLITE_BUSY.
                 let opts = SqliteConnectOptions::new()
                     .filename(&cfg.sqlite_path)
-                    .create_if_missing(true);
+                    .create_if_missing(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                    .busy_timeout(std::time::Duration::from_secs(5));
                 let pool = SqlitePool::connect_with(opts).await?;
                 Store {
                     pool: Pool::Sqlite(pool),

@@ -22,6 +22,9 @@ pub struct DbController {
     pub tag: Vec<String>,
     pub online: bool,
     pub last_seen_at: i64,
+    /// Wall-clock seconds of the first insert. Written once on insert and never
+    /// updated on conflict (see `upsert_controller`).
+    pub created_at: i64,
 }
 
 impl Store {
@@ -92,70 +95,84 @@ impl Store {
     /// path used from the fed-sync offline branches, which don't have the
     /// `cluster`/`env`/`tag` metadata handy — use `upsert_controller` when
     /// those fields matter (e.g. registration).
-    pub async fn mark_offline(&self, id: &str) -> anyhow::Result<()> {
-        let now = unix_now();
-        let sql = "UPDATE controllers SET online = 0, last_seen_at = ? WHERE controller_id = ?";
+    /// Run a single-row controller statement (identified by `controller_id`)
+    /// against whichever backend pool is active. `now` is bound first when
+    /// `Some` (for statements that refresh `last_seen_at`), then `id`.
+    ///
+    /// sqlx's `query` builder is typed by backend, so the typed query must be
+    /// constructed inside each arm; keeping that two-arm match in ONE place
+    /// means a future same-shape statement reuses this helper instead of
+    /// copy-pasting the dispatch.
+    async fn exec_by_id(&self, sql: &str, now: Option<i64>, id: &str) -> anyhow::Result<()> {
         match &self.pool {
             Pool::Sqlite(pool) => {
-                sqlx::query(sql).bind(now).bind(id).execute(pool).await?;
+                let mut q = sqlx::query(sql);
+                if let Some(now) = now {
+                    q = q.bind(now);
+                }
+                q.bind(id).execute(pool).await?;
             }
             Pool::Mysql(pool) => {
-                sqlx::query(sql).bind(now).bind(id).execute(pool).await?;
+                let mut q = sqlx::query(sql);
+                if let Some(now) = now {
+                    q = q.bind(now);
+                }
+                q.bind(id).execute(pool).await?;
             }
         }
         Ok(())
+    }
+
+    pub async fn mark_offline(&self, id: &str) -> anyhow::Result<()> {
+        let sql = "UPDATE controllers SET online = 0, last_seen_at = ? WHERE controller_id = ?";
+        self.exec_by_id(sql, Some(unix_now()), id).await
     }
 
     /// Delete a controller record from DB.
     pub async fn delete_controller(&self, id: &str) -> anyhow::Result<()> {
-        let sql = "DELETE FROM controllers WHERE controller_id = ?";
-        match &self.pool {
-            Pool::Sqlite(pool) => {
-                sqlx::query(sql).bind(id).execute(pool).await?;
-            }
-            Pool::Mysql(pool) => {
-                sqlx::query(sql).bind(id).execute(pool).await?;
-            }
-        }
-        Ok(())
+        self.exec_by_id("DELETE FROM controllers WHERE controller_id = ?", None, id)
+            .await
     }
 
     /// List all controller records, ordered by `controller_id`.
     pub async fn list_controllers(&self) -> anyhow::Result<Vec<DbController>> {
-        let sql = "SELECT controller_id, cluster, env, tag, online, last_seen_at \
+        let sql = "SELECT controller_id, cluster, env, tag, online, last_seen_at, created_at \
                    FROM controllers ORDER BY controller_id";
+        // The two backends differ only in how the boolean `online` column decodes
+        // (SQLite INTEGER -> i64, MySQL TINYINT -> i8); a closure over a generic
+        // `Row` keeps the field-mapping logic in one place.
+        fn map_row<R: Row>(row: &R, online: bool) -> anyhow::Result<DbController>
+        where
+            String: sqlx::Type<R::Database> + for<'r> sqlx::Decode<'r, R::Database>,
+            i64: sqlx::Type<R::Database> + for<'r> sqlx::Decode<'r, R::Database>,
+            for<'r> &'r str: sqlx::ColumnIndex<R>,
+        {
+            let env_json: String = row.try_get("env")?;
+            let tag_json: String = row.try_get("tag")?;
+            Ok(DbController {
+                controller_id: row.try_get("controller_id")?,
+                cluster: row.try_get("cluster")?,
+                env: serde_json::from_str(&env_json).unwrap_or_default(),
+                tag: serde_json::from_str(&tag_json).unwrap_or_default(),
+                online,
+                last_seen_at: row.try_get("last_seen_at")?,
+                created_at: row.try_get("created_at")?,
+            })
+        }
         let mut out = Vec::new();
         match &self.pool {
             Pool::Sqlite(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                for row in rows {
-                    let env_json: String = row.try_get("env")?;
-                    let tag_json: String = row.try_get("tag")?;
-                    out.push(DbController {
-                        controller_id: row.try_get("controller_id")?,
-                        cluster: row.try_get("cluster")?,
-                        env: serde_json::from_str(&env_json).unwrap_or_default(),
-                        tag: serde_json::from_str(&tag_json).unwrap_or_default(),
-                        // SQLite stores the flag in an INTEGER column.
-                        online: row.try_get::<i64, _>("online")? != 0,
-                        last_seen_at: row.try_get("last_seen_at")?,
-                    });
+                for row in sqlx::query(sql).fetch_all(pool).await? {
+                    // SQLite stores the flag in an INTEGER column.
+                    let online = row.try_get::<i64, _>("online")? != 0;
+                    out.push(map_row(&row, online)?);
                 }
             }
             Pool::Mysql(pool) => {
-                let rows = sqlx::query(sql).fetch_all(pool).await?;
-                for row in rows {
-                    let env_json: String = row.try_get("env")?;
-                    let tag_json: String = row.try_get("tag")?;
-                    out.push(DbController {
-                        controller_id: row.try_get("controller_id")?,
-                        cluster: row.try_get("cluster")?,
-                        env: serde_json::from_str(&env_json).unwrap_or_default(),
-                        tag: serde_json::from_str(&tag_json).unwrap_or_default(),
-                        // MySQL TINYINT maps to i8.
-                        online: row.try_get::<i8, _>("online")? != 0,
-                        last_seen_at: row.try_get("last_seen_at")?,
-                    });
+                for row in sqlx::query(sql).fetch_all(pool).await? {
+                    // MySQL TINYINT maps to i8.
+                    let online = row.try_get::<i8, _>("online")? != 0;
+                    out.push(map_row(&row, online)?);
                 }
             }
         }
@@ -187,6 +204,40 @@ mod tests {
         assert_eq!(rows[0].tag, vec!["edge".to_string()]);
         assert!(rows[0].online);
         assert!(rows[0].last_seen_at > 0);
+    }
+
+    #[tokio::test]
+    async fn upsert_preserves_created_at_on_conflict() {
+        let db = Store::open_in_memory().await.unwrap();
+        // First insert establishes created_at.
+        db.upsert_controller("c1", "cluster-a", &["prod".into()], &["edge".into()], true)
+            .await
+            .unwrap();
+        let first = db.list_controllers().await.unwrap();
+        assert_eq!(first.len(), 1);
+        let created_at = first[0].created_at;
+        let last_seen_first = first[0].last_seen_at;
+        assert!(created_at > 0, "created_at must be set on insert");
+
+        // Second upsert of the SAME id with different cluster/online state.
+        // created_at must NOT be reset; last_seen_at is refreshed (>= first).
+        db.upsert_controller("c1", "cluster-b", &["stage".into()], &["core".into()], false)
+            .await
+            .unwrap();
+        let second = db.list_controllers().await.unwrap();
+        assert_eq!(second.len(), 1, "upsert must not create a duplicate row");
+        assert_eq!(
+            second[0].created_at, created_at,
+            "created_at must equal the first insert's value (not reset on conflict)"
+        );
+        assert!(
+            second[0].last_seen_at >= last_seen_first,
+            "last_seen_at must be refreshed on upsert"
+        );
+        // Confirm the conflict path actually updated the mutable fields.
+        assert_eq!(second[0].cluster, "cluster-b");
+        assert!(!second[0].online);
+        assert_eq!(second[0].env, vec!["stage".to_string()]);
     }
 
     #[tokio::test]

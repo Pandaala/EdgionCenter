@@ -333,7 +333,7 @@ impl FederationSync for FederationGrpcServer {
         }
         self.aggregator
             .set_controller_info(&controller_id, register_req.clone());
-        // Persist registration to SQLite (best-effort, isolated from the hot path).
+        // Persist registration to the metadata store (best-effort, isolated from the hot path).
         // Any failure here is logged and swallowed — we refuse to block fed-sync
         // registration on DB availability, since the controller is already live
         // in-memory and remains operational without persistence.

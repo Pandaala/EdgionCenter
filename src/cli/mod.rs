@@ -115,6 +115,17 @@ impl EdgionCenterCli {
                     Some(Arc::new(d))
                 }
                 Err(e) => {
+                    // Silent degrade is acceptable for the default embedded SQLite,
+                    // but an explicit MySQL backend that fails to connect (down
+                    // server / bad URL / missing mysql_url) is an operator
+                    // misconfiguration: fail startup instead of silently running
+                    // without persistence.
+                    if config.database.backend == crate::config::DbBackend::Mysql {
+                        return Err(anyhow::anyhow!(
+                            "Failed to connect to MySQL metadata store (backend = mysql): {}",
+                            e
+                        ));
+                    }
                     tracing::error!(component = "center", error = %e, "Failed to open metadata store, running without persistence");
                     None
                 }
