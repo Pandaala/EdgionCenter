@@ -1,7 +1,7 @@
 # Task DAC-02: Audit log backend (schema + sink + middleware)
 
 **Profile:** feature
-**Status:** todo (not started)
+**Status:** done (commits f346048 + 9c921ff; 215 tests pass)
 **Depends on:** DAC-01 (Store)
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 2
 

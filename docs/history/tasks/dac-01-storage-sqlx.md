@@ -1,7 +1,7 @@
 # Task DAC-01: Storage foundation on sqlx (replace rusqlite)
 
 **Profile:** feature / refactor
-**Status:** todo (not started)
+**Status:** done (commits f71e040 + 44ddae9; 202 tests pass)
 **Depends on:** none — this is the base
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 1
 
