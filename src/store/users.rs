@@ -437,7 +437,7 @@ impl Store {
                    FROM users u \
                    JOIN user_roles ur ON ur.user_id = u.id \
                    JOIN role_permissions rp ON rp.role_id = ur.role_id \
-                   WHERE u.username = ? \
+                   WHERE u.username = ? AND u.status = 'active' \
                    ORDER BY rp.permission_key";
         let mut out = Vec::new();
         match &self.pool {
@@ -574,6 +574,30 @@ mod tests {
         let after2 = db.get_user(id).await.unwrap().unwrap();
         assert_eq!(after2.password_hash, "h1");
         assert!(after2.updated_at >= after.updated_at);
+    }
+
+    /// Disabling a user must zero out their effective permissions promptly, so a
+    /// session disabled mid-flight loses access within the DbAuthz cache TTL
+    /// rather than lingering until the JWT expires.
+    #[tokio::test]
+    async fn disabled_user_resolves_no_permissions() {
+        let db = Store::open_in_memory().await.unwrap();
+        let id = db.create_user("alice", "hash", "Alice").await.unwrap();
+        let role = db.create_role("reader", "Read-only").await.unwrap();
+        db.set_role_permissions(role, &["controllers:read".into()]).await.unwrap();
+        db.set_user_roles(id, &[role]).await.unwrap();
+
+        // While active, the join resolves the bound permission key.
+        let keys = db.permission_keys_for_user("alice").await.unwrap();
+        assert_eq!(keys, vec!["controllers:read".to_string()]);
+
+        // Once disabled, the status filter drops every key.
+        db.set_user_status(id, "disabled").await.unwrap();
+        assert_eq!(
+            db.permission_keys_for_user("alice").await.unwrap(),
+            Vec::<String>::new(),
+            "a disabled user must resolve to zero permission keys"
+        );
     }
 
     #[tokio::test]
