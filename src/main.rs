@@ -10,10 +10,10 @@ mod cli;
 mod commander;
 mod common;
 mod config;
-mod db;
 mod fed_sync;
 mod metadata_store;
 mod proxy;
+mod store;
 mod watch_cache;
 
 use crate::cli::EdgionCenterCli;

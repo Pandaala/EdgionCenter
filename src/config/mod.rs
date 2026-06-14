@@ -3,20 +3,39 @@ use crate::common::config::{AdminTlsConfig, ConfSyncSecurityConfig};
 use crate::common::local_auth::LocalAuthConfig;
 use serde::{Deserialize, Serialize};
 
+/// Persistence backend selector for the Center metadata store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DbBackend {
+    /// Embedded SQLite database (default).
+    #[default]
+    Sqlite,
+    /// External MySQL database (requires `mysql_url`).
+    Mysql,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
-    /// Path to the SQLite database file. Relative paths are resolved from the current working directory.
-    pub sqlite_path: String,
-    /// Whether the SQLite database is enabled.
+    /// Whether the database is enabled. When false, Center runs without persistence.
     pub enabled: bool,
+    /// Which storage backend to use.
+    pub backend: DbBackend,
+    /// Path to the SQLite database file. Relative paths are resolved from the
+    /// current working directory. Used when `backend = sqlite`.
+    pub sqlite_path: String,
+    /// MySQL connection URL (e.g. `mysql://user:pass@host:3306/db`). Required
+    /// when `backend = mysql`; ignored otherwise.
+    pub mysql_url: Option<String>,
 }
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            sqlite_path: "data/center.db".to_string(),
             enabled: true,
+            backend: DbBackend::Sqlite,
+            sqlite_path: "data/center.db".to_string(),
+            mysql_url: None,
         }
     }
 }

@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::aggregator::ResourceAggregator;
 use crate::config::CenterSyncConfig;
-use crate::db::CenterDb;
+use crate::store::Store;
 use crate::fed_sync::registry::ControllerRegistry;
 use crate::proxy::PendingProxyMap;
 use crate::watch_cache::{CenterSyncClient, WatchEventSimple};
@@ -194,7 +194,7 @@ pub struct FederationGrpcServer {
     pub sync_client: Arc<CenterSyncClient>,
     /// Optional — Center only persists controller registration when
     /// `database.enabled=true`. Absent DB means upsert/mark_offline are skipped.
-    pub db: Option<Arc<CenterDb>>,
+    pub db: Option<Arc<Store>>,
     /// SPIFFE trust domain for peer-identity binding (always enforced under mTLS).
     pub trust_domain: Option<String>,
 }
@@ -206,7 +206,7 @@ impl FederationGrpcServer {
         pending_proxies: PendingProxyMap,
         sync_config: CenterSyncConfig,
         sync_client: Arc<CenterSyncClient>,
-        db: Option<Arc<CenterDb>>,
+        db: Option<Arc<Store>>,
         trust_domain: Option<String>,
     ) -> Self {
         Self {
@@ -343,8 +343,8 @@ impl FederationSync for FederationGrpcServer {
             let cluster = register_req.cluster.clone();
             let env = register_req.env.clone();
             let tag = register_req.tag.clone();
-            tokio::task::spawn_blocking(move || {
-                if let Err(e) = db.upsert_controller(&cid, &cluster, &env, &tag, true) {
+            tokio::spawn(async move {
+                if let Err(e) = db.upsert_controller(&cid, &cluster, &env, &tag, true).await {
                     tracing::warn!(
                         component = "fed_server",
                         controller_id = %cid,
@@ -506,8 +506,8 @@ impl FederationSync for FederationGrpcServer {
                     if let Some(db) = &db_for_offline {
                         let db = db.clone();
                         let cid_db = cid.clone();
-                        tokio::task::spawn_blocking(move || {
-                            if let Err(e) = db.mark_offline(&cid_db) {
+                        tokio::spawn(async move {
+                            if let Err(e) = db.mark_offline(&cid_db).await {
                                 tracing::warn!(
                                     component = "fed_server",
                                     controller_id = %cid_db,

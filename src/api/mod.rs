@@ -46,7 +46,7 @@ pub mod web;
 
 use crate::aggregator::ResourceAggregator;
 use crate::commander::Commander;
-use crate::db::CenterDb;
+use crate::store::Store;
 use crate::fed_sync::registry::ControllerRegistry;
 use crate::metadata_store::CenterMetaDataStore;
 use crate::proxy::ProxyForwarder;
@@ -60,7 +60,7 @@ pub struct ApiState {
     pub aggregator: Arc<ResourceAggregator>,
     pub commander: Arc<Commander>,
     pub proxy: Arc<ProxyForwarder>,
-    pub db: Option<Arc<CenterDb>>,
+    pub db: Option<Arc<Store>>,
     pub metadata_store: Arc<CenterMetaDataStore>,
     pub sync_client: Arc<CenterSyncClient>,
     /// Needed by Admin DELETE to cascade eviction into the fed-sync registry.
@@ -270,8 +270,8 @@ struct AdminControllerDto {
     last_seen_at: i64,
 }
 
-impl From<crate::db::DbController> for AdminControllerDto {
-    fn from(r: crate::db::DbController) -> Self {
+impl From<crate::store::DbController> for AdminControllerDto {
+    fn from(r: crate::store::DbController) -> Self {
         Self {
             controller_id: r.controller_id,
             cluster: r.cluster,
@@ -293,17 +293,11 @@ async fn list_admin_controllers(State(state): State<ApiState>) -> impl IntoRespo
         )
             .into_response();
     };
-    let db2 = db.clone();
-    match tokio::task::spawn_blocking(move || db2.list_controllers()).await {
-        Ok(Ok(rows)) => {
+    match db.list_controllers().await {
+        Ok(rows) => {
             let dtos: Vec<AdminControllerDto> = rows.into_iter().map(AdminControllerDto::from).collect();
             Json(ListResponse::success(dtos)).into_response()
         }
-        Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ListResponse::<AdminControllerDto>::error(e.to_string())),
-        )
-            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ListResponse::<AdminControllerDto>::error(e.to_string())),
@@ -339,15 +333,8 @@ async fn delete_admin_controller(State(state): State<ApiState>, Path(id_raw): Pa
         "DELETE /admin/controllers: evicted in-memory state; proceeding to DB delete"
     );
 
-    let db2 = db.clone();
-    let id_for_db = id.clone();
-    match tokio::task::spawn_blocking(move || db2.delete_controller(&id_for_db)).await {
-        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
-        Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<String>::err_body(e.to_string())),
-        )
-            .into_response(),
+    match db.delete_controller(&id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::<String>::err_body(e.to_string())),

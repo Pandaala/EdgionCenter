@@ -104,14 +104,18 @@ impl EdgionCenterCli {
             plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
         });
 
-        let db: Option<Arc<crate::db::CenterDb>> = if config.database.enabled {
-            match crate::db::CenterDb::open(&config.database.sqlite_path) {
+        let db: Option<Arc<crate::store::Store>> = if config.database.enabled {
+            match crate::store::Store::connect(&config.database).await {
                 Ok(d) => {
-                    tracing::info!(component = "center", path = %config.database.sqlite_path, "SQLite DB opened");
+                    tracing::info!(
+                        component = "center",
+                        backend = ?config.database.backend,
+                        "Metadata store opened"
+                    );
                     Some(Arc::new(d))
                 }
                 Err(e) => {
-                    tracing::error!(component = "center", error = %e, "Failed to open SQLite DB, running without persistence");
+                    tracing::error!(component = "center", error = %e, "Failed to open metadata store, running without persistence");
                     None
                 }
             }

@@ -66,8 +66,16 @@ base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "http2", "stream"] }
 sha2 = "0.10"
 
-# Persistence (Center metadata store)
-rusqlite = { version = "0.31", features = ["bundled"] }
+# Persistence (Center metadata store). sqlx behind a single async API spanning
+# SQLite and MySQL. Runtime queries only (no compile-time DATABASE_URL needed).
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "sqlite",
+    "mysql",
+    "macros",
+    "migrate",
+] }
 
 # TLS cert helpers
 rcgen = { version = "0.14.7", features = ["x509-parser"] }
