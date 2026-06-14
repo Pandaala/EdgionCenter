@@ -12,7 +12,10 @@ import {
   LockOutlined,
   SettingOutlined,
   AuditOutlined,
+  UserOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
+import type { AccessMode } from '@/hooks/useServerInfo'
 
 export type AppMode = 'center' | 'controller'
 
@@ -22,6 +25,11 @@ export interface MenuLeaf {
   labelKey: string
   path: string
   icon?: ReactNode
+  /** Permission key the caller must hold for this item to be visible. */
+  requiredPermission?: string
+  /** Access tier this item requires. `full` items are hidden in `lite` (where
+   *  AllowAllAuthz would otherwise grant the manage permissions). */
+  requiredMode?: 'full'
 }
 
 export interface MenuGroup {
@@ -137,10 +145,37 @@ export const centerMenu: MenuSection[] = [
       { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',
         path: '/admin', icon: <SettingOutlined /> },
       { kind: 'item', key: 'center-audit', labelKey: 'center.nav.audit',
-        path: '/audit', icon: <AuditOutlined /> },
+        path: '/audit', icon: <AuditOutlined />, requiredPermission: 'audit:read' },
+      { kind: 'item', key: 'center-users', labelKey: 'center.nav.users',
+        path: '/users', icon: <UserOutlined />,
+        requiredPermission: 'users:manage', requiredMode: 'full' },
+      { kind: 'item', key: 'center-roles', labelKey: 'center.nav.roles',
+        path: '/roles', icon: <TeamOutlined />,
+        requiredPermission: 'roles:manage', requiredMode: 'full' },
     ],
   },
 ]
 
 export const getMenuByMode = (mode: AppMode): MenuSection[] =>
   mode === 'center' ? centerMenu : controllerMenu
+
+/** Context the menu-visibility predicate evaluates an item against. */
+export interface MenuGateContext {
+  accessMode: AccessMode | undefined
+  permissions: string[]
+}
+
+/**
+ * An item is visible IFF its (optional) `requiredMode` matches the current
+ * access tier AND its (optional) `requiredPermission` is held by the caller.
+ * Items carrying neither gate are always visible, so existing menu entries are
+ * unaffected.
+ */
+export const isMenuItemVisible = (
+  item: { requiredPermission?: string; requiredMode?: 'full' },
+  ctx: MenuGateContext,
+): boolean => {
+  if (item.requiredMode && ctx.accessMode !== item.requiredMode) return false
+  if (item.requiredPermission && !ctx.permissions.includes(item.requiredPermission)) return false
+  return true
+}

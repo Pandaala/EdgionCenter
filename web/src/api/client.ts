@@ -93,7 +93,10 @@ export const systemApi = {
     const { data } = await systemClient.get('ready')
     return data
   },
-  serverInfo: async (): Promise<{ success: boolean; data?: { mode?: string; server_id?: string; ready?: boolean } }> => {
+  serverInfo: async (): Promise<{
+    success: boolean
+    data?: { mode?: string; server_id?: string; ready?: boolean; accessMode?: 'lite' | 'full' }
+  }> => {
     const { data } = await apiClient.get('server-info')
     return data
   },

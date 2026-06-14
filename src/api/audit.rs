@@ -155,6 +155,7 @@ mod tests {
             sync_client,
             registry,
             db_required: false,
+            access_mode: crate::config::AccessMode::Full,
         }
     }
 

@@ -83,6 +83,10 @@ pub struct ApiState {
     /// Used by the `/ready` probe: if the DB was required but failed to open
     /// (`db` is `None`), Center is not ready to serve DB-backed requests.
     pub db_required: bool,
+    /// Configured access-control tier (`lite` / `full`). Exposed verbatim via
+    /// `GET /server-info` so the dashboard can hide user/role management in
+    /// `lite` (where `AllowAllAuthz` would otherwise grant the manage keys).
+    pub access_mode: crate::config::AccessMode,
 }
 
 impl ApiState {
@@ -242,13 +246,22 @@ async fn ready_check(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ServerInfoResponse {
     mode: String,
+    /// Access-control tier: `"lite"` or `"full"`. The dashboard uses this as the
+    /// single source of truth for whether to surface user/role management.
+    access_mode: String,
 }
 
-async fn server_info() -> impl IntoResponse {
+async fn server_info(State(state): State<ApiState>) -> impl IntoResponse {
+    let access_mode = match state.access_mode {
+        crate::config::AccessMode::Lite => "lite",
+        crate::config::AccessMode::Full => "full",
+    };
     Json(ApiResponse::ok_body(ServerInfoResponse {
         mode: "center".to_string(),
+        access_mode: access_mode.to_string(),
     }))
 }
 
@@ -438,6 +451,62 @@ async fn metadata_store_status(State(state): State<ApiState>) -> impl IntoRespon
         cluster_routes,
         service_routes,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AccessMode;
+
+    /// Build an `ApiState` carrying `access_mode`; every other field is a
+    /// minimal default sufficient for the stateless `server_info` handler.
+    fn state_with_access_mode(access_mode: AccessMode) -> ApiState {
+        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
+        use parking_lot::Mutex;
+        use std::collections::HashMap;
+
+        let registry = ControllerRegistry::new();
+        let metadata_store = Arc::new(CenterMetaDataStore::new());
+        let sync_client = Arc::new(CenterSyncClient {
+            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
+        });
+        let commander = Arc::new(Commander::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
+        let proxy = Arc::new(ProxyForwarder::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
+        ApiState {
+            aggregator: Arc::new(ResourceAggregator::new()),
+            commander,
+            proxy,
+            db: None,
+            metadata_store,
+            sync_client,
+            registry,
+            db_required: false,
+            access_mode,
+        }
+    }
+
+    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn server_info_reports_access_mode() {
+        // Full tier surfaces accessMode=full alongside the deployment mode.
+        let resp = server_info(State(state_with_access_mode(AccessMode::Full)))
+            .await
+            .into_response();
+        let json = body_json(resp).await;
+        assert_eq!(json["data"]["mode"], "center");
+        assert_eq!(json["data"]["accessMode"], "full");
+
+        // Lite tier reports accessMode=lite so the dashboard can hide management.
+        let resp = server_info(State(state_with_access_mode(AccessMode::Lite)))
+            .await
+            .into_response();
+        let json = body_json(resp).await;
+        assert_eq!(json["data"]["accessMode"], "lite");
+    }
 }
 
 async fn proxy_handler(

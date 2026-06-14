@@ -1,6 +1,8 @@
 import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useT } from '@/i18n'
-import { getMenuByMode, type AppMode } from './menuConfig'
+import { usePermissions } from '@/utils/permissions'
+import { useServerInfo } from '@/hooks/useServerInfo'
+import { getMenuByMode, isMenuItemVisible, type AppMode, type MenuGroup, type MenuLeaf } from './menuConfig'
 import { SidebarSection } from './SidebarSection'
 import { SidebarGroup } from './SidebarGroup'
 import { SidebarItem } from './SidebarItem'
@@ -15,6 +17,9 @@ export const Sidebar = ({ collapsed, mode = 'controller' }: SidebarProps) => {
   const navigate = useNavigate()
   const location = useLocation()
   const t = useT()
+  const { permissions } = usePermissions()
+  const { data: serverInfo } = useServerInfo()
+  const gateCtx = { accessMode: serverInfo?.data?.accessMode, permissions }
   const { controllerId: rawId } = useParams<{ controllerId?: string }>()
   const activeControllerId = rawId?.replace(/~/g, '/') ?? null
   const prefix = activeControllerId
@@ -47,16 +52,29 @@ export const Sidebar = ({ collapsed, mode = 'controller' }: SidebarProps) => {
         transition: 'width 120ms ease',
       }}
     >
-      {menuConfig.map((section, sIdx) => (
-        <SidebarSection
-          key={section.labelKey}
-          label={t(section.labelKey)}
-          collapsed={collapsed}
-          showDivider={sIdx > 0}
-        >
-          {section.children.map((child) => {
+      {menuConfig.map((section, sIdx) => {
+        // Filter leaves by the access-mode + permission gate; drop groups that
+        // end up empty so we never render a header with no items.
+        const visibleChildren = section.children
+          .map((child): MenuLeaf | MenuGroup | null => {
             if (child.kind === 'item') {
-              return (
+              return isMenuItemVisible(child, gateCtx) ? child : null
+            }
+            const leaves = child.children.filter((leaf) => isMenuItemVisible(leaf, gateCtx))
+            return leaves.length > 0 ? { ...child, children: leaves } : null
+          })
+          .filter((c): c is MenuLeaf | MenuGroup => c !== null)
+        if (visibleChildren.length === 0) return null
+        return (
+          <SidebarSection
+            key={section.labelKey}
+            label={t(section.labelKey)}
+            collapsed={collapsed}
+            showDivider={sIdx > 0}
+          >
+            {visibleChildren.map((child) => {
+              if (child.kind === 'item') {
+                return (
                 <SidebarItem
                   key={child.key}
                   label={t(child.labelKey)}
@@ -81,9 +99,10 @@ export const Sidebar = ({ collapsed, mode = 'controller' }: SidebarProps) => {
                 ))}
               </SidebarGroup>
             )
-          })}
-        </SidebarSection>
-      ))}
+            })}
+          </SidebarSection>
+        )
+      })}
     </aside>
   )
 }
