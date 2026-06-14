@@ -11,6 +11,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 
 pub mod audit;
 pub mod controllers;
+pub mod users;
 
 pub use controllers::DbController;
 
@@ -46,7 +47,9 @@ impl Store {
                     .filename(&cfg.sqlite_path)
                     .create_if_missing(true)
                     .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-                    .busy_timeout(std::time::Duration::from_secs(5));
+                    .busy_timeout(std::time::Duration::from_secs(5))
+                    // Enforce ON DELETE CASCADE foreign keys (off by default in SQLite).
+                    .foreign_keys(true);
                 let pool = SqlitePool::connect_with(opts).await?;
                 Store {
                     pool: Pool::Sqlite(pool),
@@ -87,9 +90,11 @@ impl Store {
     /// migrate + queries.
     #[cfg(test)]
     pub async fn open_in_memory() -> anyhow::Result<Store> {
+        // Enable foreign-key enforcement so ON DELETE CASCADE works in tests.
+        let opts = SqliteConnectOptions::new().foreign_keys(true);
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
-            .connect("sqlite::memory:")
+            .connect_with(opts)
             .await?;
         let store = Store {
             pool: Pool::Sqlite(pool),
