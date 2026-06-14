@@ -1,4 +1,5 @@
-//! User administration endpoints — Full-tier CRUD over the `users` table and
+//! User administration endpoints — RBAC / db_auth user management: CRUD over
+//! the `users` table and
 //! its `user_roles` bindings. All routes mount under
 //! `/api/v1/center/admin/users` and gate on the `users:manage` permission key
 //! (see [`crate::common::authz::catalog::route_permission`]).

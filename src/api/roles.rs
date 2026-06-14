@@ -1,4 +1,5 @@
-//! Role administration endpoints — Full-tier CRUD over the `roles` table and
+//! Role administration endpoints — RBAC / db_auth user management: CRUD over
+//! the `roles` table and
 //! its `role_permissions` bindings, plus the grouped permission catalog the
 //! matrix UI renders. All `/roles` routes and `/permission-catalog` gate on the
 //! `roles:manage` permission key (see

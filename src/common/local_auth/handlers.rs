@@ -49,8 +49,8 @@ pub struct LoginResponse {
 pub struct MeResponse {
     pub username: String,
     /// Permission keys granted to the caller, resolved by the authz middleware.
-    /// In the LITE tier this is the full catalog (login = admin). Empty when no
-    /// `PermissionSet` was injected (e.g. authz layer not installed).
+    /// Under `authz.mode = allow_all` this is the full catalog (login = admin).
+    /// Empty when no `PermissionSet` was injected (e.g. authz layer not installed).
     pub permissions: Vec<String>,
 }
 

@@ -6,9 +6,10 @@
 //! applied INSIDE `unified_auth`, so it covers both the shared auth routes
 //! (notably `/auth/me`) and the business routes.
 //!
-//! In the LITE tier the installed store is [`allow_all::AllowAllAuthz`], which
-//! grants every permission to every authenticated caller (login = admin). The
-//! database-backed `Full` store is a later task.
+//! Under `authz.mode = allow_all` the installed store is
+//! [`allow_all::AllowAllAuthz`], which grants every permission to every
+//! authenticated caller (login = admin). Under `authz.mode = rbac` the
+//! database-backed `db_authz::DbAuthz` store resolves permissions per subject.
 //!
 //! `unified_auth` must never import this module: authentication stays free of
 //! any authorization concept. The dependency direction is one-way — authz reads
@@ -32,7 +33,7 @@ pub struct Principal {
 /// The set of permission keys granted to a principal.
 ///
 /// `all = true` is a short-circuit that contains every catalog key without
-/// enumerating them; the LITE tier uses it so new keys are granted implicitly.
+/// enumerating them; `allow_all` mode uses it so new keys are granted implicitly.
 #[derive(Clone, Debug)]
 pub struct PermissionSet {
     keys: HashSet<String>,

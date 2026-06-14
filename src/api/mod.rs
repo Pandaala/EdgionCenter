@@ -179,7 +179,7 @@ pub fn router(state: ApiState) -> Router {
         // Admin endpoints (DB-backed)
         .route("/api/v1/center/admin/controllers", get(list_admin_controllers))
         .route("/api/v1/center/admin/controllers/{id}", delete(delete_admin_controller))
-        // User / role admin CRUD (Full tier; users:manage / roles:manage keys).
+        // User / role admin CRUD (db_auth; users:manage / roles:manage keys).
         .route(
             "/api/v1/center/admin/users",
             get(users::list_users_handler).post(users::create_user_handler),

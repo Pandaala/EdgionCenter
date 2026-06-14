@@ -311,7 +311,7 @@ mod tests {
         .unwrap()
     }
 
-    /// FULL-tier end-to-end RBAC enforcement through the fully composed app:
+    /// RBAC-mode end-to-end enforcement through the fully composed app:
     /// a logged-in user whose ONLY permission is `controllers:read` gets 200 on
     /// `GET /api/v1/controllers` but 403 on `POST /api/v1/controllers/{id}/reload`
     /// (which requires `controllers:write`). The token is hand-issued (signed

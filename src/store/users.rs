@@ -1,4 +1,4 @@
-//! `users` / `roles` / bindings table access — full-tier identity store.
+//! `users` / `roles` / bindings table access — db_auth identity store.
 //!
 //! Mirrors the runtime-sqlx style of `controllers.rs` / `audit.rs`: every query is
 //! built with `sqlx::query` + `.bind` (never the compile-time macros), and the two
@@ -19,7 +19,7 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
-/// A full-tier user row.
+/// A db_auth user row.
 #[allow(dead_code)]
 pub struct User {
     pub id: i64,

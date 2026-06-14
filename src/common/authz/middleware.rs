@@ -240,7 +240,7 @@ mod tests {
     #[tokio::test]
     async fn unmapped_business_route_allowed_for_superuser() {
         // Same unmapped business route, but a superuser (AllowAll, all=true) set
-        // still reaches it → lite tier is unchanged.
+        // still reaches it → allow_all mode is unchanged.
         let inner =
             Router::new().route("/api/v1/center/something-new", get(|| async { "new" }));
         let app = app_with(Arc::new(AllowAllAuthz), inner);

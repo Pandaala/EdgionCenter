@@ -3,11 +3,12 @@
 //! Every business route on the Admin API maps to exactly one permission key.
 //! `route_permission` is the single source of truth consulted by the authz
 //! middleware; `all_keys` is the universe materialized for an `all()`
-//! permission set (LITE tier reports the full list via `/auth/me`).
+//! permission set (under `authz.mode = allow_all` `/auth/me` reports the full
+//! list, since every key is implicitly granted).
 //!
 //! Keys are grouped by dashboard page. GET endpoints map to a `:read` key and
 //! mutating endpoints to a `:write` key. `users:manage` / `roles:manage` gate
-//! the Full-tier user/role admin endpoints (`/api/v1/center/admin/users` and
+//! the db_auth user/role admin endpoints (`/api/v1/center/admin/users` and
 //! `/api/v1/center/admin/roles` plus `/permission-catalog`, added in DAC-07).
 
 use http::Method;
@@ -27,7 +28,7 @@ pub const AUDIT_READ: &str = "audit:read";
 pub const SERVER_READ: &str = "server:read";
 // HTTP proxy to controllers (any method).
 pub const PROXY_ACCESS: &str = "proxy:access";
-// User / role administration (Full tier; gates the /admin/users & /admin/roles endpoints).
+// User / role administration (db_auth; gates the /admin/users & /admin/roles endpoints).
 pub const USERS_MANAGE: &str = "users:manage";
 pub const ROLES_MANAGE: &str = "roles:manage";
 
@@ -151,12 +152,12 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         return Some(if is_get { CONTROLLERS_READ } else { CONTROLLERS_WRITE });
     }
 
-    // User administration (Full tier): all /users routes require users:manage.
+    // User administration (db_auth): all /users routes require users:manage.
     if under_segment(path, "/api/v1/center/admin/users") {
         return Some(USERS_MANAGE);
     }
 
-    // Role administration + permission catalog (Full tier): all /roles routes
+    // Role administration + permission catalog (db_auth): all /roles routes
     // and the permission-catalog read require roles:manage.
     if under_segment(path, "/api/v1/center/admin/roles")
         || path == "/api/v1/center/admin/permission-catalog"

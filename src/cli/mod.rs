@@ -507,8 +507,13 @@ async fn build_access_app(
     // ----------------------------------------------------------------
     // Orthogonal access-control axes (authn providers x authz store).
     //   oidc_on         : OIDC ([auth]) present AND enabled.
-    //   single_admin_on : [local_auth] supplies a non-empty username AND
-    //                     password (a usable single-admin credential).
+    //   single_admin_on : [local_auth] present AND enabled, supplying a
+    //                     non-empty username AND password (a usable
+    //                     single-admin credential). The `enabled` flag is
+    //                     honored symmetrically with OIDC's `auth.enabled`:
+    //                     enabled:false disables the provider even when creds
+    //                     are present (default is true, so omitting it is the
+    //                     common case and unaffected).
     //   db_auth_on      : DB-user login enabled.
     //   rbac            : authz.mode == rbac (install DbAuthz).
     // any_password_login = single_admin_on || db_auth_on (mounts /login).
@@ -516,10 +521,26 @@ async fn build_access_app(
     let oidc_on = auth_config.as_ref().is_some_and(|c| c.enabled);
     let single_admin_on = local_auth_config
         .as_ref()
-        .is_some_and(|c| !c.username.is_empty() && !c.password.is_empty());
+        .is_some_and(|c| c.enabled && !c.username.is_empty() && !c.password.is_empty());
     let db_auth_on = db_auth_config.enabled;
     let rbac = authz_mode == crate::config::AuthzMode::Rbac;
     let any_password_login = single_admin_on || db_auth_on;
+
+    // Make `enabled: false` observable instead of silent. A provider block that
+    // is present but disabled is HONORED (the provider does not load), mirroring
+    // OIDC's `auth.enabled` and the single-admin `local_auth.enabled`.
+    if auth_config.as_ref().is_some_and(|c| !c.enabled) {
+        tracing::warn!(
+            component = "center",
+            "[auth] OIDC provider disabled via enabled:false; it will not load."
+        );
+    }
+    if local_auth_config.as_ref().is_some_and(|c| !c.enabled) {
+        tracing::warn!(
+            component = "center",
+            "[local_auth] single-admin provider disabled via enabled:false; it will not load."
+        );
+    }
 
     // Resolve the session signing secret: prefer [local_auth].jwt_secret, else
     // db_auth.jwt_secret (non-empty wins). When BOTH [local_auth].jwt_secret and
@@ -873,6 +894,50 @@ mod tests {
         let status = post_login_status(app).await;
         assert_ne!(status, 404, "db_auth on => /login must be mounted (got {status})");
         assert_eq!(status, 401, "bad creds against the mounted login => uniform 401 (got {status})");
+    }
+
+    /// `local_auth.enabled = false` is honored symmetrically with `auth.enabled`:
+    /// even with a non-empty username + password present, the single-admin provider
+    /// does NOT load. With no other authn provider and no db_auth, the app assembles
+    /// but mounts no password login (POST /login => 404), and because there is then
+    /// NO provider at all, business routes fail-close with 503 (auth still mandatory).
+    #[tokio::test]
+    async fn build_access_local_auth_disabled_mounts_no_login() {
+        use axum::{body::Body, http::Request, routing::get, Router};
+        use tower::ServiceExt;
+
+        let mut config = CenterConfig::default();
+        config.local_auth = Some(crate::common::local_auth::LocalAuthConfig {
+            enabled: false,
+            username: "admin".to_string(),
+            password: "a-real-password".to_string(),
+            jwt_secret: "a_long_enough_jwt_secret_value_abcdef".to_string(),
+            ..crate::common::local_auth::LocalAuthConfig::default()
+        });
+        // No OIDC, no db_auth, authz.mode defaults to allow_all.
+
+        let business = Router::new().route("/api/v1/controllers", get(|| async { "controllers" }));
+        let app = build_access_app(&config, business, None, true)
+            .await
+            .expect("local_auth disabled must still assemble (no provider => 503 at request time)");
+
+        // The disabled single-admin login must NOT be mounted.
+        let login_status = post_login_status(app.clone()).await;
+        assert_eq!(
+            login_status, 404,
+            "local_auth.enabled=false => /login must not be mounted (got {login_status})"
+        );
+
+        // With no provider configured, business routes fail-close with 503.
+        let req = Request::builder()
+            .uri("/api/v1/controllers")
+            .body(Body::empty())
+            .unwrap();
+        let status = app.oneshot(req).await.unwrap().status().as_u16();
+        assert_eq!(
+            status, 503,
+            "no authn provider (local_auth disabled) => business route must 503 (got {status})"
+        );
     }
 
     #[test]
