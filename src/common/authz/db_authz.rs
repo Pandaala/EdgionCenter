@@ -14,7 +14,10 @@
 //! a hand-rolled `RwLock<HashMap<..>>` with a 30s TTL — no external cache
 //! dependency. The TTL is also the staleness bound: a role/permission change is
 //! visible at most 30s later. Active cache invalidation on user/role mutation is
-//! a later (DAC-07) concern; until then the TTL is the only bound.
+//! a later (DAC-07) concern; until then the TTL is the only bound. The per-subject
+//! `HashMap` grows with the set of authenticated usernames and is bounded only by
+//! that set (entries are overwritten on TTL refresh but never actively evicted) —
+//! acceptable for DB-user populations; flagged for future bounding if ever needed.
 //!
 //! ## Fail-closed
 //!

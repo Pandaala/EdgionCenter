@@ -345,6 +345,91 @@ impl Store {
         Ok(out)
     }
 
+    /// Atomically create the bootstrap admin: a user, a role with the given permission keys,
+    /// and the user→role binding — all in one transaction. Used only for first-run provisioning.
+    ///
+    /// Either the whole admin (user + role + permissions + binding) lands or nothing does.
+    /// A mid-sequence failure rolls back, so the `users` table is never left non-empty with a
+    /// permissionless admin — which the empty-table bootstrap guard in cli would otherwise skip
+    /// forever, stranding an admin with zero permissions.
+    pub async fn bootstrap_admin(
+        &self,
+        username: &str,
+        password_hash: &str,
+        display_name: &str,
+        role_name: &str,
+        role_description: &str,
+        permission_keys: &[String],
+    ) -> anyhow::Result<()> {
+        let now = unix_now();
+        let ins_user = "INSERT INTO users(username, password_hash, display_name, status, created_at, updated_at) \
+                        VALUES (?, ?, ?, 'active', ?, ?)";
+        let ins_role = "INSERT INTO roles(name, description, created_at, updated_at) VALUES (?, ?, ?, ?)";
+        let ins_perm = "INSERT INTO role_permissions(role_id, permission_key) VALUES (?, ?)";
+        let ins_binding = "INSERT INTO user_roles(user_id, role_id) VALUES (?, ?)";
+        match &self.pool {
+            Pool::Sqlite(pool) => {
+                let mut tx = pool.begin().await?;
+                let user_id = sqlx::query(ins_user)
+                    .bind(username)
+                    .bind(password_hash)
+                    .bind(display_name)
+                    .bind(now)
+                    .bind(now)
+                    .execute(&mut *tx)
+                    .await?
+                    .last_insert_rowid();
+                let role_id = sqlx::query(ins_role)
+                    .bind(role_name)
+                    .bind(role_description)
+                    .bind(now)
+                    .bind(now)
+                    .execute(&mut *tx)
+                    .await?
+                    .last_insert_rowid();
+                for key in permission_keys {
+                    sqlx::query(ins_perm).bind(role_id).bind(key).execute(&mut *tx).await?;
+                }
+                sqlx::query(ins_binding)
+                    .bind(user_id)
+                    .bind(role_id)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+            }
+            Pool::Mysql(pool) => {
+                let mut tx = pool.begin().await?;
+                let user_id = sqlx::query(ins_user)
+                    .bind(username)
+                    .bind(password_hash)
+                    .bind(display_name)
+                    .bind(now)
+                    .bind(now)
+                    .execute(&mut *tx)
+                    .await?
+                    .last_insert_id() as i64;
+                let role_id = sqlx::query(ins_role)
+                    .bind(role_name)
+                    .bind(role_description)
+                    .bind(now)
+                    .bind(now)
+                    .execute(&mut *tx)
+                    .await?
+                    .last_insert_id() as i64;
+                for key in permission_keys {
+                    sqlx::query(ins_perm).bind(role_id).bind(key).execute(&mut *tx).await?;
+                }
+                sqlx::query(ins_binding)
+                    .bind(user_id)
+                    .bind(role_id)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Resolve a user's effective (DISTINCT) permission keys by joining
     /// `users → user_roles → role_permissions`, ordered by `permission_key`.
     pub async fn permission_keys_for_user(&self, username: &str) -> anyhow::Result<Vec<String>> {
@@ -397,6 +482,39 @@ mod tests {
             keys,
             vec!["controllers:read".to_string(), "controllers:write".to_string()],
             "DISTINCT must collapse the overlapping key"
+        );
+    }
+
+    #[tokio::test]
+    async fn bootstrap_admin_is_atomic_and_resolves_keys() {
+        let db = Store::open_in_memory().await.unwrap();
+        let keys = vec![
+            "controllers:read".to_string(),
+            "controllers:write".to_string(),
+            "audit:read".to_string(),
+        ];
+        db.bootstrap_admin(
+            "root",
+            "hash",
+            "Bootstrap Admin",
+            "admin",
+            "Built-in administrator (all permissions)",
+            &keys,
+        )
+        .await
+        .unwrap();
+
+        // User + role + role_permissions + user_roles binding must ALL have landed:
+        // resolving the user's effective keys proves every step of the chain committed.
+        let resolved = db.permission_keys_for_user("root").await.unwrap();
+        assert_eq!(
+            resolved,
+            vec![
+                "audit:read".to_string(),
+                "controllers:read".to_string(),
+                "controllers:write".to_string(),
+            ],
+            "bootstrap_admin must atomically create user, role, permissions, and binding"
         );
     }
 

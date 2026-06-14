@@ -378,13 +378,24 @@ impl EdgionCenterCli {
                     // the users table is empty and EDGION_ADMIN_* are set).
                     bootstrap_admin(&store).await?;
 
-                    // Build the auth state with OIDC passthrough (if any) but NO
-                    // single-admin local provider, then install a local validator
-                    // carrying ONLY the signing secret / expiry / cookie settings.
-                    // Its username/password are placeholders and never consulted:
-                    // DB users are the credential source.
+                    // FULL mode is DB-users only: it must NOT accept OIDC/Okta tokens.
+                    // (An OIDC `sub` would otherwise be treated as a DB username by
+                    // DbAuthz.) If OIDC is configured, warn that it is ignored here.
+                    if auth_config.is_some() {
+                        tracing::warn!(
+                            component = "center",
+                            "access.mode=full ignores OIDC ([auth]): full mode authenticates DB \
+                             local users only. The [auth] block has no effect in full mode."
+                        );
+                    }
+
+                    // Build the auth state with the OIDC provider DISABLED (pass None
+                    // for the OIDC config) and NO single-admin local provider, then
+                    // install a local validator carrying ONLY the signing secret /
+                    // expiry / cookie settings. Its username/password are non-functional
+                    // placeholders and never consulted: DB users are the credential source.
                     let auth_state = crate::common::unified_auth::UnifiedAuthState::from_configs(
-                        auth_config.as_ref(),
+                        None,
                         None,
                         require_auth,
                         "center",
@@ -394,6 +405,14 @@ impl EdgionCenterCli {
                         jwt_secret,
                         jwt_expiry_hours: local_auth_config.as_ref().map(|c| c.jwt_expiry_hours).unwrap_or(24),
                         cookie_secure: local_auth_config.as_ref().map(|c| c.cookie_secure).unwrap_or(true),
+                        // Defense-in-depth: the validator's single-admin credential path
+                        // is never used in full mode (DB users only), but `..default()`
+                        // would give password="" and `bcrypt::verify("", hash_of_empty)`
+                        // is true — so an `admin`/blank-password login would succeed if the
+                        // `local_auth_intent=false` gate were ever flipped. Set the password
+                        // to a fresh, unguessable random value so the path is non-verifiable
+                        // regardless: no one can ever produce this password.
+                        password: uuid::Uuid::new_v4().to_string(),
                         ..crate::common::local_auth::LocalAuthConfig::default()
                     };
                     auth_state.update_local(crate::common::local_auth::LocalAuthState::from_config(&validator_cfg));
@@ -599,16 +618,25 @@ async fn bootstrap_admin(store: &crate::store::Store) -> anyhow::Result<()> {
         (Some(username), Some(password)) => {
             let hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST)
                 .map_err(|e| anyhow::anyhow!("failed to hash bootstrap admin password: {}", e))?;
-            let user_id = store.create_user(&username, &hash, "Bootstrap Admin").await?;
-            let role_id = store
-                .create_role("admin", "Built-in administrator (all permissions)")
-                .await?;
             let all_keys: Vec<String> = crate::common::authz::catalog::all_keys()
                 .iter()
                 .map(|k| (*k).to_string())
                 .collect();
-            store.set_role_permissions(role_id, &all_keys).await?;
-            store.set_user_roles(user_id, &[role_id]).await?;
+            // Provision the user, the built-in `admin` role, its permission grants,
+            // and the user→role binding in ONE transaction. All-or-nothing: a crash
+            // or DB error mid-way rolls back, so we never leave a non-empty users
+            // table holding a permissionless admin that the empty-table guard above
+            // would skip on the next startup (stranding an unrepairable admin).
+            store
+                .bootstrap_admin(
+                    &username,
+                    &hash,
+                    "Bootstrap Admin",
+                    "admin",
+                    "Built-in administrator (all permissions)",
+                    &all_keys,
+                )
+                .await?;
             tracing::info!(
                 component = "center",
                 username = %username,
