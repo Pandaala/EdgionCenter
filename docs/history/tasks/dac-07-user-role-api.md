@@ -1,7 +1,7 @@
 # Task DAC-07: User/role admin CRUD API
 
 **Profile:** feature
-**Status:** todo (not started)
+**Status:** done (commits 84f26c2 + d9b8f99; 270 tests pass)
 **Depends on:** DAC-05 (store), DAC-06 (authz enforcement)
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 7
 
