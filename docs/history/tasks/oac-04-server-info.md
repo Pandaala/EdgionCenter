@@ -1,7 +1,7 @@
 # Task OAC-04: server-info exposes authzMode + dbAuthEnabled
 
 **Profile:** feature
-**Status:** todo (not started)
+**Status:** done (commit 0cef4bc; 283 tests pass)
 **Depends on:** OAC-01, OAC-03
 **Plan:** `docs/history/superpowers/plans/2026-06-14-center-orthogonal-access-control-plan.md` §Task 4
 
