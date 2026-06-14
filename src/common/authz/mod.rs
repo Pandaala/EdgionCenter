@@ -60,6 +60,13 @@ impl PermissionSet {
         self.all || self.keys.contains(key)
     }
 
+    /// Whether this is an `all()` (full-admin / superuser) set. Used by the
+    /// middleware to let superusers reach unmapped business routes that would
+    /// otherwise deny by default.
+    pub fn is_all(&self) -> bool {
+        self.all
+    }
+
     /// Render the concrete list of granted keys. For an `all()` set this is the
     /// full catalog; otherwise the explicit keys, sorted for stable output.
     pub fn materialize(&self) -> Vec<String> {

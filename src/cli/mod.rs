@@ -344,6 +344,7 @@ impl EdgionCenterCli {
                     std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz)
                 }
                 crate::config::AccessMode::Full => {
+                    // TODO(DAC-06): replace allow-all placeholder with DbAuthz; full mode currently grants every authenticated caller full admin
                     tracing::warn!(
                         component = "center",
                         "access.mode=full requested but DB-backed authz is not yet implemented; \

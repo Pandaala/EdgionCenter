@@ -38,43 +38,76 @@ fn forbidden_response(required: &str) -> Response {
 }
 
 /// Authorization middleware. See the module docs for the full contract.
+///
+/// AuthBypass invariant: when `unified_auth` honors an `AuthBypass` extension it
+/// returns early WITHOUT injecting `UnifiedAuthClaims`. Such a request reaches
+/// this middleware with no claims and so takes the no-claims branch below —
+/// passing through with NO authz enforcement at all. AuthBypass therefore means
+/// full trust by design. No Center admin route injects AuthBypass today; this
+/// note records the invariant so a future bypass path isn't added blindly.
 pub async fn authz_middleware(
     State(authz): State<Arc<dyn AuthzStore>>,
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
-    // No authenticated claims (public skip-path without a token) → pass through
-    // untouched: no enforcement, no injection.
-    let Some(claims) = request.extensions().get::<UnifiedAuthClaims>().cloned() else {
-        return next.run(request).await;
-    };
-
-    let provider = match claims.provider {
-        AuthProvider::Oidc => "oidc",
-        AuthProvider::Local => "local",
-    };
-    let principal = Principal {
-        subject: claims.sub.clone().unwrap_or_else(|| "<unknown>".to_string()),
-        provider: provider.to_string(),
+    // No authenticated claims (public skip-path without a token, or an
+    // AuthBypass'd request — see the fn doc) → pass through untouched: no
+    // enforcement, no injection.
+    let principal = {
+        let Some(claims) = request.extensions().get::<UnifiedAuthClaims>() else {
+            return next.run(request).await;
+        };
+        // Borrow the claims: copy only the provider tag and clone only `sub`,
+        // never the (potentially large) `claims: serde_json::Value`. The borrow
+        // is dropped at the end of this block, before `next.run`.
+        let provider = match claims.provider {
+            AuthProvider::Oidc => "oidc",
+            AuthProvider::Local => "local",
+        };
+        Principal {
+            subject: claims.sub.clone().unwrap_or_else(|| "<unknown>".to_string()),
+            provider: provider.to_string(),
+        }
     };
 
     let perms = authz.permissions_for(&principal).await;
 
-    // Enforcement against the route's required key, if any.
+    // Enforcement against the route's required key.
     let method = request.method().clone();
     let path = request.uri().path().to_string();
-    if let Some(key) = catalog::route_permission(&method, &path) {
-        if !perms.contains(key) {
-            tracing::debug!(
-                component = "authz",
-                subject = %principal.subject,
-                provider = %principal.provider,
-                method = %method,
-                path = %path,
-                required = key,
-                "authorization denied: missing permission"
-            );
-            return forbidden_response(key);
+    match catalog::route_permission(&method, &path) {
+        Some(key) => {
+            if !perms.contains(key) {
+                tracing::debug!(
+                    component = "authz",
+                    subject = %principal.subject,
+                    provider = %principal.provider,
+                    method = %method,
+                    path = %path,
+                    required = key,
+                    "authorization denied: missing permission"
+                );
+                return forbidden_response(key);
+            }
+        }
+        None => {
+            // Unmapped route. Fail CLOSED for business paths: a future business
+            // route nobody added to `route_permission` must NOT be silently
+            // reachable by everyone once real RBAC lands. Superusers (an `all`
+            // set — notably LITE's AllowAll) still pass, so lite is unchanged
+            // and an admin role keeps working. Public auth routes are not
+            // business paths and always pass.
+            if catalog::is_business_path(&path) && !perms.is_all() {
+                tracing::debug!(
+                    component = "authz",
+                    subject = %principal.subject,
+                    provider = %principal.provider,
+                    method = %method,
+                    path = %path,
+                    "authorization denied: unmapped business route (fail-closed)"
+                );
+                return forbidden_response("<unmapped-business-route>");
+            }
         }
     }
 
@@ -161,11 +194,63 @@ mod tests {
 
     #[tokio::test]
     async fn no_required_key_passes() {
-        // An unmapped path (route_permission == None) passes even with an empty set.
-        let inner = Router::new().route("/api/v1/auth/me", get(|| async { "me" }));
+        // An unmapped NON-business path (route_permission == None, and not under
+        // /api/v1/) passes even with an empty set.
+        let inner = Router::new().route("/auth/me", get(|| async { "me" }));
         let app = app_with(Arc::new(EmptyAuthz), inner);
         let resp = app
-            .oneshot(Request::builder().uri("/api/v1/auth/me").body(Body::empty()).unwrap())
+            .oneshot(Request::builder().uri("/auth/me").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_route_passes_without_key() {
+        // A public auth route under /api/v1/auth/ is unmapped (None) but is NOT a
+        // business path → it must pass even for an empty (non-superuser) set.
+        let inner = Router::new().route("/api/v1/auth/status", get(|| async { "status" }));
+        let app = app_with(Arc::new(EmptyAuthz), inner);
+        let resp = app
+            .oneshot(Request::builder().uri("/api/v1/auth/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn unmapped_business_route_denied_for_non_superuser() {
+        // A future business route nobody mapped (route_permission == None but it
+        // IS a business path) must fail CLOSED for a non-superuser set.
+        let inner =
+            Router::new().route("/api/v1/center/something-new", get(|| async { "new" }));
+        let app = app_with(Arc::new(EmptyAuthz), inner);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/center/something-new")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn unmapped_business_route_allowed_for_superuser() {
+        // Same unmapped business route, but a superuser (AllowAll, all=true) set
+        // still reaches it → lite tier is unchanged.
+        let inner =
+            Router::new().route("/api/v1/center/something-new", get(|| async { "new" }));
+        let app = app_with(Arc::new(AllowAllAuthz), inner);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/center/something-new")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);

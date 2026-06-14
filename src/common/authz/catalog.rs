@@ -48,6 +48,25 @@ pub fn all_keys() -> &'static [&'static str] {
     ]
 }
 
+/// Whether `path` is a business path subject to fail-closed enforcement.
+///
+/// True for any `/api/v1/` path EXCEPT the public auth routes (`/api/v1/auth/`),
+/// which carry no authorization requirement. The authz middleware uses this so
+/// an unmapped business route (one nobody added to [`route_permission`]) denies
+/// by default for non-superusers, rather than leaking access once real RBAC
+/// lands. Probe/metrics paths (`/health`, `/metrics`, ...) are not under
+/// `/api/v1/` and so are not business paths.
+pub fn is_business_path(path: &str) -> bool {
+    path.starts_with("/api/v1/") && !path.starts_with("/api/v1/auth/")
+}
+
+/// Whether `path` is exactly `base` or sits under it at a segment boundary
+/// (`base` followed by `/`). Avoids a bare `starts_with` also matching a
+/// sibling like `base + "-v2"`.
+fn under_segment(path: &str, base: &str) -> bool {
+    path == base || path.starts_with(&format!("{base}/"))
+}
+
 /// Map a concrete request `(method, path)` to the permission key it requires.
 ///
 /// Returns `None` for non-business routes — the shared auth endpoints
@@ -82,15 +101,15 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
 
     // Region routes (cluster + service): list/consistency are GET reads,
     // failover/sync are POST writes.
-    if path.starts_with("/api/v1/center/cluster-region-routes")
-        || path.starts_with("/api/v1/center/service-region-routes")
+    if under_segment(path, "/api/v1/center/cluster-region-routes")
+        || under_segment(path, "/api/v1/center/service-region-routes")
     {
         return Some(if is_get { REGION_ROUTES_READ } else { REGION_ROUTES_WRITE });
     }
 
     // Global connection IP restrictions: all reads are GET, every mutation
     // (POST/PUT/DELETE/PATCH) is a write.
-    if path.starts_with("/api/v1/center/global-connection-ip-restrictions") {
+    if under_segment(path, "/api/v1/center/global-connection-ip-restrictions") {
         return Some(if is_get { IP_RESTRICTIONS_READ } else { IP_RESTRICTIONS_WRITE });
     }
 
@@ -192,6 +211,47 @@ mod tests {
         assert_eq!(
             route_permission(&Method::GET, "/api/v1/center/admin/audit-logs"),
             Some(AUDIT_READ)
+        );
+    }
+
+    /// `is_business_path` covers /api/v1/ except the public auth routes.
+    #[test]
+    fn business_path_classification() {
+        assert!(is_business_path("/api/v1/controllers"));
+        assert!(is_business_path("/api/v1/center/something-new"));
+        // Public auth routes are NOT business paths.
+        assert!(!is_business_path("/api/v1/auth/login"));
+        assert!(!is_business_path("/api/v1/auth/status"));
+        // Probe/metrics and other non-/api/v1 paths are not business paths.
+        assert!(!is_business_path("/health"));
+        assert!(!is_business_path("/metrics"));
+        assert!(!is_business_path("/auth/me"));
+    }
+
+    /// Segment-boundary prefixes must not match a sibling like `base + "-v2"`.
+    #[test]
+    fn segment_safe_prefixes() {
+        // Sibling paths sharing a textual prefix must NOT resolve to the base key.
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/cluster-region-routes-v2"),
+            None
+        );
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/service-region-routes-v2"),
+            None
+        );
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/global-connection-ip-restrictions-v2"),
+            None
+        );
+        // Exact base and segment-boundary children still resolve.
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/cluster-region-routes"),
+            Some(REGION_ROUTES_READ)
+        );
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/cluster-region-routes/consistency"),
+            Some(REGION_ROUTES_READ)
         );
     }
 
