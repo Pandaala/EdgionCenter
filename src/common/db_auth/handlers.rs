@@ -79,6 +79,11 @@ fn unauthorized() -> Response {
 ///      not measurably faster.
 ///
 /// On success the issued token's `sub` is the submitted username.
+///
+/// A DB user and the single admin SHOULD NOT share a username: if they collide,
+/// supplying the single-admin password authenticates as that subject even if the
+/// DB row is disabled/rotated (the break-glass single admin is independent of the
+/// DB — a found-but-rejected DB user in step 1 falls through to the step 2 admin).
 pub async fn unified_login_handler(State(state): State<UnifiedLoginState>, Json(req): Json<LoginRequest>) -> Response {
     // Step 1: DB-user login.
     if let Some(store) = &state.store {

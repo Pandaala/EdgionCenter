@@ -1,10 +1,10 @@
-//! FULL-tier authorization store: resolves permissions from the database.
+//! RBAC authorization store: resolves permissions from the database.
 //!
-//! [`DbAuthz`] backs the `access.mode = full` tier. For each principal it
-//! resolves the effective permission keys by joining
+//! [`DbAuthz`] is the RBAC [`AuthzStore`], installed when `authz.mode = rbac`.
+//! For each principal it resolves the effective permission keys by joining
 //! `users -> user_roles -> role_permissions` (via
 //! [`Store::permission_keys_for_user`]) into a concrete [`PermissionSet`]
-//! (never an `all()` superuser set — full-tier admins get their power from a
+//! (never an `all()` superuser set — RBAC admins get their power from a
 //! role that holds every catalog key, see the startup bootstrap).
 //!
 //! ## Caching
@@ -37,7 +37,7 @@ use crate::store::Store;
 /// for a role/permission change to take effect (see module docs).
 const CACHE_TTL: Duration = Duration::from_secs(30);
 
-/// Database-backed authorization store (FULL tier).
+/// Database-backed authorization store (RBAC mode).
 pub struct DbAuthz {
     store: Arc<Store>,
     /// subject (username) -> (cached_at, permissions). Guarded by a plain
