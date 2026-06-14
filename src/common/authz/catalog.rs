@@ -6,9 +6,9 @@
 //! permission set (LITE tier reports the full list via `/auth/me`).
 //!
 //! Keys are grouped by dashboard page. GET endpoints map to a `:read` key and
-//! mutating endpoints to a `:write` key. `users:manage` / `roles:manage` have
-//! no routes yet (reserved for the Full-tier user/role admin pages) but are
-//! listed so the LITE permission set advertises them.
+//! mutating endpoints to a `:write` key. `users:manage` / `roles:manage` gate
+//! the Full-tier user/role admin endpoints (`/api/v1/center/admin/users` and
+//! `/api/v1/center/admin/roles` plus `/permission-catalog`, added in DAC-07).
 
 use http::Method;
 
@@ -27,7 +27,7 @@ pub const AUDIT_READ: &str = "audit:read";
 pub const SERVER_READ: &str = "server:read";
 // HTTP proxy to controllers (any method).
 pub const PROXY_ACCESS: &str = "proxy:access";
-// User / role administration (Full tier; no routes yet).
+// User / role administration (Full tier; gates the /admin/users & /admin/roles endpoints).
 pub const USERS_MANAGE: &str = "users:manage";
 pub const ROLES_MANAGE: &str = "roles:manage";
 

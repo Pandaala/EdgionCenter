@@ -86,6 +86,21 @@ fn internal_err(e: impl std::fmt::Display) -> axum::response::Response {
         .into_response()
 }
 
+/// Allowed values for a user's `status`. A PATCH carrying any other value is
+/// rejected with 400 rather than persisting an arbitrary string.
+const ALLOWED_STATUSES: &[&str] = &["active", "disabled"];
+
+/// Whether an `anyhow::Error` from a Store create wraps a genuine UNIQUE
+/// constraint violation (vs. any other DB failure — disk-full, connection-loss,
+/// schema error). Works across both sqlx backends: `is_unique_violation()` is
+/// provided by the `DatabaseError` trait for SQLite and MySQL alike.
+fn is_unique_violation(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<sqlx::Error>()
+        .and_then(|se| se.as_database_error())
+        .map(|d| d.is_unique_violation())
+        .unwrap_or(false)
+}
+
 /// Build a `UserDto` for `user`, resolving its role ids and names via the
 /// supplied `id -> name` map (computed once per request).
 async fn to_dto(db: &crate::store::Store, user: User, role_names: &HashMap<i64, String>) -> anyhow::Result<UserDto> {
@@ -203,14 +218,19 @@ pub async fn create_user_handler(
     let display_name = req.display_name.unwrap_or_default();
     let id = match db.create_user(&req.username, &hash, &display_name).await {
         Ok(id) => id,
-        Err(e) => {
-            // Lost a create race against the UNIQUE constraint.
+        // Lost a create race against the UNIQUE constraint → 409. Any other DB
+        // failure is a genuine internal error → 500 (not a spurious "duplicate").
+        Err(e) if is_unique_violation(&e) => {
             return (
                 StatusCode::CONFLICT,
-                Json(ApiResponse::<String>::err_body(e.to_string())),
+                Json(ApiResponse::<String>::err_body(format!(
+                    "username '{}' already exists",
+                    req.username
+                ))),
             )
                 .into_response();
         }
+        Err(e) => return internal_err(e),
     };
 
     if let Some(role_ids) = req.role_ids {
@@ -233,13 +253,21 @@ pub async fn update_user_handler(
         return db_unavailable();
     };
 
+    // Validate EVERY provided field up front, before performing any write, so a
+    // partially-valid PATCH (e.g. {status, password:""}) never persists one field
+    // and then 400s on another — the update is all-or-nothing.
     if let Some(status) = &req.status {
-        if let Err(e) = db.set_user_status(id, status).await {
-            return internal_err(e);
+        if !ALLOWED_STATUSES.contains(&status.as_str()) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<String>::err_body(format!(
+                    "invalid status '{status}' (allowed: active, disabled)"
+                ))),
+            )
+                .into_response();
         }
     }
-
-    if let Some(password) = req.password {
+    if let Some(password) = &req.password {
         if password.is_empty() {
             return (
                 StatusCode::BAD_REQUEST,
@@ -247,6 +275,16 @@ pub async fn update_user_handler(
             )
                 .into_response();
         }
+    }
+
+    // All provided fields validated — apply the writes.
+    if let Some(status) = &req.status {
+        if let Err(e) = db.set_user_status(id, status).await {
+            return internal_err(e);
+        }
+    }
+
+    if let Some(password) = req.password {
         let hash = match tokio::task::spawn_blocking(move || bcrypt::hash(&password, bcrypt::DEFAULT_COST)).await {
             Ok(Ok(h)) => h,
             Ok(Err(e)) => return internal_err(e),
@@ -432,6 +470,55 @@ mod tests {
         assert!(!bcrypt::verify("old-password", &user.password_hash).unwrap());
         // Roles replaced (r1 -> r2), not appended.
         assert_eq!(db.user_role_ids(uid).await.unwrap(), vec![r2]);
+    }
+
+    #[tokio::test]
+    async fn patch_rejects_without_partial_apply() {
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let initial = bcrypt::hash("pw", bcrypt::DEFAULT_COST).unwrap();
+        let uid = db.create_user("dave", &initial, "Dave").await.unwrap();
+        assert_eq!(db.get_user(uid).await.unwrap().unwrap().status, "active");
+        let state = state_with_db(Some(db.clone()));
+
+        // {status:"disabled", password:""} — the empty password is invalid, so the
+        // whole PATCH must 400 WITHOUT having applied the (valid) status first.
+        let resp = update_user_handler(
+            State(state),
+            Path(uid),
+            Json(UpdateUserRequest {
+                status: Some("disabled".to_string()),
+                password: Some("".to_string()),
+                role_ids: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        // Status must be UNCHANGED — proving no partial write happened.
+        assert_eq!(db.get_user(uid).await.unwrap().unwrap().status, "active");
+    }
+
+    #[tokio::test]
+    async fn patch_rejects_unknown_status() {
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let initial = bcrypt::hash("pw", bcrypt::DEFAULT_COST).unwrap();
+        let uid = db.create_user("erin", &initial, "Erin").await.unwrap();
+        let state = state_with_db(Some(db.clone()));
+
+        let resp = update_user_handler(
+            State(state),
+            Path(uid),
+            Json(UpdateUserRequest {
+                status: Some("bogus".to_string()),
+                password: None,
+                role_ids: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        // The unknown status must NOT have been persisted.
+        assert_eq!(db.get_user(uid).await.unwrap().unwrap().status, "active");
     }
 
     #[tokio::test]

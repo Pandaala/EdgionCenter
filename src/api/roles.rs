@@ -75,6 +75,17 @@ fn internal_err(e: impl std::fmt::Display) -> axum::response::Response {
         .into_response()
 }
 
+/// Whether an `anyhow::Error` from a Store create wraps a genuine UNIQUE
+/// constraint violation (vs. any other DB failure). Works across both sqlx
+/// backends: `is_unique_violation()` is provided by the `DatabaseError` trait
+/// for SQLite and MySQL alike.
+fn is_unique_violation(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<sqlx::Error>()
+        .and_then(|se| se.as_database_error())
+        .map(|d| d.is_unique_violation())
+        .unwrap_or(false)
+}
+
 /// Reject (400) if any key is not in `catalog::all_keys()`. Returns the
 /// offending key in the error so the caller can fix its request.
 fn validate_keys(keys: &[String]) -> Result<(), axum::response::Response> {
@@ -156,14 +167,19 @@ pub async fn create_role_handler(
     let description = req.description.unwrap_or_default();
     let id = match db.create_role(&req.name, &description).await {
         Ok(id) => id,
-        Err(e) => {
-            // Duplicate name violates the UNIQUE constraint.
+        // A duplicate name violates the UNIQUE constraint → 409. Any other DB
+        // failure is a genuine internal error → 500 (not a spurious "duplicate").
+        Err(e) if is_unique_violation(&e) => {
             return (
                 StatusCode::CONFLICT,
-                Json(ApiResponse::<String>::err_body(e.to_string())),
+                Json(ApiResponse::<String>::err_body(format!(
+                    "role '{}' already exists",
+                    req.name
+                ))),
             )
                 .into_response();
         }
+        Err(e) => return internal_err(e),
     };
 
     if !keys.is_empty() {
@@ -343,6 +359,22 @@ mod tests {
         .into_response();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         assert!(db.role_permissions(id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn roles_duplicate_returns_409() {
+        let db = Arc::new(Store::open_in_memory().await.unwrap());
+        let state = state_with_db(Some(db));
+        let mk = || CreateRoleRequest {
+            name: "ops".to_string(),
+            description: None,
+            permission_keys: None,
+        };
+        let resp = create_role_handler(State(state.clone()), Json(mk())).await.into_response();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        // Same name again → a genuine UNIQUE violation maps to 409 (not 500).
+        let resp = create_role_handler(State(state), Json(mk())).await.into_response();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]
