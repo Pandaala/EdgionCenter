@@ -1,7 +1,7 @@
 # Task OAC-05: Frontend menu gating on authzMode + dbAuthEnabled
 
 **Profile:** feature (frontend)
-**Status:** todo (not started)
+**Status:** done (commit 62ae092; frontend tests pass)
 **Depends on:** OAC-04
 **Plan:** `docs/history/superpowers/plans/2026-06-14-center-orthogonal-access-control-plan.md` §Task 5
 
