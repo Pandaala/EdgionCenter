@@ -25,6 +25,15 @@
 //!   PATCH  /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile → switch active profile (read-modify-write per controller)
 //!   POST   /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/sync       → copy PM state from source controller to target controllers
 //!   GET    /api/v1/center/global-connection-ip-restrictions/consistency            → consistency detection across controllers
+//!   GET    /api/v1/center/admin/users                              → list users (with role ids + names; no password_hash)
+//!   POST   /api/v1/center/admin/users                              → create user (bcrypt password; optional role bindings)
+//!   PATCH  /api/v1/center/admin/users/{id}                         → partial update (status / password reset / role rebind)
+//!   DELETE /api/v1/center/admin/users/{id}                         → delete user
+//!   GET    /api/v1/center/admin/roles                              → list roles (each with permission_keys)
+//!   POST   /api/v1/center/admin/roles                              → create role (optional permission set)
+//!   PUT    /api/v1/center/admin/roles/{id}/permissions            → replace a role's permission set
+//!   DELETE /api/v1/center/admin/roles/{id}                         → delete role (FK cascade removes bindings)
+//!   GET    /api/v1/center/admin/permission-catalog                → grouped permission catalog for the matrix UI
 //!   GET  /api/v1/center/admin/watch-status                          → watch cache sync status per controller
 //!   GET  /api/v1/center/admin/metadata-store                         → metadata store key summary
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
@@ -43,6 +52,8 @@ mod audit;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
 mod region_route_handlers;
+mod roles;
+mod users;
 pub mod web;
 
 use crate::aggregator::ResourceAggregator;
@@ -160,6 +171,28 @@ pub fn router(state: ApiState) -> Router {
         // Admin endpoints (DB-backed)
         .route("/api/v1/center/admin/controllers", get(list_admin_controllers))
         .route("/api/v1/center/admin/controllers/{id}", delete(delete_admin_controller))
+        // User / role admin CRUD (Full tier; users:manage / roles:manage keys).
+        .route(
+            "/api/v1/center/admin/users",
+            get(users::list_users_handler).post(users::create_user_handler),
+        )
+        .route(
+            "/api/v1/center/admin/users/{id}",
+            patch(users::update_user_handler).delete(users::delete_user_handler),
+        )
+        .route(
+            "/api/v1/center/admin/roles",
+            get(roles::list_roles_handler).post(roles::create_role_handler),
+        )
+        .route("/api/v1/center/admin/roles/{id}", delete(roles::delete_role_handler))
+        .route(
+            "/api/v1/center/admin/roles/{id}/permissions",
+            axum::routing::put(roles::set_role_permissions_handler),
+        )
+        .route(
+            "/api/v1/center/admin/permission-catalog",
+            get(roles::permission_catalog_handler),
+        )
         // Audit log read endpoint (path must match AUDIT_READ_PATH so the
         // audit middleware excludes it from self-logging).
         .route("/api/v1/center/admin/audit-logs", get(audit::audit_list_handler))

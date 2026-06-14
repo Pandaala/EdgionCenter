@@ -48,6 +48,58 @@ pub fn all_keys() -> &'static [&'static str] {
     ]
 }
 
+/// Whether `key` is a permission key known to the system.
+pub fn is_known_key(key: &str) -> bool {
+    all_keys().contains(&key)
+}
+
+/// A named group of permission keys for the role/permission matrix UI.
+///
+/// The flattened union of every group's `keys` is exactly [`all_keys`] — the
+/// `catalog_groups_cover_all_keys` test enforces this so a newly added key can
+/// never be silently omitted from the matrix.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PermissionGroup {
+    pub group: &'static str,
+    pub keys: Vec<&'static str>,
+}
+
+/// The permission catalog grouped by dashboard page, for the matrix UI.
+///
+/// Collectively the groups cover EXACTLY [`all_keys`] (enforced by test).
+pub fn catalog_groups() -> Vec<PermissionGroup> {
+    vec![
+        PermissionGroup {
+            group: "Controllers",
+            keys: vec![CONTROLLERS_READ, CONTROLLERS_WRITE],
+        },
+        PermissionGroup {
+            group: "Region Routes",
+            keys: vec![REGION_ROUTES_READ, REGION_ROUTES_WRITE],
+        },
+        PermissionGroup {
+            group: "IP Restrictions",
+            keys: vec![IP_RESTRICTIONS_READ, IP_RESTRICTIONS_WRITE],
+        },
+        PermissionGroup {
+            group: "Audit",
+            keys: vec![AUDIT_READ],
+        },
+        PermissionGroup {
+            group: "Server",
+            keys: vec![SERVER_READ],
+        },
+        PermissionGroup {
+            group: "Proxy",
+            keys: vec![PROXY_ACCESS],
+        },
+        PermissionGroup {
+            group: "Access Control",
+            keys: vec![USERS_MANAGE, ROLES_MANAGE],
+        },
+    ]
+}
+
 /// Whether `path` is a business path subject to fail-closed enforcement.
 ///
 /// True for any `/api/v1/` path EXCEPT the public auth routes (`/api/v1/auth/`),
@@ -97,6 +149,19 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     // DB-backed admin controllers (list GET / delete DELETE).
     if path == "/api/v1/center/admin/controllers" || path.starts_with("/api/v1/center/admin/controllers/") {
         return Some(if is_get { CONTROLLERS_READ } else { CONTROLLERS_WRITE });
+    }
+
+    // User administration (Full tier): all /users routes require users:manage.
+    if under_segment(path, "/api/v1/center/admin/users") {
+        return Some(USERS_MANAGE);
+    }
+
+    // Role administration + permission catalog (Full tier): all /roles routes
+    // and the permission-catalog read require roles:manage.
+    if under_segment(path, "/api/v1/center/admin/roles")
+        || path == "/api/v1/center/admin/permission-catalog"
+    {
+        return Some(ROLES_MANAGE);
     }
 
     // Region routes (cluster + service): list/consistency are GET reads,
@@ -166,6 +231,15 @@ mod tests {
             (Method::GET, "/api/v1/center/global-connection-ip-restrictions/consistency"),
             (Method::GET, "/api/v1/center/admin/controllers"),
             (Method::DELETE, "/api/v1/center/admin/controllers/c1"),
+            (Method::GET, "/api/v1/center/admin/users"),
+            (Method::POST, "/api/v1/center/admin/users"),
+            (Method::PATCH, "/api/v1/center/admin/users/1"),
+            (Method::DELETE, "/api/v1/center/admin/users/1"),
+            (Method::GET, "/api/v1/center/admin/roles"),
+            (Method::POST, "/api/v1/center/admin/roles"),
+            (Method::PUT, "/api/v1/center/admin/roles/1/permissions"),
+            (Method::DELETE, "/api/v1/center/admin/roles/1"),
+            (Method::GET, "/api/v1/center/admin/permission-catalog"),
             (Method::GET, "/api/v1/center/admin/audit-logs"),
             (Method::GET, "/api/v1/center/admin/watch-status"),
             (Method::GET, "/api/v1/center/admin/metadata-store"),
@@ -180,6 +254,41 @@ mod tests {
                 p
             );
         }
+    }
+
+    /// All /users routes gate on users:manage; all /roles routes and the
+    /// permission-catalog read gate on roles:manage (regardless of method).
+    #[test]
+    fn user_role_admin_keys() {
+        assert_eq!(route_permission(&Method::GET, "/api/v1/center/admin/users"), Some(USERS_MANAGE));
+        assert_eq!(route_permission(&Method::POST, "/api/v1/center/admin/users"), Some(USERS_MANAGE));
+        assert_eq!(route_permission(&Method::PATCH, "/api/v1/center/admin/users/1"), Some(USERS_MANAGE));
+        assert_eq!(route_permission(&Method::DELETE, "/api/v1/center/admin/users/1"), Some(USERS_MANAGE));
+        assert_eq!(route_permission(&Method::GET, "/api/v1/center/admin/roles"), Some(ROLES_MANAGE));
+        assert_eq!(route_permission(&Method::POST, "/api/v1/center/admin/roles"), Some(ROLES_MANAGE));
+        assert_eq!(
+            route_permission(&Method::PUT, "/api/v1/center/admin/roles/1/permissions"),
+            Some(ROLES_MANAGE)
+        );
+        assert_eq!(route_permission(&Method::DELETE, "/api/v1/center/admin/roles/1"), Some(ROLES_MANAGE));
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/admin/permission-catalog"),
+            Some(ROLES_MANAGE)
+        );
+    }
+
+    /// The grouped catalog must cover EXACTLY `all_keys()` — no key omitted, no
+    /// stray key, no duplicate across groups.
+    #[test]
+    fn catalog_groups_cover_all_keys() {
+        use std::collections::BTreeSet;
+        let grouped: Vec<&str> = catalog_groups().into_iter().flat_map(|g| g.keys).collect();
+        // No duplicates across the flattened groups.
+        let grouped_set: BTreeSet<&str> = grouped.iter().copied().collect();
+        assert_eq!(grouped_set.len(), grouped.len(), "a key appears in more than one group");
+        // The set of grouped keys equals the set of all_keys().
+        let all_set: BTreeSet<&str> = all_keys().iter().copied().collect();
+        assert_eq!(grouped_set, all_set, "catalog_groups() must cover exactly all_keys()");
     }
 
     /// GET endpoints resolve to `:read`, mutations to `:write`.
