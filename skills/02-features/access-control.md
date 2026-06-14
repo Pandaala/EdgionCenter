@@ -18,7 +18,7 @@ Code of record: `src/config/mod.rs` (`AccessConfig` / `AccessMode` / `DatabaseCo
 | Authentication | OIDC/Okta (`auth:`) and/or single shared admin (`local_auth:`) | DB-backed local users (username + bcrypt password) |
 | Authorization | Login = admin: every authenticated caller is a full admin | Page + API RBAC via permission keys (roles bundle keys, users get roles) |
 | User/role admin | Hidden (dashboard hides Users/Roles) | Managed from the dashboard Users + Roles pages |
-| Default storage | SQLite | MySQL (SQLite also works) |
+| Storage | SQLite (default) | SQLite (default); MySQL recommended |
 | Database required | No (audit needs it; otherwise optional) | Yes — startup fails without a usable DB |
 | OIDC (`auth:`) | Honored for SSO login | Ignored (WARN logged if configured) |
 | `local_auth:` | Single-admin login + JWT secret | Only `jwt_secret` used (signer); username/password ignored |
@@ -62,7 +62,8 @@ The dashboard Audit page reads `GET /api/v1/center/admin/audit-logs` (gated by `
   is consulted ONLY for `jwt_secret` (the HS256 secret that signs/validates DB-user login
   tokens); its `username`/`password` are ignored. A `local_auth:` block with a non-empty
   `jwt_secret` is REQUIRED — startup fails without both a usable DB and a `jwt_secret`.
-  `EDGION_ADMIN_JWT_SECRET` may supply `jwt_secret` from the environment.
+  The signing secret comes solely from the `local_auth.jwt_secret` YAML field (the same
+  field lite uses to sign/validate local tokens); there is no environment override for it.
 
 ## Permission catalog
 

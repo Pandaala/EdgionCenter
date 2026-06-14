@@ -50,8 +50,9 @@ access:
 # Persistence (`database:`)
 # ============================================================================
 # Backing store for the controller registry, audit log, and (in full mode) the
-# users/roles tables. `lite` mode defaults to SQLite; `full` mode REQUIRES a
-# usable database and refuses to start without one.
+# users/roles tables. The `backend` defaults to SQLite in both modes; `full`
+# mode REQUIRES a usable database and refuses to start without one (MySQL is
+# recommended for full mode, but is not selected automatically).
 database:
   enabled: true
   # Storage backend: sqlite (default, embedded) or mysql (external).
@@ -60,7 +61,7 @@ database:
   # the working directory.
   sqlite_path: "data/center.db"
   #
-  # --- External MySQL (recommended default for full mode) ---
+  # --- External MySQL (recommended for full mode) ---
   # backend: mysql
   # mysql_url: "mysql://user:pass@host:3306/edgion_center"
 
@@ -116,7 +117,8 @@ audit:
 #   EDGION_ADMIN_USERNAME=admin
 #   EDGION_ADMIN_PASSWORD=<strong-password>
 # If unset, a WARN is logged and no login is possible until a user is provisioned.
-# (`EDGION_ADMIN_JWT_SECRET` can also supply `jwt_secret` via the environment.)
+# The JWT signing secret comes solely from the `local_auth.jwt_secret` field above
+# (the same field lite uses); there is no environment override for it.
 # Note: permission changes take up to ~30s to take effect (authz cache TTL).
 
 # ============================================================================

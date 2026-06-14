@@ -43,16 +43,18 @@ impl Default for DatabaseConfig {
 /// Access-control tier selector.
 ///
 /// `Lite` (default) wires the `AllowAllAuthz` store: every authenticated caller
-/// is treated as a full admin (login = admin). `Full` is reserved for the
-/// database-backed RBAC store (a later task); until that lands it falls back to
-/// allow-all with a startup warning.
+/// is treated as a full admin (login = admin), with login via OIDC/Okta and/or a
+/// single shared `local_auth` admin. `Full` wires the database-backed RBAC store
+/// (`DbAuthz` + DB-user login); it requires a usable database and a
+/// `[local_auth].jwt_secret`, and ignores any OIDC (`auth:`) provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AccessMode {
     /// Login = admin. Everyone authenticated gets every permission.
     #[default]
     Lite,
-    /// Database-backed RBAC (not yet implemented; treated as Lite for now).
+    /// Database-backed users + RBAC. Requires a usable database and a
+    /// `[local_auth].jwt_secret`; startup fails without both. OIDC is ignored.
     Full,
 }
 
