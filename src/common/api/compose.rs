@@ -367,4 +367,86 @@ mod tests {
             "missing controllers:write must deny POST .../reload with 403"
         );
     }
+
+    /// Orthogonality proof: RBAC enforcement resolves by SUBJECT regardless of
+    /// the authn provider. A token whose `sub` is NOT provisioned in the users
+    /// table is denied (403) on a mapped route; once that same subject is seeded
+    /// with a role granting the route's key, it is allowed (200). The token here
+    /// is a local HS256 token standing in for any provider (OIDC included) — what
+    /// matters is that DbAuthz keys off the subject, not the issuer.
+    #[tokio::test]
+    async fn oidc_rbac_unmapped_sub_403() {
+        use crate::common::authz::db_authz::DbAuthz;
+        use crate::store::Store;
+        use std::sync::Arc;
+
+        let store = Arc::new(Store::open_in_memory().await.unwrap());
+
+        // App over an EMPTY users table: "carol" is unprovisioned.
+        let authz: Arc<dyn AuthzStore> = Arc::new(DbAuthz::new(store.clone()));
+        let business = Router::new().route("/api/v1/controllers", get(|| async { "list" }));
+        let app = compose_admin_routes(business, new_state_with_local(), false, authz);
+
+        let req = Request::builder()
+            .uri("/api/v1/controllers")
+            .header("Authorization", format!("Bearer {}", token_for("carol")))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "an unprovisioned subject must be denied under RBAC (fail closed)"
+        );
+
+        // Seed carol with a role granting controllers:read, then rebuild the app
+        // with a fresh DbAuthz (empty cache) so the new grant is visible.
+        let uid = store.create_user("carol", "hash", "Carol").await.unwrap();
+        let rid = store.create_role("viewer", "Read-only").await.unwrap();
+        store
+            .set_role_permissions(rid, &["controllers:read".into()])
+            .await
+            .unwrap();
+        store.set_user_roles(uid, &[rid]).await.unwrap();
+
+        let authz2: Arc<dyn AuthzStore> = Arc::new(DbAuthz::new(store.clone()));
+        let business2 = Router::new().route("/api/v1/controllers", get(|| async { "list" }));
+        let app2 = compose_admin_routes(business2, new_state_with_local(), false, authz2);
+        let req = Request::builder()
+            .uri("/api/v1/controllers")
+            .header("Authorization", format!("Bearer {}", token_for("carol")))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app2.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "once provisioned with controllers:read, the same subject is allowed"
+        );
+    }
+
+    /// AllowAll authz combined with DB-user login: an authenticated caller reaches
+    /// a WRITE route (mapped to controllers:write) and is allowed (200) — proving
+    /// the authz axis (allow_all) is independent of the authn axis (db users).
+    #[tokio::test]
+    async fn db_auth_allow_all_grants_everything() {
+        let business = Router::new().route(
+            "/api/v1/controllers/{id}/reload",
+            axum::routing::post(|| async { "reload" }),
+        );
+        let app = compose_admin_routes(business, new_state_with_local(), true, allow_all());
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/controllers/c1/reload")
+            .header("Authorization", format!("Bearer {}", token_for("anyuser")))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "AllowAll must grant a write route to any authenticated caller"
+        );
+    }
 }

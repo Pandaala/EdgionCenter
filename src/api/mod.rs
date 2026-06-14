@@ -83,10 +83,11 @@ pub struct ApiState {
     /// Used by the `/ready` probe: if the DB was required but failed to open
     /// (`db` is `None`), Center is not ready to serve DB-backed requests.
     pub db_required: bool,
-    /// Configured access-control tier (`lite` / `full`). Exposed verbatim via
-    /// `GET /server-info` so the dashboard can hide user/role management in
-    /// `lite` (where `AllowAllAuthz` would otherwise grant the manage keys).
-    pub access_mode: crate::config::AccessMode,
+    /// Configured authorization mode (`allow_all` / `rbac`). Exposed via
+    /// `GET /server-info` (mapped to the legacy `lite`/`full` wire values) so the
+    /// dashboard can hide user/role management under `allow_all` (where
+    /// `AllowAllAuthz` would otherwise grant the manage keys).
+    pub authz_mode: crate::config::AuthzMode,
 }
 
 impl ApiState {
@@ -249,15 +250,18 @@ async fn ready_check(State(state): State<ApiState>) -> impl IntoResponse {
 #[serde(rename_all = "camelCase")]
 struct ServerInfoResponse {
     mode: String,
-    /// Access-control tier: `"lite"` or `"full"`. The dashboard uses this as the
-    /// single source of truth for whether to surface user/role management.
+    /// Access-control tier: `"lite"` (allow_all authz) or `"full"` (rbac authz).
+    /// The dashboard uses this as the single source of truth for whether to
+    /// surface user/role management (only meaningful when RBAC is enforced).
     access_mode: String,
 }
 
 async fn server_info(State(state): State<ApiState>) -> impl IntoResponse {
-    let access_mode = match state.access_mode {
-        crate::config::AccessMode::Lite => "lite",
-        crate::config::AccessMode::Full => "full",
+    // Map the authz axis onto the legacy lite/full wire contract the dashboard
+    // already consumes: rbac -> full (show user/role management), allow_all -> lite.
+    let access_mode = match state.authz_mode {
+        crate::config::AuthzMode::AllowAll => "lite",
+        crate::config::AuthzMode::Rbac => "full",
     };
     Json(ApiResponse::ok_body(ServerInfoResponse {
         mode: "center".to_string(),
@@ -456,11 +460,11 @@ async fn metadata_store_status(State(state): State<ApiState>) -> impl IntoRespon
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AccessMode;
+    use crate::config::AuthzMode;
 
-    /// Build an `ApiState` carrying `access_mode`; every other field is a
+    /// Build an `ApiState` carrying `authz_mode`; every other field is a
     /// minimal default sufficient for the stateless `server_info` handler.
-    fn state_with_access_mode(access_mode: AccessMode) -> ApiState {
+    fn state_with_authz_mode(authz_mode: AuthzMode) -> ApiState {
         use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
         use parking_lot::Mutex;
         use std::collections::HashMap;
@@ -481,7 +485,7 @@ mod tests {
             sync_client,
             registry,
             db_required: false,
-            access_mode,
+            authz_mode,
         }
     }
 
@@ -492,16 +496,16 @@ mod tests {
 
     #[tokio::test]
     async fn server_info_reports_access_mode() {
-        // Full tier surfaces accessMode=full alongside the deployment mode.
-        let resp = server_info(State(state_with_access_mode(AccessMode::Full)))
+        // RBAC authz surfaces accessMode=full alongside the deployment mode.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::Rbac)))
             .await
             .into_response();
         let json = body_json(resp).await;
         assert_eq!(json["data"]["mode"], "center");
         assert_eq!(json["data"]["accessMode"], "full");
 
-        // Lite tier reports accessMode=lite so the dashboard can hide management.
-        let resp = server_info(State(state_with_access_mode(AccessMode::Lite)))
+        // AllowAll authz reports accessMode=lite so the dashboard can hide management.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::AllowAll)))
             .await
             .into_response();
         let json = body_json(resp).await;

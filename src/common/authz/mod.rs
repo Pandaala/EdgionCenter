@@ -84,7 +84,7 @@ impl PermissionSet {
 /// Resolves an authenticated [`Principal`] into the permissions it holds.
 ///
 /// Implementations are installed once at startup (selected by
-/// `config.access.mode`) and shared as `Arc<dyn AuthzStore>`.
+/// `config.authz.mode`) and shared as `Arc<dyn AuthzStore>`.
 #[async_trait::async_trait]
 pub trait AuthzStore: Send + Sync {
     /// Return the permission set granted to `p`.

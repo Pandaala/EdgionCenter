@@ -224,7 +224,7 @@ impl EdgionCenterCli {
             sync_client,
             registry: registry.clone(),
             db_required: config.database.enabled,
-            access_mode: config.access.mode,
+            authz_mode: config.authz.mode,
         };
         let http_addr: std::net::SocketAddr = config.server.http_addr.parse()?;
         let grpc_addr: std::net::SocketAddr = config.server.grpc_addr.parse()?;
@@ -271,10 +271,11 @@ impl EdgionCenterCli {
         let allow_admin_ips = config.server.allow_admin_ips.clone();
         let allow_tcp_ips = config.server.allow_tcp_ips.clone();
         let web_dir = config.web.dir.clone();
-        let access_mode = config.access.mode;
-        // Store handle for the FULL access tier (DB-backed login + RBAC + admin
+        let db_auth_config = config.db_auth.clone();
+        let authz_mode = config.authz.mode;
+        // Store handle for the DB-backed axes (DB-user login + RBAC + admin
         // bootstrap). Moved into the admin HTTP task below.
-        let store_for_full = db.clone();
+        let store_for_db = db.clone();
         // Startup diagnostic only — does not change cookie runtime behavior.
         if let Some(local) = config.local_auth.as_ref() {
             // Args are (admin_tls_present, cookie_secure) — keep this order.
@@ -286,31 +287,47 @@ impl EdgionCenterCli {
 
         let api_state_for_probe = api_state.clone();
         let http_handle = tokio::spawn(async move {
-            let local_auth_intent = local_auth_config.as_ref().is_some_and(|c| c.enabled);
             // Authentication is mandatory; no-auth mode was removed. require_auth is
-            // always true. In the nothing_configured case, the middleware takes the
-            // 503 fail-close branch preventing "no configuration" from leaving the
-            // admin API exposed.
+            // always true, so when NO authn provider is ready the middleware takes
+            // the 503 fail-close branch (prevents "no configuration" from leaving
+            // the admin API exposed).
             let require_auth = true;
 
-            let nothing_configured = local_auth_config.is_none() && auth_config.is_none();
-            // Scenario 1: nothing configured -- middleware takes the 503 fail-close branch.
-            if nothing_configured {
+            // ----------------------------------------------------------------
+            // Orthogonal access-control axes (authn providers x authz store).
+            //   oidc_on         : OIDC ([auth]) present AND enabled.
+            //   single_admin_on : [local_auth] supplies a non-empty username AND
+            //                     password (a usable single-admin credential).
+            //   db_auth_on      : DB-user login enabled.
+            //   rbac            : authz.mode == rbac (install DbAuthz).
+            // any_password_login = single_admin_on || db_auth_on (mounts /login).
+            // ----------------------------------------------------------------
+            let oidc_on = auth_config.as_ref().is_some_and(|c| c.enabled);
+            let single_admin_on = local_auth_config
+                .as_ref()
+                .is_some_and(|c| !c.username.is_empty() && !c.password.is_empty());
+            let db_auth_on = db_auth_config.enabled;
+            let rbac = authz_mode == crate::config::AuthzMode::Rbac;
+            let any_password_login = single_admin_on || db_auth_on;
+
+            // Resolve the session signing secret: prefer [local_auth].jwt_secret,
+            // else db_auth.jwt_secret (non-empty wins).
+            let local_secret = local_auth_config
+                .as_ref()
+                .map(|c| c.jwt_secret.clone())
+                .filter(|s| !s.is_empty());
+            let db_secret = db_auth_config.jwt_secret.clone().filter(|s| !s.is_empty());
+            let has_secret = local_secret.is_some() || db_secret.is_some();
+            let store_present = store_for_db.is_some();
+
+            // Fail-fast validation of the axis combination.
+            validate_access(oidc_on, single_admin_on, db_auth_on, rbac, has_secret, store_present)?;
+
+            if !oidc_on && !any_password_login {
                 tracing::warn!(
                     component = "center",
-                    "No authentication configured. Admin endpoints will return 503 \
-                     until you configure [local_auth] or [auth] in your YAML."
-                );
-            }
-            // Scenario 2: operator explicitly set enabled=false on a provider -- auth is
-            // still mandatory; this config is no longer supported and the flag is ignored.
-            let local_explicitly_disabled = local_auth_config.as_ref().is_some_and(|c| !c.enabled);
-            let oidc_explicitly_disabled = auth_config.as_ref().is_some_and(|c| !c.enabled);
-            if local_explicitly_disabled || oidc_explicitly_disabled {
-                tracing::warn!(
-                    component = "center",
-                    "auth `enabled: false` is no longer supported; authentication is mandatory. \
-                     Configure a real local_auth/auth provider. Ignoring the disable flag."
+                    "No authentication provider configured. Admin endpoints will return 503 \
+                     until you configure [auth] (OIDC), [local_auth] (single admin), or [db_auth]."
                 );
             }
 
@@ -332,106 +349,111 @@ impl EdgionCenterCli {
                 }
                 None => base_router,
             };
-            // Build the auth state, authorization store, and auth routes by
-            // access tier, then compose. LITE (default): single-admin/OIDC login
-            // + AllowAllAuthz (login = admin). FULL: DB-user login (bcrypt) +
-            // DbAuthz (DB-resolved RBAC). Both tiers reuse the IDENTICAL
-            // `unified_auth` local HS256 validation path — full mode only differs
-            // in the login credential source and the installed AuthzStore.
+            // Assemble from the orthogonal axes, then compose. Authentication
+            // (OIDC, single admin, DB users) and authorization (AllowAll vs RBAC)
+            // are independent: any authn provider coexists with either authz
+            // store, and DbAuthz resolves permissions by subject regardless of
+            // which provider issued the token.
             //
             // compose hard-codes the assembly order: business routes + auth routes
             // + authz + unified_auth + cache-control. The returned app is final;
             // do not call .route() / .layer() afterwards -- see the function doc.
-            let app = match access_mode {
-                crate::config::AccessMode::Lite => {
-                    let auth_state = crate::common::unified_auth::UnifiedAuthState::from_configs(
-                        auth_config.as_ref(),
-                        local_auth_config.as_ref(),
-                        require_auth,
-                        "center",
-                    )
-                    .expect("center auth state build failed");
-                    let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> =
-                        std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz);
-                    crate::common::api::compose_admin_routes(base_router, auth_state, local_auth_intent, authz)
-                }
-                crate::config::AccessMode::Full => {
-                    // FULL mode requires a usable Store AND a configured jwt_secret.
-                    // Fail startup (no allow-all fallback) when either is missing.
-                    let store = store_for_full.clone().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "access.mode=full requires a database: set database.enabled=true with a \
-                             reachable backend. Refusing to start."
-                        )
-                    })?;
-                    let jwt_secret = local_auth_config
-                        .as_ref()
-                        .map(|c| c.jwt_secret.clone())
-                        .filter(|s| !s.is_empty())
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "access.mode=full requires [local_auth].jwt_secret to be set (used to \
-                                 sign/validate DB-user login tokens). Refusing to start."
-                            )
-                        })?;
 
-                    // First-run admin bootstrap (creates a superuser-by-keys when
-                    // the users table is empty and EDGION_ADMIN_* are set).
-                    bootstrap_admin(&store).await?;
+            // OIDC is installed only when enabled; no force-disable anymore. The
+            // local arg is None here -- when password login is active we install a
+            // local validator below via update_local.
+            let oidc_cfg = if oidc_on { auth_config.as_ref() } else { None };
+            let auth_state = crate::common::unified_auth::UnifiedAuthState::from_configs(
+                oidc_cfg,
+                None,
+                require_auth,
+                "center",
+            )
+            .expect("center auth state build failed");
 
-                    // FULL mode is DB-users only: it must NOT accept OIDC/Okta tokens.
-                    // (An OIDC `sub` would otherwise be treated as a DB username by
-                    // DbAuthz.) If OIDC is configured, warn that it is ignored here.
-                    if auth_config.is_some() {
-                        tracing::warn!(
-                            component = "center",
-                            "access.mode=full ignores OIDC ([auth]): full mode authenticates DB \
-                             local users only. The [auth] block has no effect in full mode."
-                        );
+            // Install the local HS256 validator whenever any password login is
+            // active (single admin and/or DB users). It carries the signing
+            // secret / expiry / cookie used by issue_login_response and the
+            // unified_auth local-validation fallback.
+            if any_password_login {
+                let session_secret = local_secret
+                    .clone()
+                    .or_else(|| db_secret.clone())
+                    .expect("validate_access guarantees a secret when any password login is active");
+                let validator_cfg = if single_admin_on {
+                    // Build from the real [local_auth] admin so verify_single_admin
+                    // works, but force the resolved signing secret (the local
+                    // secret may be empty while db_auth supplies one).
+                    crate::common::local_auth::LocalAuthConfig {
+                        jwt_secret: session_secret,
+                        ..local_auth_config
+                            .clone()
+                            .expect("single_admin_on implies [local_auth] present")
                     }
-
-                    // Build the auth state with the OIDC provider DISABLED (pass None
-                    // for the OIDC config) and NO single-admin local provider, then
-                    // install a local validator carrying ONLY the signing secret /
-                    // expiry / cookie settings. Its username/password are non-functional
-                    // placeholders and never consulted: DB users are the credential source.
-                    let auth_state = crate::common::unified_auth::UnifiedAuthState::from_configs(
-                        None,
-                        None,
-                        require_auth,
-                        "center",
-                    )
-                    .expect("center auth state build failed");
-                    let validator_cfg = crate::common::local_auth::LocalAuthConfig {
-                        jwt_secret,
-                        jwt_expiry_hours: local_auth_config.as_ref().map(|c| c.jwt_expiry_hours).unwrap_or(24),
-                        cookie_secure: local_auth_config.as_ref().map(|c| c.cookie_secure).unwrap_or(true),
-                        // Defense-in-depth: the validator's single-admin credential path
-                        // is never used in full mode (DB users only), but `..default()`
-                        // would give password="" and `bcrypt::verify("", hash_of_empty)`
-                        // is true — so an `admin`/blank-password login would succeed if the
-                        // `local_auth_intent=false` gate were ever flipped. Set the password
-                        // to a fresh, unguessable random value so the path is non-verifiable
-                        // regardless: no one can ever produce this password.
+                } else {
+                    // DB-users only: the validator is signing-only. Its single-admin
+                    // credential is never consulted (single_admin_enabled=false), but
+                    // give it a fresh random password as defense-in-depth so the
+                    // path is non-verifiable even if that gate were ever flipped
+                    // (an empty password would otherwise bcrypt-verify against the
+                    // hash of "").
+                    crate::common::local_auth::LocalAuthConfig {
+                        jwt_secret: session_secret,
+                        jwt_expiry_hours: db_auth_config.jwt_expiry_hours.unwrap_or(24),
+                        cookie_secure: db_auth_config.cookie_secure.unwrap_or(true),
                         password: uuid::Uuid::new_v4().to_string(),
                         ..crate::common::local_auth::LocalAuthConfig::default()
-                    };
-                    auth_state.update_local(crate::common::local_auth::LocalAuthState::from_config(&validator_cfg));
-                    tracing::info!(
-                        component = "center",
-                        "access.mode=full: DB-backed login + RBAC enforcement active"
-                    );
+                    }
+                };
+                auth_state.update_local(crate::common::local_auth::LocalAuthState::from_config(&validator_cfg));
+            }
 
-                    let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> =
-                        std::sync::Arc::new(crate::common::authz::db_authz::DbAuthz::new(store.clone()));
+            // Authorization store: RBAC -> DbAuthz (validated store_present), else AllowAll.
+            let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> = if rbac {
+                let store = store_for_db
+                    .clone()
+                    .expect("validate_access guarantees a store when rbac is on");
+                std::sync::Arc::new(crate::common::authz::db_authz::DbAuthz::new(store))
+            } else {
+                std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz)
+            };
 
-                    // Mount DB login (+ reuse local logout/me) on the business
-                    // router, then compose with local_auth_intent=false so the
-                    // lite single-admin login is not also mounted.
-                    let business =
-                        crate::common::db_auth::add_db_auth_routes(base_router, auth_state.clone(), store);
-                    crate::common::api::compose_admin_routes(business, auth_state, false, authz)
+            // First-run admin bootstrap (creates a superuser-by-keys + admin role
+            // when the users table is empty and EDGION_ADMIN_* are set). Only
+            // meaningful when DB-user login is on.
+            if db_auth_on {
+                if let Some(store) = store_for_db.as_ref() {
+                    bootstrap_admin(store).await?;
                 }
+            }
+
+            tracing::info!(
+                component = "center",
+                oidc = oidc_on,
+                single_admin = single_admin_on,
+                db_auth = db_auth_on,
+                rbac = rbac,
+                "access control assembled"
+            );
+
+            let app = if any_password_login {
+                // Mount the unified login (+ reuse local logout/me), then compose
+                // with local_auth_intent=false so the single-admin login is not
+                // ALSO mounted (which would panic axum on a duplicate route).
+                let login_state = crate::common::db_auth::UnifiedLoginState {
+                    store: if db_auth_on { store_for_db.clone() } else { None },
+                    local: auth_state
+                        .local
+                        .load_full()
+                        .expect("local validator installed when any password login is active"),
+                    single_admin_enabled: single_admin_on,
+                };
+                let business =
+                    crate::common::db_auth::add_unified_auth_routes(base_router, login_state, auth_state.clone());
+                crate::common::api::compose_admin_routes(business, auth_state, false, authz)
+            } else {
+                // OIDC-only or nothing configured: no /login route is mounted.
+                crate::common::api::compose_admin_routes(base_router, auth_state, false, authz)
             };
             // Dashboard UI: a public SPA fallback mounted AFTER compose_admin_routes.
             // Because it is added after compose returns its final (auth-wrapped) router,
@@ -597,7 +619,49 @@ fn admin_tls_cookie_warning(admin_tls_present: bool, cookie_secure: bool) -> Opt
     }
 }
 
-/// First-run admin bootstrap for the FULL access tier.
+/// Validate an orthogonal access-control axis combination at startup.
+///
+/// Pure and testable. Returns `Err` (fail-close, no silent fallback) when:
+/// - `rbac` is on but there is no usable store (DbAuthz needs the DB), or
+/// - `db_auth` is on but there is no usable store (DB-user login needs the DB), or
+/// - any password login (single admin or DB users) is on but no signing secret
+///   is configured (tokens could not be signed/validated).
+///
+/// Having NO authn provider at all is NOT an error here: business routes
+/// fail-close with 503 at request time. `oidc_on` is accepted for symmetry /
+/// future cross-checks but does not by itself impose a requirement.
+fn validate_access(
+    oidc_on: bool,
+    single_admin_on: bool,
+    db_auth_on: bool,
+    rbac: bool,
+    has_secret: bool,
+    store_present: bool,
+) -> anyhow::Result<()> {
+    let _ = oidc_on;
+    let any_password_login = single_admin_on || db_auth_on;
+    if rbac && !store_present {
+        return Err(anyhow::anyhow!(
+            "authz.mode=rbac requires a database: set database.enabled=true with a reachable \
+             backend. Refusing to start."
+        ));
+    }
+    if db_auth_on && !store_present {
+        return Err(anyhow::anyhow!(
+            "db_auth.enabled=true requires a database: set database.enabled=true with a reachable \
+             backend. Refusing to start."
+        ));
+    }
+    if any_password_login && !has_secret {
+        return Err(anyhow::anyhow!(
+            "password login (local_auth single admin or db_auth) requires a signing secret: set \
+             local_auth.jwt_secret or db_auth.jwt_secret. Refusing to start."
+        ));
+    }
+    Ok(())
+}
+
+/// First-run admin bootstrap for DB-user login.
 ///
 /// When the `users` table is empty, reads `EDGION_ADMIN_USERNAME` /
 /// `EDGION_ADMIN_PASSWORD`. If both are set, creates the admin user (bcrypt),
@@ -647,8 +711,8 @@ async fn bootstrap_admin(store: &crate::store::Store) -> anyhow::Result<()> {
         _ => {
             tracing::warn!(
                 component = "center",
-                "access.mode=full but the users table is empty and EDGION_ADMIN_USERNAME / \
-                 EDGION_ADMIN_PASSWORD are not set: NO user can log in until one is provisioned. \
+                "db_auth is enabled but the users table is empty and EDGION_ADMIN_USERNAME / \
+                 EDGION_ADMIN_PASSWORD are not set: NO DB user can log in until one is provisioned. \
                  Set both env vars to bootstrap a first admin."
             );
         }
@@ -658,7 +722,7 @@ async fn bootstrap_admin(store: &crate::store::Store) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{admin_tls_cookie_warning, decide_transport, TransportDecision};
+    use super::{admin_tls_cookie_warning, decide_transport, validate_access, TransportDecision};
     use crate::config::CenterConfig;
     use crate::common::config::{ConfSyncSecurityConfig, ConfSyncTlsConfig};
     use crate::common::unified_auth::UnifiedAuthState;
@@ -674,6 +738,37 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn validate_access_rbac_requires_store() {
+        // rbac on, no store -> error.
+        let err = validate_access(false, false, false, true, true, false).unwrap_err();
+        assert!(err.to_string().contains("rbac"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn validate_access_db_auth_requires_store() {
+        // db_auth on (with a secret), no store -> error.
+        let err = validate_access(false, false, true, false, true, false).unwrap_err();
+        assert!(err.to_string().contains("db_auth"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn validate_access_password_login_requires_secret() {
+        // single admin on, no secret -> error.
+        let err = validate_access(false, true, false, false, false, true).unwrap_err();
+        assert!(err.to_string().contains("signing secret"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn validate_access_ok_lite_equivalent() {
+        // OIDC + single admin (with secret) + allow_all, no store needed -> ok.
+        assert!(validate_access(true, true, false, false, true, false).is_ok());
+        // Full-equivalent: db_auth + rbac with store + secret -> ok.
+        assert!(validate_access(false, false, true, true, true, true).is_ok());
+        // Nothing configured at all is not an error here (503 at request time).
+        assert!(validate_access(false, false, false, false, false, false).is_ok());
     }
 
     #[test]

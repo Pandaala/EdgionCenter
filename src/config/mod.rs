@@ -40,38 +40,55 @@ impl Default for DatabaseConfig {
     }
 }
 
-/// Access-control tier selector.
+/// Authorization-store selector (the *authz* axis, orthogonal to authentication).
 ///
-/// `Lite` (default) wires the `AllowAllAuthz` store: every authenticated caller
-/// is treated as a full admin (login = admin), with login via OIDC/Okta and/or a
-/// single shared `local_auth` admin. `Full` wires the database-backed RBAC store
-/// (`DbAuthz` + DB-user login); it requires a usable database and a
-/// `[local_auth].jwt_secret`, and ignores any OIDC (`auth:`) provider.
+/// `AllowAll` (default) installs `AllowAllAuthz`: every authenticated caller is
+/// treated as a full admin (login = admin). `Rbac` installs the database-backed
+/// `DbAuthz`, which resolves each caller's permissions from the `users`/`roles`
+/// tables by subject — regardless of which authentication provider issued the
+/// token. `Rbac` requires a usable database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum AccessMode {
+#[serde(rename_all = "snake_case")]
+pub enum AuthzMode {
     /// Login = admin. Everyone authenticated gets every permission.
     #[default]
-    Lite,
-    /// Database-backed users + RBAC. Requires a usable database and a
-    /// `[local_auth].jwt_secret`; startup fails without both. OIDC is ignored.
-    Full,
+    AllowAll,
+    /// Database-backed RBAC. Permissions resolved per subject from the DB.
+    /// Requires a usable database; startup fails without one.
+    Rbac,
 }
 
-/// Access-control configuration. Selects which `AuthzStore` is installed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Authorization configuration. Selects which `AuthzStore` is installed. This is
+/// orthogonal to authentication: any authn provider (OIDC, single-admin, DB
+/// users) can be combined with either authz mode.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub struct AccessConfig {
-    /// Access-control tier. Defaults to `lite`.
-    pub mode: AccessMode,
+pub struct AuthzConfig {
+    /// Authorization mode. Defaults to `allow_all`.
+    pub mode: AuthzMode,
 }
 
-impl Default for AccessConfig {
-    fn default() -> Self {
-        Self {
-            mode: AccessMode::default(),
-        }
-    }
+/// Database-backed user login configuration (one authentication axis).
+///
+/// When `enabled`, `POST /api/v1/auth/login` additionally authenticates against
+/// the `users` table (bcrypt). It coexists with OIDC and the single `local_auth`
+/// admin. Requires a usable database and a signing secret (`jwt_secret` here or
+/// in `[local_auth]`). `jwt_expiry_hours` / `cookie_secure` override the issued
+/// token / cookie settings when no `[local_auth]` admin is configured.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct DbAuthConfig {
+    /// Enable DB-user login against the `users` table. Default: false.
+    pub enabled: bool,
+    /// JWT signing secret used to sign/validate DB-user login tokens. Used when
+    /// `[local_auth].jwt_secret` is not set. Empty/unset means unconfigured.
+    pub jwt_secret: Option<String>,
+    /// Token expiry in hours for DB-user logins (when no `[local_auth]` admin
+    /// supplies it). Defaults to 24 when unset.
+    pub jwt_expiry_hours: Option<u64>,
+    /// Emit the `Secure` cookie attribute (when no `[local_auth]` admin supplies
+    /// it). Defaults to true when unset.
+    pub cookie_secure: Option<bool>,
 }
 
 /// Audit-log behavior for mutating admin actions.
@@ -133,9 +150,12 @@ pub struct CenterConfig {
     /// Audit logging of mutating admin actions. See [`AuditConfig`].
     #[serde(default)]
     pub audit: AuditConfig,
-    /// Access-control tier (lite/full). See [`AccessConfig`].
+    /// Authorization mode (allow_all/rbac). See [`AuthzConfig`].
     #[serde(default)]
-    pub access: AccessConfig,
+    pub authz: AuthzConfig,
+    /// Database-backed user login. See [`DbAuthConfig`].
+    #[serde(default)]
+    pub db_auth: DbAuthConfig,
 }
 
 impl Default for CenterConfig {
@@ -150,7 +170,8 @@ impl Default for CenterConfig {
             peer_identity: None,
             web: WebConfig::default(),
             audit: AuditConfig::default(),
-            access: AccessConfig::default(),
+            authz: AuthzConfig::default(),
+            db_auth: DbAuthConfig::default(),
         }
     }
 }
@@ -307,28 +328,52 @@ audit:
         assert_eq!(c.audit.retention_days, 0);
     }
 
-    #[test]
-    fn access_mode_defaults_to_lite() {
-        let c = CenterConfig::default();
-        assert_eq!(c.access.mode, AccessMode::Lite, "default access mode must be lite");
+    /// Helper: deserialize a YAML doc through the SAME path production uses
+    /// (`singleton_map_recursive`), not the plain `serde_yaml::from_str`.
+    fn parse_via_production(yaml: &str) -> CenterConfig {
+        let de = serde_yaml::Deserializer::from_str(yaml);
+        serde_yaml::with::singleton_map_recursive::deserialize(de)
+            .expect("config must parse through the production singleton_map_recursive path")
     }
 
     #[test]
-    fn access_mode_absent_uses_lite() {
-        // Omitting the whole [access] section must default to lite.
-        let yaml = "server:\n  http_addr: \"0.0.0.0:5900\"\n";
-        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(c.access.mode, AccessMode::Lite);
+    fn authz_mode_defaults_allow_all() {
+        // Default value and an omitted [authz] section both yield allow_all.
+        assert_eq!(CenterConfig::default().authz.mode, AuthzMode::AllowAll);
+        let c = parse_via_production("server:\n  http_addr: \"0.0.0.0:5900\"\n");
+        assert_eq!(c.authz.mode, AuthzMode::AllowAll);
     }
 
     #[test]
-    fn access_mode_full_parses() {
+    fn authz_mode_rbac_parses() {
+        let c = parse_via_production("authz:\n  mode: rbac\n");
+        assert_eq!(c.authz.mode, AuthzMode::Rbac);
+    }
+
+    #[test]
+    fn db_auth_defaults_disabled() {
+        // Default value and an omitted [db_auth] section both yield disabled.
+        let d = CenterConfig::default();
+        assert!(!d.db_auth.enabled);
+        assert!(d.db_auth.jwt_secret.is_none());
+        let c = parse_via_production("server:\n  http_addr: \"0.0.0.0:5900\"\n");
+        assert!(!c.db_auth.enabled);
+    }
+
+    #[test]
+    fn db_auth_enabled_parses() {
         let yaml = r#"
-access:
-  mode: full
+db_auth:
+  enabled: true
+  jwt_secret: "a_long_enough_jwt_secret_value_abcdef"
+  jwt_expiry_hours: 8
+  cookie_secure: false
 "#;
-        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(c.access.mode, AccessMode::Full);
+        let c = parse_via_production(yaml);
+        assert!(c.db_auth.enabled);
+        assert_eq!(c.db_auth.jwt_secret.as_deref(), Some("a_long_enough_jwt_secret_value_abcdef"));
+        assert_eq!(c.db_auth.jwt_expiry_hours, Some(8));
+        assert_eq!(c.db_auth.cookie_secure, Some(false));
     }
 
     #[test]

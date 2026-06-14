@@ -1,10 +1,10 @@
-//! LITE-tier authorization store: every authenticated caller is a full admin.
+//! Allow-all authorization store: every authenticated caller is a full admin.
 
 use super::{AuthzStore, PermissionSet, Principal};
 
 /// Grants every permission to every principal (login = admin).
 ///
-/// Installed when `config.access.mode = lite` (the default). Because it returns
+/// Installed when `config.authz.mode = allow_all` (the default). Because it returns
 /// [`PermissionSet::all`], the authz middleware never denies a mapped route and
 /// `/auth/me` reports the entire key catalog.
 pub struct AllowAllAuthz;
