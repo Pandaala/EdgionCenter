@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard'
 import UserDashboard from './pages/Dashboard/UserDashboard'
 import CenterDashboard from './pages/Center/CenterDashboard'
 import CenterAdminPage from './pages/Center/CenterAdminPage'
+import AuditLogPage from './pages/Audit/AuditLogPage'
 // RegionRoute
 import ClusterRegionRouteList from './pages/RegionRoute/ClusterRegionRouteList'
 import ServiceRegionRouteList from './pages/RegionRoute/ServiceRegionRouteList'
@@ -102,6 +103,7 @@ function App() {
             element={<GlobalConnectionIpRestrictionDetail />}
           />
           <Route path="admin" element={<CenterAdminPage />} />
+          <Route path="audit" element={<AuditLogPage />} />
         </Route>
         <Route path="/controller/:controllerId" element={<RequireAuth><ControllerProxy /></RequireAuth>}>
           <Route index element={<Dashboard />} />

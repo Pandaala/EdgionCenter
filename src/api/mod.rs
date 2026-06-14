@@ -39,6 +39,7 @@ use axum::{
 use serde::Serialize;
 use std::sync::Arc;
 
+mod audit;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
 mod region_route_handlers;
@@ -159,6 +160,9 @@ pub fn router(state: ApiState) -> Router {
         // Admin endpoints (DB-backed)
         .route("/api/v1/center/admin/controllers", get(list_admin_controllers))
         .route("/api/v1/center/admin/controllers/{id}", delete(delete_admin_controller))
+        // Audit log read endpoint (path must match AUDIT_READ_PATH so the
+        // audit middleware excludes it from self-logging).
+        .route("/api/v1/center/admin/audit-logs", get(audit::audit_list_handler))
         // Watch cache admin endpoints
         .route("/api/v1/center/admin/watch-status", get(watch_status))
         .route("/api/v1/center/admin/metadata-store", get(metadata_store_status))

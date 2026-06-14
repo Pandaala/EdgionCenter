@@ -11,6 +11,7 @@ import {
   LinkOutlined,
   LockOutlined,
   SettingOutlined,
+  AuditOutlined,
 } from '@ant-design/icons'
 
 export type AppMode = 'center' | 'controller'
@@ -135,6 +136,8 @@ export const centerMenu: MenuSection[] = [
         path: '/global-connection-ip-restrictions', icon: <SafetyOutlined /> },
       { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',
         path: '/admin', icon: <SettingOutlined /> },
+      { kind: 'item', key: 'center-audit', labelKey: 'center.nav.audit',
+        path: '/audit', icon: <AuditOutlined /> },
     ],
   },
 ]

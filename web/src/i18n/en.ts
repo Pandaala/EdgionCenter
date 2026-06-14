@@ -532,6 +532,28 @@ const en = {
   'center.admin.noDb': 'Database not enabled on this center instance',
   'center.admin.envTag': 'Env / Tag',
 
+  // Audit log
+  'center.nav.audit': 'Audit Log',
+  'audit.title': 'Audit Log',
+  'audit.subtitle': 'Attribution trail of admin actions',
+  'audit.col.ts': 'Time',
+  'audit.col.actor': 'Actor',
+  'audit.col.provider': 'Provider',
+  'audit.col.method': 'Method',
+  'audit.col.path': 'Path',
+  'audit.col.targetController': 'Target Controller',
+  'audit.col.status': 'Status',
+  'audit.col.sourceIp': 'Source IP',
+  'audit.filter.actor': 'Filter by actor',
+  'audit.filter.controller': 'Filter by controller',
+  'audit.filter.since': 'Since',
+  'audit.filter.until': 'Until',
+  'audit.filter.apply': 'Apply',
+  'audit.filter.reset': 'Reset',
+  'audit.page.prev': 'Previous',
+  'audit.page.next': 'Next',
+  'audit.page.current': 'Page {n}',
+
   // Login
   'login.title': 'Login',
   'login.subtitle': 'Sign in to Edgion Controller',

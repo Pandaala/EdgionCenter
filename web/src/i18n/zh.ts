@@ -532,6 +532,28 @@ const zh = {
   'center.admin.noDb': '此 Center 实例未启用数据库',
   'center.admin.envTag': 'Env / Tag',
 
+  // Audit log
+  'center.nav.audit': '审计日志',
+  'audit.title': '审计日志',
+  'audit.subtitle': '管理操作的归因记录',
+  'audit.col.ts': '时间',
+  'audit.col.actor': '操作者',
+  'audit.col.provider': '认证来源',
+  'audit.col.method': '方法',
+  'audit.col.path': '路径',
+  'audit.col.targetController': '目标 Controller',
+  'audit.col.status': '状态码',
+  'audit.col.sourceIp': '来源 IP',
+  'audit.filter.actor': '按操作者筛选',
+  'audit.filter.controller': '按 Controller 筛选',
+  'audit.filter.since': '起始时间',
+  'audit.filter.until': '结束时间',
+  'audit.filter.apply': '应用',
+  'audit.filter.reset': '重置',
+  'audit.page.prev': '上一页',
+  'audit.page.next': '下一页',
+  'audit.page.current': '第 {n} 页',
+
   // Login
   'login.title': '登录',
   'login.subtitle': '登录 Edgion Controller',
