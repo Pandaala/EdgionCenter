@@ -1,7 +1,7 @@
 # Task DAC-08: Frontend user mgmt + role matrix + menu gating
 
 **Profile:** feature (frontend)
-**Status:** todo (not started)
+**Status:** done (commits e9efc35 + 4e1bd6c; 17 frontend tests pass)
 **Depends on:** DAC-07 (API), DAC-04 (permission context)
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 8
 
