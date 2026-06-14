@@ -1,7 +1,7 @@
 # Task DAC-05: Full-tier schema + permission-key bindings
 
 **Profile:** feature
-**Status:** todo (not started)
+**Status:** done (commit 8858e91; 247 tests pass)
 **Depends on:** DAC-01 (Store), DAC-04 (catalog keys)
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 5
 

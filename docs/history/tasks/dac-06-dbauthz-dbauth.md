@@ -1,7 +1,7 @@
 # Task DAC-06: DbAuthz + DB-user authn (full login + enforcement)
 
 **Profile:** feature
-**Status:** todo (not started)
+**Status:** done (commits f5b8178 + c346142; 256 tests pass; full tier enforces RBAC)
 **Depends on:** DAC-05 (users store), DAC-04 (authz seam)
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 6
 
