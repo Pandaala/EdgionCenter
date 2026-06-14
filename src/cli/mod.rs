@@ -820,10 +820,10 @@ mod tests {
     }
 
     #[test]
-    fn validate_access_ok_lite_equivalent() {
+    fn validate_access_ok_valid_combos() {
         // OIDC + single admin (with secret) + allow_all, no store needed -> ok.
         assert!(validate_access(true, true, false, false, true, false).is_ok());
-        // Full-equivalent: db_auth + rbac with store + secret -> ok.
+        // db_auth + rbac with store + secret -> ok.
         assert!(validate_access(false, false, true, true, true, true).is_ok());
         // Nothing configured at all is not an error here (503 at request time).
         assert!(validate_access(false, false, false, false, false, false).is_ok());
