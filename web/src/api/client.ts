@@ -95,7 +95,13 @@ export const systemApi = {
   },
   serverInfo: async (): Promise<{
     success: boolean
-    data?: { mode?: string; server_id?: string; ready?: boolean; accessMode?: 'lite' | 'full' }
+    data?: {
+      mode?: string
+      server_id?: string
+      ready?: boolean
+      authzMode?: 'allow_all' | 'rbac'
+      dbAuthEnabled?: boolean
+    }
   }> => {
     const { data } = await apiClient.get('server-info')
     return data

@@ -19,7 +19,15 @@ export const Sidebar = ({ collapsed, mode = 'controller' }: SidebarProps) => {
   const t = useT()
   const { permissions } = usePermissions()
   const { data: serverInfo } = useServerInfo()
-  const gateCtx = { accessMode: serverInfo?.data?.accessMode, permissions }
+  const authzMode = serverInfo?.data?.authzMode
+  const dbAuthEnabled = serverInfo?.data?.dbAuthEnabled ?? false
+  const gateCtx = {
+    authzMode,
+    dbAuthEnabled,
+    // The users table is in use under rbac, or when DB-backed auth is enabled.
+    userMgmtAvailable: authzMode === 'rbac' || dbAuthEnabled,
+    permissions,
+  }
   const { controllerId: rawId } = useParams<{ controllerId?: string }>()
   const activeControllerId = rawId?.replace(/~/g, '/') ?? null
   const prefix = activeControllerId
