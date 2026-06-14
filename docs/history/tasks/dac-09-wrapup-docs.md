@@ -1,7 +1,7 @@
 # Task DAC-09: Wrap-up — configs, skills docs, migration notes
 
 **Profile:** docs
-**Status:** todo (not started)
+**Status:** done (commits 4ee074a + 0db430d; docs accurate, tests green)
 **Depends on:** DAC-01..08
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 9
 
