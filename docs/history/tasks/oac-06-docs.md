@@ -1,7 +1,7 @@
 # Task OAC-06: Docs for the orthogonal model
 
 **Profile:** docs
-**Status:** todo (not started)
+**Status:** done (commit 896d917; config parses, docs accurate)
 **Depends on:** OAC-01..05
 **Plan:** `docs/history/superpowers/plans/2026-06-14-center-orthogonal-access-control-plan.md` §Task 6
 
