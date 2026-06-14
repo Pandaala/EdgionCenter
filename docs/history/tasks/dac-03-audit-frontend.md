@@ -1,7 +1,7 @@
 # Task DAC-03: Audit read API + dashboard page
 
 **Profile:** feature (backend + frontend)
-**Status:** todo (not started)
+**Status:** done (commit 1916f2e; backend+frontend tests pass)
 **Depends on:** DAC-02
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 3
 

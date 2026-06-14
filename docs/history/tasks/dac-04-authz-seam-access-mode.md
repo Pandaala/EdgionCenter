@@ -1,7 +1,7 @@
 # Task DAC-04: Authz abstraction + `[access] mode` (lite tier complete)
 
 **Profile:** feature (backend + frontend)
-**Status:** todo (not started)
+**Status:** done (commits e08f023 + 28368c6; 240 tests pass; lite tier deliverable)
 **Depends on:** DAC-02 (audit in compose); independent of DAC-03
 **Plan:** `docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md` §Task 4
 
