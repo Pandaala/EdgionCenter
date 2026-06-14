@@ -1,7 +1,7 @@
 # Task OAC-01: Config refactor (drop access.mode; add authz + db_auth)
 
 **Profile:** refactor
-**Status:** todo (not started)
+**Status:** done (commit aa46551 + c93004b; part of OAC core)
 **Depends on:** none (but compiles only with OAC-02 + OAC-03)
 **Plan:** `docs/history/superpowers/plans/2026-06-14-center-orthogonal-access-control-plan.md` §Task 1
 

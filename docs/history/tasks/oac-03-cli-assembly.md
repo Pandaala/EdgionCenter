@@ -1,7 +1,7 @@
 # Task OAC-03: Provider-driven cli assembly + validation + bootstrap
 
 **Profile:** feature (core)
-**Status:** todo (not started)
+**Status:** done (commits aa46551 + c93004b; 283 tests pass)
 **Depends on:** OAC-01, OAC-02
 **Plan:** `docs/history/superpowers/plans/2026-06-14-center-orthogonal-access-control-plan.md` §Task 3
 

@@ -1,7 +1,7 @@
 # Task OAC-02: Unified password login (DB users then single-admin)
 
 **Profile:** feature
-**Status:** todo (not started)
+**Status:** done (commit aa46551 + c93004b; part of OAC core)
 **Depends on:** OAC-01 (DbAuthConfig); compiles with OAC-03
 **Plan:** `docs/history/superpowers/plans/2026-06-14-center-orthogonal-access-control-plan.md` §Task 2
 
