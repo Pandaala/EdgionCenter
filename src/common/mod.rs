@@ -3,6 +3,7 @@
 //! users). Only the surface Center actually uses is pulled in here.
 
 pub mod api;
+pub mod audit;
 pub mod conf_sync;
 pub mod config;
 pub mod fed_sync;

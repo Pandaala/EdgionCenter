@@ -134,6 +134,32 @@ impl EdgionCenterCli {
             None
         };
 
+        // Audit sink: spawn the background writer only when a Store exists and
+        // audit is enabled. When the DB is disabled but audit is on, log a WARN
+        // once and skip (audit requires persistence).
+        let audit_sink: Option<crate::common::audit::AuditSink> = if config.audit.enabled {
+            match db.clone() {
+                Some(store) => {
+                    tracing::info!(
+                        component = "center",
+                        log_reads = config.audit.log_reads,
+                        "audit logging enabled"
+                    );
+                    Some(crate::common::audit::AuditSink::spawn(store))
+                }
+                None => {
+                    tracing::warn!(
+                        component = "center",
+                        "audit enabled but database unavailable; audit logging disabled"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let audit_log_reads = config.audit.log_reads;
+
         // Decide federation transport (fail-close) before constructing the server.
         config
             .grpc_security
@@ -291,6 +317,23 @@ impl EdgionCenterCli {
             )
             .expect("center auth state build failed");
             let base_router = router(api_state);
+            // Audit layer: applied to the business router BEFORE compose wraps it
+            // with unified_auth (outermost). A layer already on `base_router` runs
+            // INSIDE auth, so the injected UnifiedAuthClaims are present when the
+            // audit middleware reads them. Writes are off the request path (sink).
+            let base_router = match audit_sink {
+                Some(sink) => {
+                    let audit_state = crate::common::audit::middleware::AuditLayerState {
+                        sink,
+                        log_reads: audit_log_reads,
+                    };
+                    base_router.layer(axum::middleware::from_fn_with_state(
+                        audit_state,
+                        crate::common::audit::middleware::audit_middleware,
+                    ))
+                }
+                None => base_router,
+            };
             // compose hard-codes the assembly order: business routes + auth routes + middleware + CORS.
             // The returned app is final; do not call .route() / .layer() afterwards -- see the function doc.
             let app = crate::common::api::compose_admin_routes(base_router, auth_state, local_auth_intent);

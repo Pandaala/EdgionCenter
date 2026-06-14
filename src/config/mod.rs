@@ -40,6 +40,31 @@ impl Default for DatabaseConfig {
     }
 }
 
+/// Audit-log behavior for mutating admin actions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuditConfig {
+    /// Whether audit logging is enabled. Requires `database.enabled = true`;
+    /// with no database, audit logging is skipped (a WARN is logged at startup).
+    pub enabled: bool,
+    /// Whether read (GET) requests are also recorded. Mutations are always
+    /// recorded when enabled; reads are recorded only when this is true.
+    pub log_reads: bool,
+    /// Retention window in days for periodic pruning. `0` disables pruning
+    /// (records are kept indefinitely).
+    pub retention_days: u32,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            log_reads: false,
+            retention_days: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CenterConfig {
@@ -71,6 +96,9 @@ pub struct CenterConfig {
     /// from; see [`WebConfig`].
     #[serde(default)]
     pub web: WebConfig,
+    /// Audit logging of mutating admin actions. See [`AuditConfig`].
+    #[serde(default)]
+    pub audit: AuditConfig,
 }
 
 impl Default for CenterConfig {
@@ -84,6 +112,7 @@ impl Default for CenterConfig {
             grpc_security: ConfSyncSecurityConfig::default(),
             peer_identity: None,
             web: WebConfig::default(),
+            audit: AuditConfig::default(),
         }
     }
 }
@@ -206,6 +235,38 @@ sync:
         assert_eq!(config.server.grpc_addr, "0.0.0.0:50100");
         assert_eq!(config.sync.ping_interval_secs, 60);
         assert_eq!(config.sync.command_timeout_secs, 30); // default
+    }
+
+    #[test]
+    fn audit_config_defaults() {
+        let c = CenterConfig::default();
+        assert!(c.audit.enabled, "audit enabled by default");
+        assert!(!c.audit.log_reads, "reads excluded by default");
+        assert_eq!(c.audit.retention_days, 0, "retention disabled by default");
+    }
+
+    #[test]
+    fn audit_config_parses_from_yaml() {
+        let yaml = r#"
+audit:
+  enabled: false
+  log_reads: true
+  retention_days: 30
+"#;
+        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!c.audit.enabled);
+        assert!(c.audit.log_reads);
+        assert_eq!(c.audit.retention_days, 30);
+    }
+
+    #[test]
+    fn audit_config_absent_uses_defaults() {
+        // Omitting the whole [audit] section must yield the documented defaults.
+        let yaml = "server:\n  http_addr: \"0.0.0.0:5900\"\n";
+        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(c.audit.enabled);
+        assert!(!c.audit.log_reads);
+        assert_eq!(c.audit.retention_days, 0);
     }
 
     #[test]

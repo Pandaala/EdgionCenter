@@ -9,6 +9,7 @@ use crate::config::{DatabaseConfig, DbBackend};
 use sqlx::mysql::MySqlPool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 
+pub mod audit;
 pub mod controllers;
 
 pub use controllers::DbController;
