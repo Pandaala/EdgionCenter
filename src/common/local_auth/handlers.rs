@@ -48,6 +48,10 @@ pub struct LoginResponse {
 #[derive(Debug, Serialize)]
 pub struct MeResponse {
     pub username: String,
+    /// Permission keys granted to the caller, resolved by the authz middleware.
+    /// In the LITE tier this is the full catalog (login = admin). Empty when no
+    /// `PermissionSet` was injected (e.g. authz layer not installed).
+    pub permissions: Vec<String>,
 }
 
 /// High-level auth configuration state of the controller.
@@ -198,9 +202,12 @@ pub async fn login_handler(State(state): State<Arc<UnifiedAuthState>>, Json(req)
 /// requests.
 pub async fn me_handler(
     axum::Extension(claims): axum::Extension<crate::common::unified_auth::UnifiedAuthClaims>,
+    perms: Option<axum::Extension<crate::common::authz::PermissionSet>>,
 ) -> Response {
+    let permissions = perms.map(|axum::Extension(p)| p.materialize()).unwrap_or_default();
     Json(ApiResponse::ok_body(MeResponse {
         username: claims.sub.unwrap_or_default(),
+        permissions,
     }))
     .into_response()
 }
@@ -253,6 +260,98 @@ mod handler_tests {
             .route("/api/v1/auth/logout", post(logout_handler))
             .route("/api/v1/auth/me", get(me_handler))
             .with_state(state)
+    }
+
+    /// `/auth/me` reports the injected `PermissionSet` (LITE → full catalog) and
+    /// the username from the claims. Builds a router that injects both a claims
+    /// extension and an `AllowAll` permission set ahead of the handler.
+    #[tokio::test]
+    async fn me_reports_permissions_from_injected_set() {
+        use crate::common::authz::PermissionSet;
+        use crate::common::unified_auth::{AuthProvider, UnifiedAuthClaims};
+        use axum::routing::get;
+
+        let app = axum::Router::new()
+            .route("/api/v1/auth/me", get(me_handler))
+            .layer(axum::middleware::from_fn(
+                |mut req: Request<Body>, next: axum::middleware::Next| async move {
+                    req.extensions_mut().insert(UnifiedAuthClaims {
+                        provider: AuthProvider::Local,
+                        sub: Some("admin".to_string()),
+                        iss: None,
+                        claims: serde_json::Value::Null,
+                    });
+                    req.extensions_mut().insert(PermissionSet::all());
+                    next.run(req).await
+                },
+            ));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/auth/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let data = v.get("data").expect("data field");
+        assert_eq!(data.get("username").and_then(|x| x.as_str()), Some("admin"));
+        let perms = data
+            .get("permissions")
+            .and_then(|x| x.as_array())
+            .expect("permissions array");
+        assert_eq!(
+            perms.len(),
+            crate::common::authz::catalog::all_keys().len(),
+            "LITE /auth/me must report the full permission catalog"
+        );
+        assert!(perms.iter().any(|p| p.as_str() == Some("controllers:read")));
+    }
+
+    /// When no `PermissionSet` is injected, `/auth/me` reports an empty list.
+    #[tokio::test]
+    async fn me_reports_empty_permissions_when_absent() {
+        use crate::common::unified_auth::{AuthProvider, UnifiedAuthClaims};
+        use axum::routing::get;
+
+        let app = axum::Router::new()
+            .route("/api/v1/auth/me", get(me_handler))
+            .layer(axum::middleware::from_fn(
+                |mut req: Request<Body>, next: axum::middleware::Next| async move {
+                    req.extensions_mut().insert(UnifiedAuthClaims {
+                        provider: AuthProvider::Local,
+                        sub: Some("admin".to_string()),
+                        iss: None,
+                        claims: serde_json::Value::Null,
+                    });
+                    next.run(req).await
+                },
+            ));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/auth/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let perms = v
+            .get("data")
+            .and_then(|d| d.get("permissions"))
+            .and_then(|x| x.as_array())
+            .expect("permissions array");
+        assert!(perms.is_empty(), "permissions must be empty when no set injected");
     }
 
     #[tokio::test]

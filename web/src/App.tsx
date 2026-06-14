@@ -4,6 +4,7 @@ import { Spin } from 'antd'
 import { AppShell } from './components/shell/AppShell'
 import ControllerProxy from './components/Layout/ControllerProxy'
 import { isLoggedIn } from './utils/auth'
+import { PermissionProvider } from './utils/permissions'
 import { setAppMode } from './utils/proxy'
 import { systemApi } from './api/client'
 import LoginPage from './pages/Login/LoginPage'
@@ -49,7 +50,9 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!isLoggedIn()) {
     return <Navigate to="/login" replace />
   }
-  return <>{children}</>
+  // Fetch /auth/me once for the authenticated subtree so useCan() is available.
+  // (Menu/route gating on permissions is a later task.)
+  return <PermissionProvider>{children}</PermissionProvider>
 }
 
 function App() {

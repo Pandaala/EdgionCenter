@@ -270,6 +270,7 @@ impl EdgionCenterCli {
         let allow_admin_ips = config.server.allow_admin_ips.clone();
         let allow_tcp_ips = config.server.allow_tcp_ips.clone();
         let web_dir = config.web.dir.clone();
+        let access_mode = config.access.mode;
         // Startup diagnostic only — does not change cookie runtime behavior.
         if let Some(local) = config.local_auth.as_ref() {
             // Args are (admin_tls_present, cookie_secure) — keep this order.
@@ -334,9 +335,26 @@ impl EdgionCenterCli {
                 }
                 None => base_router,
             };
-            // compose hard-codes the assembly order: business routes + auth routes + middleware + CORS.
+            // Select the authorization store by access tier. LITE installs the
+            // allow-all store (login = admin). FULL (DB-backed RBAC) is a later
+            // task; until it lands, fall back to allow-all with a warning so the
+            // binary still runs rather than fail-closing every request.
+            let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> = match access_mode {
+                crate::config::AccessMode::Lite => {
+                    std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz)
+                }
+                crate::config::AccessMode::Full => {
+                    tracing::warn!(
+                        component = "center",
+                        "access.mode=full requested but DB-backed authz is not yet implemented; \
+                         treating as allow-all (every authenticated caller is a full admin)"
+                    );
+                    std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz)
+                }
+            };
+            // compose hard-codes the assembly order: business routes + auth routes + authz + unified_auth + cache-control.
             // The returned app is final; do not call .route() / .layer() afterwards -- see the function doc.
-            let app = crate::common::api::compose_admin_routes(base_router, auth_state, local_auth_intent);
+            let app = crate::common::api::compose_admin_routes(base_router, auth_state, local_auth_intent, authz);
             // Dashboard UI: a public SPA fallback mounted AFTER compose_admin_routes.
             // Because it is added after compose returns its final (auth-wrapped) router,
             // the fallback is NOT covered by unified_auth — so the login page and its
@@ -600,7 +618,9 @@ mod tests {
             UnifiedAuthState::from_configs(auth_config, local_auth_config, require_auth, "test").unwrap();
 
         let business = Router::new().route("/api/v1/controllers", get(|| async { "controllers" }));
-        let app = crate::common::api::compose_admin_routes(business, auth_state, false);
+        let authz: Arc<dyn crate::common::authz::AuthzStore> =
+            Arc::new(crate::common::authz::allow_all::AllowAllAuthz);
+        let app = crate::common::api::compose_admin_routes(business, auth_state, false, authz);
 
         let req = Request::builder()
             .uri("/api/v1/controllers")

@@ -40,6 +40,38 @@ impl Default for DatabaseConfig {
     }
 }
 
+/// Access-control tier selector.
+///
+/// `Lite` (default) wires the `AllowAllAuthz` store: every authenticated caller
+/// is treated as a full admin (login = admin). `Full` is reserved for the
+/// database-backed RBAC store (a later task); until that lands it falls back to
+/// allow-all with a startup warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AccessMode {
+    /// Login = admin. Everyone authenticated gets every permission.
+    #[default]
+    Lite,
+    /// Database-backed RBAC (not yet implemented; treated as Lite for now).
+    Full,
+}
+
+/// Access-control configuration. Selects which `AuthzStore` is installed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AccessConfig {
+    /// Access-control tier. Defaults to `lite`.
+    pub mode: AccessMode,
+}
+
+impl Default for AccessConfig {
+    fn default() -> Self {
+        Self {
+            mode: AccessMode::default(),
+        }
+    }
+}
+
 /// Audit-log behavior for mutating admin actions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -99,6 +131,9 @@ pub struct CenterConfig {
     /// Audit logging of mutating admin actions. See [`AuditConfig`].
     #[serde(default)]
     pub audit: AuditConfig,
+    /// Access-control tier (lite/full). See [`AccessConfig`].
+    #[serde(default)]
+    pub access: AccessConfig,
 }
 
 impl Default for CenterConfig {
@@ -113,6 +148,7 @@ impl Default for CenterConfig {
             peer_identity: None,
             web: WebConfig::default(),
             audit: AuditConfig::default(),
+            access: AccessConfig::default(),
         }
     }
 }
@@ -267,6 +303,30 @@ audit:
         assert!(c.audit.enabled);
         assert!(!c.audit.log_reads);
         assert_eq!(c.audit.retention_days, 0);
+    }
+
+    #[test]
+    fn access_mode_defaults_to_lite() {
+        let c = CenterConfig::default();
+        assert_eq!(c.access.mode, AccessMode::Lite, "default access mode must be lite");
+    }
+
+    #[test]
+    fn access_mode_absent_uses_lite() {
+        // Omitting the whole [access] section must default to lite.
+        let yaml = "server:\n  http_addr: \"0.0.0.0:5900\"\n";
+        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(c.access.mode, AccessMode::Lite);
+    }
+
+    #[test]
+    fn access_mode_full_parses() {
+        let yaml = r#"
+access:
+  mode: full
+"#;
+        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(c.access.mode, AccessMode::Full);
     }
 
     #[test]
