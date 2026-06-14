@@ -59,6 +59,10 @@ fn should_record(method: &Method, path: &str, log_reads: bool) -> bool {
 
 /// For `/api/v1/proxy/{controller_id}/...`, extract and decode the first path
 /// segment (`~` -> `/`, mirroring `api::proxy_handler`). `None` for other routes.
+///
+/// `path` here is `req.uri().path()`, which is NOT percent-decoded; for ordinary
+/// controller ids this matches `proxy_handler`'s `~`->`/` decode, but a controller
+/// id containing percent-encoded bytes could differ between the two.
 fn parse_target_controller(path: &str) -> Option<String> {
     let rest = path.strip_prefix(PROXY_PREFIX)?;
     let seg = rest.split('/').next()?;
@@ -88,11 +92,15 @@ fn actor_and_provider(req: &Request) -> (String, String) {
 /// Audit middleware. Captures attribution before running the handler, then —
 /// for recordable requests — builds and hands off an [`AuditRecord`].
 pub async fn audit_middleware(State(state): State<AuditLayerState>, req: Request, next: Next) -> Response {
-    // Capture everything we need from the request before it is consumed.
+    // Decide recordability first, from borrowed inputs only (no allocation): the
+    // common GET path (default `log_reads=false`) skips all attribution work below.
+    if !should_record(req.method(), req.uri().path(), state.log_reads) {
+        return next.run(req).await;
+    }
+
+    // Recordable: capture everything we need from the request before it is consumed.
     let method = req.method().clone();
     let path = req.uri().path().to_string();
-    let record = should_record(&method, &path, state.log_reads);
-
     // Source IP comes from the TCP peer (ConnectInfo) only — never X-Forwarded-For.
     let source_ip = req
         .extensions()
@@ -108,21 +116,19 @@ pub async fn audit_middleware(State(state): State<AuditLayerState>, req: Request
 
     let resp = next.run(req).await;
 
-    if record {
-        let rec = AuditRecord {
-            ts: unix_now(),
-            actor,
-            provider,
-            method: method.to_string(),
-            path,
-            target_controller,
-            status: resp.status().as_u16() as i32,
-            source_ip,
-            request_id,
-            detail: None,
-        };
-        state.sink.record(rec);
-    }
+    let rec = AuditRecord {
+        ts: unix_now(),
+        actor,
+        provider,
+        method: method.to_string(),
+        path,
+        target_controller,
+        status: resp.status().as_u16() as i32,
+        source_ip,
+        request_id,
+        detail: None,
+    };
+    state.sink.record(rec);
 
     resp
 }
