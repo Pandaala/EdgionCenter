@@ -156,6 +156,7 @@ mod tests {
             registry,
             db_required: false,
             authz_mode: crate::config::AuthzMode::Rbac,
+            db_auth_enabled: false,
         }
     }
 

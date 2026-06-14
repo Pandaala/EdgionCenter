@@ -225,6 +225,7 @@ impl EdgionCenterCli {
             registry: registry.clone(),
             db_required: config.database.enabled,
             authz_mode: config.authz.mode,
+            db_auth_enabled: config.db_auth.enabled,
         };
         let http_addr: std::net::SocketAddr = config.server.http_addr.parse()?;
         let grpc_addr: std::net::SocketAddr = config.server.grpc_addr.parse()?;

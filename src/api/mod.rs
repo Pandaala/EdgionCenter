@@ -6,7 +6,7 @@
 //!   - Metrics   (metrics_addr / 12290): GET /metrics (no auth)
 //!
 //! Admin routes:
-//!   GET  /api/v1/server-info                              → {"mode":"center"}
+//!   GET  /api/v1/server-info                              → {"mode":"center","authzMode":...,"dbAuthEnabled":...}
 //!   GET  /api/v1/controllers                              → list all controller summaries
 //!   GET  /api/v1/clusters                                 → list distinct cluster names
 //!   POST /api/v1/controllers/{id}/reload                  → send reload command
@@ -84,10 +84,13 @@ pub struct ApiState {
     /// (`db` is `None`), Center is not ready to serve DB-backed requests.
     pub db_required: bool,
     /// Configured authorization mode (`allow_all` / `rbac`). Exposed via
-    /// `GET /server-info` (mapped to the legacy `lite`/`full` wire values) so the
-    /// dashboard can hide user/role management under `allow_all` (where
-    /// `AllowAllAuthz` would otherwise grant the manage keys).
+    /// `GET /server-info` as `authzMode` so the dashboard can hide user/role
+    /// management under `allow_all` (where `AllowAllAuthz` would otherwise grant
+    /// the manage keys).
     pub authz_mode: crate::config::AuthzMode,
+    /// Whether DB-backed user login is enabled (`db_auth.enabled`). Exposed via
+    /// `GET /server-info` as `dbAuthEnabled`.
+    pub db_auth_enabled: bool,
 }
 
 impl ApiState {
@@ -250,22 +253,19 @@ async fn ready_check(State(state): State<ApiState>) -> impl IntoResponse {
 #[serde(rename_all = "camelCase")]
 struct ServerInfoResponse {
     mode: String,
-    /// Access-control tier: `"lite"` (allow_all authz) or `"full"` (rbac authz).
-    /// The dashboard uses this as the single source of truth for whether to
-    /// surface user/role management (only meaningful when RBAC is enforced).
-    access_mode: String,
+    /// Authorization mode: `"allow_all"` or `"rbac"`. The dashboard uses this to
+    /// decide whether to surface user/role management (only meaningful under
+    /// `rbac`, where permissions are enforced per subject).
+    authz_mode: crate::config::AuthzMode,
+    /// Whether DB-backed user login is enabled (`db_auth.enabled`).
+    db_auth_enabled: bool,
 }
 
 async fn server_info(State(state): State<ApiState>) -> impl IntoResponse {
-    // Map the authz axis onto the legacy lite/full wire contract the dashboard
-    // already consumes: rbac -> full (show user/role management), allow_all -> lite.
-    let access_mode = match state.authz_mode {
-        crate::config::AuthzMode::AllowAll => "lite",
-        crate::config::AuthzMode::Rbac => "full",
-    };
     Json(ApiResponse::ok_body(ServerInfoResponse {
         mode: "center".to_string(),
-        access_mode: access_mode.to_string(),
+        authz_mode: state.authz_mode,
+        db_auth_enabled: state.db_auth_enabled,
     }))
 }
 
@@ -462,9 +462,10 @@ mod tests {
     use super::*;
     use crate::config::AuthzMode;
 
-    /// Build an `ApiState` carrying `authz_mode`; every other field is a
-    /// minimal default sufficient for the stateless `server_info` handler.
-    fn state_with_authz_mode(authz_mode: AuthzMode) -> ApiState {
+    /// Build an `ApiState` carrying `authz_mode` + `db_auth_enabled`; every other
+    /// field is a minimal default sufficient for the stateless `server_info`
+    /// handler.
+    fn state_with_authz_mode(authz_mode: AuthzMode, db_auth_enabled: bool) -> ApiState {
         use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
         use parking_lot::Mutex;
         use std::collections::HashMap;
@@ -486,6 +487,7 @@ mod tests {
             registry,
             db_required: false,
             authz_mode,
+            db_auth_enabled,
         }
     }
 
@@ -495,21 +497,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_info_reports_access_mode() {
-        // RBAC authz surfaces accessMode=full alongside the deployment mode.
-        let resp = server_info(State(state_with_authz_mode(AuthzMode::Rbac)))
+    async fn server_info_reports_authz_and_db_auth() {
+        // RBAC authz + DB-user login on: authzMode=rbac, dbAuthEnabled=true,
+        // and the legacy accessMode key is gone from the wire.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::Rbac, true)))
             .await
             .into_response();
         let json = body_json(resp).await;
         assert_eq!(json["data"]["mode"], "center");
-        assert_eq!(json["data"]["accessMode"], "full");
+        assert_eq!(json["data"]["authzMode"], "rbac");
+        assert_eq!(json["data"]["dbAuthEnabled"], true);
+        assert!(json["data"]["accessMode"].is_null(), "accessMode must be gone");
 
-        // AllowAll authz reports accessMode=lite so the dashboard can hide management.
-        let resp = server_info(State(state_with_authz_mode(AuthzMode::AllowAll)))
+        // AllowAll authz + DB-user login off: authzMode=allow_all, dbAuthEnabled=false.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::AllowAll, false)))
             .await
             .into_response();
         let json = body_json(resp).await;
-        assert_eq!(json["data"]["accessMode"], "lite");
+        assert_eq!(json["data"]["authzMode"], "allow_all");
+        assert_eq!(json["data"]["dbAuthEnabled"], false);
     }
 }
 
