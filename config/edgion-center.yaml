@@ -28,14 +28,96 @@ sync:
   ping_interval_secs: 30
 
 # ============================================================================
+# Access control (`access:`) — tier selector
+# ============================================================================
+# Selects which access-control tier Center runs in. See the full reference at
+# skills/02-features/access-control.md.
+#
+#   lite (default) — Login = admin. Authentication via OIDC (`auth:`) and/or a
+#                    single shared admin (`local_auth:`); every authenticated
+#                    caller is treated as a full admin (no per-user RBAC). The
+#                    audit log still attributes actions to the caller.
+#   full           — DB-backed local users (username + bcrypt password) with
+#                    page + API RBAC managed from the dashboard (Users + Roles).
+#                    REQUIRES a usable database (see `database:` below) AND a
+#                    `local_auth.jwt_secret`. See the full-mode notes under
+#                    `local_auth:` further down.
+access:
+  mode: lite
+  # mode: full
+
+# ============================================================================
+# Persistence (`database:`)
+# ============================================================================
+# Backing store for the controller registry, audit log, and (in full mode) the
+# users/roles tables. `lite` mode defaults to SQLite; `full` mode REQUIRES a
+# usable database and refuses to start without one.
+database:
+  enabled: true
+  # Storage backend: sqlite (default, embedded) or mysql (external).
+  backend: sqlite
+  # SQLite file path (used when backend = sqlite). Relative paths resolve from
+  # the working directory.
+  sqlite_path: "data/center.db"
+  #
+  # --- External MySQL (recommended default for full mode) ---
+  # backend: mysql
+  # mysql_url: "mysql://user:pass@host:3306/edgion_center"
+
+# ============================================================================
+# Audit log (`audit:`)
+# ============================================================================
+# Records who did what, when, from where, and with what result. Requires
+# `database.enabled = true` (with no database, audit logging is skipped and a
+# WARN is logged at startup). The dashboard Audit page reads
+# GET /api/v1/center/admin/audit-logs.
+audit:
+  # Enabled by default when the database is enabled.
+  enabled: true
+  # Record read (GET) requests too. Mutations are always recorded when enabled;
+  # reads are recorded only when this is true.
+  log_reads: false
+  # Retention window in days; 0 = keep records indefinitely.
+  # KNOWN LIMITATION: pruning is not yet scheduled, so `retention_days` has no
+  # runtime effect today — records are never auto-deleted regardless of value.
+  retention_days: 0
+
+# ============================================================================
 # Admin API Authentication
 # ============================================================================
 # Authentication is mandatory. Configure a `local_auth` or `auth` provider;
-# omitting one leaves business routes returning 503 until configured.
+# omitting both leaves business routes returning 503 until configured.
+#
+# --- OIDC / Okta (`auth:`) ---
+# Used in LITE mode for SSO login. IGNORED in FULL mode (DB users only; a WARN
+# is logged if `auth:` is set alongside `access.mode: full`).
 #
 # auth:
 #   enabled: true
 #   discovery: "https://your-idp.example.com/.well-known/openid-configuration"
+#
+# --- Local auth (`local_auth:`) ---
+# In LITE mode: a single shared admin (username + password) plus the JWT signing
+# secret. In FULL mode: ONLY `jwt_secret` is used (to sign/validate DB-user login
+# tokens); `username`/`password` are IGNORED. A `local_auth:` block WITH a
+# non-empty `jwt_secret` is REQUIRED in full mode (startup fails otherwise).
+#
+# local_auth:
+#   username: "admin"                 # lite mode only; ignored in full mode
+#   password: "change-me"             # lite mode only; ignored in full mode
+#   jwt_secret: "change-me-in-production"   # required; reused as the signer in full mode
+#   jwt_expiry_hours: 24
+#   cookie_secure: true
+#
+# --- Full-mode first-run bootstrap ---
+# When `access.mode: full` and the `users` table is empty, set BOTH env vars to
+# create the initial `admin` user (bound to a built-in `admin` role holding every
+# permission key):
+#   EDGION_ADMIN_USERNAME=admin
+#   EDGION_ADMIN_PASSWORD=<strong-password>
+# If unset, a WARN is logged and no login is possible until a user is provisioned.
+# (`EDGION_ADMIN_JWT_SECRET` can also supply `jwt_secret` via the environment.)
+# Note: permission changes take up to ~30s to take effect (authz cache TTL).
 
 # ============================================================================
 # Federation gRPC Channel Security (mTLS)

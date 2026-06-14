@@ -8,7 +8,11 @@
 > LWW can lose a revocation and cause privilege escalation; see the Policy-CRDT research.)
 
 **Profile:** design / future
-**Status:** todo (design draft — not started)
+**Status:** SUPERSEDED (2026-06-13) — replaced by the dual-access-control design + plan that
+shipped as the `lite`/`full` tiers. See
+`docs/history/superpowers/specs/2026-06-13-center-dual-access-control-design.md` and
+`docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md`, and the
+operator reference `skills/02-features/access-control.md`. Kept for history only.
 **Relates to:** `center-build-in-frontend.md` (decided "login = admin" for now),
 `center-audit-log.md` (audit is the compensating control).
 

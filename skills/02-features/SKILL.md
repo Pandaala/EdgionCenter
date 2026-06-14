@@ -33,6 +33,13 @@ business routes returning 503 until configured. `/health`, `/ready`, `/metrics`,
 `/api/v1/auth/status` remain reachable. See
 [01-architecture/06-center/SKILL.md](../01-architecture/06-center/SKILL.md) §Authentication.
 
+## Access control (lite / full)
+
+Two config-selected access-control tiers (`access.mode`): **lite** (login = admin) and
+**full** (DB-backed users + page/API RBAC). Covers the `access:` / `database:` / `audit:`
+config, the permission catalog, RBAC enforcement, admin bootstrap, and known limitations.
+See [access-control.md](access-control.md).
+
 ## Admin API
 
 TODO: enumerate Admin API endpoints. Handlers live in `src/api/`
