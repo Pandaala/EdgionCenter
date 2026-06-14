@@ -66,4 +66,45 @@ describe('RoleManagementPage', () => {
       expect(setPermissions).toHaveBeenCalledWith(1, ['audit:read', 'users:manage'])
     })
   })
+
+  it('preserves held permission keys absent from the catalog on save', async () => {
+    // The role holds 'legacy:thing', which no catalog group exposes (version
+    // skew). It has no checkbox and must survive Save untouched.
+    rolesList.mockResolvedValue({
+      success: true,
+      data: [{ id: 1, name: 'ops', description: '', permissionKeys: ['audit:read', 'legacy:thing'] }],
+      count: 1,
+    })
+    renderPage()
+    const usersBox = await screen.findByRole('checkbox', { name: 'users:manage' })
+    fireEvent.click(usersBox)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Permissions' }))
+
+    await waitFor(() => {
+      // preserved non-catalog key first, then checked catalog keys in catalog order.
+      expect(setPermissions).toHaveBeenCalledWith(1, ['legacy:thing', 'audit:read', 'users:manage'])
+    })
+  })
+
+  it('keeps unsaved matrix edits when a background refetch adds other roles', async () => {
+    renderPage()
+    const usersBox = await screen.findByRole('checkbox', { name: 'users:manage' })
+    // Unsaved toggle on the selected role.
+    fireEvent.click(usersBox)
+    expect(usersBox).toBeChecked()
+
+    // A refetch returns an extra, unrelated role — selectedId is unchanged.
+    rolesList.mockResolvedValue({
+      success: true,
+      data: [...ROLES, { id: 2, name: 'viewer', description: '', permissionKeys: [] }],
+      count: 2,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
+
+    // The new role shows up...
+    await waitFor(() => expect(screen.getByText('viewer')).toBeInTheDocument())
+    // ...but the unsaved toggle on the selected role is preserved.
+    expect(screen.getByRole('checkbox', { name: 'users:manage' })).toBeChecked()
+  })
 })

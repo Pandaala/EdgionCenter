@@ -38,23 +38,44 @@ export default function RoleManagementPage() {
 
   const selectedRole = roles.find((r) => r.id === selectedId) ?? null
 
-  // Auto-select the first role and load its permission keys into the matrix.
-  // Re-runs when the role list changes so the matrix never points at a stale id.
+  // Selection lifecycle, driven by the role list (create/delete/refetch):
+  //  - no roles  → clear the selection and the editable matrix;
+  //  - nothing selected → auto-select the first role;
+  //  - selected role deleted → clear selection and matrix.
+  // It deliberately does NOT re-seed selectedKeys for a still-present selection,
+  // so a background refetch of OTHER roles can't clobber unsaved toggles.
   useEffect(() => {
     if (roles.length === 0) {
       setSelectedId(null)
+      setSelectedKeys(new Set())
       return
     }
-    const current = roles.find((r) => r.id === selectedId)
-    const target = current ?? roles[0]
-    setSelectedId(target.id)
-    setSelectedKeys(new Set(target.permissionKeys))
+    if (selectedId == null) {
+      setSelectedId(roles[0].id)
+      return
+    }
+    if (!roles.some((r) => r.id === selectedId)) {
+      setSelectedId(null)
+      setSelectedKeys(new Set())
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rolesData])
 
+  // Seed the editable matrix from the selected role's saved keys, but only when
+  // the user picks a DIFFERENT role (selectedId changes) — not on every refetch.
+  useEffect(() => {
+    if (selectedId == null) {
+      setSelectedKeys(new Set())
+      return
+    }
+    const role = (rolesData?.data ?? []).find((r) => r.id === selectedId)
+    if (role) setSelectedKeys(new Set(role.permissionKeys))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId])
+
   const selectRole = (role: RoleDto) => {
     setSelectedId(role.id)
-    setSelectedKeys(new Set(role.permissionKeys))
+    // selectedKeys is seeded by the [selectedId] effect above.
   }
 
   const toggleKey = (key: string, checked: boolean) => {
@@ -104,8 +125,13 @@ export default function RoleManagementPage() {
 
   const handleSave = () => {
     if (!selectedRole) return
-    // Preserve catalog order for a stable, predictable payload.
-    const keys = catalogOrder.filter((k) => selectedKeys.has(k))
+    // Preserve any held key the catalog doesn't manage (version skew /
+    // deprecated-but-assigned), then apply checkbox state over catalog keys
+    // in catalog order for a stable, predictable payload.
+    const catalogKeys = new Set(catalogOrder)
+    const preserved = selectedRole.permissionKeys.filter((k) => !catalogKeys.has(k))
+    const checked = catalogOrder.filter((k) => selectedKeys.has(k))
+    const keys = Array.from(new Set([...preserved, ...checked]))
     saveMutation.mutate({ id: selectedRole.id, keys })
   }
 
