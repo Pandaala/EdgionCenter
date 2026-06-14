@@ -293,4 +293,78 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
     }
+
+    /// Mint a valid local HS256 token for `valid_local()`'s secret with an
+    /// arbitrary `sub`.
+    fn token_for(sub: &str) -> String {
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as usize;
+        let claims = serde_json::json!({ "sub": sub, "iat": now, "exp": now + 3600 });
+        encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret("a_long_enough_jwt_secret_value_abcdef".as_bytes()),
+        )
+        .unwrap()
+    }
+
+    /// FULL-tier end-to-end RBAC enforcement through the fully composed app:
+    /// a logged-in user whose ONLY permission is `controllers:read` gets 200 on
+    /// `GET /api/v1/controllers` but 403 on `POST /api/v1/controllers/{id}/reload`
+    /// (which requires `controllers:write`). The token is hand-issued (signed
+    /// with the test secret) and resolved by a real `DbAuthz` over a seeded
+    /// in-memory `Store` — a real behavioral assertion, not a mock.
+    #[tokio::test]
+    async fn db_authz_enforces_per_route_permissions() {
+        use crate::common::authz::db_authz::DbAuthz;
+        use crate::store::Store;
+        use std::sync::Arc;
+
+        // Seed: user "alice" with a role granting only controllers:read.
+        let store = Arc::new(Store::open_in_memory().await.unwrap());
+        let uid = store.create_user("alice", "hash", "Alice").await.unwrap();
+        let rid = store.create_role("viewer", "Read-only").await.unwrap();
+        store
+            .set_role_permissions(rid, &["controllers:read".into()])
+            .await
+            .unwrap();
+        store.set_user_roles(uid, &[rid]).await.unwrap();
+
+        let state = new_state_with_local();
+        let authz: Arc<dyn AuthzStore> = Arc::new(DbAuthz::new(store));
+        let business = Router::new()
+            .route("/api/v1/controllers", get(|| async { "list" }))
+            .route("/api/v1/controllers/{id}/reload", axum::routing::post(|| async { "reload" }));
+        let app = compose_admin_routes(business, state, false, authz);
+
+        // GET /api/v1/controllers -> controllers:read -> granted -> 200.
+        let req = Request::builder()
+            .uri("/api/v1/controllers")
+            .header("Authorization", format!("Bearer {}", token_for("alice")))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "controllers:read must permit GET /api/v1/controllers"
+        );
+
+        // POST /api/v1/controllers/c1/reload -> controllers:write -> missing -> 403.
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/controllers/c1/reload")
+            .header("Authorization", format!("Bearer {}", token_for("alice")))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "missing controllers:write must deny POST .../reload with 403"
+        );
+    }
 }

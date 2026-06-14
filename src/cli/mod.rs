@@ -271,6 +271,9 @@ impl EdgionCenterCli {
         let allow_tcp_ips = config.server.allow_tcp_ips.clone();
         let web_dir = config.web.dir.clone();
         let access_mode = config.access.mode;
+        // Store handle for the FULL access tier (DB-backed login + RBAC + admin
+        // bootstrap). Moved into the admin HTTP task below.
+        let store_for_full = db.clone();
         // Startup diagnostic only — does not change cookie runtime behavior.
         if let Some(local) = config.local_auth.as_ref() {
             // Args are (admin_tls_present, cookie_secure) — keep this order.
@@ -310,13 +313,6 @@ impl EdgionCenterCli {
                 );
             }
 
-            let auth_state = crate::common::unified_auth::UnifiedAuthState::from_configs(
-                auth_config.as_ref(),
-                local_auth_config.as_ref(),
-                require_auth,
-                "center",
-            )
-            .expect("center auth state build failed");
             let base_router = router(api_state);
             // Audit layer: applied to the business router BEFORE compose wraps it
             // with unified_auth (outermost). A layer already on `base_router` runs
@@ -335,27 +331,88 @@ impl EdgionCenterCli {
                 }
                 None => base_router,
             };
-            // Select the authorization store by access tier. LITE installs the
-            // allow-all store (login = admin). FULL (DB-backed RBAC) is a later
-            // task; until it lands, fall back to allow-all with a warning so the
-            // binary still runs rather than fail-closing every request.
-            let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> = match access_mode {
+            // Build the auth state, authorization store, and auth routes by
+            // access tier, then compose. LITE (default): single-admin/OIDC login
+            // + AllowAllAuthz (login = admin). FULL: DB-user login (bcrypt) +
+            // DbAuthz (DB-resolved RBAC). Both tiers reuse the IDENTICAL
+            // `unified_auth` local HS256 validation path — full mode only differs
+            // in the login credential source and the installed AuthzStore.
+            //
+            // compose hard-codes the assembly order: business routes + auth routes
+            // + authz + unified_auth + cache-control. The returned app is final;
+            // do not call .route() / .layer() afterwards -- see the function doc.
+            let app = match access_mode {
                 crate::config::AccessMode::Lite => {
-                    std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz)
+                    let auth_state = crate::common::unified_auth::UnifiedAuthState::from_configs(
+                        auth_config.as_ref(),
+                        local_auth_config.as_ref(),
+                        require_auth,
+                        "center",
+                    )
+                    .expect("center auth state build failed");
+                    let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> =
+                        std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz);
+                    crate::common::api::compose_admin_routes(base_router, auth_state, local_auth_intent, authz)
                 }
                 crate::config::AccessMode::Full => {
-                    // TODO(DAC-06): replace allow-all placeholder with DbAuthz; full mode currently grants every authenticated caller full admin
-                    tracing::warn!(
+                    // FULL mode requires a usable Store AND a configured jwt_secret.
+                    // Fail startup (no allow-all fallback) when either is missing.
+                    let store = store_for_full.clone().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "access.mode=full requires a database: set database.enabled=true with a \
+                             reachable backend. Refusing to start."
+                        )
+                    })?;
+                    let jwt_secret = local_auth_config
+                        .as_ref()
+                        .map(|c| c.jwt_secret.clone())
+                        .filter(|s| !s.is_empty())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "access.mode=full requires [local_auth].jwt_secret to be set (used to \
+                                 sign/validate DB-user login tokens). Refusing to start."
+                            )
+                        })?;
+
+                    // First-run admin bootstrap (creates a superuser-by-keys when
+                    // the users table is empty and EDGION_ADMIN_* are set).
+                    bootstrap_admin(&store).await?;
+
+                    // Build the auth state with OIDC passthrough (if any) but NO
+                    // single-admin local provider, then install a local validator
+                    // carrying ONLY the signing secret / expiry / cookie settings.
+                    // Its username/password are placeholders and never consulted:
+                    // DB users are the credential source.
+                    let auth_state = crate::common::unified_auth::UnifiedAuthState::from_configs(
+                        auth_config.as_ref(),
+                        None,
+                        require_auth,
+                        "center",
+                    )
+                    .expect("center auth state build failed");
+                    let validator_cfg = crate::common::local_auth::LocalAuthConfig {
+                        jwt_secret,
+                        jwt_expiry_hours: local_auth_config.as_ref().map(|c| c.jwt_expiry_hours).unwrap_or(24),
+                        cookie_secure: local_auth_config.as_ref().map(|c| c.cookie_secure).unwrap_or(true),
+                        ..crate::common::local_auth::LocalAuthConfig::default()
+                    };
+                    auth_state.update_local(crate::common::local_auth::LocalAuthState::from_config(&validator_cfg));
+                    tracing::info!(
                         component = "center",
-                        "access.mode=full requested but DB-backed authz is not yet implemented; \
-                         treating as allow-all (every authenticated caller is a full admin)"
+                        "access.mode=full: DB-backed login + RBAC enforcement active"
                     );
-                    std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz)
+
+                    let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> =
+                        std::sync::Arc::new(crate::common::authz::db_authz::DbAuthz::new(store.clone()));
+
+                    // Mount DB login (+ reuse local logout/me) on the business
+                    // router, then compose with local_auth_intent=false so the
+                    // lite single-admin login is not also mounted.
+                    let business =
+                        crate::common::db_auth::add_db_auth_routes(base_router, auth_state.clone(), store);
+                    crate::common::api::compose_admin_routes(business, auth_state, false, authz)
                 }
             };
-            // compose hard-codes the assembly order: business routes + auth routes + authz + unified_auth + cache-control.
-            // The returned app is final; do not call .route() / .layer() afterwards -- see the function doc.
-            let app = crate::common::api::compose_admin_routes(base_router, auth_state, local_auth_intent, authz);
             // Dashboard UI: a public SPA fallback mounted AFTER compose_admin_routes.
             // Because it is added after compose returns its final (auth-wrapped) router,
             // the fallback is NOT covered by unified_auth — so the login page and its
@@ -518,6 +575,56 @@ fn admin_tls_cookie_warning(admin_tls_present: bool, cookie_secure: bool) -> Opt
         ),
         _ => None,
     }
+}
+
+/// First-run admin bootstrap for the FULL access tier.
+///
+/// When the `users` table is empty, reads `EDGION_ADMIN_USERNAME` /
+/// `EDGION_ADMIN_PASSWORD`. If both are set, creates the admin user (bcrypt),
+/// a built-in `admin` role holding EVERY catalog permission key, and binds the
+/// user to that role — yielding a working superuser-by-keys. If the env vars are
+/// unset (and there are no users) it logs a prominent WARN: login is impossible
+/// until a user is provisioned. Credentials are never invented.
+///
+/// No-op when users already exist (idempotent across restarts).
+async fn bootstrap_admin(store: &crate::store::Store) -> anyhow::Result<()> {
+    if !store.list_users().await?.is_empty() {
+        return Ok(());
+    }
+
+    let username = std::env::var("EDGION_ADMIN_USERNAME").ok().filter(|v| !v.is_empty());
+    let password = std::env::var("EDGION_ADMIN_PASSWORD").ok().filter(|v| !v.is_empty());
+
+    match (username, password) {
+        (Some(username), Some(password)) => {
+            let hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST)
+                .map_err(|e| anyhow::anyhow!("failed to hash bootstrap admin password: {}", e))?;
+            let user_id = store.create_user(&username, &hash, "Bootstrap Admin").await?;
+            let role_id = store
+                .create_role("admin", "Built-in administrator (all permissions)")
+                .await?;
+            let all_keys: Vec<String> = crate::common::authz::catalog::all_keys()
+                .iter()
+                .map(|k| (*k).to_string())
+                .collect();
+            store.set_role_permissions(role_id, &all_keys).await?;
+            store.set_user_roles(user_id, &[role_id]).await?;
+            tracing::info!(
+                component = "center",
+                username = %username,
+                "bootstrap admin user created with the built-in 'admin' role (full access-control tier)"
+            );
+        }
+        _ => {
+            tracing::warn!(
+                component = "center",
+                "access.mode=full but the users table is empty and EDGION_ADMIN_USERNAME / \
+                 EDGION_ADMIN_PASSWORD are not set: NO user can log in until one is provisioned. \
+                 Set both env vars to bootstrap a first admin."
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

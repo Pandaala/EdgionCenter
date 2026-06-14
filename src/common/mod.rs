@@ -16,5 +16,6 @@ pub mod startup;
 // Auth stack copied from core::common as the integration plumbing; the OIDC
 // validation core is replaced with the `openidconnect` crate in Phase 4b.
 pub mod auth;
+pub mod db_auth;
 pub mod local_auth;
 pub mod unified_auth;

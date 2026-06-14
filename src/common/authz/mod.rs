@@ -16,6 +16,7 @@
 
 pub mod allow_all;
 pub mod catalog;
+pub mod db_authz;
 pub mod middleware;
 
 use std::collections::HashSet;

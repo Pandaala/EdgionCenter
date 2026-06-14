@@ -144,27 +144,42 @@ pub async fn login_handler(State(state): State<Arc<UnifiedAuthState>>, Json(req)
         }
     }
 
-    // Build JWT claims
+    tracing::info!(
+        component = "local_auth",
+        username = %local_state.username,
+        "Login successful"
+    );
+    issue_login_response(&local_state, &local_state.username)
+}
+
+/// Issue a signed HS256 JWT + httpOnly auth cookie for an authenticated
+/// `username`, using the signing secret / expiry / cookie settings carried by
+/// `local_state`.
+///
+/// Shared by the lite single-admin login ([`login_handler`]) and the full-tier
+/// DB-user login (`crate::common::db_auth::handlers::db_login_handler`) so the
+/// token format and `Set-Cookie` shape are byte-for-byte identical across tiers
+/// — the same `unified_auth` local validation path accepts both. The only
+/// difference between tiers is the credential source (config admin vs. `users`
+/// table); the issued token is the same.
+pub(crate) fn issue_login_response(
+    local_state: &crate::common::local_auth::middleware::LocalAuthState,
+    username: &str,
+) -> Response {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as usize;
     let expiry_secs = local_state.jwt_expiry_hours * 3600;
     let claims = LocalAuthClaims {
-        sub: local_state.username.clone(),
+        sub: username.to_string(),
         iat: now,
         exp: now + expiry_secs as usize,
     };
 
-    // Encode JWT
     let encoding_key = EncodingKey::from_secret(local_state.jwt_secret.as_bytes());
     match encode(&Header::new(jsonwebtoken::Algorithm::HS256), &claims, &encoding_key) {
         Ok(token) => {
-            tracing::info!(
-                component = "local_auth",
-                username = %local_state.username,
-                "Login successful"
-            );
             // `Secure` keeps this bearer-equivalent JWT cookie off plaintext http://.
             // Operator-configurable (default true) for non-TLS dev; see LocalAuthConfig.
             let secure_attr = if local_state.cookie_secure { "; Secure" } else { "" };
