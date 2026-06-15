@@ -13,6 +13,10 @@ export interface LoginResponse {
 
 export interface MeResponse {
   username: string
+  /** Permission keys granted to the caller. In the LITE tier this is the full
+   *  catalog (login = admin). Optional for backward compatibility with older
+   *  servers that did not report permissions. */
+  permissions?: string[]
 }
 
 export const authApi = {

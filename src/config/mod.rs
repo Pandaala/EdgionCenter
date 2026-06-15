@@ -3,20 +3,115 @@ use crate::common::config::{AdminTlsConfig, ConfSyncSecurityConfig};
 use crate::common::local_auth::LocalAuthConfig;
 use serde::{Deserialize, Serialize};
 
+/// Persistence backend selector for the Center metadata store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DbBackend {
+    /// Embedded SQLite database (default).
+    #[default]
+    Sqlite,
+    /// External MySQL database (requires `mysql_url`).
+    Mysql,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
-    /// Path to the SQLite database file. Relative paths are resolved from the current working directory.
-    pub sqlite_path: String,
-    /// Whether the SQLite database is enabled.
+    /// Whether the database is enabled. When false, Center runs without persistence.
     pub enabled: bool,
+    /// Which storage backend to use.
+    pub backend: DbBackend,
+    /// Path to the SQLite database file. Relative paths are resolved from the
+    /// current working directory. Used when `backend = sqlite`.
+    pub sqlite_path: String,
+    /// MySQL connection URL (e.g. `mysql://user:pass@host:3306/db`). Required
+    /// when `backend = mysql`; ignored otherwise.
+    pub mysql_url: Option<String>,
 }
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            sqlite_path: "data/center.db".to_string(),
             enabled: true,
+            backend: DbBackend::Sqlite,
+            sqlite_path: "data/center.db".to_string(),
+            mysql_url: None,
+        }
+    }
+}
+
+/// Authorization-store selector (the *authz* axis, orthogonal to authentication).
+///
+/// `AllowAll` (default) installs `AllowAllAuthz`: every authenticated caller is
+/// treated as a full admin (login = admin). `Rbac` installs the database-backed
+/// `DbAuthz`, which resolves each caller's permissions from the `users`/`roles`
+/// tables by subject — regardless of which authentication provider issued the
+/// token. `Rbac` requires a usable database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthzMode {
+    /// Login = admin. Everyone authenticated gets every permission.
+    #[default]
+    AllowAll,
+    /// Database-backed RBAC. Permissions resolved per subject from the DB.
+    /// Requires a usable database; startup fails without one.
+    Rbac,
+}
+
+/// Authorization configuration. Selects which `AuthzStore` is installed. This is
+/// orthogonal to authentication: any authn provider (OIDC, single-admin, DB
+/// users) can be combined with either authz mode.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AuthzConfig {
+    /// Authorization mode. Defaults to `allow_all`.
+    pub mode: AuthzMode,
+}
+
+/// Database-backed user login configuration (one authentication axis).
+///
+/// When `enabled`, `POST /api/v1/auth/login` additionally authenticates against
+/// the `users` table (bcrypt). It coexists with OIDC and the single `local_auth`
+/// admin. Requires a usable database and a signing secret (`jwt_secret` here or
+/// in `[local_auth]`). `jwt_expiry_hours` / `cookie_secure` override the issued
+/// token / cookie settings when no `[local_auth]` admin is configured.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct DbAuthConfig {
+    /// Enable DB-user login against the `users` table. Default: false.
+    pub enabled: bool,
+    /// JWT signing secret used to sign/validate DB-user login tokens. Used when
+    /// `[local_auth].jwt_secret` is not set. Empty/unset means unconfigured.
+    pub jwt_secret: Option<String>,
+    /// Token expiry in hours for DB-user logins (when no `[local_auth]` admin
+    /// supplies it). Defaults to 24 when unset.
+    pub jwt_expiry_hours: Option<u64>,
+    /// Emit the `Secure` cookie attribute (when no `[local_auth]` admin supplies
+    /// it). Defaults to true when unset.
+    pub cookie_secure: Option<bool>,
+}
+
+/// Audit-log behavior for mutating admin actions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuditConfig {
+    /// Whether audit logging is enabled. Requires `database.enabled = true`;
+    /// with no database, audit logging is skipped (a WARN is logged at startup).
+    pub enabled: bool,
+    /// Whether read (GET) requests are also recorded. Mutations are always
+    /// recorded when enabled; reads are recorded only when this is true.
+    pub log_reads: bool,
+    /// Retention window in days for periodic pruning. `0` disables pruning
+    /// (records are kept indefinitely).
+    pub retention_days: u32,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            log_reads: false,
+            retention_days: 0,
         }
     }
 }
@@ -52,6 +147,15 @@ pub struct CenterConfig {
     /// from; see [`WebConfig`].
     #[serde(default)]
     pub web: WebConfig,
+    /// Audit logging of mutating admin actions. See [`AuditConfig`].
+    #[serde(default)]
+    pub audit: AuditConfig,
+    /// Authorization mode (allow_all/rbac). See [`AuthzConfig`].
+    #[serde(default)]
+    pub authz: AuthzConfig,
+    /// Database-backed user login. See [`DbAuthConfig`].
+    #[serde(default)]
+    pub db_auth: DbAuthConfig,
 }
 
 impl Default for CenterConfig {
@@ -65,6 +169,9 @@ impl Default for CenterConfig {
             grpc_security: ConfSyncSecurityConfig::default(),
             peer_identity: None,
             web: WebConfig::default(),
+            audit: AuditConfig::default(),
+            authz: AuthzConfig::default(),
+            db_auth: DbAuthConfig::default(),
         }
     }
 }
@@ -187,6 +294,86 @@ sync:
         assert_eq!(config.server.grpc_addr, "0.0.0.0:50100");
         assert_eq!(config.sync.ping_interval_secs, 60);
         assert_eq!(config.sync.command_timeout_secs, 30); // default
+    }
+
+    #[test]
+    fn audit_config_defaults() {
+        let c = CenterConfig::default();
+        assert!(c.audit.enabled, "audit enabled by default");
+        assert!(!c.audit.log_reads, "reads excluded by default");
+        assert_eq!(c.audit.retention_days, 0, "retention disabled by default");
+    }
+
+    #[test]
+    fn audit_config_parses_from_yaml() {
+        let yaml = r#"
+audit:
+  enabled: false
+  log_reads: true
+  retention_days: 30
+"#;
+        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!c.audit.enabled);
+        assert!(c.audit.log_reads);
+        assert_eq!(c.audit.retention_days, 30);
+    }
+
+    #[test]
+    fn audit_config_absent_uses_defaults() {
+        // Omitting the whole [audit] section must yield the documented defaults.
+        let yaml = "server:\n  http_addr: \"0.0.0.0:5900\"\n";
+        let c: CenterConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(c.audit.enabled);
+        assert!(!c.audit.log_reads);
+        assert_eq!(c.audit.retention_days, 0);
+    }
+
+    /// Helper: deserialize a YAML doc through the SAME path production uses
+    /// (`singleton_map_recursive`), not the plain `serde_yaml::from_str`.
+    fn parse_via_production(yaml: &str) -> CenterConfig {
+        let de = serde_yaml::Deserializer::from_str(yaml);
+        serde_yaml::with::singleton_map_recursive::deserialize(de)
+            .expect("config must parse through the production singleton_map_recursive path")
+    }
+
+    #[test]
+    fn authz_mode_defaults_allow_all() {
+        // Default value and an omitted [authz] section both yield allow_all.
+        assert_eq!(CenterConfig::default().authz.mode, AuthzMode::AllowAll);
+        let c = parse_via_production("server:\n  http_addr: \"0.0.0.0:5900\"\n");
+        assert_eq!(c.authz.mode, AuthzMode::AllowAll);
+    }
+
+    #[test]
+    fn authz_mode_rbac_parses() {
+        let c = parse_via_production("authz:\n  mode: rbac\n");
+        assert_eq!(c.authz.mode, AuthzMode::Rbac);
+    }
+
+    #[test]
+    fn db_auth_defaults_disabled() {
+        // Default value and an omitted [db_auth] section both yield disabled.
+        let d = CenterConfig::default();
+        assert!(!d.db_auth.enabled);
+        assert!(d.db_auth.jwt_secret.is_none());
+        let c = parse_via_production("server:\n  http_addr: \"0.0.0.0:5900\"\n");
+        assert!(!c.db_auth.enabled);
+    }
+
+    #[test]
+    fn db_auth_enabled_parses() {
+        let yaml = r#"
+db_auth:
+  enabled: true
+  jwt_secret: "a_long_enough_jwt_secret_value_abcdef"
+  jwt_expiry_hours: 8
+  cookie_secure: false
+"#;
+        let c = parse_via_production(yaml);
+        assert!(c.db_auth.enabled);
+        assert_eq!(c.db_auth.jwt_secret.as_deref(), Some("a_long_enough_jwt_secret_value_abcdef"));
+        assert_eq!(c.db_auth.jwt_expiry_hours, Some(8));
+        assert_eq!(c.db_auth.cookie_secure, Some(false));
     }
 
     #[test]

@@ -48,6 +48,10 @@ pub struct LoginResponse {
 #[derive(Debug, Serialize)]
 pub struct MeResponse {
     pub username: String,
+    /// Permission keys granted to the caller, resolved by the authz middleware.
+    /// Under `authz.mode = allow_all` this is the full catalog (login = admin).
+    /// Empty when no `PermissionSet` was injected (e.g. authz layer not installed).
+    pub permissions: Vec<String>,
 }
 
 /// High-level auth configuration state of the controller.
@@ -100,23 +104,14 @@ pub async fn login_handler(State(state): State<Arc<UnifiedAuthState>>, Json(req)
         return resp;
     };
 
-    // Validate username. Run dummy bcrypt regardless to equalize timing and
-    // prevent side-channel enumeration of whether the username exists.
-    if req.username != local_state.username {
-        let password = req.password.clone();
-        let dummy = local_state.dummy_hash.clone();
-        let _ = tokio::task::spawn_blocking(move || bcrypt::verify(&password, &dummy)).await;
-        tracing::debug!(component = "local_auth", "Login failed: unknown username");
-        let body: Json<ApiResponse<LoginResponse>> =
-            Json(ApiResponse::err_body("Invalid username or password".to_string()));
-        return (StatusCode::UNAUTHORIZED, body).into_response();
-    }
-
-    // Validate password using bcrypt
+    // Single timing-safe credential check (always runs exactly one bcrypt verify:
+    // the real hash on a username match, a dummy hash otherwise) off the async
+    // runtime via spawn_blocking. A task panic is the only internal-error case.
+    let checker = local_state.clone();
+    let username = req.username.clone();
     let password = req.password.clone();
-    let hash = local_state.password_hash.clone();
-    let verify_result = match tokio::task::spawn_blocking(move || bcrypt::verify(&password, &hash)).await {
-        Ok(r) => r,
+    let ok = match tokio::task::spawn_blocking(move || checker.verify_single_admin(&username, &password)).await {
+        Ok(v) => v,
         Err(_) => {
             tracing::error!(component = "local_auth", "bcrypt task panicked");
             let body: Json<ApiResponse<LoginResponse>> =
@@ -124,43 +119,74 @@ pub async fn login_handler(State(state): State<Arc<UnifiedAuthState>>, Json(req)
             return (StatusCode::INTERNAL_SERVER_ERROR, body).into_response();
         }
     };
-    match verify_result {
-        Ok(true) => {}
-        Ok(false) => {
-            tracing::debug!(component = "local_auth", "Login failed: wrong password");
-            let body: Json<ApiResponse<LoginResponse>> =
-                Json(ApiResponse::err_body("Invalid username or password".to_string()));
-            return (StatusCode::UNAUTHORIZED, body).into_response();
-        }
-        Err(e) => {
-            tracing::error!(component = "local_auth", error = %e, "bcrypt verify error");
-            let body: Json<ApiResponse<LoginResponse>> =
-                Json(ApiResponse::err_body("Internal authentication error".to_string()));
-            return (StatusCode::INTERNAL_SERVER_ERROR, body).into_response();
-        }
+
+    if !ok {
+        tracing::debug!(component = "local_auth", "Login failed: invalid username or password");
+        let body: Json<ApiResponse<LoginResponse>> =
+            Json(ApiResponse::err_body("Invalid username or password".to_string()));
+        return (StatusCode::UNAUTHORIZED, body).into_response();
     }
 
-    // Build JWT claims
+    tracing::info!(
+        component = "local_auth",
+        username = %local_state.username,
+        "Login successful"
+    );
+    issue_login_response(&local_state, &local_state.username)
+}
+
+impl crate::common::local_auth::middleware::LocalAuthState {
+    /// Timing-safe single-admin credential check.
+    ///
+    /// ALWAYS runs exactly one bcrypt verify — against the real `password_hash`
+    /// when `username` matches the configured admin, against `dummy_hash`
+    /// otherwise — so response time does not reveal whether the username exists.
+    /// Returns `true` only when the username matches AND the password verifies.
+    /// A bcrypt error (e.g. a malformed stored hash) is treated as a failed
+    /// verify (`false`), never as success.
+    ///
+    /// Synchronous and CPU-bound: callers on an async runtime should invoke it
+    /// inside `spawn_blocking`.
+    pub(crate) fn verify_single_admin(&self, username: &str, password: &str) -> bool {
+        let username_matches = username == self.username;
+        let hash = if username_matches {
+            &self.password_hash
+        } else {
+            &self.dummy_hash
+        };
+        let verified = bcrypt::verify(password, hash).unwrap_or(false);
+        username_matches && verified
+    }
+}
+
+/// Issue a signed HS256 JWT + httpOnly auth cookie for an authenticated
+/// `username`, using the signing secret / expiry / cookie settings carried by
+/// `local_state`.
+///
+/// Shared by the single-admin login ([`login_handler`]) and the unified login
+/// (`crate::common::db_auth::handlers::unified_login_handler`) so the token
+/// format and `Set-Cookie` shape are byte-for-byte identical regardless of the
+/// credential source — the same `unified_auth` local validation path accepts
+/// both. The only difference is the credential source (config admin vs. `users`
+/// table); the issued token is the same.
+pub(crate) fn issue_login_response(
+    local_state: &crate::common::local_auth::middleware::LocalAuthState,
+    username: &str,
+) -> Response {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as usize;
     let expiry_secs = local_state.jwt_expiry_hours * 3600;
     let claims = LocalAuthClaims {
-        sub: local_state.username.clone(),
+        sub: username.to_string(),
         iat: now,
         exp: now + expiry_secs as usize,
     };
 
-    // Encode JWT
     let encoding_key = EncodingKey::from_secret(local_state.jwt_secret.as_bytes());
     match encode(&Header::new(jsonwebtoken::Algorithm::HS256), &claims, &encoding_key) {
         Ok(token) => {
-            tracing::info!(
-                component = "local_auth",
-                username = %local_state.username,
-                "Login successful"
-            );
             // `Secure` keeps this bearer-equivalent JWT cookie off plaintext http://.
             // Operator-configurable (default true) for non-TLS dev; see LocalAuthConfig.
             let secure_attr = if local_state.cookie_secure { "; Secure" } else { "" };
@@ -198,9 +224,12 @@ pub async fn login_handler(State(state): State<Arc<UnifiedAuthState>>, Json(req)
 /// requests.
 pub async fn me_handler(
     axum::Extension(claims): axum::Extension<crate::common::unified_auth::UnifiedAuthClaims>,
+    perms: Option<axum::Extension<crate::common::authz::PermissionSet>>,
 ) -> Response {
+    let permissions = perms.map(|axum::Extension(p)| p.materialize()).unwrap_or_default();
     Json(ApiResponse::ok_body(MeResponse {
         username: claims.sub.unwrap_or_default(),
+        permissions,
     }))
     .into_response()
 }
@@ -253,6 +282,110 @@ mod handler_tests {
             .route("/api/v1/auth/logout", post(logout_handler))
             .route("/api/v1/auth/me", get(me_handler))
             .with_state(state)
+    }
+
+    /// `/auth/me` reports the injected `PermissionSet` (LITE → full catalog) and
+    /// the username from the claims. Builds a router that injects both a claims
+    /// extension and an `AllowAll` permission set ahead of the handler.
+    #[tokio::test]
+    async fn me_reports_permissions_from_injected_set() {
+        use crate::common::authz::PermissionSet;
+        use crate::common::unified_auth::{AuthProvider, UnifiedAuthClaims};
+        use axum::routing::get;
+
+        let app = axum::Router::new()
+            .route("/api/v1/auth/me", get(me_handler))
+            .layer(axum::middleware::from_fn(
+                |mut req: Request<Body>, next: axum::middleware::Next| async move {
+                    req.extensions_mut().insert(UnifiedAuthClaims {
+                        provider: AuthProvider::Local,
+                        sub: Some("admin".to_string()),
+                        iss: None,
+                        claims: serde_json::Value::Null,
+                    });
+                    req.extensions_mut().insert(PermissionSet::all());
+                    next.run(req).await
+                },
+            ));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/auth/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let data = v.get("data").expect("data field");
+        assert_eq!(data.get("username").and_then(|x| x.as_str()), Some("admin"));
+        let perms = data
+            .get("permissions")
+            .and_then(|x| x.as_array())
+            .expect("permissions array");
+        assert_eq!(
+            perms.len(),
+            crate::common::authz::catalog::all_keys().len(),
+            "LITE /auth/me must report the full permission catalog"
+        );
+        assert!(perms.iter().any(|p| p.as_str() == Some("controllers:read")));
+    }
+
+    /// When no `PermissionSet` is injected, `/auth/me` reports an empty list.
+    #[tokio::test]
+    async fn me_reports_empty_permissions_when_absent() {
+        use crate::common::unified_auth::{AuthProvider, UnifiedAuthClaims};
+        use axum::routing::get;
+
+        let app = axum::Router::new()
+            .route("/api/v1/auth/me", get(me_handler))
+            .layer(axum::middleware::from_fn(
+                |mut req: Request<Body>, next: axum::middleware::Next| async move {
+                    req.extensions_mut().insert(UnifiedAuthClaims {
+                        provider: AuthProvider::Local,
+                        sub: Some("admin".to_string()),
+                        iss: None,
+                        claims: serde_json::Value::Null,
+                    });
+                    next.run(req).await
+                },
+            ));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/auth/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let perms = v
+            .get("data")
+            .and_then(|d| d.get("permissions"))
+            .and_then(|x| x.as_array())
+            .expect("permissions array");
+        assert!(perms.is_empty(), "permissions must be empty when no set injected");
+    }
+
+    #[test]
+    fn verify_single_admin_matrix() {
+        let state = LocalAuthState::from_config(&valid_local());
+        // Right username + right password -> true.
+        assert!(state.verify_single_admin("admin", "a_long_enough_password_123"));
+        // Right username + wrong password -> false.
+        assert!(!state.verify_single_admin("admin", "wrong"));
+        // Unknown username (runs the dummy-hash bcrypt) -> false, even if the
+        // password happens to equal the admin's.
+        assert!(!state.verify_single_admin("ghost", "a_long_enough_password_123"));
     }
 
     #[tokio::test]

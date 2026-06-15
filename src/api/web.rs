@@ -275,7 +275,9 @@ mod tests {
         let state = UnifiedAuthState::from_configs(None, Some(&local), true, "test").unwrap();
 
         let business = Router::new().route("/api/v1/secret", get(|| async { "secret" }));
-        let app = compose_admin_routes(business, state, true);
+        let authz: std::sync::Arc<dyn crate::common::authz::AuthzStore> =
+            std::sync::Arc::new(crate::common::authz::allow_all::AllowAllAuthz);
+        let app = compose_admin_routes(business, state, true, authz);
         let app = app.fallback(move |uri: Uri| {
             let source = source.clone();
             async move { serve(source, uri).await }

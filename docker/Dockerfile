@@ -6,6 +6,7 @@
 #
 # Build CONTEXT layout (produced by docker/build.sh — see that script):
 #   <context>/EdgionCenter/                 the center source
+#   <context>/Edgion/Cargo.toml             trimmed workspace root manifest
 #   <context>/Edgion/edgion-resources/      the shared crate (path dependency)
 #
 # The relative layout mirrors local dev so the Cargo path dependency
@@ -41,7 +42,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-# Shared crate first (path dependency target), then the center sources.
+# Shared crate first (path dependency target), then the center sources. The
+# trimmed workspace root manifest must accompany the crate so its
+# `*.workspace = true` inheritance resolves (edgion-resources is a workspace
+# member and cannot be parsed without it).
+COPY Edgion/Cargo.toml /src/Edgion/Cargo.toml
 COPY Edgion/edgion-resources /src/Edgion/edgion-resources
 WORKDIR /src/EdgionCenter
 COPY EdgionCenter/Cargo.toml EdgionCenter/Cargo.lock EdgionCenter/build.rs ./

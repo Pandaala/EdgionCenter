@@ -4,6 +4,7 @@ import { Spin } from 'antd'
 import { AppShell } from './components/shell/AppShell'
 import ControllerProxy from './components/Layout/ControllerProxy'
 import { isLoggedIn } from './utils/auth'
+import { PermissionProvider } from './utils/permissions'
 import { setAppMode } from './utils/proxy'
 import { systemApi } from './api/client'
 import LoginPage from './pages/Login/LoginPage'
@@ -11,6 +12,9 @@ import Dashboard from './pages/Dashboard'
 import UserDashboard from './pages/Dashboard/UserDashboard'
 import CenterDashboard from './pages/Center/CenterDashboard'
 import CenterAdminPage from './pages/Center/CenterAdminPage'
+import AuditLogPage from './pages/Audit/AuditLogPage'
+import UserManagementPage from './pages/Users/UserManagementPage'
+import RoleManagementPage from './pages/Roles/RoleManagementPage'
 // RegionRoute
 import ClusterRegionRouteList from './pages/RegionRoute/ClusterRegionRouteList'
 import ServiceRegionRouteList from './pages/RegionRoute/ServiceRegionRouteList'
@@ -48,7 +52,9 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!isLoggedIn()) {
     return <Navigate to="/login" replace />
   }
-  return <>{children}</>
+  // Fetch /auth/me once for the authenticated subtree so useCan() is available.
+  // (Menu/route gating on permissions is a later task.)
+  return <PermissionProvider>{children}</PermissionProvider>
 }
 
 function App() {
@@ -102,6 +108,9 @@ function App() {
             element={<GlobalConnectionIpRestrictionDetail />}
           />
           <Route path="admin" element={<CenterAdminPage />} />
+          <Route path="audit" element={<AuditLogPage />} />
+          <Route path="users" element={<UserManagementPage />} />
+          <Route path="roles" element={<RoleManagementPage />} />
         </Route>
         <Route path="/controller/:controllerId" element={<RequireAuth><ControllerProxy /></RequireAuth>}>
           <Route index element={<Dashboard />} />

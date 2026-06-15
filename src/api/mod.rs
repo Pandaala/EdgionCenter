@@ -6,7 +6,7 @@
 //!   - Metrics   (metrics_addr / 12290): GET /metrics (no auth)
 //!
 //! Admin routes:
-//!   GET  /api/v1/server-info                              → {"mode":"center"}
+//!   GET  /api/v1/server-info                              → {"mode":"center","authzMode":...,"dbAuthEnabled":...}
 //!   GET  /api/v1/controllers                              → list all controller summaries
 //!   GET  /api/v1/clusters                                 → list distinct cluster names
 //!   POST /api/v1/controllers/{id}/reload                  → send reload command
@@ -25,6 +25,15 @@
 //!   PATCH  /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile → switch active profile (read-modify-write per controller)
 //!   POST   /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/sync       → copy PM state from source controller to target controllers
 //!   GET    /api/v1/center/global-connection-ip-restrictions/consistency            → consistency detection across controllers
+//!   GET    /api/v1/center/admin/users                              → list users (with role ids + names; no password_hash)
+//!   POST   /api/v1/center/admin/users                              → create user (bcrypt password; optional role bindings)
+//!   PATCH  /api/v1/center/admin/users/{id}                         → partial update (status / password reset / role rebind)
+//!   DELETE /api/v1/center/admin/users/{id}                         → delete user
+//!   GET    /api/v1/center/admin/roles                              → list roles (each with permission_keys)
+//!   POST   /api/v1/center/admin/roles                              → create role (optional permission set)
+//!   PUT    /api/v1/center/admin/roles/{id}/permissions            → replace a role's permission set
+//!   DELETE /api/v1/center/admin/roles/{id}                         → delete role (FK cascade removes bindings)
+//!   GET    /api/v1/center/admin/permission-catalog                → grouped permission catalog for the matrix UI
 //!   GET  /api/v1/center/admin/watch-status                          → watch cache sync status per controller
 //!   GET  /api/v1/center/admin/metadata-store                         → metadata store key summary
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
@@ -39,14 +48,17 @@ use axum::{
 use serde::Serialize;
 use std::sync::Arc;
 
+mod audit;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
 mod region_route_handlers;
+mod roles;
+mod users;
 pub mod web;
 
 use crate::aggregator::ResourceAggregator;
 use crate::commander::Commander;
-use crate::db::CenterDb;
+use crate::store::Store;
 use crate::fed_sync::registry::ControllerRegistry;
 use crate::metadata_store::CenterMetaDataStore;
 use crate::proxy::ProxyForwarder;
@@ -60,7 +72,7 @@ pub struct ApiState {
     pub aggregator: Arc<ResourceAggregator>,
     pub commander: Arc<Commander>,
     pub proxy: Arc<ProxyForwarder>,
-    pub db: Option<Arc<CenterDb>>,
+    pub db: Option<Arc<Store>>,
     pub metadata_store: Arc<CenterMetaDataStore>,
     pub sync_client: Arc<CenterSyncClient>,
     /// Needed by Admin DELETE to cascade eviction into the fed-sync registry.
@@ -71,6 +83,14 @@ pub struct ApiState {
     /// Used by the `/ready` probe: if the DB was required but failed to open
     /// (`db` is `None`), Center is not ready to serve DB-backed requests.
     pub db_required: bool,
+    /// Configured authorization mode (`allow_all` / `rbac`). Exposed via
+    /// `GET /server-info` as `authzMode` so the dashboard can hide user/role
+    /// management under `allow_all` (where `AllowAllAuthz` would otherwise grant
+    /// the manage keys).
+    pub authz_mode: crate::config::AuthzMode,
+    /// Whether DB-backed user login is enabled (`db_auth.enabled`). Exposed via
+    /// `GET /server-info` as `dbAuthEnabled`.
+    pub db_auth_enabled: bool,
 }
 
 impl ApiState {
@@ -159,6 +179,31 @@ pub fn router(state: ApiState) -> Router {
         // Admin endpoints (DB-backed)
         .route("/api/v1/center/admin/controllers", get(list_admin_controllers))
         .route("/api/v1/center/admin/controllers/{id}", delete(delete_admin_controller))
+        // User / role admin CRUD (db_auth; users:manage / roles:manage keys).
+        .route(
+            "/api/v1/center/admin/users",
+            get(users::list_users_handler).post(users::create_user_handler),
+        )
+        .route(
+            "/api/v1/center/admin/users/{id}",
+            patch(users::update_user_handler).delete(users::delete_user_handler),
+        )
+        .route(
+            "/api/v1/center/admin/roles",
+            get(roles::list_roles_handler).post(roles::create_role_handler),
+        )
+        .route("/api/v1/center/admin/roles/{id}", delete(roles::delete_role_handler))
+        .route(
+            "/api/v1/center/admin/roles/{id}/permissions",
+            axum::routing::put(roles::set_role_permissions_handler),
+        )
+        .route(
+            "/api/v1/center/admin/permission-catalog",
+            get(roles::permission_catalog_handler),
+        )
+        // Audit log read endpoint (path must match AUDIT_READ_PATH so the
+        // audit middleware excludes it from self-logging).
+        .route("/api/v1/center/admin/audit-logs", get(audit::audit_list_handler))
         // Watch cache admin endpoints
         .route("/api/v1/center/admin/watch-status", get(watch_status))
         .route("/api/v1/center/admin/metadata-store", get(metadata_store_status))
@@ -189,7 +234,7 @@ async fn health_check() -> impl IntoResponse {
 
 /// Readiness check endpoint - returns 200 OK only when Center is fully operational.
 ///
-/// Returns 503 when `database.enabled = true` but the SQLite database failed to open
+/// Returns 503 when `database.enabled = true` but the metadata store failed to open
 /// at startup, leaving DB-backed endpoints permanently degraded.
 async fn ready_check(State(state): State<ApiState>) -> impl IntoResponse {
     if state.is_ready() {
@@ -205,13 +250,22 @@ async fn ready_check(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ServerInfoResponse {
     mode: String,
+    /// Authorization mode: `"allow_all"` or `"rbac"`. The dashboard uses this to
+    /// decide whether to surface user/role management (only meaningful under
+    /// `rbac`, where permissions are enforced per subject).
+    authz_mode: crate::config::AuthzMode,
+    /// Whether DB-backed user login is enabled (`db_auth.enabled`).
+    db_auth_enabled: bool,
 }
 
-async fn server_info() -> impl IntoResponse {
+async fn server_info(State(state): State<ApiState>) -> impl IntoResponse {
     Json(ApiResponse::ok_body(ServerInfoResponse {
         mode: "center".to_string(),
+        authz_mode: state.authz_mode,
+        db_auth_enabled: state.db_auth_enabled,
     }))
 }
 
@@ -270,8 +324,8 @@ struct AdminControllerDto {
     last_seen_at: i64,
 }
 
-impl From<crate::db::DbController> for AdminControllerDto {
-    fn from(r: crate::db::DbController) -> Self {
+impl From<crate::store::DbController> for AdminControllerDto {
+    fn from(r: crate::store::DbController) -> Self {
         Self {
             controller_id: r.controller_id,
             cluster: r.cluster,
@@ -293,17 +347,11 @@ async fn list_admin_controllers(State(state): State<ApiState>) -> impl IntoRespo
         )
             .into_response();
     };
-    let db2 = db.clone();
-    match tokio::task::spawn_blocking(move || db2.list_controllers()).await {
-        Ok(Ok(rows)) => {
+    match db.list_controllers().await {
+        Ok(rows) => {
             let dtos: Vec<AdminControllerDto> = rows.into_iter().map(AdminControllerDto::from).collect();
             Json(ListResponse::success(dtos)).into_response()
         }
-        Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ListResponse::<AdminControllerDto>::error(e.to_string())),
-        )
-            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ListResponse::<AdminControllerDto>::error(e.to_string())),
@@ -339,15 +387,8 @@ async fn delete_admin_controller(State(state): State<ApiState>, Path(id_raw): Pa
         "DELETE /admin/controllers: evicted in-memory state; proceeding to DB delete"
     );
 
-    let db2 = db.clone();
-    let id_for_db = id.clone();
-    match tokio::task::spawn_blocking(move || db2.delete_controller(&id_for_db)).await {
-        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
-        Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<String>::err_body(e.to_string())),
-        )
-            .into_response(),
+    match db.delete_controller(&id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::<String>::err_body(e.to_string())),
@@ -414,6 +455,68 @@ async fn metadata_store_status(State(state): State<ApiState>) -> impl IntoRespon
         cluster_routes,
         service_routes,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AuthzMode;
+
+    /// Build an `ApiState` carrying `authz_mode` + `db_auth_enabled`; every other
+    /// field is a minimal default sufficient for the stateless `server_info`
+    /// handler.
+    fn state_with_authz_mode(authz_mode: AuthzMode, db_auth_enabled: bool) -> ApiState {
+        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
+        use parking_lot::Mutex;
+        use std::collections::HashMap;
+
+        let registry = ControllerRegistry::new();
+        let metadata_store = Arc::new(CenterMetaDataStore::new());
+        let sync_client = Arc::new(CenterSyncClient {
+            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
+        });
+        let commander = Arc::new(Commander::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
+        let proxy = Arc::new(ProxyForwarder::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
+        ApiState {
+            aggregator: Arc::new(ResourceAggregator::new()),
+            commander,
+            proxy,
+            db: None,
+            metadata_store,
+            sync_client,
+            registry,
+            db_required: false,
+            authz_mode,
+            db_auth_enabled,
+        }
+    }
+
+    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn server_info_reports_authz_and_db_auth() {
+        // RBAC authz + DB-user login on: authzMode=rbac, dbAuthEnabled=true,
+        // and the legacy accessMode key is gone from the wire.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::Rbac, true)))
+            .await
+            .into_response();
+        let json = body_json(resp).await;
+        assert_eq!(json["data"]["mode"], "center");
+        assert_eq!(json["data"]["authzMode"], "rbac");
+        assert_eq!(json["data"]["dbAuthEnabled"], true);
+        assert!(json["data"]["accessMode"].is_null(), "accessMode must be gone");
+
+        // AllowAll authz + DB-user login off: authzMode=allow_all, dbAuthEnabled=false.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::AllowAll, false)))
+            .await
+            .into_response();
+        let json = body_json(resp).await;
+        assert_eq!(json["data"]["authzMode"], "allow_all");
+        assert_eq!(json["data"]["dbAuthEnabled"], false);
+    }
 }
 
 async fn proxy_handler(

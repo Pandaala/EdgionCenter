@@ -8,14 +8,21 @@
 # the relative layout the Dockerfile expects:
 #
 #   <ctx>/EdgionCenter/                source (no target/node_modules/dist)
+#   <ctx>/Edgion/Cargo.toml            trimmed workspace root (members = resources)
 #   <ctx>/Edgion/edgion-resources/     the shared crate (no target)
+#
+# `edgion-resources` is now an Edgion workspace member: its Cargo.toml inherits
+# `edition`/`version`/deps via `*.workspace = true`, so it cannot be built in
+# isolation. We stage a trimmed copy of the workspace root manifest (only
+# `edgion-resources` as a member) so that inheritance resolves without pulling in
+# the other members (notably the ~56k-line `edgion-tests`).
 #
 # Usage:
 #   docker/build.sh [-t IMAGE_TAG] [-r PATH_TO_EDGION_REPO]
 # Defaults: IMAGE_TAG=edgion/edgion-center:dev, Edgion repo = ../Edgion
 set -euo pipefail
 
-IMAGE_TAG="edgion/edgion-center:dev"
+IMAGE_TAG="edgion/edgion-center:0.3.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CENTER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 EDGION_DIR="$(cd "${CENTER_DIR}/.." && pwd)/Edgion"
@@ -50,6 +57,13 @@ rsync -a \
     "${CENTER_DIR}/" "${CTX}/EdgionCenter/"
 # Shared crate (exclude its build artifacts).
 rsync -a --exclude '/target' --exclude '/.git' "${RESOURCES_DIR}/" "${CTX}/Edgion/edgion-resources/"
+# Trimmed workspace root: keep [workspace.package] + [workspace.dependencies]
+# (the source of truth for edgion-resources' inherited fields) but list only
+# edgion-resources as a member so the other crate dirs need not be staged.
+sed -E \
+    -e 's/^members = .*/members = ["edgion-resources"]/' \
+    -e 's/^default-members = .*/default-members = ["edgion-resources"]/' \
+    "${EDGION_DIR}/Cargo.toml" > "${CTX}/Edgion/Cargo.toml"
 
 echo "Building ${IMAGE_TAG} ..."
 docker build -f "${CENTER_DIR}/docker/Dockerfile" -t "${IMAGE_TAG}" "${CTX}"

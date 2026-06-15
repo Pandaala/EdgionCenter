@@ -3,6 +3,8 @@
 //! users). Only the surface Center actually uses is pulled in here.
 
 pub mod api;
+pub mod audit;
+pub mod authz;
 pub mod conf_sync;
 pub mod config;
 pub mod fed_sync;
@@ -14,5 +16,6 @@ pub mod startup;
 // Auth stack copied from core::common as the integration plumbing; the OIDC
 // validation core is replaced with the `openidconnect` crate in Phase 4b.
 pub mod auth;
+pub mod db_auth;
 pub mod local_auth;
 pub mod unified_auth;

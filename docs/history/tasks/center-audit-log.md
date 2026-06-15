@@ -7,7 +7,11 @@
 > apply to the Management Plane, not the Hub.
 
 **Profile:** feature / single-file
-**Status:** todo (not started)
+**Status:** SUPERSEDED (2026-06-13) — the audit log shipped as part of the dual-access-control
+feature (DB-backed audit log + dashboard Audit page, in both lite and full tiers). See
+`docs/history/superpowers/specs/2026-06-13-center-dual-access-control-design.md` and
+`docs/history/superpowers/plans/2026-06-13-center-dual-access-control-plan.md`, and the
+operator reference `skills/02-features/access-control.md`. Kept for history only.
 **Depends on / relates to:** `center-build-in-frontend.md` (the embedded dashboard is the
 main interactive client whose actions need auditing).
 
