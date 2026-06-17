@@ -89,6 +89,7 @@ fn is_unique_violation(e: &anyhow::Error) -> bool {
 
 /// Reject (400) if any key is not in `catalog::all_keys()`. Returns the
 /// offending key in the error so the caller can fix its request.
+#[allow(clippy::result_large_err)]
 fn validate_keys(keys: &[String]) -> Result<(), axum::response::Response> {
     if let Some(bad) = keys.iter().find(|k| !catalog::is_known_key(k)) {
         return Err((

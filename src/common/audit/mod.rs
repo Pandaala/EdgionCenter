@@ -37,6 +37,7 @@ const CHANNEL_CAPACITY: usize = 1024;
 static AUDIT_DROPPED: AtomicU64 = AtomicU64::new(0);
 
 /// Returns the process-wide number of dropped audit records.
+#[allow(dead_code)]
 pub fn audit_dropped_total() -> u64 {
     AUDIT_DROPPED.load(Ordering::Relaxed)
 }

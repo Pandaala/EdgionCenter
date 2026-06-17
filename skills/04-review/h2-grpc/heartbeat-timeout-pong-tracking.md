@@ -10,7 +10,7 @@ description: FederationSync heartbeat now tracks last-Pong timestamp via AtomicU
 
 ## Conclusion
 
-The FederationSync server (`src/core/center/fed_sync/server/mod.rs`) no longer wraps
+The FederationSync server (`src/fed_sync/server/mod.rs`) no longer wraps
 `inbound.message()` in `tokio::time::timeout`. Instead, the heartbeat task checks
 `last_pong_ms` (an `Arc<AtomicU64>`) after each tick; if `now - last_pong_ms > heartbeat_timeout`
 it calls `heartbeat_cancel.cancel()`, which the message loop picks up and maps to

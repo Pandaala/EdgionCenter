@@ -87,6 +87,7 @@ pub fn install_global_recorder(cfg: RecorderConfig<'_>) -> Result<(), String> {
 }
 
 /// Whether the global Prometheus recorder has been installed.
+#[allow(dead_code)]
 pub fn recorder_installed() -> bool {
     PROMETHEUS_HANDLE.get().is_some()
 }
@@ -111,6 +112,7 @@ pub async fn metrics_handler() -> Response {
 
 /// Liveness probe paired with `/metrics` on Gateway's standalone metrics
 /// listener. Controller and Center reuse their existing `/health` route.
+#[allow(dead_code)]
 pub async fn health_handler() -> &'static str {
     "OK"
 }
@@ -118,6 +120,7 @@ pub async fn health_handler() -> &'static str {
 /// Router that exposes `/metrics` and `/health` on a standalone listener.
 /// Used by Gateway; Controller and Center instead mount `metrics_handler`
 /// directly on their admin router.
+#[allow(dead_code)]
 pub fn create_metrics_router() -> Router {
     Router::new()
         .route("/metrics", get(metrics_handler))

@@ -42,10 +42,13 @@ pub mod names {
     /// Gauge: controllers known to the aggregator, broken down by cluster.
     pub const AGGREGATOR_CONTROLLERS: &str = "edgion_fed_aggregator_controllers";
     /// Counter: consistency-check API detected cross-controller divergence.
+    // NOTE(migration): unused after cluster/service route consistency handlers were stubbed.
+    #[allow(dead_code)]
     pub const CONSISTENCY_MISMATCH_TOTAL: &str = "edgion_fed_consistency_mismatch_total";
     /// Counter: fan-out patch operations' aggregate outcome.
     pub const FANOUT_TOTAL: &str = "edgion_fed_fanout_total";
     /// Gauge: last observed ready-gate wait in seconds (Controller side).
+    #[allow(dead_code)]
     pub const READY_GATE_WAIT_LAST: &str = "edgion_fed_ready_gate_wait_seconds_last";
     /// Counter: peer-identity binding outcome on the federation gRPC server.
     pub const PEER_IDENTITY_CHECK_TOTAL: &str = "edgion_fed_peer_identity_check_total";
@@ -55,9 +58,11 @@ pub mod names {
     /// Labels: `verb` (closed set from `Verb::as_str()` + "unknown"),
     /// `kind` (known ResourceKind, "*", "RegionRoute", or "unknown" — never raw input),
     /// `source` ("center" | "cli_token" | "unknown" — identifies the auth path).
+    #[allow(dead_code)]
     pub const RBAC_DENIED_TOTAL: &str = "edgion_fed_rbac_denied_total";
     /// Gauge: federation kill-switch state. 1.0 = enabled, 0.0 = disabled.
     /// Emitted by the supervisor on each start/stop transition.
+    #[allow(dead_code)]
     pub const KILL_SWITCH_STATE: &str = "edgion_fed_kill_switch_state";
 }
 
@@ -66,14 +71,17 @@ pub mod names {
 pub mod labels {
     pub mod role {
         pub const CENTER: &str = "center";
+        #[allow(dead_code)]
         pub const CONTROLLER: &str = "controller";
     }
     pub mod event {
         pub const CONNECTED: &str = "connected";
         pub const DISCONNECTED: &str = "disconnected";
+        #[allow(dead_code)]
         pub const RELOAD: &str = "reload";
     }
     pub mod direction {
+        #[allow(dead_code)]
         pub const SENT: &str = "sent";
         pub const RECV: &str = "recv";
     }
@@ -81,16 +89,19 @@ pub mod labels {
         pub const OK: &str = "ok";
         pub const VERSION_TOO_OLD: &str = "version_too_old";
         pub const PARSE_ERROR: &str = "parse_error";
+        #[allow(dead_code)]
         pub const READY_WAIT: &str = "ready_wait";
     }
     pub mod watch_error_reason {
         pub const PARSE_ERROR: &str = "parse_error";
+        #[allow(dead_code)]
         pub const TIMEOUT: &str = "timeout";
         pub const RECV_ERROR: &str = "recv_error";
     }
     pub mod offline_reason {
         pub const HEARTBEAT: &str = "heartbeat";
         pub const DISCONNECT: &str = "disconnect";
+        #[allow(dead_code)]
         pub const RELOAD: &str = "reload";
     }
     pub mod evict_source {
@@ -121,8 +132,11 @@ pub mod labels {
     /// - `unknown`: denied before a source could be determined (missing route,
     ///   AuthBypass-without-Role invariant violation, or unclassified origin).
     pub mod rbac_source {
+        #[allow(dead_code)]
         pub const CENTER: &str = "center";
+        #[allow(dead_code)]
         pub const CLI_TOKEN: &str = "cli_token";
+        #[allow(dead_code)]
         pub const UNKNOWN: &str = "unknown";
     }
 }
@@ -152,7 +166,7 @@ pub fn record_connection_duration(role: &'static str, seconds: f64) {
 /// Record a watch event crossing the federation link.
 ///
 /// `kind` must come from a bounded set of resource kinds (e.g.
-/// "PluginMetaData"). Never pass raw user input.
+/// "EdgionConfigData"). Never pass raw user input.
 #[inline]
 pub fn record_watch_event(kind: &str, direction: &'static str) {
     counter!(names::WATCH_EVENTS_TOTAL, "kind" => kind.to_string(), "direction" => direction).increment(1);
@@ -207,6 +221,8 @@ pub fn set_aggregator_controllers(cluster: &str, count: u64) {
     gauge!(names::AGGREGATOR_CONTROLLERS, "cluster" => cluster.to_string()).set(count as f64);
 }
 
+// NOTE(migration): unused after cluster/service route consistency handlers were stubbed.
+#[allow(dead_code)]
 #[inline]
 pub fn record_consistency_mismatch() {
     counter!(names::CONSISTENCY_MISMATCH_TOTAL).increment(1);
@@ -219,6 +235,7 @@ pub fn record_fanout(op: &'static str, result: &'static str) {
 
 // ---------- Ready gate (Controller) ----------
 
+#[allow(dead_code)]
 #[inline]
 pub fn record_ready_gate_wait(seconds: f64) {
     gauge!(names::READY_GATE_WAIT_LAST).set(seconds);
@@ -236,6 +253,7 @@ pub fn record_ready_gate_wait(seconds: f64) {
 /// `"center"`, `"cli_token"`, or `"unknown"`. Never pass raw user input as any
 /// label — in particular, do NOT use the token name as a label value (use a
 /// structured log field instead).
+#[allow(dead_code)]
 #[inline]
 pub fn record_rbac_denied(verb: &str, kind: &str, source: &str) {
     counter!(
@@ -253,6 +271,7 @@ pub fn record_rbac_denied(verb: &str, kind: &str, source: &str) {
 /// always visible in Prometheus without querying event history.
 /// Value: `1.0` when the federation client is enabled and running, `0.0` when
 /// it is disabled (kill-switch active).
+#[allow(dead_code)]
 #[inline]
 pub fn record_kill_switch_state(enabled: bool) {
     gauge!(names::KILL_SWITCH_STATE).set(if enabled { 1.0 } else { 0.0 });
@@ -505,9 +524,9 @@ mod tests {
         super::set_connections_active(role::CENTER, 0);
         super::record_connection_event(role::CENTER, event::CONNECTED);
         super::record_connection_duration(role::CENTER, 1.5);
-        super::record_watch_event("PluginMetaData", direction::RECV);
-        super::record_watch_list("PluginMetaData", watch_list_result::OK);
-        super::record_watch_error("PluginMetaData", watch_error_reason::RECV_ERROR);
+        super::record_watch_event("EdgionConfigData", direction::RECV);
+        super::record_watch_list("EdgionConfigData", watch_list_result::OK);
+        super::record_watch_error("EdgionConfigData", watch_error_reason::RECV_ERROR);
         super::record_mark_offline(offline_reason::DISCONNECT);
         super::record_evict_stale(evict_source::REGISTRY);
         super::record_session_reentry();
@@ -569,7 +588,7 @@ mod rbac_metric_tests {
             "unknown",
         ];
         // Bounded kind values: known kinds, synthetic labels, "unknown".
-        let kinds = ["Secret", "PluginMetaData", "HTTPRoute", "RegionRoute", "*", "unknown"];
+        let kinds = ["Secret", "EdgionConfigData", "HTTPRoute", "RegionRoute", "*", "unknown"];
         // Bounded source values from labels::rbac_source.
         let sources = [
             labels::rbac_source::CENTER,
@@ -602,7 +621,7 @@ mod rbac_metric_tests {
         use super::labels::rbac_source;
         // The canonical Task-7 case: a cli token denied on Secret.
         record_rbac_denied("get", "Secret", rbac_source::CLI_TOKEN);
-        record_rbac_denied("list", "PluginMetaData", rbac_source::CENTER);
+        record_rbac_denied("list", "EdgionConfigData", rbac_source::CENTER);
         record_rbac_denied("unknown", "unknown", rbac_source::UNKNOWN);
         // All three bounded source values work.
         for source in [rbac_source::CENTER, rbac_source::CLI_TOKEN, rbac_source::UNKNOWN] {

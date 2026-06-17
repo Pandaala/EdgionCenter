@@ -13,7 +13,7 @@ When reviewing federation `RegisterRequest` / `ControllerRegistry` / `ResourceAg
 
 ## Source paths
 
-- `src/core/center/fed_sync/server/mod.rs` — `fed_sync::server::sync`, `validate_register_req`, `registry_capacity_exceeded`
+- `src/fed_sync/server/mod.rs` — `fed_sync::server::sync`, `validate_register_req`, `registry_capacity_exceeded`
 
 ## Related decisions
 
@@ -21,4 +21,4 @@ The retention rule in `cpu-memory/not-a-performance-issue.md` (now split into `c
 
 ## Re-report guard
 
-If a finding claims the boundary checks are missing, verify the current `src/core/center/fed_sync/server/mod.rs` before re-reporting; if a finding proposes loosening or removing the caps, reject — they are the defence-in-depth that complements `common-center-01`'s mTLS work.
+If a finding claims the boundary checks are missing, verify the current `src/fed_sync/server/mod.rs` before re-reporting; if a finding proposes loosening or removing the caps, reject — they are the defence-in-depth that complements `common-center-01`'s mTLS work.

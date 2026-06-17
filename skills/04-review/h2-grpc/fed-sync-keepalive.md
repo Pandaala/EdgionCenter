@@ -10,7 +10,7 @@ description: FederationSync gRPC server now applies the same HTTP/2 keepalive se
 
 ## Conclusion
 
-The FederationSync gRPC server (`src/core/center/cli/mod.rs`) now applies
+The FederationSync gRPC server (`src/cli/mod.rs`) now applies
 `.http2_keepalive_interval(Some(Duration::from_secs(10)))` and
 `.http2_keepalive_timeout(Some(Duration::from_secs(5)))`, matching the
 ConfigSync server (`grpc_server.rs:67-69`). Both long-lived bidirectional
@@ -33,7 +33,7 @@ an internal consistency issue: ConfigSync had keepalive; FederationSync did not.
 
 ## Code shape today
 
-- `src/core/center/cli/mod.rs:151-153` — `Server::builder()` chain now includes
+- `src/cli/mod.rs` — `Server::builder()` chain now includes
   `.http2_keepalive_interval(Some(Duration::from_secs(10)))` and
   `.http2_keepalive_timeout(Some(Duration::from_secs(5)))`.
 - `src/core/controller/conf_sync/conf_server/grpc_server.rs:11-13,67-69` —

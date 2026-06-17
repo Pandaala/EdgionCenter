@@ -28,20 +28,20 @@ pub struct FailoverRequest {
 
 // ============= RegionRoute MetaDataStore Handlers =============
 
-pub async fn list_cluster_region_routes(State(state): State<ApiState>) -> Json<serde_json::Value> {
-    let routes = state.metadata_store.list_cluster_routes();
-    Json(serde_json::json!({
-        "success": true,
-        "data": routes,
-    }))
+/// NOTE(migration): Returns empty list — ClusterRegionRouteEntry was deleted upstream
+/// (PluginMetaData → EdgionConfigData migration). Restore from git history when
+/// RegionRoute is re-implemented on EdgionConfigData.
+pub async fn list_cluster_region_routes(_state: State<ApiState>) -> Json<serde_json::Value> {
+    // NOTE(migration): ClusterRegionRouteEntry deleted upstream; cluster_routes map removed.
+    Json(serde_json::json!({ "success": true, "data": [] }))
 }
 
-pub async fn list_service_region_routes(State(state): State<ApiState>) -> Json<serde_json::Value> {
-    let routes = state.metadata_store.list_service_routes();
-    Json(serde_json::json!({
-        "success": true,
-        "data": routes,
-    }))
+/// NOTE(migration): Returns empty list — ServiceRegionRouteEntry was deleted upstream
+/// (PluginMetaData → EdgionConfigData migration). Restore from git history when
+/// RegionRoute is re-implemented on EdgionConfigData.
+pub async fn list_service_region_routes(_state: State<ApiState>) -> Json<serde_json::Value> {
+    // NOTE(migration): ServiceRegionRouteEntry deleted upstream; service_routes map removed.
+    Json(serde_json::json!({ "success": true, "data": [] }))
 }
 
 // ============= Failover Handlers =============
@@ -141,19 +141,14 @@ pub async fn cluster_region_route_sync(
         }
     };
 
-    // 2. Get each controller's myRegion from MetaDataStore
-    let routes = state.metadata_store.list_cluster_routes();
-    let route = routes
-        .iter()
-        .find(|r| r.namespace == body.namespace && r.name == body.name);
-    let my_region_map: HashMap<String, String> = match route {
-        Some(r) => r
-            .controllers
-            .iter()
-            .map(|(cid, entry)| (cid.clone(), entry.my_region.clone()))
-            .collect(),
-        None => HashMap::new(),
-    };
+    // 2. Get each controller's myRegion from MetaDataStore.
+    // NOTE(migration): ClusterRegionRouteEntry deleted upstream (PluginMetaData →
+    // EdgionConfigData); per-controller myRegion is no longer cached in Center.
+    // my_region_map is kept as an empty stub so the fan-out path below continues to
+    // compile and function without the preservation step. Restore from git history
+    // when RegionRoute is re-implemented on EdgionConfigData.
+    // FLAG: cluster_region_route_sync no longer preserves each target's myRegion.
+    let my_region_map: HashMap<String, String> = HashMap::new();
 
     // 3. Fan-out PUT to all online controllers (except source)
     let summaries = state.aggregator.controller_summaries();

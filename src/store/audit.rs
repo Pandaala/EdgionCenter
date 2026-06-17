@@ -181,6 +181,7 @@ impl Store {
     }
 
     /// Delete all records with `ts < before_ts`. Returns the number of rows removed.
+    #[allow(dead_code)]
     pub async fn prune_audit(&self, before_ts: i64) -> anyhow::Result<u64> {
         let sql = "DELETE FROM audit_log WHERE ts < ?";
         let affected = match &self.pool {

@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::api::ApiState;
 use crate::metadata_store::ControllerPmEntry;
@@ -33,7 +34,7 @@ fn fanout_result_label(success_count: usize, failed_count: usize) -> &'static st
 pub struct CenterGlobalIpRestrictionView {
     pub namespace: String,
     pub name: String,
-    pub controllers: HashMap<String, ControllerPmEntry>,
+    pub controllers: HashMap<String, Arc<ControllerPmEntry>>,
     pub online_controller_ids: Vec<String>,
 }
 
@@ -234,7 +235,9 @@ fn fanout_status(success: &[ControllerOpResult], failed: &[ControllerOpResult]) 
 // POST /api/v1/center/global-connection-ip-restrictions
 // =====================================================================
 
-use edgion_resources::resources::plugin_metadata::GlobalConnectionIpRestrictionData;
+// NOTE(migration): GlobalConnectionIpRestrictionData deleted upstream (PluginMetaData →
+// EdgionConfigData); GIR config moved to edgion_stream_plugins::GlobalConnectionIpRestrictionConfig.
+use edgion_resources::resources::edgion_stream_plugins::GlobalConnectionIpRestrictionConfig;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -242,7 +245,7 @@ pub struct CreateRequest {
     pub namespace: String,
     pub name: String,
     pub controllers: Vec<String>,
-    pub data: GlobalConnectionIpRestrictionData,
+    pub data: GlobalConnectionIpRestrictionConfig,
 }
 
 /// `POST /api/v1/center/global-connection-ip-restrictions`
@@ -261,7 +264,6 @@ pub async fn create_global_ip_restriction(
             );
         }
     }
-
     let (targets, warnings) = resolve_targets(&state, &req.controllers);
 
     let pm_json = build_pm_json(&req.namespace, &req.name, &req.data);
@@ -282,11 +284,13 @@ pub async fn create_global_ip_restriction(
     )
 }
 
-/// Extract [`GlobalConnectionIpRestrictionData`] from a Controller GET response body.
+/// Extract [`GlobalConnectionIpRestrictionConfig`] from a Controller GET response body.
 ///
 /// The Controller stores and returns PluginMetaData as:
-/// `{"spec": {"metadata": {"config": <GlobalConnectionIpRestrictionData>}}}`
-fn extract_pm_data(v: &serde_json::Value) -> Result<GlobalConnectionIpRestrictionData, String> {
+/// `{"spec": {"metadata": {"config": <GlobalConnectionIpRestrictionConfig>}}}`
+// FIXME(migration): GIR is now an EdgionStreamPlugins config; this wire contract is stale
+// and must be reconciled with the controller in a follow-up.
+fn extract_pm_data(v: &serde_json::Value) -> Result<GlobalConnectionIpRestrictionConfig, String> {
     let config = v
         .pointer("/spec/metadata/config")
         .ok_or_else(|| "missing /spec/metadata/config in Controller PM response".to_string())?;
@@ -301,7 +305,7 @@ async fn fetch_live_pm_data(
     proxy: &crate::proxy::ProxyForwarder,
     cid: &str,
     path: &str,
-) -> Result<GlobalConnectionIpRestrictionData, (u16, String)> {
+) -> Result<GlobalConnectionIpRestrictionConfig, (u16, String)> {
     match proxy
         .forward(cid, "GET".to_string(), path.to_string(), HashMap::new(), vec![])
         .await
@@ -320,7 +324,9 @@ async fn fetch_live_pm_data(
     }
 }
 
-fn build_pm_json(ns: &str, name: &str, data: &GlobalConnectionIpRestrictionData) -> String {
+// FIXME(migration): GIR is now an EdgionStreamPlugins config; this wire contract is stale
+// and must be reconciled with the controller in a follow-up.
+fn build_pm_json(ns: &str, name: &str, data: &GlobalConnectionIpRestrictionConfig) -> String {
     let doc = serde_json::json!({
         "apiVersion": "edgion.io/v1",
         "kind": "PluginMetaData",
@@ -343,7 +349,7 @@ fn build_pm_json(ns: &str, name: &str, data: &GlobalConnectionIpRestrictionData)
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRequest {
     pub controllers: Vec<String>,
-    pub data: GlobalConnectionIpRestrictionData,
+    pub data: GlobalConnectionIpRestrictionConfig,
 }
 
 /// `PUT /api/v1/center/global-connection-ip-restrictions/{ns}/{name}`
@@ -450,11 +456,13 @@ pub async fn patch_enable(
                     }
                 }
             };
-            let data = GlobalConnectionIpRestrictionData {
+            let data = GlobalConnectionIpRestrictionConfig {
                 enable,
                 active_profile: base.active_profile,
                 profiles: base.profiles,
                 description: base.description,
+                // Carry active_profile_ref from the base to avoid clobbering it.
+                active_profile_ref: base.active_profile_ref,
             };
             let body = build_pm_json(&ns, &name, &data).into_bytes();
             let mut headers = HashMap::new();
@@ -550,11 +558,13 @@ pub async fn patch_active_profile(
                     status_code: Some(400),
                 };
             }
-            let data = GlobalConnectionIpRestrictionData {
+            let data = GlobalConnectionIpRestrictionConfig {
                 enable: base.enable,
                 active_profile,
                 profiles: base.profiles,
                 description: base.description,
+                // Carry active_profile_ref from the base to avoid clobbering it.
+                active_profile_ref: base.active_profile_ref,
             };
             let body = build_pm_json(&ns, &name, &data).into_bytes();
             let mut headers = HashMap::new();
@@ -669,11 +679,19 @@ pub async fn sync_global_ip_restriction(
     };
 
     // Reconstruct the PM data from the source ControllerPmEntry.
-    let data = GlobalConnectionIpRestrictionData {
+    // FIDELITY GAP(migration): active_profile_ref is dropped here (set to None) because
+    // ControllerPmEntry does not carry it, unlike patch_enable / patch_active_profile
+    // which fetch live data and preserve base.active_profile_ref. This sync path is
+    // currently unreachable (the GIR map is never fed by fed-sync, so the caller 404s
+    // before reaching here). When EdgionStreamPlugins watch feeding is restored, either
+    // add active_profile_ref to ControllerPmEntry or switch this path to fetch_live_pm_data
+    // so the source controller's selector reference is copied faithfully to targets.
+    let data = GlobalConnectionIpRestrictionConfig {
         enable: source_entry.enable,
         active_profile: source_entry.active_profile.clone(),
         profiles: source_entry.profiles.clone(),
         description: source_entry.description.clone(),
+        active_profile_ref: None,
     };
     let body = build_pm_json(&ns, &name, &data).into_bytes();
     let path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", ns, name);
@@ -693,9 +711,9 @@ pub async fn sync_global_ip_restriction(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use edgion_resources::resources::plugin_metadata::ProfileRules;
+    use edgion_resources::resources::edgion_stream_plugins::ProfileRules;
 
-    fn make_pm_json(data: &GlobalConnectionIpRestrictionData) -> serde_json::Value {
+    fn make_pm_json(data: &GlobalConnectionIpRestrictionConfig) -> serde_json::Value {
         serde_json::json!({
             "apiVersion": "edgion.io/v1",
             "kind": "PluginMetaData",
@@ -709,8 +727,9 @@ mod tests {
         })
     }
 
-    fn sample_data() -> GlobalConnectionIpRestrictionData {
-        GlobalConnectionIpRestrictionData {
+    fn sample_data() -> GlobalConnectionIpRestrictionConfig {
+        // NOTE(migration): active_profile_ref added (new field in GlobalConnectionIpRestrictionConfig).
+        GlobalConnectionIpRestrictionConfig {
             enable: true,
             active_profile: "prod".to_string(),
             profiles: {
@@ -728,6 +747,7 @@ mod tests {
                 m
             },
             description: Some("test desc".to_string()),
+            active_profile_ref: None,
         }
     }
 

@@ -8,7 +8,7 @@ description: Use when reviewing Center `proxy_handler` / federation HttpProxy fi
 ## Conclusion
 
 The Center `proxy_handler` (`/api/v1/proxy/{controller_id}/*rest`,
-`src/core/center/api/mod.rs`) converting the inbound `HeaderMap` to a
+`src/api/mod.rs`) converting the inbound `HeaderMap` to a
 `HashMap<String, String>` with no allow/deny list and shipping it whole to the
 target controller over the federation gRPC stream is an **accepted tradeoff, not
 a credential-coupling vulnerability**. The "the Center operator credential is
@@ -86,4 +86,4 @@ credential exposure to the (already trusted) controller without changing behavio
 
 - `common-center-04` (P2, Architecture), closed 2026-05-24 as an accepted tradeoff (this entry).
 - [fed-proxy-mtls-fail-close.md](fed-proxy-mtls-fail-close.md) — the controller-side mTLS fail-close + `CenterRestricted` RBAC layer that refutes the credential-coupling premise.
-- Source: `src/core/center/api/mod.rs` (`proxy_handler`), `src/core/center/proxy/mod.rs` (`ProxyForwarder::forward`), `src/core/controller/cli/mod.rs` (fed router build), `src/core/controller/api/authz_middleware.rs:178-185` (`inject_center_identity`), `src/core/controller/fed_sync/fed_client/mod.rs` (`oneshot` dispatch).
+- Source: `src/api/mod.rs` (`proxy_handler`), `src/proxy/mod.rs` (`ProxyForwarder::forward`), `src/core/controller/cli/mod.rs` (fed router build), `src/core/controller/api/authz_middleware.rs:178-185` (`inject_center_identity`), `src/core/controller/fed_sync/fed_client/mod.rs` (`oneshot` dispatch).

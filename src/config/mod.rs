@@ -158,6 +158,7 @@ pub struct CenterConfig {
     pub db_auth: DbAuthConfig,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for CenterConfig {
     fn default() -> Self {
         Self {
@@ -200,6 +201,7 @@ pub struct PeerIdentityConfig {
     pub trust_domain: String,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for PeerIdentityConfig {
     fn default() -> Self {
         Self {

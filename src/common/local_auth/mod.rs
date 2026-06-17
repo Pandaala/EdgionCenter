@@ -18,7 +18,5 @@ pub mod handlers;
 pub mod middleware;
 
 pub use config::LocalAuthConfig;
-pub use handlers::{
-    login_handler, logout_handler, me_handler, AuthStatus, AuthStatusResponse, LoginRequest, LoginResponse,
-};
+pub use handlers::{login_handler, logout_handler, me_handler, AuthStatus, AuthStatusResponse};
 pub use middleware::LocalAuthState;

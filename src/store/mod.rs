@@ -47,6 +47,14 @@ impl Store {
                     .filename(&cfg.sqlite_path)
                     .create_if_missing(true)
                     .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                    // NORMAL is the standard, safe pairing with WAL. The only
+                    // durability cost is that the last committed transaction may be
+                    // lost on an OS crash / power loss (not on a process crash).
+                    // Accepted tradeoff: this DB holds best-effort controller registry
+                    // state (reconstructed from live controllers on restart) plus
+                    // rarely-written roles / db_auth users; the small power-loss window
+                    // is acceptable for both.
+                    .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
                     .busy_timeout(std::time::Duration::from_secs(5))
                     // Enforce ON DELETE CASCADE foreign keys (off by default in SQLite).
                     .foreign_keys(true);

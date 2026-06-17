@@ -128,6 +128,7 @@ pub fn verify(
 }
 
 /// Controller-side path-only check (trust_domain verified by Center).
+#[allow(dead_code)]
 pub fn path_matches(parsed: &ControllerSpiffe, cluster: &str, name: &str) -> bool {
     parsed.cluster == cluster && parsed.name == name
 }

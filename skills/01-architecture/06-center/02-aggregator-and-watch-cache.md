@@ -7,9 +7,9 @@ description: ResourceAggregator, CenterWatchCache/Registry, CenterMetaDataStore,
 
 ## ResourceAggregator
 
-Source: `src/core/center/aggregator/mod.rs`
+Source: `src/aggregator/mod.rs`
 
-`ResourceAggregator` (`src/core/center/aggregator/mod.rs:30-32`) tracks
+`ResourceAggregator` (`src/aggregator/mod.rs`, `ResourceAggregator`) tracks
 per-controller registration state and drives Prometheus gauges for online controller
 counts per cluster. It is the *control-plane view* of which controllers are live.
 
@@ -24,11 +24,11 @@ Key methods:
 
 Internal structure: `Arc<RwLock<HashMap<String, ControllerSnapshot>>>`.
 Gauge emission is done **outside** the write lock to avoid blocking registration on
-any future non-trivial metrics backend (`src/core/center/aggregator/mod.rs:136-144`).
+any future non-trivial metrics backend (`src/aggregator/mod.rs`, gauge emission after write-lock release).
 
 ## CenterWatchCache
 
-Source: `src/core/center/watch_cache/cache.rs`
+Source: `src/watch_cache/cache.rs`
 
 `CenterWatchCache<T>` (`cache.rs:19-23`) is a per-controller, single-kind in-memory
 cache. It mirrors Gateway's `ClientCache<T>`.
@@ -49,7 +49,7 @@ Read paths: `get_sync_version()` (`cache.rs:100`), `get_server_id()` (`cache.rs:
 
 ### CenterWatchCacheRegistry
 
-Source: `src/core/center/watch_cache/registry.rs`
+Source: `src/watch_cache/registry.rs`
 
 `CenterWatchCacheRegistry<T>` (`registry.rs:11-13`) manages one `CenterWatchCache<T>`
 per controller ID. Caches **persist across reconnects** so that `sync_version` is
@@ -65,7 +65,7 @@ preserved — on reconnect, Center sends `from_version = last_known_version` in 
 
 ### CenterSyncClient
 
-Source: `src/core/center/watch_cache/mod.rs:13-15`
+Source: `src/watch_cache/mod.rs` (`CenterSyncClient`)
 
 Top-level container: one `CenterWatchCacheRegistry<T>` field per resource kind.
 Currently only `plugin_metadata: CenterWatchCacheRegistry<PluginMetaData>`.
@@ -73,7 +73,7 @@ Adding a new kind requires a new field here plus a corresponding `FedWatchReques
 
 ## CenterMetaDataStore
 
-Source: `src/core/center/metadata_store/mod.rs`
+Source: `src/metadata_store/mod.rs`
 
 `CenterMetaDataStore` (`mod.rs:73-78`) implements `CenterConfHandler<PluginMetaData>`
 and aggregates PluginMetaData across all connected controllers into three maps:
@@ -123,9 +123,9 @@ Center is the **watch issuer**; Controllers are the **watch servers**. This mean
 - Data freshness depends on the Controller's `ConfigSyncServer` being live and
   having current watch data; Center never polls K8s directly.
 - On Controller restart (detected via `server_id` change in `WatchEventResponse`,
-  `src/core/center/fed_sync/server/mod.rs:613-631`), Center automatically re-watches
+  `src/fed_sync/server/mod.rs`, `server_id` change detection branch), Center automatically re-watches
   from version 0 to rebuild the snapshot.
 
 The stream handler that drives `CenterWatchCache` write paths is the main loop in
-`src/core/center/fed_sync/server/mod.rs:459-705` (the `WatchListResponse` and
+`src/fed_sync/server/mod.rs`, `async fn sync` (the `WatchListResponse` and
 `WatchEventResponse` arms).

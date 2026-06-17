@@ -275,9 +275,7 @@ async fn list_controllers(State(state): State<ApiState>) -> impl IntoResponse {
     // registry here so we keep the aggregator independent of the registry.
     let mut summaries = state.aggregator.controller_summaries();
     for s in summaries.iter_mut() {
-        if let Some(session) = state.registry.get_session(&s.controller_id) {
-            s.last_seen_secs_ago = Some(session.last_seen.elapsed().as_secs());
-        }
+        s.last_seen_secs_ago = state.registry.last_seen_secs_ago(&s.controller_id);
     }
     Json(ListResponse::success(summaries))
 }
@@ -432,91 +430,17 @@ struct MetaDataStoreEntry {
     controller_count: usize,
 }
 
-async fn metadata_store_status(State(state): State<ApiState>) -> impl IntoResponse {
-    let cluster_routes: Vec<MetaDataStoreEntry> = state
-        .metadata_store
-        .list_cluster_routes()
-        .into_iter()
-        .map(|v| MetaDataStoreEntry {
-            pm_key: format!("{}/{}", v.namespace, v.name),
-            controller_count: v.controllers.len(),
-        })
-        .collect();
-    let service_routes: Vec<MetaDataStoreEntry> = state
-        .metadata_store
-        .list_service_routes()
-        .into_iter()
-        .map(|v| MetaDataStoreEntry {
-            pm_key: format!("{}/{}", v.namespace, v.name),
-            controller_count: v.controllers.len(),
-        })
-        .collect();
+async fn metadata_store_status(State(_state): State<ApiState>) -> impl IntoResponse {
+    // NOTE(migration): cluster_routes and service_routes stubbed to empty —
+    // ClusterRegionRouteEntry and ServiceRegionRouteEntry were deleted upstream
+    // (PluginMetaData → EdgionConfigData migration). Restore from git history when
+    // RegionRoute is re-implemented on EdgionConfigData.
+    let cluster_routes: Vec<MetaDataStoreEntry> = Vec::new();
+    let service_routes: Vec<MetaDataStoreEntry> = Vec::new();
     Json(ApiResponse::ok_body(MetaDataStoreStatus {
         cluster_routes,
         service_routes,
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::AuthzMode;
-
-    /// Build an `ApiState` carrying `authz_mode` + `db_auth_enabled`; every other
-    /// field is a minimal default sufficient for the stateless `server_info`
-    /// handler.
-    fn state_with_authz_mode(authz_mode: AuthzMode, db_auth_enabled: bool) -> ApiState {
-        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
-        use parking_lot::Mutex;
-        use std::collections::HashMap;
-
-        let registry = ControllerRegistry::new();
-        let metadata_store = Arc::new(CenterMetaDataStore::new());
-        let sync_client = Arc::new(CenterSyncClient {
-            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
-        });
-        let commander = Arc::new(Commander::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
-        let proxy = Arc::new(ProxyForwarder::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
-        ApiState {
-            aggregator: Arc::new(ResourceAggregator::new()),
-            commander,
-            proxy,
-            db: None,
-            metadata_store,
-            sync_client,
-            registry,
-            db_required: false,
-            authz_mode,
-            db_auth_enabled,
-        }
-    }
-
-    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    #[tokio::test]
-    async fn server_info_reports_authz_and_db_auth() {
-        // RBAC authz + DB-user login on: authzMode=rbac, dbAuthEnabled=true,
-        // and the legacy accessMode key is gone from the wire.
-        let resp = server_info(State(state_with_authz_mode(AuthzMode::Rbac, true)))
-            .await
-            .into_response();
-        let json = body_json(resp).await;
-        assert_eq!(json["data"]["mode"], "center");
-        assert_eq!(json["data"]["authzMode"], "rbac");
-        assert_eq!(json["data"]["dbAuthEnabled"], true);
-        assert!(json["data"]["accessMode"].is_null(), "accessMode must be gone");
-
-        // AllowAll authz + DB-user login off: authzMode=allow_all, dbAuthEnabled=false.
-        let resp = server_info(State(state_with_authz_mode(AuthzMode::AllowAll, false)))
-            .await
-            .into_response();
-        let json = body_json(resp).await;
-        assert_eq!(json["data"]["authzMode"], "allow_all");
-        assert_eq!(json["data"]["dbAuthEnabled"], false);
-    }
 }
 
 async fn proxy_handler(
@@ -584,5 +508,67 @@ async fn proxy_handler(
                         .unwrap()
                 })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AuthzMode;
+
+    /// Build an `ApiState` carrying `authz_mode` + `db_auth_enabled`; every other
+    /// field is a minimal default sufficient for the stateless `server_info`
+    /// handler.
+    fn state_with_authz_mode(authz_mode: AuthzMode, db_auth_enabled: bool) -> ApiState {
+        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
+        use parking_lot::Mutex;
+        use std::collections::HashMap;
+
+        let registry = ControllerRegistry::new();
+        let metadata_store = Arc::new(CenterMetaDataStore::new());
+        let sync_client = Arc::new(CenterSyncClient {
+            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
+        });
+        let commander = Arc::new(Commander::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
+        let proxy = Arc::new(ProxyForwarder::new(registry.clone(), Arc::new(Mutex::new(HashMap::new())), 5));
+        ApiState {
+            aggregator: Arc::new(ResourceAggregator::new()),
+            commander,
+            proxy,
+            db: None,
+            metadata_store,
+            sync_client,
+            registry,
+            db_required: false,
+            authz_mode,
+            db_auth_enabled,
+        }
+    }
+
+    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn server_info_reports_authz_and_db_auth() {
+        // RBAC authz + DB-user login on: authzMode=rbac, dbAuthEnabled=true,
+        // and the legacy accessMode key is gone from the wire.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::Rbac, true)))
+            .await
+            .into_response();
+        let json = body_json(resp).await;
+        assert_eq!(json["data"]["mode"], "center");
+        assert_eq!(json["data"]["authzMode"], "rbac");
+        assert_eq!(json["data"]["dbAuthEnabled"], true);
+        assert!(json["data"]["accessMode"].is_null(), "accessMode must be gone");
+
+        // AllowAll authz + DB-user login off: authzMode=allow_all, dbAuthEnabled=false.
+        let resp = server_info(State(state_with_authz_mode(AuthzMode::AllowAll, false)))
+            .await
+            .into_response();
+        let json = body_json(resp).await;
+        assert_eq!(json["data"]["authzMode"], "allow_all");
+        assert_eq!(json["data"]["dbAuthEnabled"], false);
     }
 }

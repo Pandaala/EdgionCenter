@@ -8,7 +8,7 @@ description: Use when understanding how the edgion-center binary aggregates Cont
 Center is the federation hub for multi-cluster Edgion deployments.
 It accepts bidirectional gRPC streams from one or more Controllers, aggregates the
 PluginMetaData they publish, and exposes an HTTP Admin API for operators.
-Entry point: `src/bin/edgion_center.rs`; startup logic: `src/core/center/cli/mod.rs`.
+Entry point: `src/main.rs`; startup logic: `src/cli/mod.rs` (`EdgionCenterCli::run`).
 
 ## Mental model
 

@@ -104,6 +104,27 @@ impl<T: Send + Sync + 'static> CenterWatchCache<T> {
     pub fn get_server_id(&self) -> String {
         self.inner.read().server_id.clone()
     }
+
+    /// Returns a sorted list of all cache keys.
+    ///
+    /// Available in `#[cfg(test)]` only — used by unit tests to assert which
+    /// keys are present after add/update/delete classification.
+    #[cfg(test)]
+    pub fn snapshot_keys(&self) -> Vec<String> {
+        let state = self.inner.read();
+        let mut keys: Vec<String> = state.data.keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    /// Returns the current cache entry for `key`, or `None` if absent.
+    ///
+    /// Available in `#[cfg(test)]` only — used by unit tests to assert
+    /// key-level presence/absence after classification.
+    #[cfg(test)]
+    pub fn get_entry(&self, key: &str) -> Option<Arc<T>> {
+        self.inner.read().data.get(key).cloned()
+    }
 }
 
 #[cfg(test)]

@@ -25,6 +25,7 @@ pub mod names {
     /// Gauge = 1 while the `(component, reason)` pair's error condition
     /// is active; stays at 1 until the process restarts (these are
     /// startup-time config decisions, not transient runtime failures).
+    #[allow(dead_code)]
     pub const SYSTEM_ERROR_STATE: &str = "edgion_system_error_state";
 }
 
@@ -33,10 +34,13 @@ pub mod names {
 /// Keep this list small and closed (bounded cardinality).
 pub mod components {
     /// Gateway-side conf_sync gRPC client (Gateway → Controller).
+    #[allow(dead_code)]
     pub const CONF_SYNC_CLIENT: &str = "conf_sync_client";
     /// Controller-side conf_sync gRPC server.
+    #[allow(dead_code)]
     pub const CONF_SYNC_SERVER: &str = "conf_sync_server";
     /// Controller-side federation gRPC client (Controller → Center).
+    #[allow(dead_code)]
     pub const FED_SYNC_CLIENT: &str = "fed_sync_client";
 }
 
@@ -47,13 +51,16 @@ pub mod reasons {
     /// TLS was configured but `skip_tls=true` is in effect — the channel
     /// is running in plaintext despite cert paths being present.
     /// Emergency bypass; must not stay enabled in production.
+    #[allow(dead_code)]
     pub const SKIP_TLS: &str = "skip_tls";
     /// Federation requires mTLS but no TLS block was configured; the channel
     /// refused to start (fail-close). Distinct from a *running* plaintext
     /// channel — federation never runs in plaintext.
+    #[allow(dead_code)]
     pub const NO_TLS_CONFIGURED: &str = "no_tls_configured";
     /// Controller's own client cert SPIFFE SAN does not match its configured
     /// cluster/name; federation client was not started.
+    #[allow(dead_code)]
     pub const PEER_IDENTITY_SELF_CHECK: &str = "peer_identity_self_check";
 }
 
@@ -66,6 +73,7 @@ pub mod reasons {
 /// `component` should come from [`components`] and `reason` from
 /// [`reasons`]. Callers that pass ad-hoc strings will pollute Prometheus
 /// cardinality and should be audited.
+#[allow(dead_code)]
 pub fn mark_system_error(component: &'static str, reason: &'static str) {
     gauge!(
         names::SYSTEM_ERROR_STATE,

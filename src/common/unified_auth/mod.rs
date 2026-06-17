@@ -40,7 +40,6 @@ use axum::{
 };
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -81,8 +80,10 @@ pub struct UnifiedAuthClaims {
     /// The subject (`sub` claim), if present.
     pub sub: Option<String>,
     /// The issuer (`iss` claim), if present.
+    #[allow(dead_code)]
     pub iss: Option<String>,
     /// Full claims as a JSON value (for scope/role inspection).
+    #[allow(dead_code)]
     pub claims: serde_json::Value,
 }
 
@@ -523,27 +524,30 @@ mod tests {
     use tower::ServiceExt;
 
     fn invalid_oidc_cfg() -> AdminAuthConfig {
-        let mut c = AdminAuthConfig::default();
-        c.enabled = true;
-        c.discovery = String::new();
-        c
+        AdminAuthConfig {
+            enabled: true,
+            discovery: String::new(),
+            ..AdminAuthConfig::default()
+        }
     }
 
     fn invalid_local_cfg() -> LocalAuthConfig {
-        let mut c = LocalAuthConfig::default();
-        c.enabled = true;
-        c.username = String::new();
-        c.password = String::new();
-        c
+        LocalAuthConfig {
+            enabled: true,
+            username: String::new(),
+            password: String::new(),
+            ..LocalAuthConfig::default()
+        }
     }
 
     fn valid_local_cfg() -> LocalAuthConfig {
-        let mut c = LocalAuthConfig::default();
-        c.enabled = true;
-        c.username = "admin".to_string();
-        c.password = "a_long_enough_password_123".to_string();
-        c.jwt_secret = "a_long_enough_jwt_secret_value_abcdef".to_string();
-        c
+        LocalAuthConfig {
+            enabled: true,
+            username: "admin".to_string(),
+            password: "a_long_enough_password_123".to_string(),
+            jwt_secret: "a_long_enough_jwt_secret_value_abcdef".to_string(),
+            ..LocalAuthConfig::default()
+        }
     }
 
     #[test]

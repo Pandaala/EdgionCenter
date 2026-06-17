@@ -267,12 +267,13 @@ mod handler_tests {
     use tower::ServiceExt;
 
     fn valid_local() -> crate::common::local_auth::LocalAuthConfig {
-        let mut c = crate::common::local_auth::LocalAuthConfig::default();
-        c.enabled = true;
-        c.username = "admin".to_string();
-        c.password = "a_long_enough_password_123".to_string();
-        c.jwt_secret = "a_long_enough_jwt_secret_value_abcdef".to_string();
-        c
+        crate::common::local_auth::LocalAuthConfig {
+            enabled: true,
+            username: "admin".to_string(),
+            password: "a_long_enough_password_123".to_string(),
+            jwt_secret: "a_long_enough_jwt_secret_value_abcdef".to_string(),
+            ..crate::common::local_auth::LocalAuthConfig::default()
+        }
     }
 
     fn app_with_unified(state: Arc<UnifiedAuthState>) -> axum::Router {

@@ -7,7 +7,7 @@ description: Use when reviewing findings that flag controller_summaries() being 
 
 # Admin API `controller_summaries()` Multi-Call / Partial Field Discard is Not an Issue
 
-**False-positive scenario**: the audit flags `ResourceAggregator::controller_summaries()` (`src/core/center/aggregator/mod.rs:123-135`) called in multiple Admin API handlers, with some call sites only taking one or two fields and discarding the rest; judged as "repeated full-field clone, CPU waste". Typical examples:
+**False-positive scenario**: the audit flags `ResourceAggregator::controller_summaries()` (`src/aggregator/mod.rs`, `controller_summaries`) called in multiple Admin API handlers, with some call sites only taking one or two fields and discarding the rest; judged as "repeated full-field clone, CPU waste". Typical examples:
 
 | Call site | Fields actually used | "Discarded" fields |
 |-------|------------|-----------|

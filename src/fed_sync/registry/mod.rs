@@ -78,7 +78,7 @@ impl ControllerRegistry {
         self.inner
             .read()
             .get(controller_id)
-            .map_or(false, |s| s.session_id == session_id)
+            .is_some_and(|s| s.session_id == session_id)
     }
 
     pub fn get_session(&self, controller_id: &str) -> Option<SessionView> {
@@ -91,6 +91,16 @@ impl ControllerRegistry {
             last_seen: s.last_seen,
             offline_since: s.offline_since,
         })
+    }
+
+    /// Seconds elapsed since the controller's last_seen, computed inside the
+    /// read lock so callers needing only liveness don't clone the whole
+    /// SessionView (info vectors, cluster string, stream_tx). None if unknown.
+    pub fn last_seen_secs_ago(&self, controller_id: &str) -> Option<u64> {
+        self.inner
+            .read()
+            .get(controller_id)
+            .map(|s| s.last_seen.elapsed().as_secs())
     }
 
     pub fn update_last_seen(&self, controller_id: &str) {
@@ -135,6 +145,7 @@ impl ControllerRegistry {
         true
     }
 
+    #[allow(dead_code)]
     pub fn online_controller_ids(&self) -> Vec<String> {
         self.inner
             .read()
@@ -144,6 +155,7 @@ impl ControllerRegistry {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn online_senders(&self) -> Vec<(String, mpsc::Sender<CenterMessage>)> {
         self.inner
             .read()
@@ -169,6 +181,7 @@ impl ControllerRegistry {
     }
 
     /// True when no controller sessions are registered.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.read().is_empty()
     }
@@ -181,11 +194,16 @@ impl ControllerRegistry {
 
 #[derive(Debug, Clone)]
 pub struct SessionView {
+    #[allow(dead_code)]
     pub controller_id: String,
+    #[allow(dead_code)]
     pub session_id: String,
+    #[allow(dead_code)]
     pub info: RegisterRequest,
     pub stream_tx: Option<mpsc::Sender<CenterMessage>>,
+    #[allow(dead_code)]
     pub last_seen: Instant,
+    #[allow(dead_code)]
     pub offline_since: Option<Instant>,
 }
 
@@ -312,6 +330,15 @@ mod tests {
         let (tx2, _rx2) = mpsc::channel(8);
         let prev = reg.register("cid".to_string(), mock_info("cid"), tx2, "s2".to_string());
         assert_eq!(prev, None, "an already-offline session is not a live takeover");
+    }
+
+    #[test]
+    fn last_seen_secs_ago_returns_some_for_known_none_for_unknown() {
+        let registry = ControllerRegistry::new();
+        let (tx, _rx) = mpsc::channel(8);
+        registry.register("cid".to_string(), mock_info("cid"), tx, "s1".to_string());
+        assert!(registry.last_seen_secs_ago("cid").is_some());
+        assert_eq!(registry.last_seen_secs_ago("nope"), None);
     }
 
     #[test]

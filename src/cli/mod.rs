@@ -864,12 +864,14 @@ mod tests {
         // reqwest's TLS client construction (OidcProvider::from_config) is happier
         // with a process CryptoProvider installed; idempotent install.
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let mut config = CenterConfig::default();
-        config.auth = Some(AdminAuthConfig {
-            enabled: true,
-            discovery: "https://idp.example.com/.well-known/openid-configuration".to_string(),
-            ..AdminAuthConfig::default()
-        });
+        let config = CenterConfig {
+            auth: Some(AdminAuthConfig {
+                enabled: true,
+                discovery: "https://idp.example.com/.well-known/openid-configuration".to_string(),
+                ..AdminAuthConfig::default()
+            }),
+            ..CenterConfig::default()
+        };
         // authz.mode defaults to allow_all; local_auth None; db_auth off.
         let app = build_access_app(&config, axum::Router::new(), None, true)
             .await
@@ -906,14 +908,16 @@ mod tests {
         use axum::{body::Body, http::Request, routing::get, Router};
         use tower::ServiceExt;
 
-        let mut config = CenterConfig::default();
-        config.local_auth = Some(crate::common::local_auth::LocalAuthConfig {
-            enabled: false,
-            username: "admin".to_string(),
-            password: "a-real-password".to_string(),
-            jwt_secret: "a_long_enough_jwt_secret_value_abcdef".to_string(),
-            ..crate::common::local_auth::LocalAuthConfig::default()
-        });
+        let config = CenterConfig {
+            local_auth: Some(crate::common::local_auth::LocalAuthConfig {
+                enabled: false,
+                username: "admin".to_string(),
+                password: "a-real-password".to_string(),
+                jwt_secret: "a_long_enough_jwt_secret_value_abcdef".to_string(),
+                ..crate::common::local_auth::LocalAuthConfig::default()
+            }),
+            ..CenterConfig::default()
+        };
         // No OIDC, no db_auth, authz.mode defaults to allow_all.
 
         let business = Router::new().route("/api/v1/controllers", get(|| async { "controllers" }));

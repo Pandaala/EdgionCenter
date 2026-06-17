@@ -90,6 +90,7 @@ impl LocalAuthConfig {
     /// Apply EDGION_ADMIN_* environment-variable overrides onto this config.
     /// A non-empty env value overrides the corresponding field. This is the
     /// recommended K8s path: inject from a Secret via valueFrom.secretKeyRef.
+    #[allow(dead_code)]
     pub fn apply_env_overrides(&mut self) {
         if let Ok(v) = std::env::var("EDGION_ADMIN_USERNAME") {
             if !v.is_empty() {
@@ -109,6 +110,7 @@ impl LocalAuthConfig {
     }
 
     /// Whether any EDGION_ADMIN_* override is set (non-empty).
+    #[allow(dead_code)]
     pub fn env_overrides_present() -> bool {
         [
             "EDGION_ADMIN_USERNAME",

@@ -25,18 +25,20 @@ use crate::watch_cache::{CenterSyncClient, WatchEventSimple};
 use crate::common::conf_sync::types::EventType;
 use crate::common::fed_sync::proto::{
     center_message::Payload as CenterPayload, controller_message::Payload as CtrlPayload,
-    federation_sync_server::FederationSync, CenterMessage, ControllerMessage, FedWatchRequest, Ping, RegisterAck,
-    RegisterRequest,
+    federation_sync_server::FederationSync, CenterMessage, ControllerMessage, FedWatchEventResponse,
+    FedWatchListResponse, FedWatchRequest, Ping, RegisterAck, RegisterRequest,
 };
+use crate::common::now_ms;
 use crate::common::observe::fed_metrics;
 use edgion_resources::resource::meta::ResourceMeta;
-use edgion_resources::resources::plugin_metadata::PluginMetaData;
+// Renamed from PluginMetaData to EdgionConfigData (upstream migration).
+use edgion_resources::resources::edgion_config_data::EdgionConfigData;
 
 /// Label value used on fed-sync metrics whose `kind` dimension is
-/// currently hardcoded. The federation server only streams PluginMetaData
+/// currently hardcoded. The federation server only streams EdgionConfigData
 /// today; when new kinds are added, each call site should pass its own
 /// kind instead of this constant.
-const PLUGIN_METADATA_KIND: &str = "PluginMetaData";
+const PLUGIN_METADATA_KIND: &str = "EdgionConfigData";
 
 // Boundary caps on RegisterRequest fields. The federation gRPC server requires
 // mTLS, but input validation is kept independent of the TLS layer: any peer
@@ -146,9 +148,11 @@ struct WatchEventRaw<'a> {
     sync_version: u64,
 }
 
-/// Per-kind watch state for a controller session.
-/// Currently only PluginMetaData is watched; this struct makes it straightforward
-/// to add more kinds by storing a `HashMap<kind, FedWatchState>`.
+/// Watch state for a controller session's single watched kind.
+/// Only EdgionConfigData is watched today, tracked by one `FedWatchState`
+/// instance (`pm_watch`) in the stream loop. Supporting multiple kinds would
+/// require a `HashMap<kind, FedWatchState>` plus a per-kind match in the loop —
+/// not yet implemented.
 struct FedWatchState {
     /// Current request_id for correlation (stale responses are skipped).
     request_id: String,
@@ -182,8 +186,228 @@ impl FedWatchState {
     }
 }
 
+/// Outcome returned by the synchronous watch-response handlers.
+///
+/// The loop inspects this to decide whether to trigger a backoff, re-watch,
+/// or simply continue waiting for the next message.
+#[derive(Debug, PartialEq, Eq)]
+enum WatchOutcome {
+    /// Response parsed and applied to the cache.
+    Applied,
+    /// Response skipped because its request_id is stale.
+    Skipped,
+    /// Response data could not be deserialized.
+    ParseError,
+    /// Server ID changed — re-watch from version 0 immediately.
+    ReWatch,
+    /// Error field set — back off 3 s then re-watch from version 0.
+    BackoffReWatch,
+}
+
 pub type PendingCommandMap =
     Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<crate::common::fed_sync::proto::CommandResponse>>>>;
+
+/// Handle a `FedWatchListResponse` from the controller.
+///
+/// Synchronous — no `.await` inside. Stale-request and parse errors are
+/// handled inline; callers do not need to take any further action for
+/// `Skipped` or `ParseError`. On `Applied`, `pm_watch` state is updated.
+fn apply_watch_list(
+    cid: &str,
+    pm_cache: &crate::watch_cache::CenterWatchCache<EdgionConfigData>,
+    pm_watch: &mut FedWatchState,
+    resp: FedWatchListResponse,
+) -> WatchOutcome {
+    if resp.request_id != pm_watch.request_id {
+        tracing::debug!(
+            component = "fed_server",
+            controller_id = %cid,
+            expected = %pm_watch.request_id,
+            got = %resp.request_id,
+            "Skipping stale WatchListResponse"
+        );
+        return WatchOutcome::Skipped;
+    }
+    match serde_json::from_str::<Vec<EdgionConfigData>>(&resp.data) {
+        Ok(items) => {
+            let keyed: Vec<(String, EdgionConfigData)> = items
+                .into_iter()
+                .map(|pm| {
+                    let key = pm.key_name();
+                    (key, pm)
+                })
+                .collect();
+            pm_cache.replace_all(keyed, resp.sync_version, resp.server_id.clone());
+            pm_watch.server_id = Some(resp.server_id);
+            pm_watch.consecutive_errors = 0;
+            fed_metrics::record_watch_list(
+                PLUGIN_METADATA_KIND,
+                fed_metrics::labels::watch_list_result::OK,
+            );
+            tracing::debug!(
+                component = "fed_server",
+                controller_id = %cid,
+                sync_version = resp.sync_version,
+                "EdgionConfigData WatchListResponse applied"
+            );
+            WatchOutcome::Applied
+        }
+        Err(e) => {
+            fed_metrics::record_watch_list(
+                PLUGIN_METADATA_KIND,
+                fed_metrics::labels::watch_list_result::PARSE_ERROR,
+            );
+            tracing::warn!(
+                component = "fed_server",
+                controller_id = %cid,
+                error = %e,
+                "Failed to deserialize WatchListResponse data"
+            );
+            WatchOutcome::ParseError
+        }
+    }
+}
+
+/// Handle a `FedWatchEventResponse` from the controller.
+///
+/// Synchronous — no `.await` inside. Returns `BackoffReWatch` or `ReWatch`
+/// when the caller must re-issue a watch; the caller is responsible for
+/// the backoff sleep and sending the new `FedWatchRequest`.
+fn apply_watch_event(
+    cid: &str,
+    pm_cache: &crate::watch_cache::CenterWatchCache<EdgionConfigData>,
+    pm_watch: &mut FedWatchState,
+    resp: FedWatchEventResponse,
+) -> WatchOutcome {
+    // (1) Stale request_id — skip silently.
+    if resp.request_id != pm_watch.request_id {
+        tracing::debug!(
+            component = "fed_server",
+            controller_id = %cid,
+            expected = %pm_watch.request_id,
+            got = %resp.request_id,
+            "Skipping stale WatchEventResponse"
+        );
+        return WatchOutcome::Skipped;
+    }
+
+    // (2) Record delivery metric (direction = recv from Center's perspective).
+    fed_metrics::record_watch_event(
+        PLUGIN_METADATA_KIND,
+        fed_metrics::labels::direction::RECV,
+    );
+
+    // (3) Error set — back off then re-watch.
+    if !resp.error.is_empty() {
+        fed_metrics::record_watch_error(
+            PLUGIN_METADATA_KIND,
+            fed_metrics::labels::watch_error_reason::RECV_ERROR,
+        );
+        pm_watch.consecutive_errors += 1;
+        if pm_watch.consecutive_errors == 1 {
+            // First error is normal during startup/reload.
+            tracing::info!(
+                component = "fed_server",
+                controller_id = %cid,
+                error = %resp.error,
+                "WatchEventResponse error (likely startup delay), backing off before re-watch"
+            );
+        } else {
+            tracing::warn!(
+                component = "fed_server",
+                controller_id = %cid,
+                error = %resp.error,
+                consecutive_errors = pm_watch.consecutive_errors,
+                "WatchEventResponse error persists, backing off before re-watch"
+            );
+        }
+        return WatchOutcome::BackoffReWatch;
+    }
+
+    // (4) Server-ID mismatch — re-watch from version 0 immediately.
+    if let Some(ref expected_sid) = pm_watch.server_id {
+        if *expected_sid != resp.server_id {
+            fed_metrics::record_watch_list(
+                PLUGIN_METADATA_KIND,
+                fed_metrics::labels::watch_list_result::VERSION_TOO_OLD,
+            );
+            tracing::warn!(
+                component = "fed_server",
+                controller_id = %cid,
+                expected_server_id = %expected_sid,
+                got_server_id = %resp.server_id,
+                "Controller server_id changed, re-watching from 0"
+            );
+            return WatchOutcome::ReWatch;
+        }
+    }
+
+    // (5) Parse and classify events.
+    match serde_json::from_str::<Vec<WatchEventRaw>>(&resp.data) {
+        Ok(raw_events) => {
+            let mut events = Vec::new();
+            for raw in raw_events {
+                let event_type = match raw.event_type.as_str() {
+                    "add" => EventType::Add,
+                    "update" => EventType::Update,
+                    "delete" => EventType::Delete,
+                    other => {
+                        tracing::warn!(
+                            component = "fed_server",
+                            controller_id = %cid,
+                            event_type = other,
+                            "Unknown watch event type, skipping"
+                        );
+                        continue;
+                    }
+                };
+                match serde_json::from_str::<EdgionConfigData>(raw.data.get()) {
+                    Ok(pm) => {
+                        let key = pm.key_name();
+                        events.push(WatchEventSimple {
+                            event_type,
+                            key,
+                            data: pm,
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            component = "fed_server",
+                            controller_id = %cid,
+                            error = %e,
+                            "Failed to parse watch event data as EdgionConfigData"
+                        );
+                    }
+                }
+            }
+            if !events.is_empty() {
+                pm_cache.apply_events(events, resp.sync_version, resp.server_id.clone());
+            }
+            pm_watch.server_id = Some(resp.server_id);
+            pm_watch.consecutive_errors = 0;
+            tracing::debug!(
+                component = "fed_server",
+                controller_id = %cid,
+                sync_version = resp.sync_version,
+                "EdgionConfigData WatchEventResponse applied"
+            );
+            WatchOutcome::Applied
+        }
+        Err(e) => {
+            fed_metrics::record_watch_error(
+                PLUGIN_METADATA_KIND,
+                fed_metrics::labels::watch_error_reason::PARSE_ERROR,
+            );
+            tracing::warn!(
+                component = "fed_server",
+                controller_id = %cid,
+                error = %e,
+                "Failed to parse WatchEventResponse data"
+            );
+            WatchOutcome::ParseError
+        }
+    }
+}
 
 pub struct FederationGrpcServer {
     pub registry: ControllerRegistry,
@@ -372,7 +596,7 @@ impl FederationSync for FederationGrpcServer {
             })
             .await;
 
-        // Send FedWatchRequest for PluginMetaData
+        // Send FedWatchRequest for EdgionConfigData
         let pm_cache = self.sync_client.plugin_metadata.get_or_create(&controller_id);
         let from_version = pm_cache.get_sync_version();
         let watch_request_id = Uuid::new_v4().to_string();
@@ -392,7 +616,7 @@ impl FederationSync for FederationGrpcServer {
             controller_id = %controller_id,
             request_id = %watch_request_id,
             from_version = from_version,
-            "Sent FedWatchRequest for PluginMetaData"
+            "Sent FedWatchRequest for EdgionConfigData"
         );
 
         let registry = self.registry.clone();
@@ -406,12 +630,7 @@ impl FederationSync for FederationGrpcServer {
         // Tracks the epoch-ms timestamp of the last received Pong. The heartbeat task reads
         // this to detect idle connections without wrapping message delivery in a timeout,
         // which would falsely fire on large in-flight WatchListResponse payloads.
-        let last_pong_ms = Arc::new(AtomicU64::new(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
-        ));
+        let last_pong_ms = Arc::new(AtomicU64::new(now_ms()));
         let heartbeat_cancel = CancellationToken::new();
         let cid = controller_id.clone();
 
@@ -439,10 +658,7 @@ impl FederationSync for FederationGrpcServer {
                 interval.tick().await; // skip first
                 loop {
                     interval.tick().await;
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
+                    let now_ms = crate::common::now_ms();
                     // Check Pong freshness before sending next Ping. Tracking last-pong-at
                     // rather than wrapping inbound.message() in a timeout avoids false offline
                     // declarations when a large WatchListResponse is in transit (RFC 9113 §6.7).
@@ -587,13 +803,7 @@ impl FederationSync for FederationGrpcServer {
                                 registry.update_last_seen(&cid);
                                 match msg.payload {
                                     Some(CtrlPayload::Pong(_)) => {
-                                        last_pong_ms.store(
-                                            std::time::SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .map(|d| d.as_millis() as u64)
-                                                .unwrap_or(0),
-                                            Ordering::Relaxed,
-                                        );
+                                        last_pong_ms.store(now_ms(), Ordering::Relaxed);
                                     }
                                 Some(CtrlPayload::CommandResponse(resp)) => {
                                     if let Some(sender) = pending_commands.lock().remove(&resp.request_id) {
@@ -606,200 +816,32 @@ impl FederationSync for FederationGrpcServer {
                                     }
                                 }
                                 Some(CtrlPayload::WatchListResponse(resp)) => {
-                                    if resp.request_id != pm_watch.request_id {
-                                        tracing::debug!(
-                                            component = "fed_server",
-                                            controller_id = %cid,
-                                            expected = %pm_watch.request_id,
-                                            got = %resp.request_id,
-                                            "Skipping stale WatchListResponse"
-                                        );
-                                        continue;
-                                    }
-                                    match serde_json::from_str::<Vec<PluginMetaData>>(&resp.data) {
-                                        Ok(items) => {
-                                            let keyed: Vec<(String, PluginMetaData)> = items
-                                                .into_iter()
-                                                .map(|pm| {
-                                                    let key = pm.key_name();
-                                                    (key, pm)
-                                                })
-                                                .collect();
-                                            pm_cache.replace_all(keyed, resp.sync_version, resp.server_id.clone());
-                                            pm_watch.server_id = Some(resp.server_id);
-                                            pm_watch.consecutive_errors = 0;
-                                            fed_metrics::record_watch_list(
-                                                PLUGIN_METADATA_KIND,
-                                                fed_metrics::labels::watch_list_result::OK,
-                                            );
-                                            tracing::debug!(
-                                                component = "fed_server",
-                                                controller_id = %cid,
-                                                sync_version = resp.sync_version,
-                                                "PluginMetaData WatchListResponse applied"
-                                            );
-                                        }
-                                        Err(e) => {
-                                            fed_metrics::record_watch_list(
-                                                PLUGIN_METADATA_KIND,
-                                                fed_metrics::labels::watch_list_result::PARSE_ERROR,
-                                            );
-                                            tracing::warn!(
-                                                component = "fed_server",
-                                                controller_id = %cid,
-                                                error = %e,
-                                                "Failed to deserialize WatchListResponse data"
-                                            );
-                                        }
-                                    }
+                                    apply_watch_list(&cid, &pm_cache, &mut pm_watch, resp);
                                 }
                                 Some(CtrlPayload::WatchEventResponse(resp)) => {
-                                    if resp.request_id != pm_watch.request_id {
-                                        tracing::debug!(
-                                            component = "fed_server",
-                                            controller_id = %cid,
-                                            expected = %pm_watch.request_id,
-                                            got = %resp.request_id,
-                                            "Skipping stale WatchEventResponse"
-                                        );
-                                        continue;
-                                    }
-
-                                    // Watch event delivered to Center (direction = recv from the
-                                    // Center's point of view: events flow Controller → Center).
-                                    fed_metrics::record_watch_event(
-                                        PLUGIN_METADATA_KIND,
-                                        fed_metrics::labels::direction::RECV,
-                                    );
-
-                                    // Error → backoff then re-watch from 0
-                                    if !resp.error.is_empty() {
-                                        fed_metrics::record_watch_error(
-                                            PLUGIN_METADATA_KIND,
-                                            fed_metrics::labels::watch_error_reason::RECV_ERROR,
-                                        );
-                                        pm_watch.consecutive_errors += 1;
-                                        if pm_watch.consecutive_errors == 1 {
-                                            // First error is normal during startup/reload
-                                            tracing::info!(
-                                                component = "fed_server",
-                                                controller_id = %cid,
-                                                error = %resp.error,
-                                                "WatchEventResponse error (likely startup delay), backing off before re-watch"
-                                            );
-                                        } else {
-                                            tracing::warn!(
-                                                component = "fed_server",
-                                                controller_id = %cid,
-                                                error = %resp.error,
-                                                consecutive_errors = pm_watch.consecutive_errors,
-                                                "WatchEventResponse error persists, backing off before re-watch"
-                                            );
-                                        }
-                                        // Backoff before retrying to avoid tight loop.
-                                        // Use select! to detect session close during sleep.
-                                        tokio::select! {
-                                            _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
-                                            _ = inner_tx.closed() => {
-                                                tracing::debug!(
-                                                    component = "fed_server",
-                                                    controller_id = %cid,
-                                                    "Session closed during backoff, stopping re-watch"
-                                                );
-                                                break;
-                                            }
-                                        }
-                                        let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
-                                        let _ = inner_tx.send(re_watch_msg).await;
-                                        continue;
-                                    }
-
-                                    // Server restart detection → re-watch from 0
-                                    if let Some(ref expected_sid) = pm_watch.server_id {
-                                        if *expected_sid != resp.server_id {
-                                            fed_metrics::record_watch_list(
-                                                PLUGIN_METADATA_KIND,
-                                                fed_metrics::labels::watch_list_result::VERSION_TOO_OLD,
-                                            );
-                                            tracing::warn!(
-                                                component = "fed_server",
-                                                controller_id = %cid,
-                                                expected_server_id = %expected_sid,
-                                                got_server_id = %resp.server_id,
-                                                "Controller server_id changed, re-watching from 0"
-                                            );
-                                            let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
-                                            let _ = inner_tx.send(re_watch_msg).await;
-                                            continue;
-                                        }
-                                    }
-
-                                    // Parse events using typed struct
-                                    match serde_json::from_str::<Vec<WatchEventRaw>>(&resp.data) {
-                                        Ok(raw_events) => {
-                                            let mut events = Vec::new();
-                                            for raw in raw_events {
-                                                let event_type = match raw.event_type.as_str() {
-                                                    "add" => EventType::Add,
-                                                    "update" => EventType::Update,
-                                                    "delete" => EventType::Delete,
-                                                    other => {
-                                                        tracing::warn!(
-                                                            component = "fed_server",
-                                                            controller_id = %cid,
-                                                            event_type = other,
-                                                            "Unknown watch event type, skipping"
-                                                        );
-                                                        continue;
-                                                    }
-                                                };
-                                                match serde_json::from_str::<PluginMetaData>(raw.data.get()) {
-                                                    Ok(pm) => {
-                                                        let key = pm.key_name();
-                                                        events.push(WatchEventSimple {
-                                                            event_type,
-                                                            key,
-                                                            data: pm,
-                                                        });
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::warn!(
-                                                            component = "fed_server",
-                                                            controller_id = %cid,
-                                                            error = %e,
-                                                            "Failed to parse watch event data as PluginMetaData"
-                                                        );
-                                                    }
+                                    match apply_watch_event(&cid, &pm_cache, &mut pm_watch, resp) {
+                                        WatchOutcome::BackoffReWatch => {
+                                            // Backoff before retrying to avoid tight loop.
+                                            // Use select! to detect session close during sleep.
+                                            tokio::select! {
+                                                _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
+                                                _ = inner_tx.closed() => {
+                                                    tracing::debug!(
+                                                        component = "fed_server",
+                                                        controller_id = %cid,
+                                                        "Session closed during backoff, stopping re-watch"
+                                                    );
+                                                    break;
                                                 }
                                             }
-                                            if !events.is_empty() {
-                                                pm_cache.apply_events(
-                                                    events,
-                                                    resp.sync_version,
-                                                    resp.server_id.clone(),
-                                                );
-                                            }
-                                            pm_watch.server_id = Some(resp.server_id);
-                                            pm_watch.consecutive_errors = 0;
-                                            tracing::debug!(
-                                                component = "fed_server",
-                                                controller_id = %cid,
-                                                sync_version = resp.sync_version,
-                                                "PluginMetaData WatchEventResponse applied"
-                                            );
+                                            let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
+                                            let _ = inner_tx.send(re_watch_msg).await;
                                         }
-                                        Err(e) => {
-                                            fed_metrics::record_watch_error(
-                                                PLUGIN_METADATA_KIND,
-                                                fed_metrics::labels::watch_error_reason::PARSE_ERROR,
-                                            );
-                                            tracing::warn!(
-                                                component = "fed_server",
-                                                controller_id = %cid,
-                                                error = %e,
-                                                "Failed to parse WatchEventResponse data"
-                                            );
+                                        WatchOutcome::ReWatch => {
+                                            let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
+                                            let _ = inner_tx.send(re_watch_msg).await;
                                         }
+                                        _ => {}
                                     }
                                 }
                                 Some(CtrlPayload::StatsReport(report)) => {
@@ -831,7 +873,7 @@ mod tests {
             cluster: "cluster-a".to_string(),
             env: vec!["prod".to_string()],
             tag: vec!["region:us".to_string()],
-            supported_kinds: vec!["PluginMetaData".to_string()],
+            supported_kinds: vec!["EdgionConfigData".to_string()],
         }
     }
 
@@ -968,6 +1010,315 @@ mod tests {
         assert!(s.trust_domain.is_none());
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers for apply_watch_list / apply_watch_event unit tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Build a per-controller EdgionConfigData watch cache backed by the real
+    /// CenterMetaDataStore handler (same construction used by the server).
+    fn make_pm_cache() -> std::sync::Arc<crate::watch_cache::CenterWatchCache<EdgionConfigData>> {
+        let store = std::sync::Arc::new(crate::metadata_store::CenterMetaDataStore::new());
+        let registry = crate::watch_cache::CenterWatchCacheRegistry::<EdgionConfigData>::new(store);
+        registry.get_or_create("test-ctrl")
+    }
+
+    /// Minimal EdgionConfigData JSON for one resource (KeyList variant).
+    /// Wire format changed: kind is now "EdgionConfigData" and spec carries
+    /// spec.data (ConfigEntry with type/config tags) instead of spec.metadata.
+    fn pm_json(ns: &str, name: &str) -> String {
+        serde_json::json!({
+            "apiVersion": "edgion.io/v1",
+            "kind": "EdgionConfigData",
+            "metadata": {"namespace": ns, "name": name},
+            "spec": {
+                "enable": true,
+                "data": {
+                    "type": "KeyList",
+                    "config": {
+                        "items": [{"name": "g1", "items": [{"key": "k1"}]}]
+                    }
+                }
+            }
+        })
+        .to_string()
+    }
+
+    /// JSON array string for a WatchListResponse.data field.
+    fn list_json(items: &[(&str, &str)]) -> String {
+        let pms: Vec<serde_json::Value> = items
+            .iter()
+            .map(|(ns, n)| serde_json::from_str(&pm_json(ns, n)).unwrap())
+            .collect();
+        serde_json::to_string(&pms).unwrap()
+    }
+
+    /// JSON array string for a WatchEventResponse.data field.
+    /// Each tuple is (event_type, namespace, name).
+    fn event_json(events: &[(&str, &str, &str)], sync_version: u64) -> String {
+        let evts: Vec<serde_json::Value> = events
+            .iter()
+            .map(|(t, ns, n)| {
+                let data: serde_json::Value = serde_json::from_str(&pm_json(ns, n)).unwrap();
+                serde_json::json!({"type": t, "data": data, "sync_version": sync_version})
+            })
+            .collect();
+        serde_json::to_string(&evts).unwrap()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // apply_watch_list tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_watch_list_happy_path() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data: list_json(&[("default", "pm-a"), ("default", "pm-b")]),
+            sync_version: 42,
+            server_id: "srv-1".to_string(),
+        };
+
+        let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::Applied);
+        assert_eq!(pm_cache.get_sync_version(), 42);
+        assert_eq!(pm_cache.get_server_id(), "srv-1");
+        assert_eq!(pm_watch.server_id, Some("srv-1".to_string()));
+        assert_eq!(pm_watch.consecutive_errors, 0);
+    }
+
+    #[test]
+    fn apply_watch_list_skips_stale_request_id() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-current".to_string(), None);
+
+        let resp = FedWatchListResponse {
+            request_id: "req-stale".to_string(),
+            data: list_json(&[("default", "pm-a")]),
+            sync_version: 99,
+            server_id: "srv-1".to_string(),
+        };
+
+        let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::Skipped);
+        assert_eq!(pm_cache.get_sync_version(), 0, "cache must be untouched on stale request");
+    }
+
+    #[test]
+    fn apply_watch_list_parse_error() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data: "this is not valid json".to_string(),
+            sync_version: 1,
+            server_id: "srv-1".to_string(),
+        };
+
+        let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ParseError);
+        assert_eq!(pm_cache.get_sync_version(), 0, "cache must be untouched on parse error");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // apply_watch_event tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_watch_event_happy_path_classifies_types() {
+        let pm_cache = make_pm_cache();
+        // Seed the cache so update and delete have existing targets.
+        let keyed = vec![
+            (
+                "default/seed1".to_string(),
+                serde_json::from_str::<EdgionConfigData>(&pm_json("default", "seed1")).unwrap(),
+            ),
+            (
+                "default/seed2".to_string(),
+                serde_json::from_str::<EdgionConfigData>(&pm_json("default", "seed2")).unwrap(),
+            ),
+        ];
+        pm_cache.replace_all(keyed, 1, "srv-1".to_string());
+
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), Some("srv-1".to_string()));
+
+        let resp = FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: event_json(
+                &[
+                    ("add", "default", "new-pm"),
+                    ("update", "default", "seed1"),
+                    ("delete", "default", "seed2"),
+                ],
+                2,
+            ),
+            sync_version: 2,
+            server_id: "srv-1".to_string(),
+            error: String::new(),
+        };
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::Applied);
+        assert_eq!(pm_cache.get_sync_version(), 2);
+        assert_eq!(pm_watch.server_id, Some("srv-1".to_string()));
+        assert_eq!(pm_watch.consecutive_errors, 0);
+
+        // Verify that each event type was classified correctly via observable cache state.
+        //
+        // Seed had 2 keys (seed1, seed2).  After: +1 add (new-pm), 0 net for update (seed1),
+        // -1 delete (seed2) → exactly 2 keys must remain.
+        //
+        // A misclassification would break this:
+        //   • delete treated as update → seed2 stays → 3 keys
+        //   • update treated as delete → seed1 removed → 1 key
+        //   • add treated as delete (no-op on absent key) → new-pm absent → 1 key (or seed2 absent too)
+        let keys = pm_cache.snapshot_keys();
+        assert_eq!(keys.len(), 2, "expected exactly 2 keys after add+update+delete; got: {:?}", keys);
+
+        // Add: "default/new-pm" must have been inserted.
+        assert!(
+            pm_cache.get_entry("default/new-pm").is_some(),
+            "add event must insert default/new-pm"
+        );
+        // Update: "default/seed1" must still be present (not deleted).
+        assert!(
+            pm_cache.get_entry("default/seed1").is_some(),
+            "update event must keep default/seed1 in cache"
+        );
+        // Delete: "default/seed2" must have been removed.
+        assert!(
+            pm_cache.get_entry("default/seed2").is_none(),
+            "delete event must remove default/seed2 from cache"
+        );
+    }
+
+    #[test]
+    fn apply_watch_event_skips_stale() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-current".to_string(), None);
+
+        let resp = FedWatchEventResponse {
+            request_id: "req-stale".to_string(),
+            data: event_json(&[("add", "default", "pm-a")], 1),
+            sync_version: 1,
+            server_id: "srv-1".to_string(),
+            error: String::new(),
+        };
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::Skipped);
+        assert_eq!(pm_cache.get_sync_version(), 0, "cache must be untouched on stale request");
+    }
+
+    #[test]
+    fn apply_watch_event_server_id_change_rewatches() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), Some("srv-old".to_string()));
+
+        let resp = FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: event_json(&[("add", "default", "pm-a")], 1),
+            sync_version: 1,
+            server_id: "srv-new".to_string(), // differs from expected "srv-old"
+            error: String::new(),
+        };
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ReWatch);
+        assert_eq!(pm_cache.get_sync_version(), 0, "data must not be applied on server_id mismatch");
+    }
+
+    #[test]
+    fn apply_watch_event_error_backoff_rewatch() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let make_err_resp = || FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: String::new(),
+            sync_version: 0,
+            server_id: String::new(),
+            error: "WATCH_ERROR".to_string(),
+        };
+
+        // First error: consecutive_errors 0 → 1.
+        let outcome1 = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, make_err_resp());
+        assert_eq!(outcome1, WatchOutcome::BackoffReWatch);
+        assert_eq!(pm_watch.consecutive_errors, 1);
+
+        // Second error without intervening re_watch reset: 1 → 2.
+        let outcome2 = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, make_err_resp());
+        assert_eq!(outcome2, WatchOutcome::BackoffReWatch);
+        assert_eq!(pm_watch.consecutive_errors, 2);
+    }
+
+    #[test]
+    fn apply_watch_event_parse_error() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let resp = FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: "not a valid json array".to_string(),
+            sync_version: 1,
+            server_id: "srv-1".to_string(),
+            error: String::new(),
+        };
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ParseError);
+    }
+
+    #[test]
+    fn apply_watch_event_unknown_type_skipped() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        // One unknown event (warned and skipped) plus one valid add event.
+        let resp = FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: event_json(&[("bogus_type", "default", "pm-x"), ("add", "default", "pm-valid")], 1),
+            sync_version: 1,
+            server_id: "srv-1".to_string(),
+            error: String::new(),
+        };
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        // Applied: the valid add event was processed; bogus_type was warned and skipped.
+        assert_eq!(outcome, WatchOutcome::Applied);
+        assert_eq!(pm_cache.get_sync_version(), 1);
+
+        // Verify that the unknown-type event was dropped (not inserted under any key) and
+        // only the one valid add event landed in the cache.
+        //
+        // If the unknown type were mistakenly treated as an add, there would be 2 keys.
+        // If the valid add were also dropped, there would be 0 keys.
+        let keys = pm_cache.snapshot_keys();
+        assert_eq!(keys.len(), 1, "unknown-type event must be dropped; exactly 1 key expected; got: {:?}", keys);
+
+        // The valid add must be present.
+        assert!(
+            pm_cache.get_entry("default/pm-valid").is_some(),
+            "valid add event must insert default/pm-valid"
+        );
+        // The unknown-type event must not have produced a cache entry.
+        assert!(
+            pm_cache.get_entry("default/pm-x").is_none(),
+            "unknown-type event must not insert default/pm-x"
+        );
+    }
+
     #[test]
     fn takeover_then_stale_offline_keeps_controller_online() {
         use crate::aggregator::ResourceAggregator;
@@ -981,7 +1332,7 @@ mod tests {
             cluster: "cluster-a".to_string(),
             env: vec!["prod".to_string()],
             tag: vec!["region:us".to_string()],
-            supported_kinds: vec!["PluginMetaData".to_string()],
+            supported_kinds: vec!["EdgionConfigData".to_string()],
         };
 
         // New session s2 is authoritative.

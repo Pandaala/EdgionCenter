@@ -29,6 +29,7 @@ pub async fn load_server_tls(cfg: &ConfSyncTlsConfig) -> anyhow::Result<tonic::t
 /// Load client TLS config from certificate files.
 ///
 /// Returns error if any file is missing or invalid — caller must not connect.
+#[allow(dead_code)]
 pub async fn load_client_tls(cfg: &ConfSyncTlsConfig) -> anyhow::Result<tonic::transport::ClientTlsConfig> {
     cfg.validate()?;
     let ca_path = cfg.ca_path();

@@ -152,11 +152,12 @@ mod tests {
     /// Build a signing-capable `LocalAuthState` carrying the given single-admin
     /// credential (used only when `single_admin_enabled`).
     fn local_state(username: &str, password: &str) -> Arc<LocalAuthState> {
-        let mut c = LocalAuthConfig::default();
-        c.username = username.to_string();
-        c.password = password.to_string();
-        c.jwt_secret = "a_long_enough_jwt_secret_value_abcdef".to_string();
-        LocalAuthState::from_config(&c)
+        LocalAuthState::from_config(&LocalAuthConfig {
+            username: username.to_string(),
+            password: password.to_string(),
+            jwt_secret: "a_long_enough_jwt_secret_value_abcdef".to_string(),
+            ..LocalAuthConfig::default()
+        })
     }
 
     fn app(state: UnifiedLoginState) -> axum::Router {

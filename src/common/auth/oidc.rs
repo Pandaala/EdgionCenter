@@ -102,6 +102,7 @@ impl OidcProvider {
     }
 
     /// The provider's canonical issuer (from the last successful discovery), if any.
+    #[allow(dead_code)]
     pub fn cached_issuer(&self) -> Option<String> {
         self.cache.read().as_ref().map(|c| c.issuer.clone())
     }

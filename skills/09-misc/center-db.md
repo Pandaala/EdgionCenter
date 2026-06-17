@@ -117,11 +117,11 @@ The only impact is that the first full compile takes ~30 seconds longer (compili
 
 | Module | Path |
 |--------|------|
-| DB initialization & connection management | `src/core/center/db/mod.rs` |
-| Schema CREATE TABLE SQL | `src/core/center/db/mod.rs` (schema inlined) |
-| CenterDb (controller upsert/delete) | `src/core/center/db/mod.rs` |
-| Admin API handlers | `src/core/center/api/` (`region_route_handlers.rs`, `consistency_handlers.rs`, `global_connection_ip_restriction_handlers.rs`) |
-| Center configuration struct | `src/core/center/config/mod.rs` (`DatabaseConfig` field) |
-| **Reverse-Watch cache layer** | `src/core/center/watch_cache/` (CenterWatchCache, CenterWatchCacheRegistry, CenterSyncClient, CenterConfHandler) |
-| **PM aggregated view** | `src/core/center/metadata_store/` (CenterMetaDataStore) |
-| **Shared parsing utilities** | `src/core/common/metadata_conf_handler.rs` (parse_region_route(), etc.) |
+| DB initialization & connection management (`Store::connect`) | `src/store/mod.rs` |
+| Schema CREATE TABLE SQL | `src/store/migrations/sqlite/` (migration SQL files) |
+| `DbController` (controller upsert/delete) | `src/store/controllers.rs` |
+| Admin API handlers | `src/api/` (`region_route_handlers.rs`, `consistency_handlers.rs`, `global_connection_ip_restriction_handlers.rs`) |
+| Center configuration struct | `src/config/mod.rs` (`DatabaseConfig` field) |
+| **Reverse-Watch cache layer** | `src/watch_cache/` (CenterWatchCache, CenterWatchCacheRegistry, CenterSyncClient, CenterConfHandler) |
+| **PM aggregated view** | `src/metadata_store/` (CenterMetaDataStore) |
+| **Shared parsing utilities** | `src/common/metadata_conf_handler.rs` (parse_region_route(), etc.) |

@@ -24,6 +24,7 @@ pub struct DbController {
     pub last_seen_at: i64,
     /// Wall-clock seconds of the first insert. Written once on insert and never
     /// updated on conflict (see `upsert_controller`).
+    #[allow(dead_code)]
     pub created_at: i64,
 }
 

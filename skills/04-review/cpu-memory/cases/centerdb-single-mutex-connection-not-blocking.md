@@ -7,7 +7,9 @@ description: Use when reviewing findings that flag CenterDb single Mutex<Connect
 
 # CenterDb Single `Mutex<Connection>` is Not a Write-Blocking Issue
 
-**False-positive scenario**: `src/core/center/db/mod.rs:28-30`'s `CenterDb { conn: Arc<Mutex<rusqlite::Connection>> }` flagged as "shared single connection across the Center; admin list query and registration write block each other"; suggests introducing an r2d2 connection pool or write-connection + multiple read-connections + WAL.
+**Historical note**: the original finding described a `CenterDb { conn: Arc<Mutex<rusqlite::Connection>> }` rusqlite single-mutex design. That implementation has since been superseded by an sqlx async connection pool (`Store` in `src/store/mod.rs`, `Store::connect`); the single-Mutex-rusqlite premise no longer applies. The analysis below explains why the finding was already not a real issue under the old model, and the same logic holds even more strongly under the async pool.
+
+**False-positive scenario**: `src/store/mod.rs` (`Store`, using an sqlx async connection pool) flagged as "shared single connection across the Center; admin list query and registration write block each other"; suggests introducing an r2d2 connection pool or write-connection + multiple read-connections + WAL.
 
 **Reality**:
 

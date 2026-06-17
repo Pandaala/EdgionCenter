@@ -24,7 +24,9 @@ use axum::{
     Json,
 };
 
-use super::{catalog, AuthzStore, PermissionSet, Principal};
+use super::{catalog, AuthzStore, Principal};
+#[allow(unused_imports)]
+use super::PermissionSet;
 use crate::common::unified_auth::{AuthProvider, UnifiedAuthClaims};
 
 /// Build the 403 JSON body returned when a caller lacks the required key.

@@ -5,11 +5,11 @@ description: FederationGrpcServer — RegisterRequest validation contract, bidir
 
 # Federation gRPC Server
 
-Source: `src/core/center/fed_sync/server/mod.rs`
+Source: `src/fed_sync/server/mod.rs`
 
 ## Validation caps (canonical reference)
 
-These constants are defined at `src/core/center/fed_sync/server/mod.rs:46-57` and are the
+These constants are defined at `src/fed_sync/server/mod.rs` (`HEARTBEAT_MISSED_PING_BUDGET`, `MAX_REGISTRY_ENTRIES`) and are the
 **authoritative caps** for the federation gRPC surface.
 
 | Field | Cap | Constant |
@@ -31,7 +31,7 @@ DNS-style identifiers).
 fn validate_register_req(req: &RegisterRequest) -> Result<(), &'static str>
 ```
 
-Source: `src/core/center/fed_sync/server/mod.rs:66-86`
+Source: `src/fed_sync/server/mod.rs` (`validate_register_req`)
 
 Order of checks:
 1. `controller_id` must not be empty.
@@ -46,7 +46,7 @@ Order of checks:
    - Each item contains no control characters.
 
 Rejection reasons are logged via `tracing::warn!` at the call site
-(`src/core/center/fed_sync/server/mod.rs:239-251`) but the peer-facing
+(`src/fed_sync/server/mod.rs`, near the `validate_register_req` call) but the peer-facing
 `Status::invalid_argument` message is a fixed string — attacker-controlled bytes
 are never echoed back.
 
@@ -56,18 +56,18 @@ are never echoed back.
 fn registry_capacity_exceeded(registry: &ControllerRegistry, incoming_id: &str, cap: usize) -> bool
 ```
 
-Source: `src/core/center/fed_sync/server/mod.rs:122-124`
+Source: `src/fed_sync/server/mod.rs` (`registry_capacity_exceeded`)
 
 Returns `true` only when `registry.len() >= cap` **and** the `incoming_id` is not
 already known. Reconnects from an already-registered controller always succeed,
 preserving operator recovery during a flood.
 
 Rejection: `Status::resource_exhausted("Federation registry is at capacity")`
-(`src/core/center/fed_sync/server/mod.rs:259`).
+(`src/fed_sync/server/mod.rs`, `registry_capacity_exceeded` call site).
 
 ## `FederationGrpcServer` struct
 
-Source: `src/core/center/fed_sync/server/mod.rs:181-191`
+Source: `src/fed_sync/server/mod.rs` (`FederationGrpcServer`)
 
 Fields:
 - `registry: ControllerRegistry` — live session map.
@@ -76,11 +76,11 @@ Fields:
 - `pending_proxies: PendingProxyMap` — one-shot channels for `HttpProxyResponse`.
 - `sync_config: CenterSyncConfig` — ping interval, command timeout.
 - `sync_client: Arc<CenterSyncClient>` — per-kind watch cache registries.
-- `db: Option<Arc<CenterDb>>` — SQLite, absent when `database.enabled = false`.
+- `db: Option<Arc<Store>>` — SQLite, absent when `database.enabled = false`.
 
 ## Bidirectional stream protocol
 
-The `sync` RPC is a bidirectional streaming call (`src/core/center/fed_sync/server/mod.rs:218`):
+The `sync` RPC is a bidirectional streaming call (`src/fed_sync/server/mod.rs`, `async fn sync`):
 
 ```
 Controller → Center (ControllerMessage):
@@ -100,12 +100,12 @@ Center → Controller (CenterMessage):
 ```
 
 After `RegisterAck`, Center sends a `FedWatchRequest` for `PluginMetaData`
-(`src/core/center/fed_sync/server/mod.rs:322-334`), using the last known
+(`src/fed_sync/server/mod.rs`, post-registration watch dispatch), using the last known
 `sync_version` from the per-controller cache to avoid unnecessary re-syncs.
 
 ### Watch state tracking (`FedWatchState`)
 
-Source: `src/core/center/fed_sync/server/mod.rs:145-176`
+Source: `src/fed_sync/server/mod.rs` (`FedWatchState`)
 
 Each session tracks a `request_id` (UUID) per kind. Stale responses (wrong `request_id`)
 are silently skipped. On server-ID change (Controller restart detected), Center re-watches
@@ -125,10 +125,10 @@ from version 0.
 | `WatchEventResponse` error field set | 3 s backoff, then re-watch from version 0; consecutive errors escalate from INFO → WARN |
 | `WatchListResponse` parse error | Metric recorded, warning logged; session continues |
 
-The `mark_offline_all` closure (`src/core/center/fed_sync/server/mod.rs:414-447`)
+The `mark_offline_all` closure (`src/fed_sync/server/mod.rs`, `mark_offline_all`)
 propagates disconnect to all four state holders in lockstep:
 `ControllerRegistry`, `ResourceAggregator`, `CenterWatchCacheRegistry`,
-and `CenterDb` (async best-effort). Session-ID matching prevents a stale
+and `Store`/`DbController` (async best-effort). Session-ID matching prevents a stale
 heartbeat task from clobbering a reconnected session.
 
 ## Peer Authentication

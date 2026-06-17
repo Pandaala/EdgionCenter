@@ -43,6 +43,7 @@ pub fn is_public_auth_endpoint(path: &str) -> bool {
 /// Probes + the three public auth endpoints. Deliberately EXCLUDES
 /// operator-configured `skip_paths` (fr-cauth-01: authz must never trust
 /// operator-extended skips).
+#[allow(dead_code)]
 pub fn is_static_public(path: &str) -> bool {
     is_public_probe(path) || is_public_auth_endpoint(path)
 }

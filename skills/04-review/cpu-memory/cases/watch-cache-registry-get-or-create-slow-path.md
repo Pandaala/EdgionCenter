@@ -7,7 +7,7 @@ description: Use when reviewing findings that flag controller_id.to_string() twi
 
 # `CenterWatchCacheRegistry::get_or_create` Slow-Path `to_string()` is Not an Issue
 
-**False-positive scenario**: `src/core/center/watch_cache/registry.rs:38-39` does `controller_id.to_string()` twice in the write-lock branch (once as HashMap key, once passed to `CenterWatchCache::new` for ownership); flagged as "repeated stringify; should switch to `Arc<str>` / string interning".
+**False-positive scenario**: `src/watch_cache/registry.rs` (`get_or_create` write-lock branch) does `controller_id.to_string()` twice (once as HashMap key, once passed to `CenterWatchCache::new` for ownership); flagged as "repeated stringify; should switch to `Arc<str>` / string interning".
 
 **Reality**:
 
