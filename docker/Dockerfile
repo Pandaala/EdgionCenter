@@ -16,13 +16,22 @@
 #
 # Usage: docker/build.sh   (do NOT `docker build .` directly — the context must
 # include the shared crate; the script stages it.)
+#
+# Multi-arch: this Dockerfile is platform-agnostic. docker/build.sh drives
+# `docker buildx build --platform linux/amd64,linux/arm64` to emit a single
+# multi-arch manifest. The Rust stage compiles natively for its target platform
+# (the non-host arch runs under QEMU/Rosetta emulation); BuildKit cache mounts,
+# keyed per target arch, keep emulated rebuilds incremental.
 
 ARG RUST_VERSION=1.92
 ARG NODE_VERSION=20
 ARG RUNTIME_BASE=debian:bookworm-slim
 
 # ── Stage 1: build the dashboard (vite) ───────────────────────────────────────
-FROM node:${NODE_VERSION}-bookworm AS web
+# Pinned to the build platform: the dashboard output (web/dist) is static JS/CSS,
+# identical across target arches, so building it once natively avoids compiling
+# it under emulation for every target platform.
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-bookworm AS web
 WORKDIR /web
 # Install deps against the lockfile first (better layer caching).
 COPY EdgionCenter/web/package.json EdgionCenter/web/package-lock.json ./
@@ -54,7 +63,16 @@ COPY EdgionCenter/proto ./proto
 COPY EdgionCenter/src ./src
 # Staged dashboard assets so rust-embed (`#[folder = "web/dist/"]`) finds them.
 COPY --from=web /web/dist ./web/dist
-RUN cargo build --release --features embed-dashboard
+# TARGETARCH (auto-provided by BuildKit) keys the per-arch target cache so the
+# amd64 and arm64 builds don't clobber each other's artifacts. Cache mounts are
+# ephemeral and never committed to the image layer, so the compiled binary is
+# copied out to a real path for the runtime stage's COPY --from to pick up.
+ARG TARGETARCH
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/src/EdgionCenter/target,id=center-target-${TARGETARCH},sharing=locked \
+    cargo build --release --features embed-dashboard \
+    && cp target/release/edgion-center /usr/local/bin/edgion-center
 
 # ── Stage 3: slim runtime ─────────────────────────────────────────────────────
 FROM ${RUNTIME_BASE}
@@ -65,7 +83,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 1000 edgion 2>/dev/null || groupadd edgion && \
     useradd -r -u 1000 -g edgion edgion 2>/dev/null || useradd -r -g edgion edgion
 WORKDIR /usr/local/edgion
-COPY --from=build /src/EdgionCenter/target/release/edgion-center /usr/local/bin/edgion-center
+COPY --from=build /usr/local/bin/edgion-center /usr/local/bin/edgion-center
 USER edgion
 # Informational: admin API / fed-sync gRPC / probe / metrics.
 EXPOSE 12201 12251 12200 12290
