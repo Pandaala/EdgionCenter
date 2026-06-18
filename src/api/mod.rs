@@ -10,20 +10,18 @@
 //!   GET  /api/v1/controllers                              → list all controller summaries
 //!   GET  /api/v1/clusters                                 → list distinct cluster names
 //!   POST /api/v1/controllers/{id}/reload                  → send reload command
-//!   GET  /api/v1/center/cluster-region-routes                      → aggregated ClusterRegionRoute list from MetaDataStore
-//!   GET  /api/v1/center/service-region-routes                      → aggregated ServiceRegionRoute list from MetaDataStore
-//!   POST /api/v1/center/cluster-region-routes/failover             → fan-out failover to all online controllers (new-URL path)
-//!   POST /api/v1/center/service-region-routes/failover             → fan-out failover to all online controllers (new-URL path)
-//!   GET  /api/v1/center/cluster-region-routes/consistency          → consistency detection across controllers
-//!   GET  /api/v1/center/service-region-routes/consistency          → consistency detection across controllers
+//!   GET  /api/v1/center/region-routes                              → aggregated effective region routes (unified)
+//!   POST /api/v1/center/region-routes/failover                     → fan-out failover to all online controllers (unified)
+//!   GET  /api/v1/center/region-routes/consistency                  → cross-controller consistency check (unified, online-only)
+//!   GET  /api/v1/center/cluster-region-routes                      → 308 redirect → /api/v1/center/region-routes
+//!   GET  /api/v1/center/service-region-routes                      → 308 redirect → /api/v1/center/region-routes
+//!   POST /api/v1/center/cluster-region-routes/failover             → 308 redirect → /api/v1/center/region-routes/failover
+//!   POST /api/v1/center/service-region-routes/failover             → 308 redirect → /api/v1/center/region-routes/failover
+//!   GET  /api/v1/center/cluster-region-routes/consistency          → 308 redirect → /api/v1/center/region-routes/consistency
+//!   GET  /api/v1/center/service-region-routes/consistency          → 308 redirect → /api/v1/center/region-routes/consistency
 //!   GET    /api/v1/center/global-connection-ip-restrictions                        → aggregated GlobalConnectionIpRestriction list from MetaDataStore
-//!   POST   /api/v1/center/global-connection-ip-restrictions                        → create/upsert GlobalConnectionIpRestriction (fan-out PUT to target controllers)
 //!   GET    /api/v1/center/global-connection-ip-restrictions/{ns}/{name}            → single GlobalConnectionIpRestriction detail
-//!   PUT    /api/v1/center/global-connection-ip-restrictions/{ns}/{name}            → update GlobalConnectionIpRestriction (fan-out PUT to target controllers)
-//!   DELETE /api/v1/center/global-connection-ip-restrictions/{ns}/{name}            → delete GlobalConnectionIpRestriction (fan-out DELETE to target controllers)
-//!   PATCH  /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/enable     → flip enable flag (read-modify-write per controller)
-//!   PATCH  /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile → switch active profile (read-modify-write per controller)
-//!   POST   /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/sync       → copy PM state from source controller to target controllers
+//!   PATCH  /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile → switch active profile (fan-out Selector PUT to target controllers)
 //!   GET    /api/v1/center/global-connection-ip-restrictions/consistency            → consistency detection across controllers
 //!   GET    /api/v1/center/admin/users                              → list users (with role ids + names; no password_hash)
 //!   POST   /api/v1/center/admin/users                              → create user (bcrypt password; optional role bindings)
@@ -114,63 +112,60 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/controllers/{id}/reload", post(reload_controller))
         // MetaDataStore-backed RegionRoute endpoints
         .route(
+            "/api/v1/center/region-routes",
+            get(region_route_handlers::list_region_routes),
+        )
+        // Legacy paths redirect permanently (308) to the unified endpoint above.
+        .route(
             "/api/v1/center/cluster-region-routes",
-            get(region_route_handlers::list_cluster_region_routes),
+            get(|| async { axum::response::Redirect::permanent("/api/v1/center/region-routes") }),
         )
         .route(
             "/api/v1/center/service-region-routes",
-            get(region_route_handlers::list_service_region_routes),
+            get(|| async { axum::response::Redirect::permanent("/api/v1/center/region-routes") }),
         )
-        // RegionRoute failover (new-URL paths)
+        // RegionRoute failover (unified endpoint; legacy paths redirect 308)
+        .route(
+            "/api/v1/center/region-routes/failover",
+            post(region_route_handlers::region_route_failover),
+        )
         .route(
             "/api/v1/center/cluster-region-routes/failover",
-            post(region_route_handlers::cluster_region_route_failover),
+            post(|| async { axum::response::Redirect::permanent("/api/v1/center/region-routes/failover") }),
         )
         .route(
             "/api/v1/center/service-region-routes/failover",
-            post(region_route_handlers::service_region_route_failover),
+            post(|| async { axum::response::Redirect::permanent("/api/v1/center/region-routes/failover") }),
         )
-        // Config sync endpoints
+        // RegionRoute consistency (unified endpoint; legacy paths redirect 308)
         .route(
-            "/api/v1/center/cluster-region-routes/sync",
-            post(region_route_handlers::cluster_region_route_sync),
+            "/api/v1/center/region-routes/consistency",
+            get(consistency_handlers::region_routes_consistency),
         )
-        .route(
-            "/api/v1/center/service-region-routes/sync",
-            post(region_route_handlers::service_region_route_sync),
-        )
-        // Consistency detection endpoints
         .route(
             "/api/v1/center/cluster-region-routes/consistency",
-            get(consistency_handlers::cluster_region_routes_consistency),
+            get(|| async {
+                axum::response::Redirect::permanent("/api/v1/center/region-routes/consistency")
+            }),
         )
         .route(
             "/api/v1/center/service-region-routes/consistency",
-            get(consistency_handlers::service_region_routes_consistency),
+            get(|| async {
+                axum::response::Redirect::permanent("/api/v1/center/region-routes/consistency")
+            }),
         )
-        // GlobalConnectionIpRestriction endpoints
+        // GlobalConnectionIpRestriction endpoints (read + active-profile write only; base CRUD retired)
         .route(
             "/api/v1/center/global-connection-ip-restrictions",
-            get(global_connection_ip_restriction_handlers::list_global_ip_restrictions)
-                .post(global_connection_ip_restriction_handlers::create_global_ip_restriction),
+            get(global_connection_ip_restriction_handlers::list_global_ip_restrictions),
         )
         .route(
             "/api/v1/center/global-connection-ip-restrictions/{ns}/{name}",
-            get(global_connection_ip_restriction_handlers::get_global_ip_restriction)
-                .put(global_connection_ip_restriction_handlers::update_global_ip_restriction)
-                .delete(global_connection_ip_restriction_handlers::delete_global_ip_restriction),
-        )
-        .route(
-            "/api/v1/center/global-connection-ip-restrictions/{ns}/{name}/enable",
-            patch(global_connection_ip_restriction_handlers::patch_enable),
+            get(global_connection_ip_restriction_handlers::get_global_ip_restriction),
         )
         .route(
             "/api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile",
             patch(global_connection_ip_restriction_handlers::patch_active_profile),
-        )
-        .route(
-            "/api/v1/center/global-connection-ip-restrictions/{ns}/{name}/sync",
-            post(global_connection_ip_restriction_handlers::sync_global_ip_restriction),
         )
         .route(
             "/api/v1/center/global-connection-ip-restrictions/consistency",
@@ -432,9 +427,8 @@ struct MetaDataStoreEntry {
 
 async fn metadata_store_status(State(_state): State<ApiState>) -> impl IntoResponse {
     // NOTE(migration): cluster_routes and service_routes stubbed to empty —
-    // ClusterRegionRouteEntry and ServiceRegionRouteEntry were deleted upstream
-    // (PluginMetaData → EdgionConfigData migration). Restore from git history when
-    // RegionRoute is re-implemented on EdgionConfigData.
+    // ClusterRegionRouteEntry and ServiceRegionRouteEntry were deleted upstream.
+    // Restore from git history when RegionRoute is re-implemented on EdgionConfigData.
     let cluster_routes: Vec<MetaDataStoreEntry> = Vec::new();
     let service_routes: Vec<MetaDataStoreEntry> = Vec::new();
     Json(ApiResponse::ok_body(MetaDataStoreStatus {

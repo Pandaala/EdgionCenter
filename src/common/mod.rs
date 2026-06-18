@@ -9,7 +9,6 @@ pub mod conf_sync;
 pub mod config;
 pub mod fed_sync;
 pub mod grpc_tls;
-pub mod metadata_conf_handler;
 pub mod observe;
 pub mod startup;
 

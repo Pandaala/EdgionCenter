@@ -109,7 +109,6 @@ pub mod labels {
         pub const AGGREGATOR: &str = "aggregator";
     }
     pub mod fanout_op {
-        pub const PATCH_ENABLE: &str = "patch_enable";
         pub const PATCH_PROFILE: &str = "patch_profile";
     }
     pub mod fanout_result {
@@ -389,7 +388,6 @@ mod tests {
             ("offline_reason::RELOAD", offline_reason::RELOAD),
             ("evict_source::REGISTRY", evict_source::REGISTRY),
             ("evict_source::AGGREGATOR", evict_source::AGGREGATOR),
-            ("fanout_op::PATCH_ENABLE", fanout_op::PATCH_ENABLE),
             ("fanout_op::PATCH_PROFILE", fanout_op::PATCH_PROFILE),
             ("fanout_result::OK", fanout_result::OK),
             ("fanout_result::PARTIAL", fanout_result::PARTIAL),
@@ -501,8 +499,8 @@ mod tests {
         );
         check(
             "fanout_op",
-            &[fanout_op::PATCH_ENABLE, fanout_op::PATCH_PROFILE],
-            &["patch_enable", "patch_profile"],
+            &[fanout_op::PATCH_PROFILE],
+            &["patch_profile"],
         );
         check(
             "fanout_result",
@@ -532,7 +530,7 @@ mod tests {
         super::record_session_reentry();
         super::set_aggregator_controllers("default", 3);
         super::record_consistency_mismatch();
-        super::record_fanout(fanout_op::PATCH_ENABLE, fanout_result::OK);
+        super::record_fanout(fanout_op::PATCH_PROFILE, fanout_result::OK);
         super::record_ready_gate_wait(0.25);
     }
 }

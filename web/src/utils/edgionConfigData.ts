@@ -1,9 +1,9 @@
 import * as yaml from 'js-yaml'
 import { dumpYaml } from './yaml-utils'
 
-export interface PluginMetaDataResource {
+export interface EdgionConfigDataResource {
   apiVersion: string
-  kind: 'PluginMetaData'
+  kind: 'EdgionConfigData'
   metadata: {
     name: string
     namespace?: string
@@ -19,19 +19,19 @@ export interface PluginMetaDataResource {
   }
 }
 
-export function createEmpty(): PluginMetaDataResource {
+export function createEmpty(): EdgionConfigDataResource {
   return {
     apiVersion: 'edgion.io/v1',
-    kind: 'PluginMetaData',
+    kind: 'EdgionConfigData',
     metadata: { name: '', namespace: 'default' },
     spec: {},
   }
 }
 
-export function normalize(raw: any): PluginMetaDataResource {
+export function normalize(raw: any): EdgionConfigDataResource {
   return {
     apiVersion: raw.apiVersion || 'edgion.io/v1',
-    kind: 'PluginMetaData',
+    kind: 'EdgionConfigData',
     metadata: {
       name: raw.metadata?.name || '',
       namespace: raw.metadata?.namespace || 'default',
@@ -48,10 +48,10 @@ export function normalize(raw: any): PluginMetaDataResource {
   }
 }
 
-export function toYaml(r: PluginMetaDataResource): string {
+export function toYaml(r: EdgionConfigDataResource): string {
   return dumpYaml(r)
 }
 
-export function fromYaml(yamlStr: string): PluginMetaDataResource {
+export function fromYaml(yamlStr: string): EdgionConfigDataResource {
   return normalize(yaml.load(yamlStr) as any)
 }

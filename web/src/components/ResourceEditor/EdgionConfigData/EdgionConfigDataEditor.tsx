@@ -1,5 +1,5 @@
 /**
- * PluginMetaData 编辑器 Modal
+ * EdgionConfigData editor modal
  */
 
 import React, { useEffect, useState } from 'react'
@@ -7,19 +7,19 @@ import { Modal, Button, Tabs, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
-import PluginMetaDataForm from './PluginMetaDataForm'
-import type { PluginMetaDataResource } from '@/utils/pluginmetadata'
-import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/pluginmetadata'
+import EdgionConfigDataForm from './EdgionConfigDataForm'
+import type { EdgionConfigDataResource } from '@/utils/edgionConfigData'
+import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/edgionConfigData'
 import { useT } from '@/i18n'
 
-interface PluginMetaDataEditorProps {
+interface EdgionConfigDataEditorProps {
   visible: boolean
   mode: 'create' | 'edit' | 'view'
   resource?: any | null
   onClose: () => void
 }
 
-const PluginMetaDataEditor: React.FC<PluginMetaDataEditorProps> = ({
+const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
   visible,
   mode,
   resource,
@@ -27,7 +27,7 @@ const PluginMetaDataEditor: React.FC<PluginMetaDataEditorProps> = ({
 }) => {
   const t = useT()
   const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
-  const [formData, setFormData] = useState<PluginMetaDataResource>(() => createEmpty())
+  const [formData, setFormData] = useState<EdgionConfigDataResource>(() => createEmpty())
   const [yamlContent, setYamlContent] = useState('')
   const queryClient = useQueryClient()
 
@@ -57,10 +57,10 @@ const PluginMetaDataEditor: React.FC<PluginMetaDataEditorProps> = ({
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, yamlStr }: { namespace: string; yamlStr: string }) =>
-      resourceApi.create('pluginmetadata', namespace, yamlStr),
+      resourceApi.create('edgionconfigdata', namespace, yamlStr),
     onSuccess: () => {
       message.success(t('msg.createOk'))
-      queryClient.invalidateQueries({ queryKey: ['pluginmetadata'] })
+      queryClient.invalidateQueries({ queryKey: ['edgionconfigdata'] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
@@ -68,10 +68,10 @@ const PluginMetaDataEditor: React.FC<PluginMetaDataEditorProps> = ({
 
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, yamlStr }: { namespace: string; name: string; yamlStr: string }) =>
-      resourceApi.update('pluginmetadata', namespace, name, yamlStr),
+      resourceApi.update('edgionconfigdata', namespace, name, yamlStr),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
-      queryClient.invalidateQueries({ queryKey: ['pluginmetadata'] })
+      queryClient.invalidateQueries({ queryKey: ['edgionconfigdata'] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),
@@ -105,10 +105,10 @@ const PluginMetaDataEditor: React.FC<PluginMetaDataEditorProps> = ({
 
   const title =
     mode === 'create'
-      ? t('modal.create', { resource: 'PluginMetaData' })
+      ? t('modal.create', { resource: 'EdgionConfigData' })
       : mode === 'edit'
-      ? t('modal.edit', { resource: 'PluginMetaData' })
-      : t('modal.view', { resource: 'PluginMetaData' })
+      ? t('modal.edit', { resource: 'EdgionConfigData' })
+      : t('modal.view', { resource: 'EdgionConfigData' })
 
   return (
     <Modal
@@ -137,7 +137,7 @@ const PluginMetaDataEditor: React.FC<PluginMetaDataEditorProps> = ({
             key: 'form',
             label: t('tab.form'),
             children: (
-              <PluginMetaDataForm
+              <EdgionConfigDataForm
                 data={formData}
                 onChange={setFormData}
                 readOnly={isReadOnly}
@@ -163,4 +163,4 @@ const PluginMetaDataEditor: React.FC<PluginMetaDataEditorProps> = ({
   )
 }
 
-export default PluginMetaDataEditor
+export default EdgionConfigDataEditor

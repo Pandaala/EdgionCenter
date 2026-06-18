@@ -1,4 +1,13 @@
 //! HTTP handlers for /api/v1/center/global-connection-ip-restrictions endpoints.
+//!
+//! Surviving surface (D7 architecture, git-owned GIR base config):
+//!   GET   /api/v1/center/global-connection-ip-restrictions                        → list (read)
+//!   GET   /api/v1/center/global-connection-ip-restrictions/{ns}/{name}            → get (read)
+//!   PATCH .../{ns}/{name}/active-profile                                           → switch active profile (fan-out Selector PUT)
+//!   GET   .../global-connection-ip-restrictions/consistency                        → consistency check (read)
+//!
+//! Base CRUD (create/update/delete/enable/sync) has been retired; GIR base config
+//! is now git-owned via EdgionStreamPlugins and must be modified through GitOps.
 
 use axum::{
     extract::{Path, State},
@@ -7,10 +16,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use crate::api::ApiState;
-use crate::metadata_store::ControllerPmEntry;
+use crate::api::consistency_handlers::ConsistencyResult;
+use crate::metadata_store::EffectiveGirView;
 use crate::common::api::ApiResponse;
 use crate::common::observe::fed_metrics;
 
@@ -29,23 +38,18 @@ fn fanout_result_label(success_count: usize, failed_count: usize) -> &'static st
     }
 }
 
+/// Effective GIR aggregated view returned by the read endpoints.
+/// Populated from the background poller's snapshot (`metadata_store.gir_effective`).
+/// Replaces the old `CenterGlobalIpRestrictionView` which relied on the dead
+/// `global_ip_restrictions` fed-sync feed.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CenterGlobalIpRestrictionView {
+pub struct CenterGirAggregatedView {
     pub namespace: String,
-    pub name: String,
-    pub controllers: HashMap<String, Arc<ControllerPmEntry>>,
+    pub plugin_name: String,
+    /// Per-controller effective GIR view keyed by controller_id.
+    pub controllers: HashMap<String, EffectiveGirView>,
     pub online_controller_ids: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConsistencyResult {
-    pub namespace: String,
-    pub name: String,
-    pub consistent: bool,
-    pub controller_count: usize,
-    pub conflicts: Vec<String>,
 }
 
 fn online_controllers(state: &ApiState) -> Vec<String> {
@@ -59,16 +63,19 @@ fn online_controllers(state: &ApiState) -> Vec<String> {
 }
 
 /// `GET /api/v1/center/global-connection-ip-restrictions`
+///
+/// Returns all GIR effective views aggregated across controllers, read from the
+/// background-poller snapshot (`metadata_store.gir_effective`).
 pub async fn list_global_ip_restrictions(
     State(state): State<ApiState>,
-) -> Json<ApiResponse<Vec<CenterGlobalIpRestrictionView>>> {
-    let entries = state.metadata_store.list_global_ip_restrictions();
+) -> Json<ApiResponse<Vec<CenterGirAggregatedView>>> {
+    let entries = state.metadata_store.list_gir_effective();
     let online = online_controllers(&state);
     let items: Vec<_> = entries
         .into_iter()
-        .map(|e| CenterGlobalIpRestrictionView {
+        .map(|e| CenterGirAggregatedView {
             namespace: e.namespace,
-            name: e.name,
+            plugin_name: e.plugin_name,
             controllers: e.controllers,
             online_controller_ids: online.clone(),
         })
@@ -77,12 +84,18 @@ pub async fn list_global_ip_restrictions(
 }
 
 /// `GET /api/v1/center/global-connection-ip-restrictions/{ns}/{name}`
+///
+/// `name` is matched against `plugin_name` in the effective GIR store.
 pub async fn get_global_ip_restriction(
     State(state): State<ApiState>,
     Path((ns, name)): Path<(String, String)>,
-) -> Result<Json<ApiResponse<CenterGlobalIpRestrictionView>>, (StatusCode, Json<ApiResponse<()>>)> {
-    let pm_key = format!("{}/{}", ns, name);
-    let Some(per_ctrl) = state.metadata_store.get_global_ip_restriction(&pm_key) else {
+) -> Result<Json<ApiResponse<CenterGirAggregatedView>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let Some(entry) = state
+        .metadata_store
+        .list_gir_effective()
+        .into_iter()
+        .find(|v| v.namespace == ns && v.plugin_name == name)
+    else {
         return Err((
             StatusCode::NOT_FOUND,
             Json(ApiResponse::err_body(format!(
@@ -92,35 +105,67 @@ pub async fn get_global_ip_restriction(
         ));
     };
     let online = online_controllers(&state);
-    Ok(Json(ApiResponse::ok_body(CenterGlobalIpRestrictionView {
-        namespace: ns,
-        name,
-        controllers: per_ctrl,
+    Ok(Json(ApiResponse::ok_body(CenterGirAggregatedView {
+        namespace: entry.namespace,
+        plugin_name: entry.plugin_name,
+        controllers: entry.controllers,
         online_controller_ids: online,
     })))
 }
 
 /// `GET /api/v1/center/global-connection-ip-restrictions/consistency`
+///
+/// For each (namespace, plugin_name) GIR key, restricts to online controllers and
+/// checks whether all agree on the effective `active_profile`. Offline controllers
+/// are excluded to avoid false positives during initial sync or after a drop.
 pub async fn global_ip_restrictions_consistency(
     State(state): State<ApiState>,
 ) -> Json<ApiResponse<Vec<ConsistencyResult>>> {
-    let entries = state.metadata_store.list_global_ip_restrictions();
+    // Collect the set of currently-online controller IDs.
+    let online: HashSet<String> = state
+        .aggregator
+        .controller_summaries()
+        .into_iter()
+        .filter(|s| s.online)
+        .map(|s| s.controller_id)
+        .collect();
+
+    let entries = state.metadata_store.list_gir_effective();
     let items: Vec<_> = entries
         .into_iter()
         .map(|e| {
-            let hashes: HashSet<&str> = e.controllers.values().map(|c| c.content_hash.as_str()).collect();
-            let consistent = hashes.len() <= 1;
-            // v1: report whole-entry mismatch; per-field conflicts left to v2
+            // Collect active_profile values only from online controllers.
+            let online_profiles: Vec<String> = e
+                .controllers
+                .iter()
+                .filter(|(ctrl_id, _)| online.contains(*ctrl_id))
+                .map(|(_, gir)| gir.active_profile.clone())
+                .collect();
+
+            if online_profiles.len() <= 1 {
+                // Zero or one online controller — divergence is impossible.
+                return ConsistencyResult {
+                    namespace: e.namespace,
+                    name: e.plugin_name,
+                    consistent: true,
+                    controller_count: online_profiles.len(),
+                    conflicts: Vec::new(),
+                };
+            }
+
+            let distinct: HashSet<&str> = online_profiles.iter().map(String::as_str).collect();
+            let consistent = distinct.len() <= 1;
             let conflicts = if consistent {
                 Vec::new()
             } else {
-                vec!["contentHash".to_string()]
+                vec!["activeProfile".to_string()]
             };
+
             ConsistencyResult {
                 namespace: e.namespace,
-                name: e.name,
+                name: e.plugin_name,
                 consistent,
-                controller_count: e.controllers.len(),
+                controller_count: online_profiles.len(),
                 conflicts,
             }
         })
@@ -129,7 +174,7 @@ pub async fn global_ip_restrictions_consistency(
 }
 
 // =====================================================================
-// Write endpoints: fan-out helpers and request/response types
+// Fan-out helpers and response types (shared by write endpoints)
 // =====================================================================
 
 #[derive(Debug, Clone, Serialize)]
@@ -231,282 +276,28 @@ fn fanout_status(success: &[ControllerOpResult], failed: &[ControllerOpResult]) 
     }
 }
 
-// =====================================================================
-// POST /api/v1/center/global-connection-ip-restrictions
-// =====================================================================
-
-// NOTE(migration): GlobalConnectionIpRestrictionData deleted upstream (PluginMetaData →
-// EdgionConfigData); GIR config moved to edgion_stream_plugins::GlobalConnectionIpRestrictionConfig.
-use edgion_resources::resources::edgion_stream_plugins::GlobalConnectionIpRestrictionConfig;
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateRequest {
-    pub namespace: String,
-    pub name: String,
-    pub controllers: Vec<String>,
-    pub data: GlobalConnectionIpRestrictionConfig,
-}
-
-/// `POST /api/v1/center/global-connection-ip-restrictions`
-pub async fn create_global_ip_restriction(
-    State(state): State<ApiState>,
-    Json(req): Json<CreateRequest>,
-) -> (StatusCode, Json<ApiResponse<FanOutResponse>>) {
-    // Early validation: bad request body must surface as HTTP 400 so automated
-    // callers can rely on the status code instead of inspecting nested fields.
-    {
-        let mut cloned = req.data.clone();
-        if let Err(e) = cloned.validate_and_init() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse::err_body(format!("invalid PM data: {}", e))),
-            );
-        }
-    }
-    let (targets, warnings) = resolve_targets(&state, &req.controllers);
-
-    let pm_json = build_pm_json(&req.namespace, &req.name, &req.data);
-    let body = pm_json.into_bytes();
-    // POST /api/v1/namespaced/pluginmetadata/{namespace} — create on Controller.
-    // Name is embedded in the JSON body; POST path does not include the name segment.
-    let path = format!("/api/v1/namespaced/pluginmetadata/{}", req.namespace);
-    let results = fan_out_http(&state, targets, "POST", path, body).await;
-    let (success, failed) = partition(results);
-    let status = fanout_status(&success, &failed);
-    (
-        status,
-        Json(ApiResponse::ok_body(FanOutResponse {
-            success,
-            failed,
-            warnings,
-        })),
-    )
-}
-
-/// Extract [`GlobalConnectionIpRestrictionConfig`] from a Controller GET response body.
+/// Build the PUT path and JSON body for a Selector EdgionConfigData update.
 ///
-/// The Controller stores and returns PluginMetaData as:
-/// `{"spec": {"metadata": {"config": <GlobalConnectionIpRestrictionConfig>}}}`
-// FIXME(migration): GIR is now an EdgionStreamPlugins config; this wire contract is stale
-// and must be reconciled with the controller in a follow-up.
-fn extract_pm_data(v: &serde_json::Value) -> Result<GlobalConnectionIpRestrictionConfig, String> {
-    let config = v
-        .pointer("/spec/metadata/config")
-        .ok_or_else(|| "missing /spec/metadata/config in Controller PM response".to_string())?;
-    serde_json::from_value(config.clone()).map_err(|e| format!("failed to deserialize PM config: {e}"))
-}
-
-/// Fetch live PM data from a specific Controller via GET.
-///
-/// Returns `Err((status_code, message))` on any failure so the caller can build a
-/// `ControllerOpResult` with the correct `controller_id` and forward the reason to the client.
-async fn fetch_live_pm_data(
-    proxy: &crate::proxy::ProxyForwarder,
-    cid: &str,
-    path: &str,
-) -> Result<GlobalConnectionIpRestrictionConfig, (u16, String)> {
-    match proxy
-        .forward(cid, "GET".to_string(), path.to_string(), HashMap::new(), vec![])
-        .await
-    {
-        Ok(r) if r.status_code == 200 => {
-            let v = serde_json::from_slice::<serde_json::Value>(&r.body)
-                .map_err(|e| (502u16, format!("Controller returned non-JSON body: {e}")))?;
-            extract_pm_data(&v).map_err(|e| (502u16, format!("GET PM from controller: {e}")))
-        }
-        Ok(r) if r.status_code == 404 => Err((404, "PM not found on this controller".to_string())),
-        Ok(r) => Err((
-            r.status_code as u16,
-            format!("GET PM from controller returned HTTP {}", r.status_code),
-        )),
-        Err((_, msg)) => Err((502, format!("GET PM from controller failed: {msg}"))),
-    }
-}
-
-// FIXME(migration): GIR is now an EdgionStreamPlugins config; this wire contract is stale
-// and must be reconciled with the controller in a follow-up.
-fn build_pm_json(ns: &str, name: &str, data: &GlobalConnectionIpRestrictionConfig) -> String {
+/// Returns `(path, json_body)` where:
+/// - `path` is `/api/v1/namespaced/edgionconfigdata/{ns}/{name}`
+/// - `json_body` is a full EdgionConfigData document with `spec.enable:true` and
+///   `spec.data = {"type":"Selector","config":{"active":<active_profile>}}`
+fn build_selector_put(ns: &str, name: &str, active_profile: &str) -> (String, String) {
+    let path = format!("/api/v1/namespaced/edgionconfigdata/{}/{}", ns, name);
     let doc = serde_json::json!({
         "apiVersion": "edgion.io/v1",
-        "kind": "PluginMetaData",
+        "kind": "EdgionConfigData",
         "metadata": { "name": name, "namespace": ns },
         "spec": {
-            "metadata": {
-                "type": "GlobalConnectionIpRestriction",
-                "config": data
+            "enable": true,
+            "data": {
+                "type": "Selector",
+                "config": { "active": active_profile }
             }
         }
     });
-    serde_json::to_string(&doc).expect("serde_json serialize")
-}
-
-// =====================================================================
-// PUT /api/v1/center/global-connection-ip-restrictions/{ns}/{name}
-// =====================================================================
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateRequest {
-    pub controllers: Vec<String>,
-    pub data: GlobalConnectionIpRestrictionConfig,
-}
-
-/// `PUT /api/v1/center/global-connection-ip-restrictions/{ns}/{name}`
-pub async fn update_global_ip_restriction(
-    State(state): State<ApiState>,
-    Path((ns, name)): Path<(String, String)>,
-    Json(req): Json<UpdateRequest>,
-) -> (StatusCode, Json<ApiResponse<FanOutResponse>>) {
-    // Early validation: bad request body must surface as HTTP 400 so automated
-    // callers can rely on the status code instead of inspecting nested fields.
-    {
-        let mut cloned = req.data.clone();
-        if let Err(e) = cloned.validate_and_init() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse::err_body(format!("invalid PM data: {}", e))),
-            );
-        }
-    }
-    let (targets, warnings) = resolve_targets(&state, &req.controllers);
-    let body = build_pm_json(&ns, &name, &req.data).into_bytes();
-    let path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", ns, name);
-    let results = fan_out_http(&state, targets, "PUT", path, body).await;
-    let (success, failed) = partition(results);
-    let status = fanout_status(&success, &failed);
-    (
-        status,
-        Json(ApiResponse::ok_body(FanOutResponse {
-            success,
-            failed,
-            warnings,
-        })),
-    )
-}
-
-// =====================================================================
-// DELETE /api/v1/center/global-connection-ip-restrictions/{ns}/{name}
-// =====================================================================
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeleteRequest {
-    pub controllers: Vec<String>,
-}
-
-/// `DELETE /api/v1/center/global-connection-ip-restrictions/{ns}/{name}`
-pub async fn delete_global_ip_restriction(
-    State(state): State<ApiState>,
-    Path((ns, name)): Path<(String, String)>,
-    Json(req): Json<DeleteRequest>,
-) -> (StatusCode, Json<ApiResponse<FanOutResponse>>) {
-    let (targets, warnings) = resolve_targets(&state, &req.controllers);
-    let path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", ns, name);
-    let results = fan_out_http(&state, targets, "DELETE", path, vec![]).await;
-    let (success, failed) = partition(results);
-    let status = fanout_status(&success, &failed);
-    (
-        status,
-        Json(ApiResponse::ok_body(FanOutResponse {
-            success,
-            failed,
-            warnings,
-        })),
-    )
-}
-
-// =====================================================================
-// PATCH /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/enable
-// =====================================================================
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PatchEnableRequest {
-    pub enable: bool,
-    pub controllers: Vec<String>,
-}
-
-/// `PATCH /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/enable`
-pub async fn patch_enable(
-    State(state): State<ApiState>,
-    Path((ns, name)): Path<(String, String)>,
-    Json(req): Json<PatchEnableRequest>,
-) -> (StatusCode, Json<ApiResponse<FanOutResponse>>) {
-    let (targets, warnings) = resolve_targets(&state, &req.controllers);
-
-    let path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", ns, name);
-    let futs = targets.into_iter().map(|cid| {
-        let proxy = state.proxy.clone();
-        let ns = ns.clone();
-        let name = name.clone();
-        let path = path.clone();
-        let enable = req.enable;
-        async move {
-            // GET live data from the Controller to avoid clobbering concurrent writes
-            // with a stale Center-cache snapshot.
-            let base = match fetch_live_pm_data(&proxy, &cid, &path).await {
-                Ok(d) => d,
-                Err((code, msg)) => {
-                    return ControllerOpResult {
-                        controller_id: cid,
-                        detail: None,
-                        error: Some(msg),
-                        status_code: Some(code),
-                    }
-                }
-            };
-            let data = GlobalConnectionIpRestrictionConfig {
-                enable,
-                active_profile: base.active_profile,
-                profiles: base.profiles,
-                description: base.description,
-                // Carry active_profile_ref from the base to avoid clobbering it.
-                active_profile_ref: base.active_profile_ref,
-            };
-            let body = build_pm_json(&ns, &name, &data).into_bytes();
-            let mut headers = HashMap::new();
-            headers.insert("content-type".to_string(), "application/json".to_string());
-            // NOTE: There is still a TOCTOU window between the GET above and this PUT.
-            // A concurrent write between the two calls means the last writer wins silently.
-            // Eliminating this would require Controller-side ETag/resourceVersion support.
-            match proxy.forward(&cid, "PUT".to_string(), path, headers, body).await {
-                Ok(r) if r.status_code >= 200 && r.status_code < 300 => ControllerOpResult {
-                    controller_id: cid,
-                    detail: Some(format!("status {}", r.status_code)),
-                    error: None,
-                    status_code: Some(r.status_code as u16),
-                },
-                Ok(r) => ControllerOpResult {
-                    controller_id: cid,
-                    detail: None,
-                    error: Some(format!("HTTP {}", r.status_code)),
-                    status_code: Some(r.status_code as u16),
-                },
-                Err((status, msg)) => ControllerOpResult {
-                    controller_id: cid,
-                    detail: None,
-                    error: Some(msg),
-                    status_code: Some(status.as_u16()),
-                },
-            }
-        }
-    });
-    let results = futures::future::join_all(futs).await;
-    let (success, failed) = partition(results);
-    fed_metrics::record_fanout(
-        fed_metrics::labels::fanout_op::PATCH_ENABLE,
-        fanout_result_label(success.len(), failed.len()),
-    );
-    let status = fanout_status(&success, &failed);
-    (
-        status,
-        Json(ApiResponse::ok_body(FanOutResponse {
-            success,
-            failed,
-            warnings,
-        })),
-    )
+    let json = serde_json::to_string(&doc).expect("serde_json serialize");
+    (path, json)
 }
 
 // =====================================================================
@@ -521,80 +312,47 @@ pub struct PatchActiveProfileRequest {
 }
 
 /// `PATCH /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile`
+///
+/// Resolves the active-profile Selector for the GIR `(ns, name)` from the effective store,
+/// then fan-outs a PUT of the Selector EdgionConfigData to the target controllers.
+/// Center patches an EXISTING Selector only (D7 architecture); if the GIR has no
+/// `active_profile_ref` configured, returns 400 — it does not create a Selector.
 pub async fn patch_active_profile(
     State(state): State<ApiState>,
     Path((ns, name)): Path<(String, String)>,
     Json(req): Json<PatchActiveProfileRequest>,
 ) -> (StatusCode, Json<ApiResponse<FanOutResponse>>) {
-    let (targets, warnings) = resolve_targets(&state, &req.controllers);
-
-    let path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", ns, name);
-    let futs = targets.into_iter().map(|cid| {
-        let proxy = state.proxy.clone();
-        let ns = ns.clone();
-        let name = name.clone();
-        let path = path.clone();
-        let active_profile = req.active_profile.clone();
-        async move {
-            // GET live data from the Controller to avoid clobbering concurrent writes
-            // with a stale Center-cache snapshot. Profile existence is validated against
-            // the live state for the same reason.
-            let base = match fetch_live_pm_data(&proxy, &cid, &path).await {
-                Ok(d) => d,
-                Err((code, msg)) => {
-                    return ControllerOpResult {
-                        controller_id: cid,
-                        detail: None,
-                        error: Some(msg),
-                        status_code: Some(code),
-                    }
-                }
-            };
-            if !base.profiles.contains_key(&active_profile) {
-                return ControllerOpResult {
-                    controller_id: cid,
-                    detail: None,
-                    error: Some(format!("profile '{}' not found on this controller", active_profile)),
-                    status_code: Some(400),
-                };
-            }
-            let data = GlobalConnectionIpRestrictionConfig {
-                enable: base.enable,
-                active_profile,
-                profiles: base.profiles,
-                description: base.description,
-                // Carry active_profile_ref from the base to avoid clobbering it.
-                active_profile_ref: base.active_profile_ref,
-            };
-            let body = build_pm_json(&ns, &name, &data).into_bytes();
-            let mut headers = HashMap::new();
-            headers.insert("content-type".to_string(), "application/json".to_string());
-            // NOTE: There is still a TOCTOU window between the GET above and this PUT.
-            // A concurrent write between the two calls means the last writer wins silently.
-            // Eliminating this would require Controller-side ETag/resourceVersion support.
-            match proxy.forward(&cid, "PUT".to_string(), path, headers, body).await {
-                Ok(r) if r.status_code >= 200 && r.status_code < 300 => ControllerOpResult {
-                    controller_id: cid,
-                    detail: Some(format!("status {}", r.status_code)),
-                    error: None,
-                    status_code: Some(r.status_code as u16),
-                },
-                Ok(r) => ControllerOpResult {
-                    controller_id: cid,
-                    detail: None,
-                    error: Some(format!("HTTP {}", r.status_code)),
-                    status_code: Some(r.status_code as u16),
-                },
-                Err((status, msg)) => ControllerOpResult {
-                    controller_id: cid,
-                    detail: None,
-                    error: Some(msg),
-                    status_code: Some(status.as_u16()),
-                },
+    // Resolve which Selector EdgionConfigData to patch by reading the effective GIR view.
+    // The active_profile_ref field names the Selector in the same namespace as the GIR plugin.
+    let selector_name = {
+        let gir_row = state
+            .metadata_store
+            .list_gir_effective()
+            .into_iter()
+            .find(|v| v.namespace == ns && v.plugin_name == name);
+        let selector_ref = gir_row.and_then(|row| {
+            // All controllers share the same base spec; take the first non-None ref.
+            row.controllers
+                .into_values()
+                .find_map(|v| v.active_profile_ref)
+        });
+        match selector_ref {
+            Some(s) => s,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiResponse::err_body(
+                        "no active-profile selector configured".to_string(),
+                    )),
+                );
             }
         }
-    });
-    let results = futures::future::join_all(futs).await;
+    };
+
+    let (targets, warnings) = resolve_targets(&state, &req.controllers);
+    let (path, body_str) = build_selector_put(&ns, &selector_name, &req.active_profile);
+    let body = body_str.into_bytes();
+    let results = fan_out_http(&state, targets, "PUT", path, body).await;
     let (success, failed) = partition(results);
     fed_metrics::record_fanout(
         fed_metrics::labels::fanout_op::PATCH_PROFILE,
@@ -611,167 +369,190 @@ pub async fn patch_active_profile(
     )
 }
 
-// =====================================================================
-// POST /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/sync
-// =====================================================================
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncRequest {
-    pub source_controller: String,
-    pub target_controllers: Vec<String>,
-}
-
-/// `POST /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/sync`
-///
-/// Copy a PM's current state from `source_controller` to `target_controllers`.
-/// `target_controllers: ["all"]` expands to all online controllers except the source.
-pub async fn sync_global_ip_restriction(
-    State(state): State<ApiState>,
-    Path((ns, name)): Path<(String, String)>,
-    Json(req): Json<SyncRequest>,
-) -> (StatusCode, Json<ApiResponse<FanOutResponse>>) {
-    let pm_key = format!("{}/{}", ns, name);
-    let per_ctrl = match state.metadata_store.get_global_ip_restriction(&pm_key) {
-        Some(m) => m,
-        None => {
-            // 404, not 502: Center is the authoritative origin here; no upstream gateway involved.
-            return (
-                StatusCode::NOT_FOUND,
-                Json(ApiResponse::ok_body(FanOutResponse {
-                    success: vec![],
-                    failed: vec![ControllerOpResult {
-                        controller_id: "<lookup>".to_string(),
-                        detail: None,
-                        error: Some("PM not found".to_string()),
-                        status_code: Some(404),
-                    }],
-                    warnings: vec![],
-                })),
-            );
-        }
-    };
-
-    let Some(source_entry) = per_ctrl.get(&req.source_controller) else {
-        // 404: source controller has no entry for this PM (not-found, not a gateway failure).
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ApiResponse::ok_body(FanOutResponse {
-                success: vec![],
-                failed: vec![ControllerOpResult {
-                    controller_id: req.source_controller.clone(),
-                    detail: None,
-                    error: Some("source controller does not have this PM".to_string()),
-                    status_code: Some(404),
-                }],
-                warnings: vec![],
-            })),
-        );
-    };
-
-    // Resolve targets: "all" = all online except source.
-    let (targets, warnings) = if req.target_controllers.len() == 1 && req.target_controllers[0] == "all" {
-        let online = online_controllers(&state);
-        let targets: Vec<_> = online.into_iter().filter(|cid| cid != &req.source_controller).collect();
-        (targets, vec![])
-    } else {
-        (req.target_controllers.clone(), vec![])
-    };
-
-    // Reconstruct the PM data from the source ControllerPmEntry.
-    // FIDELITY GAP(migration): active_profile_ref is dropped here (set to None) because
-    // ControllerPmEntry does not carry it, unlike patch_enable / patch_active_profile
-    // which fetch live data and preserve base.active_profile_ref. This sync path is
-    // currently unreachable (the GIR map is never fed by fed-sync, so the caller 404s
-    // before reaching here). When EdgionStreamPlugins watch feeding is restored, either
-    // add active_profile_ref to ControllerPmEntry or switch this path to fetch_live_pm_data
-    // so the source controller's selector reference is copied faithfully to targets.
-    let data = GlobalConnectionIpRestrictionConfig {
-        enable: source_entry.enable,
-        active_profile: source_entry.active_profile.clone(),
-        profiles: source_entry.profiles.clone(),
-        description: source_entry.description.clone(),
-        active_profile_ref: None,
-    };
-    let body = build_pm_json(&ns, &name, &data).into_bytes();
-    let path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", ns, name);
-    let results = fan_out_http(&state, targets, "PUT", path, body).await;
-    let (success, failed) = partition(results);
-    let status = fanout_status(&success, &failed);
-    (
-        status,
-        Json(ApiResponse::ok_body(FanOutResponse {
-            success,
-            failed,
-            warnings,
-        })),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use edgion_resources::resources::edgion_stream_plugins::ProfileRules;
+    use axum::extract::State;
+    use crate::metadata_store::EffectiveGirView;
 
-    fn make_pm_json(data: &GlobalConnectionIpRestrictionConfig) -> serde_json::Value {
-        serde_json::json!({
-            "apiVersion": "edgion.io/v1",
-            "kind": "PluginMetaData",
-            "metadata": { "name": "test", "namespace": "default" },
-            "spec": {
-                "metadata": {
-                    "type": "GlobalConnectionIpRestriction",
-                    "config": serde_json::to_value(data).unwrap()
-                }
-            }
-        })
-    }
+    /// Minimal `ApiState` for handler tests — mirrors the builder in `region_route_handlers.rs`.
+    fn test_api_state() -> ApiState {
+        use crate::aggregator::ResourceAggregator;
+        use crate::commander::Commander;
+        use crate::config::AuthzMode;
+        use crate::fed_sync::registry::ControllerRegistry;
+        use crate::metadata_store::CenterMetaDataStore;
+        use crate::proxy::ProxyForwarder;
+        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
+        use parking_lot::Mutex;
+        use std::collections::HashMap;
+        use std::sync::Arc;
 
-    fn sample_data() -> GlobalConnectionIpRestrictionConfig {
-        // NOTE(migration): active_profile_ref added (new field in GlobalConnectionIpRestrictionConfig).
-        GlobalConnectionIpRestrictionConfig {
-            enable: true,
-            active_profile: "prod".to_string(),
-            profiles: {
-                let mut m = std::collections::HashMap::new();
-                m.insert(
-                    "prod".to_string(),
-                    ProfileRules {
-                        allow: None,
-                        deny: None,
-                        default_action: Default::default(),
-                        allow_matcher: None,
-                        deny_matcher: None,
-                    },
-                );
-                m
-            },
-            description: Some("test desc".to_string()),
-            active_profile_ref: None,
+        let registry = ControllerRegistry::new();
+        let metadata_store = Arc::new(CenterMetaDataStore::new());
+        let sync_client = Arc::new(CenterSyncClient {
+            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
+        });
+        let commander = Arc::new(Commander::new(
+            registry.clone(),
+            Arc::new(Mutex::new(HashMap::new())),
+            5,
+        ));
+        let proxy = Arc::new(ProxyForwarder::new(
+            registry.clone(),
+            Arc::new(Mutex::new(HashMap::new())),
+            5,
+        ));
+        ApiState {
+            aggregator: Arc::new(ResourceAggregator::new()),
+            commander,
+            proxy,
+            db: None,
+            metadata_store,
+            sync_client,
+            registry,
+            db_required: false,
+            authz_mode: AuthzMode::AllowAll,
+            db_auth_enabled: false,
         }
     }
 
-    #[test]
-    fn extract_pm_data_success() {
-        let v = make_pm_json(&sample_data());
-        let got = extract_pm_data(&v).expect("should parse valid PM JSON");
-        assert!(got.enable);
-        assert_eq!(got.active_profile, "prod");
-        assert!(got.profiles.contains_key("prod"));
-        assert_eq!(got.description.as_deref(), Some("test desc"));
+    fn make_register_info(controller_id: &str) -> crate::common::fed_sync::proto::RegisterRequest {
+        crate::common::fed_sync::proto::RegisterRequest {
+            controller_id: controller_id.to_string(),
+            cluster: "test-cluster".to_string(),
+            env: vec![],
+            tag: vec![],
+            supported_kinds: vec![],
+        }
     }
 
-    #[test]
-    fn extract_pm_data_missing_spec() {
-        let v = serde_json::json!({ "apiVersion": "edgion.io/v1", "kind": "PluginMetaData" });
-        assert!(extract_pm_data(&v).is_err());
+    fn make_gir_view(plugin_name: &str, active_profile: &str) -> EffectiveGirView {
+        EffectiveGirView {
+            namespace: "default".into(),
+            plugin_name: plugin_name.into(),
+            enable: true,
+            active_profile: active_profile.into(),
+            profiles: serde_json::json!({}),
+            active_profile_ref: None,
+            selector_applied: false,
+        }
     }
 
+    /// Seed one GIR into the effective store and assert `list_global_ip_restrictions`
+    /// returns it aggregated by (ns, plugin_name) with the controller entry present.
+    #[tokio::test]
+    async fn list_global_ip_restrictions_returns_aggregated() {
+        let state = test_api_state();
+        state.metadata_store.replace_gir("ctrl-a", vec![make_gir_view("gir1", "strict")]);
+        let Json(resp) = list_global_ip_restrictions(State(state)).await;
+        assert!(resp.success, "response must be success:true");
+        let data = resp.data.expect("data must be present");
+        assert_eq!(data.len(), 1, "one GIR key");
+        assert_eq!(data[0].plugin_name, "gir1");
+        assert_eq!(data[0].namespace, "default");
+        assert_eq!(data[0].controllers.len(), 1);
+        assert!(data[0].controllers.contains_key("ctrl-a"));
+    }
+
+    /// `get_global_ip_restriction` must return 404 when the effective store has no entry.
+    #[tokio::test]
+    async fn get_global_ip_restriction_not_found_returns_404() {
+        let state = test_api_state();
+        let result = get_global_ip_restriction(
+            State(state),
+            Path(("default".to_string(), "nonexistent".to_string())),
+        )
+        .await;
+        assert!(result.is_err(), "must return 404 for missing GIR");
+        // Use if-let to extract the status code without requiring Debug on the Ok type.
+        if let Err((status, _)) = result {
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+
+    /// `get_global_ip_restriction` must return the view when the entry exists.
+    #[tokio::test]
+    async fn get_global_ip_restriction_found_returns_view() {
+        let state = test_api_state();
+        state.metadata_store.replace_gir("ctrl-a", vec![make_gir_view("gir1", "strict")]);
+        let result = get_global_ip_restriction(
+            State(state),
+            Path(("default".to_string(), "gir1".to_string())),
+        )
+        .await;
+        assert!(result.is_ok(), "must succeed when entry exists");
+        // Use if-let to extract the response without requiring Debug on the Err type.
+        if let Ok(Json(resp)) = result {
+            assert!(resp.success);
+            let view = resp.data.expect("data must be present");
+            assert_eq!(view.plugin_name, "gir1");
+            assert!(view.controllers.contains_key("ctrl-a"));
+        }
+    }
+
+    /// Two online controllers with divergent `active_profile` for the same GIR key
+    /// must be reported as inconsistent.
+    #[tokio::test]
+    async fn global_ip_consistency_flags_divergent_online_controllers() {
+        let state = test_api_state();
+        state.aggregator.set_controller_info("ctrl-a", make_register_info("ctrl-a"));
+        state.aggregator.set_controller_info("ctrl-b", make_register_info("ctrl-b"));
+
+        state.metadata_store.replace_gir("ctrl-a", vec![make_gir_view("gir1", "strict")]);
+        state.metadata_store.replace_gir("ctrl-b", vec![make_gir_view("gir1", "open")]);
+
+        let Json(resp) = global_ip_restrictions_consistency(State(state)).await;
+        assert!(resp.success, "response must be success:true");
+        let data = resp.data.expect("data must be present");
+        assert_eq!(data.len(), 1, "one GIR key with a conflict");
+        assert!(!data[0].consistent, "divergent active_profile => inconsistent");
+        assert_eq!(data[0].controller_count, 2);
+        assert!(data[0].conflicts.contains(&"activeProfile".to_string()));
+    }
+
+    /// Offline ctrl-b must be excluded; only ctrl-a (online) is considered,
+    /// so there can be no conflict.
+    #[tokio::test]
+    async fn global_ip_consistency_excludes_offline_controllers() {
+        let state = test_api_state();
+        state.aggregator.set_controller_info("ctrl-a", make_register_info("ctrl-a"));
+        state.aggregator.set_controller_info("ctrl-b", make_register_info("ctrl-b"));
+        state.aggregator.mark_offline("ctrl-b");
+
+        state.metadata_store.replace_gir("ctrl-a", vec![make_gir_view("gir1", "strict")]);
+        state.metadata_store.replace_gir("ctrl-b", vec![make_gir_view("gir1", "open")]);
+
+        let Json(resp) = global_ip_restrictions_consistency(State(state)).await;
+        assert!(resp.success, "response must be success:true");
+        let data = resp.data.expect("data must be present");
+        assert_eq!(data.len(), 1, "one GIR key");
+        assert!(data[0].consistent, "offline ctrl-b excluded => consistent");
+        assert_eq!(data[0].controller_count, 1, "only ctrl-a is online");
+        assert!(data[0].conflicts.is_empty(), "no conflicts with single online controller");
+    }
+
+    /// `build_selector_put` must produce the correct path and a JSON body that
+    /// describes a Selector EdgionConfigData with the given active profile.
     #[test]
-    fn extract_pm_data_invalid_config() {
-        let v = serde_json::json!({
-            "spec": { "metadata": { "config": "not-an-object" } }
-        });
-        assert!(extract_pm_data(&v).is_err());
+    fn build_selector_put_path_and_body() {
+        let (path, json) = build_selector_put("prod-ns", "my-selector", "strict");
+        assert_eq!(path, "/api/v1/namespaced/edgionconfigdata/prod-ns/my-selector");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        assert_eq!(
+            v.pointer("/kind").and_then(|x| x.as_str()),
+            Some("EdgionConfigData"),
+            "/kind must be EdgionConfigData"
+        );
+        assert_eq!(
+            v.pointer("/spec/data/type").and_then(|x| x.as_str()),
+            Some("Selector"),
+            "/spec/data/type must be Selector"
+        );
+        assert_eq!(
+            v.pointer("/spec/data/config/active").and_then(|x| x.as_str()),
+            Some("strict"),
+            "/spec/data/config/active must match the requested profile"
+        );
     }
 }

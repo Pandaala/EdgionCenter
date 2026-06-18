@@ -84,7 +84,7 @@ const Dashboard = () => {
   const gcQuery      = useQuery({ queryKey: ['count', 'gatewayclass',        controllerId ?? ''], queryFn: () => clusterResourceApi.listAll<K8sResource>('gatewayclass').then(r => r.count ?? r.data?.length ?? 0),        staleTime: 30000 })
   const pluginQuery  = useQuery({ queryKey: ['count', 'edgionplugins',        controllerId ?? ''], queryFn: () => resourceApi.listAll<K8sResource>('edgionplugins').then(r => r.count ?? r.data?.length ?? 0),              staleTime: 30000 })
   const streamQuery  = useQuery({ queryKey: ['count', 'edgionstreamplugins',  controllerId ?? ''], queryFn: () => resourceApi.listAll<K8sResource>('edgionstreamplugins').then(r => r.count ?? r.data?.length ?? 0),        staleTime: 30000 })
-  const metaQuery    = useQuery({ queryKey: ['count', 'pluginmetadata',        controllerId ?? ''], queryFn: () => resourceApi.listAll<K8sResource>('pluginmetadata').then(r => r.count ?? r.data?.length ?? 0),              staleTime: 30000 })
+  const metaQuery    = useQuery({ queryKey: ['count', 'edgionconfigdata',       controllerId ?? ''], queryFn: () => resourceApi.listAll<K8sResource>('edgionconfigdata').then(r => r.count ?? r.data?.length ?? 0),             staleTime: 30000 })
   const gcfgQuery    = useQuery({ queryKey: ['count', 'edgiongatewayconfig',  controllerId ?? ''], queryFn: () => clusterResourceApi.listAll<K8sResource>('edgiongatewayconfig').then(r => r.count ?? r.data?.length ?? 0), staleTime: 30000 })
   const linksysQuery = useQuery({ queryKey: ['count', 'linksys',              controllerId ?? ''], queryFn: () => resourceApi.listAll<K8sResource>('linksys').then(r => r.count ?? r.data?.length ?? 0),                    staleTime: 30000 })
   const rgQuery      = useQuery({ queryKey: ['count', 'referencegrant',       controllerId ?? ''], queryFn: () => resourceApi.listAll<K8sResource>('referencegrant').then(r => r.count ?? r.data?.length ?? 0),              staleTime: 30000 })
@@ -127,7 +127,7 @@ const Dashboard = () => {
     { label: 'GatewayClass',       value: gcQuery.data      ?? 0, path: '/infrastructure/gatewayclasses', icon: <ClusterOutlined />  },
     { label: 'EdgionPlugins',       value: pluginQuery.data   ?? 0, path: '/plugins',                       icon: <AppstoreOutlined /> },
     { label: 'StreamPlugins',       value: streamQuery.data   ?? 0, path: '/plugins/stream',                icon: <AppstoreOutlined /> },
-    { label: 'PluginMetaData',      value: metaQuery.data     ?? 0, path: '/plugins/metadata',              icon: <AppstoreOutlined /> },
+    { label: 'EdgionConfigData',     value: metaQuery.data     ?? 0, path: '/plugins/metadata',              icon: <AppstoreOutlined /> },
     { label: 'GatewayConfig',       value: gcfgQuery.data     ?? 0, path: '/system/config',                 icon: <SettingOutlined />  },
     { label: 'LinkSys',             value: linksysQuery.data  ?? 0, path: '/system/linksys',                icon: <SettingOutlined />  },
     { label: 'ReferenceGrant',      value: rgQuery.data       ?? 0, path: '',                               icon: <SettingOutlined />  },

@@ -1,6 +1,6 @@
 /**
  * 通用简化编辑器 — 只有 YAML 编辑器，无表单标签
- * 适用于：Service, EndpointSlice, GatewayClass, PluginMetaData, BackendTLSPolicy, ReferenceGrant 等
+ * Applies to: Service, EndpointSlice, GatewayClass, EdgionConfigData, BackendTLSPolicy, ReferenceGrant, etc.
  */
 
 import React, { useEffect, useState } from 'react'

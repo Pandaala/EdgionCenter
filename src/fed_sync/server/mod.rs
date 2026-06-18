@@ -31,7 +31,6 @@ use crate::common::fed_sync::proto::{
 use crate::common::now_ms;
 use crate::common::observe::fed_metrics;
 use edgion_resources::resource::meta::ResourceMeta;
-// Renamed from PluginMetaData to EdgionConfigData (upstream migration).
 use edgion_resources::resources::edgion_config_data::EdgionConfigData;
 
 /// Label value used on fed-sync metrics whose `kind` dimension is

@@ -52,7 +52,7 @@ export type ResourceKind =
   | 'endpointslice'
   | 'edgiontls'
   | 'edgionplugins'
-  | 'pluginmetadata'
+  | 'edgionconfigdata'
   | 'linksys'
   | 'secret'
   | 'gatewayclass'

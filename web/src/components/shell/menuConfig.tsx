@@ -115,14 +115,7 @@ export const controllerMenu: MenuSection[] = [
       },
       { kind: 'item', key: 'sys-linksys', labelKey: 'system.linksys', path: '/system/linksys', icon: <LinkOutlined /> },
       { kind: 'item', key: 'sys-acme',    labelKey: 'system.acme',    path: '/system/acme',    icon: <LockOutlined /> },
-      {
-        kind: 'group',
-        labelKey: 'nav.group.regionRoutes',
-        children: [
-          { kind: 'item', key: 'rr-cluster', labelKey: 'nav.regionRouteCluster', path: '/region-routes/cluster', icon: <ShareAltOutlined /> },
-          { kind: 'item', key: 'rr-service', labelKey: 'nav.regionRouteService', path: '/region-routes/service', icon: <ShareAltOutlined /> },
-        ],
-      },
+      { kind: 'item', key: 'rr', labelKey: 'nav.regionRoutes', path: '/region-routes', icon: <ShareAltOutlined /> },
     ],
   },
 ]
@@ -135,16 +128,7 @@ export const centerMenu: MenuSection[] = [
     children: [
       { kind: 'item', key: 'center-controllers', labelKey: 'center.nav.controllers',
         path: '/', icon: <ClusterOutlined /> },
-      {
-        kind: 'group',
-        labelKey: 'center.nav.regionRoutes',
-        children: [
-          { kind: 'item', key: 'center-rr-cluster', labelKey: 'center.nav.region',
-            path: '/region-routes/cluster', icon: <ShareAltOutlined /> },
-          { kind: 'item', key: 'center-rr-service', labelKey: 'center.nav.servicePm',
-            path: '/region-routes/service', icon: <ShareAltOutlined /> },
-        ],
-      },
+      { kind: 'item', key: 'center-rr', labelKey: 'center.nav.regionRoutes', path: '/region-routes', icon: <ShareAltOutlined /> },
       { kind: 'item', key: 'center-gipr', labelKey: 'center.nav.globalIpRestrictions',
         path: '/global-connection-ip-restrictions', icon: <SafetyOutlined /> },
       { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',

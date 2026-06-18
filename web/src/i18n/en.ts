@@ -11,8 +11,6 @@ const en = {
   'nav.system': 'Gateway',
   'nav.topology': 'Topology',
   'nav.regionRoutes': 'RegionRoute',
-  'nav.regionRouteCluster': 'Cluster',
-  'nav.regionRouteService': 'Service',
 
   // Route types
   'route.http': 'HTTPRoute',
@@ -36,7 +34,7 @@ const en = {
   // Plugins
   'plugins.edgion': 'EdgionPlugins',
   'plugins.stream': 'StreamPlugins',
-  'plugins.metadata': 'PluginMetaData',
+  'plugins.metadata': 'EdgionConfigData',
 
   // System
   'system.config': 'GatewayConfig',
@@ -426,7 +424,7 @@ const en = {
   'field.preflightMode': 'Mode',
   'field.preflightStatusCode': 'Status Code',
 
-  // PluginMetaData sections / fields / notices
+  // EdgionConfigData sections / fields / notices
   'section.pluginInfo': 'Plugin Info',
   'field.pluginDesc': 'Description',
   'notice.pluginMetaYaml': 'For complex schema and defaultConfig, use the YAML tab.',
@@ -455,12 +453,11 @@ const en = {
   'center.searchPlaceholder': 'Search controller...',
   'center.nav.controllers': 'Controllers',
   'center.nav.regionRoutes': 'RegionRoute',
-  'center.nav.region': 'Cluster',
-  'center.nav.servicePm': 'Service',
   'center.nav.admin': 'Admin',
   'center.nav.globalIpRestrictions': 'Global IP Restrictions',
   'center.regionRoute.subtitle': '{n} service region route(s)',
   'center.regionRoute.pmName': 'Service PM Name',
+  'center.regionRoute.pluginName': 'Plugin Name',
   'center.regionRoute.namespace': 'Namespace',
   'center.regionRoute.controllers': 'Controllers',
   'center.regionRoute.noData': 'No region route data found',
@@ -596,8 +593,6 @@ const en = {
   'nav.group.security': 'SECURITY',
   'nav.group.plugins': 'PLUGINS',
   'nav.group.infrastructure': 'INFRASTRUCTURE',
-  'nav.group.regionRoutes': 'REGION ROUTES',
-
   // Page subtitles for list pages (used by PageHeader)
   'page.subtitle.httpRoute': 'Manage HTTP routing rules across your gateways',
   'page.subtitle.grpcRoute': 'Manage gRPC routing rules',
@@ -614,12 +609,11 @@ const en = {
   'page.subtitle.backendTls': 'TLS policy applied between gateway and backend',
   'page.subtitle.plugins': 'Plugins applied to HTTP traffic',
   'page.subtitle.streamPlugins': 'Plugins applied to L4 stream traffic',
-  'page.subtitle.pluginMetadata': 'Plugin metadata definitions',
+  'page.subtitle.edgionConfigData': 'EdgionConfigData definitions',
   'page.subtitle.gatewayConfig': 'Cluster-wide Edgion gateway configuration',
   'page.subtitle.linkSys': 'Linked external systems',
   'page.subtitle.acme': 'ACME certificate issuance',
-  'page.subtitle.regionRouteCluster': 'Cluster-scope region routing rules',
-  'page.subtitle.regionRouteService': 'Service-scope region routing rules',
+  'page.subtitle.regionRoutes': 'Aggregated region route view across all controllers',
   'page.subtitle.topology': 'Visual topology of gateways, routes, and services',
   'page.subtitle.userDashboard': 'Overview of routing and traffic resources',
   'page.subtitle.opsDashboard': 'Controller, gateway, and certificate health',

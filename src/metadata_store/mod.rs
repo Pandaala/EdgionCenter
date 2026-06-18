@@ -1,19 +1,18 @@
 //! CenterMetaDataStore — aggregates EdgionConfigData across all controllers.
 //!
-//! Implements [`CenterConfHandler<EdgionConfigData>`] for the GIR map.
+//! Implements [`CenterConfHandler<EdgionConfigData>`] for the EdgionConfigData watch cache.
+//! The impl is a minimal no-op because GIR/region feeding via fed_sync has been replaced
+//! by the background poller (`poll` module).  The trait impl must remain so the generic
+//! EdgionConfigData watch cache (wired in `cli/mod.rs`) still compiles.
 //!
 //! NOTE(migration): ClusterRegionRoute and ServiceRegionRoute aggregation was removed
 //! because ClusterRegionRouteEntry, ServiceRegionRouteEntry, MetaDataEntry, and
-//! GlobalConnectionIpRestrictionData were deleted upstream (PluginMetaData →
-//! EdgionConfigData migration). The cluster_routes and service_routes maps are gone;
-//! restore from git history when RegionRoute is re-implemented on EdgionConfigData.
+//! GlobalConnectionIpRestrictionData were deleted upstream. The cluster_routes and
+//! service_routes maps are gone; restore from git history when RegionRoute is
+//! re-implemented on EdgionConfigData.
 //!
-//! GIR aggregation feeding is also removed: GlobalConnectionIpRestrictionData was
-//! deleted upstream; GIR config is now carried by EdgionStreamPlugins (not EdgionConfigData).
-//! The global_ip_restrictions map and query APIs are kept so callers compile and the
-//! write fan-out path (global_connection_ip_restriction_handlers) stays functional;
-//! the map will simply never be populated by the fed-sync path until EdgionStreamPlugins
-//! watch support is added. The GIR write endpoints remain wired (FIXME in handlers).
+//! The global_ip_restrictions map (legacy fed-sync GIR feed) has been removed; GIR
+//! is now populated by the background poller via `replace_gir`/`gir_effective`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -21,94 +20,177 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::watch_cache::CenterConfHandler;
-// NOTE(migration): parse_region_route is kept for the handler trait impl but is now a no-op
-// stub; ClusterRegionRoute and ServiceRegionRoute variants were deleted upstream.
-use crate::common::metadata_conf_handler::{parse_region_route, ParsedRegionRoute};
-// Renamed from PluginMetaData to EdgionConfigData (upstream migration).
 use edgion_resources::resources::edgion_config_data::EdgionConfigData;
-// ProfileRules re-pointed from plugin_metadata to edgion_stream_plugins (upstream migration).
-use edgion_resources::resources::edgion_stream_plugins::ProfileRules;
 
-/// Per-Controller view of a GlobalConnectionIpRestriction PM aggregated at Center.
-/// (Naming disambiguation: distinct from `GlobalConnectionIpRestrictionEntry` in
-/// edgion_stream_plugins — that one is the stream-plugin ref carrier.)
-#[derive(Debug, Clone, serde::Serialize)]
+/// One controller's effective region route (deserialized from the controller's
+/// /api/v1/region-routes/effective response; field names match that DTO).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ControllerPmEntry {
-    pub pm_namespace: String,
-    pub pm_name: String,
-    pub enable: bool,
-    pub active_profile: String,
-    pub profiles: HashMap<String, ProfileRules>,
-    pub description: Option<String>,
-    /// sha256 over canonical JSON of the PM data; used for consistency/freshness display.
-    pub content_hash: String,
-    /// Unix ms of last modification on the Controller (Center-assigned on observation).
-    pub last_modified: i64,
+pub struct EffectiveRegionRouteView {
+    pub namespace: String,
+    pub plugin_name: String,
+    #[serde(default)]
+    pub alias: Option<String>,
+    pub my_region: String,
+    pub regions: serde_json::Value,
+    #[serde(default)]
+    pub override_ref: Option<String>,
+    #[serde(default)]
+    pub override_applied: bool,
 }
 
-/// Aggregated view of one GlobalConnectionIpRestriction PM across all Controllers.
+/// Aggregated region route across controllers (one row per (ns, plugin, alias)).
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CenterGlobalIpRestrictionEntryView {
+pub struct CenterRegionRouteView {
     pub namespace: String,
-    pub name: String,
-    /// Map of controller_id → ControllerPmEntry
-    pub controllers: HashMap<String, Arc<ControllerPmEntry>>,
+    pub plugin_name: String,
+    pub alias: Option<String>,
+    pub controllers: HashMap<String, EffectiveRegionRouteView>,
+}
+
+/// One controller's effective GIR (Global IP Restriction) state (deserialized from
+/// the controller's /api/v1/global-ip-restrictions/effective response; field names
+/// match the controller's EffectiveGir DTO).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveGirView {
+    pub namespace: String,
+    pub plugin_name: String,
+    pub enable: bool,
+    pub active_profile: String,
+    /// Passthrough blob — keeps the full ProfileRules tree without pulling the type here.
+    pub profiles: serde_json::Value,
+    #[serde(default)]
+    pub active_profile_ref: Option<String>,
+    #[serde(default)]
+    pub selector_applied: bool,
+}
+
+/// Aggregated GIR view across controllers (one row per (ns, plugin_name)).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CenterGirView {
+    pub namespace: String,
+    pub plugin_name: String,
+    /// Map of controller_id → that controller's effective GIR view.
+    pub controllers: HashMap<String, EffectiveGirView>,
 }
 
 /// Aggregates EdgionConfigData across all controllers.
 ///
 /// Internal structure:
-/// - `global_ip_restrictions`: pm_key → { controller_id → ControllerPmEntry }
+/// - `region_routes`: route_key ("ns/plugin/alias") → { controller_id → EffectiveRegionRouteView }
+/// - `gir_effective`: gir_key ("ns/pluginName") → { controller_id → EffectiveGirView }
+///
+/// Both maps are populated by the background poller (`poll` module); the
+/// `CenterConfHandler<EdgionConfigData>` trait impl is a no-op because feeding
+/// via fed_sync was replaced by polling the controller's `/effective` endpoints.
 ///
 /// NOTE(migration): cluster_routes and service_routes maps were removed because
 /// ClusterRegionRouteEntry and ServiceRegionRouteEntry were deleted upstream.
 /// Restore from git history when RegionRoute is re-implemented on EdgionConfigData.
 pub struct CenterMetaDataStore {
-    // pm_key ("ns/name") → { controller_id → entry }
-    // NOTE(migration): GIR feeding removed — GlobalConnectionIpRestrictionData was deleted
-    // upstream; this map is kept so the GIR query/write APIs stay functional, but it
-    // will not be populated by fed-sync until EdgionStreamPlugins watch is added.
-    global_ip_restrictions: RwLock<HashMap<String, HashMap<String, Arc<ControllerPmEntry>>>>,
+    // route_key ("ns/plugin/alias") → { controller_id → EffectiveRegionRouteView }
+    // Populated by the background poller (poll module); not fed by the conf_sync path.
+    region_routes: RwLock<HashMap<String, HashMap<String, EffectiveRegionRouteView>>>,
+    // gir_key ("ns/pluginName") → { controller_id → EffectiveGirView }
+    // Populated by the background poller; replaces the dead fed-sync GIR feed.
+    gir_effective: RwLock<HashMap<String, HashMap<String, EffectiveGirView>>>,
 }
 
 impl CenterMetaDataStore {
     pub fn new() -> Self {
         Self {
-            global_ip_restrictions: RwLock::new(HashMap::new()),
+            region_routes: RwLock::new(HashMap::new()),
+            gir_effective: RwLock::new(HashMap::new()),
         }
     }
 
-    /// List all GlobalConnectionIpRestriction PMs aggregated across Controllers.
-    /// Returns one view per `pm_key`, with the outer key already split into
-    /// `namespace`/`name` so callers don't pay for an extra `pm_key` clone.
-    pub fn list_global_ip_restrictions(&self) -> Vec<CenterGlobalIpRestrictionEntryView> {
-        self.global_ip_restrictions
-            .read()
-            .iter()
-            .map(|(pm_key, controllers)| {
-                let (namespace, name) = split_pm_key(pm_key);
-                CenterGlobalIpRestrictionEntryView {
-                    namespace,
-                    name,
-                    controllers: controllers.clone(),
-                }
+    /// Replace all region routes for one controller (full snapshot from a poll).
+    /// Prunes all old entries for this controller across all route keys, then inserts
+    /// the new snapshot; drops any outer key that becomes empty.
+    pub fn replace_region_routes(&self, controller_id: &str, routes: Vec<EffectiveRegionRouteView>) {
+        let mut map = self.region_routes.write();
+        // Prune this controller's old entries across all keys.
+        for inner in map.values_mut() {
+            inner.remove(controller_id);
+        }
+        // Insert new entries.
+        for r in routes {
+            let key = region_route_key(&r);
+            map.entry(key).or_default().insert(controller_id.to_string(), r);
+        }
+        // Drop outer keys that became empty.
+        map.retain(|_, inner| !inner.is_empty());
+    }
+
+    /// Return aggregated effective region routes across all controllers.
+    /// Each element represents one unique (ns, plugin, alias) key, with a map
+    /// of controller_id → that controller's effective view for the same key.
+    pub fn list_region_routes(&self) -> Vec<CenterRegionRouteView> {
+        let map = self.region_routes.read();
+        map.values()
+            .filter_map(|inner| {
+                let any = inner.values().next()?;
+                Some(CenterRegionRouteView {
+                    namespace: any.namespace.clone(),
+                    plugin_name: any.plugin_name.clone(),
+                    alias: any.alias.clone(),
+                    controllers: inner.clone(),
+                })
             })
             .collect()
     }
 
-    /// Get a single PM's entries across Controllers.
-    pub fn get_global_ip_restriction(&self, pm_key: &str) -> Option<HashMap<String, Arc<ControllerPmEntry>>> {
-        self.global_ip_restrictions.read().get(pm_key).cloned()
+    /// Replace all GIR effective views for one controller (full snapshot from a poll).
+    /// Prunes all old entries for this controller across all gir keys, then inserts
+    /// the new snapshot; drops any outer key that becomes empty.
+    pub fn replace_gir(&self, controller_id: &str, girs: Vec<EffectiveGirView>) {
+        let mut map = self.gir_effective.write();
+        // Prune this controller's old entries across all keys.
+        for inner in map.values_mut() {
+            inner.remove(controller_id);
+        }
+        // Insert new entries.
+        for g in girs {
+            let key = gir_key(&g);
+            map.entry(key).or_default().insert(controller_id.to_string(), g);
+        }
+        // Drop outer keys that became empty.
+        map.retain(|_, inner| !inner.is_empty());
+    }
+
+    /// Return aggregated effective GIR views across all controllers.
+    /// Each element represents one unique (ns, plugin_name) key, with a map
+    /// of controller_id → that controller's effective GIR view for the same key.
+    pub fn list_gir_effective(&self) -> Vec<CenterGirView> {
+        let map = self.gir_effective.read();
+        map.values()
+            .filter_map(|inner| {
+                let any = inner.values().next()?;
+                Some(CenterGirView {
+                    namespace: any.namespace.clone(),
+                    plugin_name: any.plugin_name.clone(),
+                    controllers: inner.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Remove all entries for a given controller from all maps.
     /// If an inner HashMap becomes empty after removal, the outer key is also removed.
     fn remove_all_for_controller(&self, controller_id: &str) {
         {
-            let mut gir = self.global_ip_restrictions.write();
-            gir.retain(|_, inner| {
+            let mut rr = self.region_routes.write();
+            rr.retain(|_, inner| {
+                inner.remove(controller_id);
+                !inner.is_empty()
+            });
+        }
+        {
+            let mut ge = self.gir_effective.write();
+            ge.retain(|_, inner| {
                 inner.remove(controller_id);
                 !inner.is_empty()
             });
@@ -124,32 +206,11 @@ impl Default for CenterMetaDataStore {
 
 impl CenterConfHandler<EdgionConfigData> for CenterMetaDataStore {
     fn full_set(&self, controller_id: &str, data: &HashMap<String, Arc<EdgionConfigData>>) {
-        // NOTE(migration): ClusterRegionRoute and ServiceRegionRoute feeding removed —
-        // ClusterRegionRouteConfig, ServiceRegionRouteConfig, and MetaDataEntry were
-        // deleted upstream (PluginMetaData → EdgionConfigData). Restore from git history.
-        //
-        // NOTE(migration): GIR feeding removed — GlobalConnectionIpRestrictionData was
-        // deleted upstream; GIR config is now carried by EdgionStreamPlugins. The map
-        // is kept so reads stay functional; feeding will be re-wired when EdgionStreamPlugins
-        // watch support is added.
-        let new_gir: HashMap<String, ControllerPmEntry> = HashMap::new();
-
-        // Suppress unused-variable warning; parse_region_route is a no-op stub post-migration.
-        for pm in data.values() {
-            let _ = parse_region_route(pm);
-        }
-
-        // Single lock acquisition for global_ip_restrictions (prune removed keys; insert new).
-        {
-            let mut gir = self.global_ip_restrictions.write();
-            gir.retain(|_, controllers| {
-                controllers.remove(controller_id);
-                !controllers.is_empty()
-            });
-            for (pm_key, entry) in new_gir {
-                gir.entry(pm_key).or_default().insert(controller_id.to_string(), Arc::new(entry));
-            }
-        }
+        // No-op: GIR and RegionRoute feeding via fed_sync (EdgionConfigData watch) has been
+        // replaced by the background poller (`poll` module) which calls replace_region_routes
+        // and replace_gir directly. The trait impl must remain so the generic EdgionConfigData
+        // watch cache in cli/mod.rs compiles.
+        let _ = (controller_id, data);
     }
 
     fn partial_update(
@@ -159,36 +220,8 @@ impl CenterConfHandler<EdgionConfigData> for CenterMetaDataStore {
         update: HashMap<String, Arc<EdgionConfigData>>,
         remove: HashSet<String>,
     ) {
-        // NOTE(migration): ClusterRegionRoute and ServiceRegionRoute feeding removed —
-        // ClusterRegionRouteConfig, ServiceRegionRouteConfig, and MetaDataEntry were
-        // deleted upstream (PluginMetaData → EdgionConfigData). Restore from git history.
-        //
-        // NOTE(migration): GIR feeding removed — GlobalConnectionIpRestrictionData was
-        // deleted upstream. Restore when EdgionStreamPlugins watch support is added.
-        let gir_upserts: HashMap<String, ControllerPmEntry> = HashMap::new();
-
-        // Suppress unused-variable warning; parse_region_route is a no-op stub post-migration.
-        for (_, pm) in add.iter().chain(update.iter()) {
-            match parse_region_route(pm) {
-                ParsedRegionRoute::Other => {}
-            }
-        }
-
-        // Apply global_ip_restrictions changes in one lock (removals still prune).
-        {
-            let mut gir = self.global_ip_restrictions.write();
-            for pm_key in &remove {
-                if let Some(controllers) = gir.get_mut(pm_key.as_str()) {
-                    controllers.remove(controller_id);
-                    if controllers.is_empty() {
-                        gir.remove(pm_key.as_str());
-                    }
-                }
-            }
-            for (pm_key, entry) in gir_upserts {
-                gir.entry(pm_key).or_default().insert(controller_id.to_string(), Arc::new(entry));
-            }
-        }
+        // No-op: see full_set comment.
+        let _ = (controller_id, add, update, remove);
     }
 
     fn controller_offline(&self, _controller_id: &str) {
@@ -200,62 +233,62 @@ impl CenterConfHandler<EdgionConfigData> for CenterMetaDataStore {
     }
 }
 
-/// Split a pm_key of the form "namespace/name" into (namespace, name).
-/// If there is no '/', returns ("", pm_key).
-fn split_pm_key(pm_key: &str) -> (String, String) {
-    match pm_key.split_once('/') {
-        Some((ns, name)) => (ns.to_string(), name.to_string()),
-        None => (String::new(), pm_key.to_string()),
-    }
+/// Build the canonical storage key for a region route: "namespace/plugin_name/alias".
+/// When alias is None the trailing segment is an empty string ("ns/plugin/").
+fn region_route_key(r: &EffectiveRegionRouteView) -> String {
+    format!("{}/{}/{}", r.namespace, r.plugin_name, r.alias.as_deref().unwrap_or(""))
+}
+
+/// Build the canonical storage key for a GIR entry: "namespace/plugin_name".
+fn gir_key(g: &EffectiveGirView) -> String {
+    format!("{}/{}", g.namespace, g.plugin_name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── JSON guard tests: Arc<Entry> must serialize transparently (no extra nesting) ──
+    // ── GIR effective aggregation tests ──
 
-    /// Verify that Arc<ControllerPmEntry> serializes identically to ControllerPmEntry
-    /// — no extra wrapper, all camelCase keys (pmNamespace, pmName, activeProfile,
-    /// contentHash, lastModified) present at the right level.
-    /// This test was preserved from Task 02 (Arc-wrap + serde(rc) guard).
     #[test]
-    fn json_guard_gir_entry_view_arc_transparent() {
-        let entry = ControllerPmEntry {
-            pm_namespace: "prod".to_string(),
-            pm_name: "gir-test".to_string(),
+    fn gir_replace_and_list_aggregates_by_plugin_key() {
+        let store = CenterMetaDataStore::new();
+        let g = EffectiveGirView {
+            namespace: "default".into(),
+            plugin_name: "gir1".into(),
             enable: true,
-            active_profile: "default".to_string(),
-            profiles: HashMap::new(),
-            description: None,
-            content_hash: "deadbeef".to_string(),
-            last_modified: 42,
+            active_profile: "strict".into(),
+            profiles: serde_json::json!({}),
+            active_profile_ref: None,
+            selector_applied: false,
         };
-        let view = CenterGlobalIpRestrictionEntryView {
-            namespace: "prod".to_string(),
-            name: "gir-test".to_string(),
-            controllers: {
-                let mut m = HashMap::new();
-                m.insert("ctrl-1".to_string(), Arc::new(entry));
-                m
-            },
+        store.replace_gir("ctrl-a", vec![g.clone()]);
+        store.replace_gir("ctrl-b", vec![g.clone()]);
+        let list = store.list_gir_effective();
+        assert_eq!(list.len(), 1, "should aggregate to one row per (ns, plugin_name)");
+        assert_eq!(list[0].controllers.len(), 2, "both controllers should appear");
+        assert!(list[0].controllers.contains_key("ctrl-a"));
+        assert!(list[0].controllers.contains_key("ctrl-b"));
+    }
+
+    // ── RegionRoute aggregation tests ──
+
+    #[test]
+    fn region_route_replace_and_list_aggregates_by_route_key() {
+        let store = CenterMetaDataStore::new();
+        let r = EffectiveRegionRouteView {
+            namespace: "default".into(),
+            plugin_name: "ep1".into(),
+            alias: Some("rr1".into()),
+            my_region: "east".into(),
+            regions: serde_json::json!([]),
+            override_ref: None,
+            override_applied: false,
         };
-
-        let json = serde_json::to_string(&view).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(v["namespace"], "prod");
-        assert_eq!(v["name"], "gir-test");
-        assert!(v["controllers"].is_object());
-
-        // Arc must not add extra nesting.
-        let ctrl = &v["controllers"]["ctrl-1"];
-        assert!(ctrl.is_object(), "Arc<ControllerPmEntry> must serialize transparently");
-        assert_eq!(ctrl["pmNamespace"], "prod");
-        assert_eq!(ctrl["pmName"], "gir-test");
-        assert_eq!(ctrl["enable"], true);
-        assert_eq!(ctrl["activeProfile"], "default");
-        assert_eq!(ctrl["contentHash"], "deadbeef");
-        assert_eq!(ctrl["lastModified"], 42);
+        store.replace_region_routes("ctrl-a", vec![r.clone()]);
+        store.replace_region_routes("ctrl-b", vec![r.clone()]);
+        let list = store.list_region_routes();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].controllers.len(), 2);
     }
 }

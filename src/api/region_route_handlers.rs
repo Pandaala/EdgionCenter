@@ -1,7 +1,30 @@
 //! Region Route handlers and shared helpers for Center aggregation handlers.
+//!
+//! # Center RegionRoute API contract (frozen — web/P4 builds against these URLs)
+//!
+//! ## Primary (unified) endpoints
+//!
+//! | Method | Path                                          | Description                                          |
+//! |--------|-----------------------------------------------|------------------------------------------------------|
+//! | GET    | `/api/v1/center/region-routes`                | Aggregated effective region routes (MetaDataStore snapshot) |
+//! | POST   | `/api/v1/center/region-routes/failover`       | Patch `failoverTo` on a RegionRouteOverride; fans out to all online controllers |
+//! | GET    | `/api/v1/center/region-routes/consistency`    | Cross-controller consistency check (online controllers only) |
+//!
+//! ## Legacy paths (308 permanent redirect to unified endpoints above)
+//!
+//! | Method | Legacy path                                              | Redirects to                                    |
+//! |--------|----------------------------------------------------------|-------------------------------------------------|
+//! | GET    | `/api/v1/center/cluster-region-routes`                   | `/api/v1/center/region-routes`                  |
+//! | GET    | `/api/v1/center/service-region-routes`                   | `/api/v1/center/region-routes`                  |
+//! | POST   | `/api/v1/center/cluster-region-routes/failover`          | `/api/v1/center/region-routes/failover`         |
+//! | POST   | `/api/v1/center/service-region-routes/failover`          | `/api/v1/center/region-routes/failover`         |
+//! | GET    | `/api/v1/center/cluster-region-routes/consistency`       | `/api/v1/center/region-routes/consistency`      |
+//! | GET    | `/api/v1/center/service-region-routes/consistency`       | `/api/v1/center/region-routes/consistency`      |
+//!
+//! New callers MUST use the unified paths. Legacy paths exist only for backward compatibility
+//! and may be removed in a future major release.
 
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,31 +51,28 @@ pub struct FailoverRequest {
 
 // ============= RegionRoute MetaDataStore Handlers =============
 
-/// NOTE(migration): Returns empty list — ClusterRegionRouteEntry was deleted upstream
-/// (PluginMetaData → EdgionConfigData migration). Restore from git history when
-/// RegionRoute is re-implemented on EdgionConfigData.
-pub async fn list_cluster_region_routes(_state: State<ApiState>) -> Json<serde_json::Value> {
-    // NOTE(migration): ClusterRegionRouteEntry deleted upstream; cluster_routes map removed.
-    Json(serde_json::json!({ "success": true, "data": [] }))
-}
-
-/// NOTE(migration): Returns empty list — ServiceRegionRouteEntry was deleted upstream
-/// (PluginMetaData → EdgionConfigData migration). Restore from git history when
-/// RegionRoute is re-implemented on EdgionConfigData.
-pub async fn list_service_region_routes(_state: State<ApiState>) -> Json<serde_json::Value> {
-    // NOTE(migration): ServiceRegionRouteEntry deleted upstream; service_routes map removed.
-    Json(serde_json::json!({ "success": true, "data": [] }))
+/// `GET /api/v1/center/region-routes`
+///
+/// Returns aggregated effective region routes across all controllers,
+/// drawn from the background poller's snapshot in `CenterMetaDataStore`.
+///
+/// Legacy paths `/api/v1/center/cluster-region-routes` and
+/// `/api/v1/center/service-region-routes` redirect (308) to this endpoint.
+pub async fn list_region_routes(State(state): State<ApiState>) -> Json<serde_json::Value> {
+    let data = state.metadata_store.list_region_routes();
+    Json(serde_json::json!({ "success": true, "data": data }))
 }
 
 // ============= Failover Handlers =============
 
-/// `POST /api/v1/center/cluster-region-routes/failover`
+/// `POST /api/v1/center/region-routes/failover`
 ///
 /// Fans out `POST /api/v1/cluster-region-routes/failover` to all online controllers
-/// with the same request body.
+/// with the same request body.  Both the old cluster- and service- paths redirect
+/// (308) to this unified endpoint.
 ///
 /// Response: `{ modified: N, failed: N }`
-pub async fn cluster_region_route_failover(
+pub async fn region_route_failover(
     State(state): State<ApiState>,
     Json(req): Json<FailoverRequest>,
 ) -> Json<serde_json::Value> {
@@ -62,251 +82,6 @@ pub async fn cluster_region_route_failover(
         "success": true,
         "data": { "modified": modified, "failed": failed },
     }))
-}
-
-/// `POST /api/v1/center/service-region-routes/failover`
-///
-/// Fans out `POST /api/v1/service-region-routes/failover` to all online controllers
-/// with the same request body.
-///
-/// Response: `{ modified: N, failed: N }`
-pub async fn service_region_route_failover(
-    State(state): State<ApiState>,
-    Json(req): Json<FailoverRequest>,
-) -> Json<serde_json::Value> {
-    let (modified, failed) = fan_out_failover(&state, "/api/v1/service-region-routes/failover".to_string(), &req).await;
-
-    Json(serde_json::json!({
-        "success": true,
-        "data": { "modified": modified, "failed": failed },
-    }))
-}
-
-// ============= Sync Handlers =============
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncRequest {
-    pub source_controller_id: String,
-    pub namespace: String,
-    pub name: String,
-}
-
-/// `POST /api/v1/center/cluster-region-routes/sync`
-///
-/// Reads the ClusterRegionRoute PluginMetaData from the source controller,
-/// then writes it to all other online controllers. Preserves each target's
-/// `myRegion` value (since it's intentionally different per controller).
-pub async fn cluster_region_route_sync(
-    State(state): State<ApiState>,
-    Json(body): Json<SyncRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    // 1. Read source PM via proxy
-    let source_path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", body.namespace, body.name);
-    let source_pm = match state
-        .proxy
-        .forward(
-            &body.source_controller_id,
-            "GET".to_string(),
-            source_path.clone(),
-            HashMap::new(),
-            vec![],
-        )
-        .await
-    {
-        Ok(r) if r.status_code == 200 => match serde_json::from_slice::<serde_json::Value>(&r.body) {
-            // Controller's single-resource GET returns the bare PluginMetaData object,
-            // not a {success,data} wrapper. Tolerate both shapes for forward compatibility.
-            Ok(v) => v.get("data").cloned().unwrap_or(v),
-            Err(e) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({ "success": false, "error": format!("Parse source PM failed: {e}") })),
-                )
-            }
-        },
-        Ok(r) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(
-                    serde_json::json!({ "success": false, "error": format!("Source GET returned {}", r.status_code) }),
-                ),
-            )
-        }
-        Err((status, msg)) => {
-            return (
-                status,
-                Json(serde_json::json!({ "success": false, "error": format!("Source GET failed: {status} {msg}") })),
-            )
-        }
-    };
-
-    // 2. Get each controller's myRegion from MetaDataStore.
-    // NOTE(migration): ClusterRegionRouteEntry deleted upstream (PluginMetaData →
-    // EdgionConfigData); per-controller myRegion is no longer cached in Center.
-    // my_region_map is kept as an empty stub so the fan-out path below continues to
-    // compile and function without the preservation step. Restore from git history
-    // when RegionRoute is re-implemented on EdgionConfigData.
-    // FLAG: cluster_region_route_sync no longer preserves each target's myRegion.
-    let my_region_map: HashMap<String, String> = HashMap::new();
-
-    // 3. Fan-out PUT to all online controllers (except source)
-    let summaries = state.aggregator.controller_summaries();
-    let targets: Vec<_> = summaries
-        .into_iter()
-        .filter(|s| s.online && s.controller_id != body.source_controller_id)
-        .collect();
-
-    let put_path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", body.namespace, body.name);
-
-    let futs = targets.iter().map(|s| {
-        let proxy = state.proxy.clone();
-        let controller_id = s.controller_id.clone();
-        let put_path = put_path.clone();
-        let mut pm = source_pm.clone();
-
-        // Preserve target's myRegion
-        if let Some(target_my_region) = my_region_map.get(&controller_id) {
-            // Try spec.metadata.config.myRegion (raw file format)
-            if let Some(mr) = pm.pointer_mut("/spec/metadata/config/myRegion") {
-                *mr = serde_json::Value::String(target_my_region.clone());
-            }
-            // Try spec.plugins[].config.baseInfo.myRegion (processed format)
-            if let Some(plugins) = pm.pointer_mut("/spec/plugins").and_then(|p| p.as_array_mut()) {
-                for plugin in plugins.iter_mut() {
-                    if let Some(mr) = plugin.pointer_mut("/config/baseInfo/myRegion") {
-                        *mr = serde_json::Value::String(target_my_region.clone());
-                    }
-                }
-            }
-        }
-
-        async move {
-            let content = match serde_json::to_vec(&pm) {
-                Ok(b) => b,
-                Err(_) => return false,
-            };
-            let mut headers = HashMap::new();
-            headers.insert("content-type".to_string(), "application/json".to_string());
-            match proxy
-                .forward(&controller_id, "PUT".to_string(), put_path, headers, content)
-                .await
-            {
-                Ok(r) if r.status_code == 200 => true,
-                _ => {
-                    tracing::warn!(component = "center", controller_id = %controller_id, "Sync PUT failed");
-                    false
-                }
-            }
-        }
-    });
-
-    let results = futures::future::join_all(futs).await;
-    let modified = results.iter().filter(|&&ok| ok).count() + 1; // +1 for source
-    let failed = results.iter().filter(|&&ok| !ok).count();
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "success": true,
-            "data": { "modified": modified, "failed": failed },
-        })),
-    )
-}
-
-/// `POST /api/v1/center/service-region-routes/sync`
-///
-/// Same as cluster sync but for ServiceRegionRoute. No myRegion to preserve.
-pub async fn service_region_route_sync(
-    State(state): State<ApiState>,
-    Json(body): Json<SyncRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    // 1. Read source PM via proxy
-    let source_path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", body.namespace, body.name);
-    let source_pm = match state
-        .proxy
-        .forward(
-            &body.source_controller_id,
-            "GET".to_string(),
-            source_path,
-            HashMap::new(),
-            vec![],
-        )
-        .await
-    {
-        Ok(r) if r.status_code == 200 => match serde_json::from_slice::<serde_json::Value>(&r.body) {
-            // Controller's single-resource GET returns the bare PluginMetaData object,
-            // not a {success,data} wrapper. Tolerate both shapes for forward compatibility.
-            Ok(v) => v.get("data").cloned().unwrap_or(v),
-            Err(e) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({ "success": false, "error": format!("Parse source PM failed: {e}") })),
-                )
-            }
-        },
-        Ok(r) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(
-                    serde_json::json!({ "success": false, "error": format!("Source GET returned {}", r.status_code) }),
-                ),
-            )
-        }
-        Err((status, msg)) => {
-            return (
-                status,
-                Json(serde_json::json!({ "success": false, "error": format!("Source GET failed: {status} {msg}") })),
-            )
-        }
-    };
-
-    // 2. Fan-out PUT to all online controllers (except source)
-    let summaries = state.aggregator.controller_summaries();
-    let targets: Vec<_> = summaries
-        .into_iter()
-        .filter(|s| s.online && s.controller_id != body.source_controller_id)
-        .collect();
-
-    let put_path = format!("/api/v1/namespaced/pluginmetadata/{}/{}", body.namespace, body.name);
-
-    let futs = targets.iter().map(|s| {
-        let proxy = state.proxy.clone();
-        let controller_id = s.controller_id.clone();
-        let put_path = put_path.clone();
-        let pm = source_pm.clone();
-
-        async move {
-            let content = match serde_json::to_vec(&pm) {
-                Ok(b) => b,
-                Err(_) => return false,
-            };
-            let mut headers = HashMap::new();
-            headers.insert("content-type".to_string(), "application/json".to_string());
-            match proxy
-                .forward(&controller_id, "PUT".to_string(), put_path, headers, content)
-                .await
-            {
-                Ok(r) if r.status_code == 200 => true,
-                _ => {
-                    tracing::warn!(component = "center", controller_id = %controller_id, "Service sync PUT failed");
-                    false
-                }
-            }
-        }
-    });
-
-    let results = futures::future::join_all(futs).await;
-    let modified = results.iter().filter(|&&ok| ok).count() + 1;
-    let failed = results.iter().filter(|&&ok| !ok).count();
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "success": true,
-            "data": { "modified": modified, "failed": failed },
-        })),
-    )
 }
 
 /// Fan-out a POST request to all online controllers in parallel.
@@ -382,6 +157,70 @@ async fn fan_out_failover(state: &ApiState, path: String, req: &FailoverRequest)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use axum::extract::State;
+    use axum::Json;
+    use crate::api::ApiState;
+
+    /// Minimal `ApiState` for handler tests; mirrors the builder in `src/api/mod.rs`.
+    fn test_api_state() -> ApiState {
+        use crate::aggregator::ResourceAggregator;
+        use crate::commander::Commander;
+        use crate::config::AuthzMode;
+        use crate::fed_sync::registry::ControllerRegistry;
+        use crate::metadata_store::CenterMetaDataStore;
+        use crate::proxy::ProxyForwarder;
+        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
+        use parking_lot::Mutex;
+        use std::collections::HashMap;
+
+        let registry = ControllerRegistry::new();
+        let metadata_store = Arc::new(CenterMetaDataStore::new());
+        let sync_client = Arc::new(CenterSyncClient {
+            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
+        });
+        let commander = Arc::new(Commander::new(
+            registry.clone(),
+            Arc::new(Mutex::new(HashMap::new())),
+            5,
+        ));
+        let proxy = Arc::new(ProxyForwarder::new(
+            registry.clone(),
+            Arc::new(Mutex::new(HashMap::new())),
+            5,
+        ));
+        ApiState {
+            aggregator: Arc::new(ResourceAggregator::new()),
+            commander,
+            proxy,
+            db: None,
+            metadata_store,
+            sync_client,
+            registry,
+            db_required: false,
+            authz_mode: AuthzMode::AllowAll,
+            db_auth_enabled: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_region_routes_returns_aggregated() {
+        use crate::metadata_store::EffectiveRegionRouteView;
+        let state = test_api_state();
+        let route = EffectiveRegionRouteView {
+            namespace: "default".into(),
+            plugin_name: "rr1".into(),
+            alias: Some("primary".into()),
+            my_region: "east".into(),
+            regions: serde_json::json!([]),
+            override_ref: None,
+            override_applied: false,
+        };
+        state.metadata_store.replace_region_routes("ctrl-a", vec![route]);
+        let Json(v) = list_region_routes(State(state)).await;
+        assert_eq!(v["success"], true);
+        assert_eq!(v["data"].as_array().unwrap().len(), 1);
+    }
 
     #[test]
     fn failover_request_rejects_unknown_fields() {
@@ -397,8 +236,9 @@ mod tests {
     }
 
     #[test]
-    fn failover_request_rejects_full_pm_payload() {
-        // A real-world risk: someone tries to send a full PluginMetaData YAML/JSON.
+    fn failover_request_rejects_full_resource_payload() {
+        // A real-world risk: someone tries to send a full EdgionConfigData YAML/JSON
+        // instead of the compact 4-field failover body.
         let json = r#"{
             "namespace": "default",
             "name": "test-cluster-route",
@@ -409,8 +249,25 @@ mod tests {
         let result: Result<FailoverRequest, _> = serde_json::from_str(json);
         assert!(
             result.is_err(),
-            "spec field must be rejected — center failover does not accept full PM"
+            "spec field must be rejected — center failover does not accept full resource payload"
         );
+    }
+
+    /// With no online controllers, `region_route_failover` must return
+    /// `{success:true, data:{modified:0, failed:0}}` rather than an error.
+    #[tokio::test]
+    async fn region_route_failover_no_online_controllers_returns_modified_zero() {
+        let state = test_api_state();
+        let req = FailoverRequest {
+            namespace: "default".into(),
+            name: "rr-override".into(),
+            region_name: "east".into(),
+            failover_to: "west".into(),
+        };
+        let Json(v) = region_route_failover(State(state), Json(req)).await;
+        assert_eq!(v["success"], true, "response must be success:true");
+        assert_eq!(v["data"]["modified"], 0, "no online controllers => modified:0");
+        assert_eq!(v["data"]["failed"], 0, "no online controllers => failed:0");
     }
 
     #[test]

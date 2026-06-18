@@ -5,7 +5,7 @@ import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
-import PluginMetaDataEditor from '@/components/ResourceEditor/PluginMetaData/PluginMetaDataEditor'
+import EdgionConfigDataEditor from '@/components/ResourceEditor/EdgionConfigData/EdgionConfigDataEditor'
 import PageHeader from '@/components/PageHeader'
 import { useT } from '@/i18n'
 import { useResourceList } from '@/hooks/useResourceList'
@@ -15,7 +15,7 @@ import ResourceListError from '@/components/resource/ResourceListError'
 
 const { Search } = Input
 
-const PluginMetaDataList = () => {
+const EdgionConfigDataList = () => {
   const t = useT()
   const [searchText, setSearchText] = useState('')
   const [editorVisible, setEditorVisible] = useState(false)
@@ -25,28 +25,28 @@ const PluginMetaDataList = () => {
   const { controllerId } = useParams<{ controllerId?: string }>()
 
   const {
-    items: pluginMetas,
+    items: configDataItems,
     isLoading,
     error,
     refetch,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useResourceList<K8sResource>('pluginmetadata', {
+  } = useResourceList<K8sResource>('edgionconfigdata', {
     namespaced: true,
     scope: controllerId ?? null,
   })
 
   const deleteMutation = useMutation({
     mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('pluginmetadata', namespace, name),
+      resourceApi.delete('edgionconfigdata', namespace, name),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
-      queryClient.invalidateQueries({ queryKey: ['resource-list', 'pluginmetadata'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionconfigdata'] })
     },
   })
 
-  const filtered = pluginMetas.filter((r) => {
+  const filtered = configDataItems.filter((r) => {
     const s = searchText.toLowerCase()
     return r.metadata.name.toLowerCase().includes(s) || r.metadata.namespace?.toLowerCase().includes(s)
   })
@@ -63,7 +63,7 @@ const PluginMetaDataList = () => {
         namespace: t('col.namespace'),
         age: t('col.age'),
       },
-      items: pluginMetas,
+      items: configDataItems,
     }),
     { title: t('col.description'), key: 'desc', render: (_: any, r: K8sResource) => r.spec?.description || '-' },
     {
@@ -90,8 +90,8 @@ const PluginMetaDataList = () => {
   return (
     <div>
       <PageHeader
-        title="PluginMetaData"
-        subtitle={t('page.subtitle.pluginMetadata')}
+        title="EdgionConfigData"
+        subtitle={t('page.subtitle.edgionConfigData')}
         actions={
           <>
             <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
@@ -105,7 +105,7 @@ const PluginMetaDataList = () => {
       </div>
 
       {searchText && (
-        <SearchScopeHint loaded={pluginMetas.length} hasNext={hasNextPage ?? false} />
+        <SearchScopeHint loaded={configDataItems.length} hasNext={hasNextPage ?? false} />
       )}
 
       <Table rowKey={(r) => `${r.metadata.namespace ?? ''}/${r.metadata.name}`}
@@ -118,16 +118,16 @@ const PluginMetaDataList = () => {
           showTotal: (n) =>
             hasNextPage ? t('table.loadedMore', { n }) : t('table.totalItems', { n }),
           onChange: (page, pageSize) => {
-            if (page * pageSize >= pluginMetas.length && hasNextPage && !isFetchingNextPage) {
+            if (page * pageSize >= configDataItems.length && hasNextPage && !isFetchingNextPage) {
               fetchNextPage()
             }
           },
         }}
       />
-      <PluginMetaDataEditor visible={editorVisible} mode={editorMode} resource={selectedResource}
+      <EdgionConfigDataEditor visible={editorVisible} mode={editorMode} resource={selectedResource}
         onClose={() => setEditorVisible(false)} />
     </div>
   )
 }
 
-export default PluginMetaDataList
+export default EdgionConfigDataList

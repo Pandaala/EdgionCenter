@@ -11,8 +11,6 @@ const zh = {
   'nav.system': 'Gateway',
   'nav.topology': '拓扑图',
   'nav.regionRoutes': 'RegionRoute',
-  'nav.regionRouteCluster': 'Cluster',
-  'nav.regionRouteService': 'Service',
 
   // Route types
   'route.http': 'HTTPRoute',
@@ -36,7 +34,7 @@ const zh = {
   // Plugins
   'plugins.edgion': 'EdgionPlugins',
   'plugins.stream': 'StreamPlugins',
-  'plugins.metadata': 'PluginMetaData',
+  'plugins.metadata': 'EdgionConfigData',
 
   // System
   'system.config': 'GatewayConfig',
@@ -426,7 +424,7 @@ const zh = {
   'field.preflightMode': '模式',
   'field.preflightStatusCode': '状态码',
 
-  // PluginMetaData sections / fields / notices
+  // EdgionConfigData sections / fields / notices
   'section.pluginInfo': '插件信息',
   'field.pluginDesc': '描述',
   'notice.pluginMetaYaml': '复杂的 schema 和 defaultConfig 请使用 YAML 标签编辑。',
@@ -455,12 +453,11 @@ const zh = {
   'center.searchPlaceholder': '搜索 Controller...',
   'center.nav.controllers': 'Controllers',
   'center.nav.regionRoutes': 'RegionRoute',
-  'center.nav.region': 'Cluster',
-  'center.nav.servicePm': 'Service',
   'center.nav.admin': '管理',
   'center.nav.globalIpRestrictions': '全局 IP 限制',
   'center.regionRoute.subtitle': '共 {n} 个服务区域路由',
   'center.regionRoute.pmName': '服务 PM 名称',
+  'center.regionRoute.pluginName': '插件名称',
   'center.regionRoute.namespace': '命名空间',
   'center.regionRoute.controllers': '控制器',
   'center.regionRoute.noData': '未找到区域路由数据',
@@ -596,8 +593,6 @@ const zh = {
   'nav.group.security': '证书',
   'nav.group.plugins': '插件',
   'nav.group.infrastructure': '基础设施',
-  'nav.group.regionRoutes': '区域路由',
-
   // Page subtitles
   'page.subtitle.httpRoute': '管理网关的 HTTP 路由规则',
   'page.subtitle.grpcRoute': '管理 gRPC 路由规则',
@@ -614,12 +609,11 @@ const zh = {
   'page.subtitle.backendTls': '网关与后端之间的 TLS 策略',
   'page.subtitle.plugins': '应用于 HTTP 流量的插件',
   'page.subtitle.streamPlugins': '应用于四层流量的插件',
-  'page.subtitle.pluginMetadata': '插件元数据定义',
+  'page.subtitle.edgionConfigData': 'EdgionConfigData 定义',
   'page.subtitle.gatewayConfig': '集群级 Edgion 网关配置',
   'page.subtitle.linkSys': '关联的外部系统',
   'page.subtitle.acme': 'ACME 证书签发',
-  'page.subtitle.regionRouteCluster': '集群级区域路由规则',
-  'page.subtitle.regionRouteService': '服务级区域路由规则',
+  'page.subtitle.regionRoutes': '跨所有 Controller 的聚合区域路由视图',
   'page.subtitle.topology': '网关、路由与服务的可视化拓扑',
   'page.subtitle.userDashboard': '路由与流量资源概览',
   'page.subtitle.opsDashboard': 'Controller、网关与证书健康状况',

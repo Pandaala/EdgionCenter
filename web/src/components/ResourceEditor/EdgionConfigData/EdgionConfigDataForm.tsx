@@ -1,21 +1,21 @@
 /**
- * PluginMetaData 表单
+ * EdgionConfigData form
  */
 
 import React from 'react'
 import { Form, Input, Card, Space, Alert } from 'antd'
 import MetadataSection from '../common/MetadataSection'
-import type { PluginMetaDataResource } from '@/utils/pluginmetadata'
+import type { EdgionConfigDataResource } from '@/utils/edgionConfigData'
 import { useT } from '@/i18n'
 
-interface PluginMetaDataFormProps {
-  data: PluginMetaDataResource
-  onChange: (data: PluginMetaDataResource) => void
+interface EdgionConfigDataFormProps {
+  data: EdgionConfigDataResource
+  onChange: (data: EdgionConfigDataResource) => void
   readOnly?: boolean
   isCreate?: boolean
 }
 
-const PluginMetaDataForm: React.FC<PluginMetaDataFormProps> = ({
+const EdgionConfigDataForm: React.FC<EdgionConfigDataFormProps> = ({
   data,
   onChange,
   readOnly = false,
@@ -56,4 +56,4 @@ const PluginMetaDataForm: React.FC<PluginMetaDataFormProps> = ({
   )
 }
 
-export default PluginMetaDataForm
+export default EdgionConfigDataForm

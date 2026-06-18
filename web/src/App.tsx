@@ -16,10 +16,7 @@ import AuditLogPage from './pages/Audit/AuditLogPage'
 import UserManagementPage from './pages/Users/UserManagementPage'
 import RoleManagementPage from './pages/Roles/RoleManagementPage'
 // RegionRoute
-import ClusterRegionRouteList from './pages/RegionRoute/ClusterRegionRouteList'
-import ServiceRegionRouteList from './pages/RegionRoute/ServiceRegionRouteList'
-import ControllerClusterRegionRouteList from './pages/RegionRoute/ControllerClusterRegionRouteList'
-import ControllerServiceRegionRouteList from './pages/RegionRoute/ControllerServiceRegionRouteList'
+import RegionRouteList from './pages/RegionRoute/RegionRouteList'
 // Routes
 import HTTPRouteList from './pages/Routes/HTTPRouteList'
 import GRPCRouteList from './pages/Routes/GRPCRouteList'
@@ -38,7 +35,7 @@ import BackendTLSPolicyList from './pages/Security/BackendTLSPolicyList'
 // Plugins
 import EdgionPluginsList from './pages/Plugins/EdgionPluginsList'
 import EdgionStreamPluginsList from './pages/Plugins/EdgionStreamPluginsList'
-import PluginMetaDataList from './pages/Plugins/PluginMetaDataList'
+import EdgionConfigDataList from './pages/Plugins/EdgionConfigDataList'
 // System
 import EdgionGatewayConfigPage from './pages/System/EdgionGatewayConfigPage'
 import LinkSysList from './pages/System/LinkSysList'
@@ -97,8 +94,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<RequireAuth><AppShell mode="center" /></RequireAuth>}>
           <Route index element={<CenterDashboard />} />
-          <Route path="region-routes/cluster" element={<ClusterRegionRouteList />} />
-          <Route path="region-routes/service" element={<ServiceRegionRouteList />} />
+          <Route path="region-routes" element={<RegionRouteList />} />
           <Route
             path="global-connection-ip-restrictions"
             element={<GlobalConnectionIpRestrictionList />}
@@ -130,12 +126,11 @@ function App() {
           <Route path="security/backendtls" element={<BackendTLSPolicyList />} />
           <Route path="plugins" element={<EdgionPluginsList />} />
           <Route path="plugins/stream" element={<EdgionStreamPluginsList />} />
-          <Route path="plugins/metadata" element={<PluginMetaDataList />} />
+          <Route path="plugins/metadata" element={<EdgionConfigDataList />} />
           <Route path="system/config" element={<EdgionGatewayConfigPage />} />
           <Route path="system/linksys" element={<LinkSysList />} />
           <Route path="system/acme" element={<EdgionAcmeList />} />
-          <Route path="region-routes/cluster" element={<ControllerClusterRegionRouteList />} />
-          <Route path="region-routes/service" element={<ControllerServiceRegionRouteList />} />
+          <Route path="region-routes" element={<RegionRouteList />} />
         </Route>
       </Routes>
     )
@@ -162,12 +157,11 @@ function App() {
         <Route path="security/backendtls" element={<BackendTLSPolicyList />} />
         <Route path="plugins" element={<EdgionPluginsList />} />
         <Route path="plugins/stream" element={<EdgionStreamPluginsList />} />
-        <Route path="plugins/metadata" element={<PluginMetaDataList />} />
+        <Route path="plugins/metadata" element={<EdgionConfigDataList />} />
         <Route path="system/config" element={<EdgionGatewayConfigPage />} />
         <Route path="system/linksys" element={<LinkSysList />} />
         <Route path="system/acme" element={<EdgionAcmeList />} />
-        <Route path="region-routes/cluster" element={<ControllerClusterRegionRouteList />} />
-        <Route path="region-routes/service" element={<ControllerServiceRegionRouteList />} />
+        <Route path="region-routes" element={<RegionRouteList />} />
       </Route>
     </Routes>
   )

@@ -12,6 +12,7 @@ mod common;
 mod config;
 mod fed_sync;
 mod metadata_store;
+mod poll;
 mod proxy;
 mod store;
 mod watch_cache;

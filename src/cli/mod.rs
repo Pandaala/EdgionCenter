@@ -257,6 +257,28 @@ impl EdgionCenterCli {
             TransportDecision::FailClose => unreachable!("FailClose returned earlier"),
         }
 
+        // Background poller: refresh RegionRoute + GIR effective views from online controllers.
+        {
+            let aggregator = aggregator.clone();
+            let proxy = proxy.clone();
+            let metadata_store = metadata_store.clone();
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
+                loop {
+                    ticker.tick().await;
+                    let online: Vec<String> = aggregator
+                        .controller_summaries()
+                        .into_iter()
+                        .filter(|s| s.online)
+                        .map(|s| s.controller_id.clone())
+                        .collect();
+                    for cid in online {
+                        crate::poll::poll_controller_once(&proxy, &metadata_store, &cid).await;
+                    }
+                }
+            });
+        }
+
         // gRPC server
         let grpc_handle = tokio::spawn(
             server_builder

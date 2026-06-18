@@ -1,8 +1,8 @@
 import { apiClient } from './client'
-import { getActiveControllerId } from '@/utils/proxy'
+import { getActiveControllerId, getAppMode } from '@/utils/proxy'
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — match the FROZEN backend contract (camelCase on the wire)
 // ---------------------------------------------------------------------------
 
 export interface RegionDef {
@@ -13,66 +13,23 @@ export interface RegionDef {
   failoverTo?: string
 }
 
-export interface HashCalcConfig {
-  algorithm: string
-  modulo: number
-}
-
-/** ClusterRegionRoute Entry — per-controller data.
- *
- * Two wire formats arrive here:
- *   - Center aggregation (`controllers[ctrlId]` value): uses `pmNamespace`/`pmName`.
- *   - Controller-side endpoint (single controller view): uses `namespace`/`name`.
- * Both are kept optional; consumers should read with fallback
- * `r.pmNamespace ?? r.namespace`.
- */
-export interface ClusterRegionRouteEntry {
-  pmNamespace?: string
-  pmName?: string
-  namespace?: string
-  name?: string
+/** Per-controller effective region route view. */
+export interface EffectiveRegionRoute {
+  namespace: string
+  pluginName: string
+  alias: string | null
   myRegion: string
   regions: RegionDef[]
-  keyGet: unknown[]
-  hashKeyGet?: unknown[]
-  hashCalc?: HashCalcConfig
-  routeRules: unknown[]
-  routeByKeyConfMatch?: { matchMap: Record<string, string> } | null
+  overrideRef: string | null
+  overrideApplied: boolean
 }
 
-/** Center aggregated ClusterRegionRoute */
-export interface CenterClusterRegionRoute {
+/** Center aggregated region route — one row per (namespace, pluginName, alias) tuple. */
+export interface CenterRegionRoute {
   namespace: string
-  name: string
-  controllers: Record<string, ClusterRegionRouteEntry>
-}
-
-/** ServiceRegionRoute Entry — per-controller data.
- * See [[ClusterRegionRouteEntry]] for the dual-wire-format rationale.
- */
-export interface ServiceRegionRouteEntry {
-  pmNamespace?: string
-  pmName?: string
-  namespace?: string
-  name?: string
-  clusterPmRef?: { namespace: string; name: string }
-  clusterRef?: { namespace: string; name: string }
-  regions: Array<{ name: string; failoverTo?: string }>
-  refPlugins: Array<string | { kind?: string; namespace?: string; name?: string }>
-}
-
-/** Center aggregated ServiceRegionRoute */
-export interface CenterServiceRegionRoute {
-  namespace: string
-  name: string
-  clusterRef: { namespace: string; name: string }
-  controllers: Record<string, ServiceRegionRouteEntry>
-}
-
-/** Consistency check result */
-export interface ConsistencyConflict {
-  field: string
-  values: Record<string, string>
+  pluginName: string
+  alias: string | null
+  controllers: Record<string, EffectiveRegionRoute>
 }
 
 export interface ConsistencyResult {
@@ -80,21 +37,24 @@ export interface ConsistencyResult {
   name: string
   consistent: boolean
   controllerCount: number
-  conflicts: ConsistencyConflict[]
+  /** Field names that differ across online controllers, e.g. ["regions"]. */
+  conflicts: string[]
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Pick the path prefix based on viewing context, not backend mode:
-// - When a specific controller is active (apiClient routes via center proxy
-//   to that controller's admin API), the controller's own endpoints use bare
-//   paths like `cluster-region-routes`.
-// - When not in controller view (Center aggregation pages), Center's endpoints
-//   live under `center/`.
+/**
+ * Path prefix based on viewing context:
+ * - Center aggregated view (mode=center, no active controller): 'center/'
+ * - Controller proxy view (active controller set): ''
+ * - Standalone controller view (mode=controller): ''
+ */
 function prefix(): string {
-  return getActiveControllerId() ? '' : 'center/'
+  if (getActiveControllerId()) return ''
+  if (getAppMode() === 'controller') return ''
+  return 'center/'
 }
 
 // ---------------------------------------------------------------------------
@@ -102,60 +62,27 @@ function prefix(): string {
 // ---------------------------------------------------------------------------
 
 export const regionRouteApi = {
-  listClusterRegionRoutes: async (): Promise<{ success: boolean; data: CenterClusterRegionRoute[] | ClusterRegionRouteEntry[] }> => {
-    const { data } = await apiClient.get(`${prefix()}cluster-region-routes`)
+  listRegionRoutes: async (): Promise<{ success: boolean; data: CenterRegionRoute[] | EffectiveRegionRoute[] }> => {
+    const center = prefix() === 'center/'
+    const url = center ? 'center/region-routes' : 'region-routes/effective'
+    const { data } = await apiClient.get(url)
     return data
   },
 
-  listServiceRegionRoutes: async (): Promise<{ success: boolean; data: CenterServiceRegionRoute[] | ServiceRegionRouteEntry[] }> => {
-    const { data } = await apiClient.get(`${prefix()}service-region-routes`)
-    return data
-  },
-
-  clusterRegionRouteFailover: async (
+  regionRouteFailover: async (
     namespace: string, name: string, regionName: string, failoverTo: string,
   ): Promise<{ success: boolean; data?: { modified: number; failed: number } }> => {
-    const { data } = await apiClient.post(`${prefix()}cluster-region-routes/failover`, {
+    const center = prefix() === 'center/'
+    const url = center ? 'center/region-routes/failover' : 'cluster-region-routes/failover'
+    const { data } = await apiClient.post(url, {
       namespace, name, regionName, failoverTo,
     })
     return data
   },
 
-  serviceRegionRouteFailover: async (
-    namespace: string, name: string, regionName: string, failoverTo: string,
-  ): Promise<{ success: boolean; data?: { modified: number; failed: number } }> => {
-    const { data } = await apiClient.post(`${prefix()}service-region-routes/failover`, {
-      namespace, name, regionName, failoverTo,
-    })
-    return data
-  },
-
-  // Center-only
-  clusterRegionRoutesConsistency: async (): Promise<{ success: boolean; data: ConsistencyResult[] }> => {
-    const { data } = await apiClient.get('center/cluster-region-routes/consistency')
-    return data
-  },
-
-  serviceRegionRoutesConsistency: async (): Promise<{ success: boolean; data: ConsistencyResult[] }> => {
-    const { data } = await apiClient.get('center/service-region-routes/consistency')
-    return data
-  },
-
-  clusterRegionRouteSync: async (
-    sourceControllerId: string, namespace: string, name: string,
-  ): Promise<{ success: boolean; data?: { modified: number; failed: number } }> => {
-    const { data } = await apiClient.post('center/cluster-region-routes/sync', {
-      sourceControllerId, namespace, name,
-    })
-    return data
-  },
-
-  serviceRegionRouteSync: async (
-    sourceControllerId: string, namespace: string, name: string,
-  ): Promise<{ success: boolean; data?: { modified: number; failed: number } }> => {
-    const { data } = await apiClient.post('center/service-region-routes/sync', {
-      sourceControllerId, namespace, name,
-    })
+  // Center-only consistency check
+  regionRoutesConsistency: async (): Promise<{ success: boolean; data: ConsistencyResult[] }> => {
+    const { data } = await apiClient.get('center/region-routes/consistency')
     return data
   },
 }
