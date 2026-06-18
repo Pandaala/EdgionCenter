@@ -12,6 +12,14 @@ env:
   EDGION_REPO: ${{ vars.EDGION_REPO || format('{0}/Edgion', github.repository_owner) }}
 
 jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # ripgrep is preinstalled on ubuntu-latest runners.
+      - name: English-only (everything outside web/)
+        run: cicd/checks/check_english_only.sh
+
   build-test:
     runs-on: ubuntu-latest
     steps:
