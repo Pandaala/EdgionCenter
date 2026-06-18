@@ -26,10 +26,10 @@
 # building more than one arch requires --push to a registry.
 #
 # Usage:
-#   docker/build.sh                                          # host arch, loaded locally
-#   docker/build.sh --arch amd64,arm64 --push                # multi-arch -> registry
-#   docker/build.sh --platform linux/amd64,linux/arm64 --push
-#   docker/build.sh -t pandaala/edgion-center:dev -r ../Edgion
+#   cicd/build-image.sh                                          # host arch, loaded locally
+#   cicd/build-image.sh --arch amd64,arm64 --push                # multi-arch -> registry
+#   cicd/build-image.sh --platform linux/amd64,linux/arm64 --push
+#   cicd/build-image.sh -t pandaala/edgion-center:dev -r ../Edgion
 #
 # Options:
 #   -t IMAGE_TAG     Full image tag, overrides the assembled default. Repeatable.
@@ -100,10 +100,10 @@ Build the edgion-center Docker image (single binary, dashboard embedded),
 optionally for multiple architectures (linux/amd64 + linux/arm64).
 
 Usage:
-  docker/build.sh                                          # host arch, loaded locally
-  docker/build.sh --arch amd64,arm64 --push                # multi-arch -> registry
-  docker/build.sh --platform linux/amd64,linux/arm64 --push
-  docker/build.sh -t pandaala/edgion-center:dev -r ../Edgion
+  cicd/build-image.sh                                          # host arch, loaded locally
+  cicd/build-image.sh --arch amd64,arm64 --push                # multi-arch -> registry
+  cicd/build-image.sh --platform linux/amd64,linux/arm64 --push
+  cicd/build-image.sh -t pandaala/edgion-center:dev -r ../Edgion
 
 Options:
   -t IMAGE_TAG     Full image tag, overrides the assembled default. Repeatable.
@@ -218,7 +218,7 @@ sed -E \
     "${EDGION_DIR}/Cargo.toml" > "${CTX}/Edgion/Cargo.toml"
 
 # Assemble the buildx invocation.
-BUILD_CMD=(docker buildx build --builder "${BUILDER_NAME}" --platform "${PLATFORMS}" -f "${CENTER_DIR}/docker/Dockerfile")
+BUILD_CMD=(docker buildx build --builder "${BUILDER_NAME}" --platform "${PLATFORMS}" -f "${CENTER_DIR}/cicd/docker/Dockerfile")
 for tag in "${IMAGE_TAGS[@]}"; do
     BUILD_CMD+=(-t "${tag}")
 done

@@ -4,7 +4,7 @@
 # single edgion-center binary with the dashboard embedded (rust-embed), in one
 # image, with no dependency on the monorepo's CI machinery.
 #
-# Build CONTEXT layout (produced by docker/build.sh — see that script):
+# Build CONTEXT layout (produced by cicd/build-image.sh — see that script):
 #   <context>/EdgionCenter/                 the center source
 #   <context>/Edgion/Cargo.toml             trimmed workspace root manifest
 #   <context>/Edgion/edgion-resources/      the shared crate (path dependency)
@@ -14,10 +14,10 @@
 # unchanged. (For a CI/registry build you may instead pin edgion-resources to a
 # git rev and build with the EdgionCenter dir alone as context.)
 #
-# Usage: docker/build.sh   (do NOT `docker build .` directly — the context must
+# Usage: cicd/build-image.sh   (do NOT `docker build .` directly — the context must
 # include the shared crate; the script stages it.)
 #
-# Multi-arch: this Dockerfile is platform-agnostic. docker/build.sh drives
+# Multi-arch: this Dockerfile is platform-agnostic. cicd/build-image.sh drives
 # `docker buildx build --platform linux/amd64,linux/arm64` to emit a single
 # multi-arch manifest. The Rust stage compiles natively for its target platform
 # (the non-host arch runs under QEMU/Rosetta emulation); BuildKit cache mounts,

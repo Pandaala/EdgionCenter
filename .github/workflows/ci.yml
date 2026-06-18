@@ -76,4 +76,4 @@ jobs:
       # build.sh stages the two repos into a temp context and runs docker build.
       - name: Build image
         working-directory: EdgionCenter
-        run: docker/build.sh -t edgion/edgion-center:ci -r ../Edgion
+        run: cicd/build-image.sh -t pandaala/edgion-center:ci -r ../Edgion

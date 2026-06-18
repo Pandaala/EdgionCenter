@@ -50,8 +50,8 @@ TODO: enumerate Admin API endpoints. Handlers live in `src/api/`
 
 ## Deployment
 
-TODO: document deployment shapes. See `deploy/` and `docker/` in the repo root, and the
-`embed-dashboard` feature in `Cargo.toml`.
+TODO: document deployment shapes. See `cicd/deploy/`, `cicd/docker/`, and the build
+script `cicd/build-image.sh`, plus the `embed-dashboard` feature in `Cargo.toml`.
 
 ## External dependency — Edgion features
 
