@@ -1,23 +1,25 @@
 ---
 name: center-testing
-description: Test guidance for EdgionCenter. Center-specific notes here; the shared framework lives upstream.
+description: Hermetic and external integration matrices for both EdgionCenter modes.
 ---
 
-# 05 Testing
+# Testing
 
-Test guidance for EdgionCenter.
+Run the default, non-destructive matrix from the repository root:
 
-## Running tests
+```sh
+cicd/integration/run-matrix.sh
+```
 
-TODO: document Center's test entry points (`cargo test -p edgion-center`, integration
-harness location). Capture commands as they stabilize.
+It runs formatting, workspace Clippy with warnings denied, all Rust tests, the app's
+no-default-feature build, dependency-purity checks, offline manifest rendering, frontend
+lint/tests/build, policy guards, and `git diff --check`.
 
-## Center-specific scenarios
+External fixtures are opt-in:
 
-TODO: federation sync (register → reverse Watch), aggregator merge correctness, controller
-offline/online transitions, CenterDb persistence.
+- `EDGION_TEST_MYSQL_URL=...` enables SQL-adapter MySQL tests.
+- `EDGION_TEST_KUBERNETES=1` plus a disposable
+  `EDGION_TEST_KUBERNETES_NAMESPACE` enables real API-server CRD/Lease tests.
 
-## External dependency — Edgion testing framework
-
-Unit/integration testing patterns are shared and defined upstream:
-https://github.com/Pandaala/Edgion/tree/main/skills/05-testing
+Never point the Kubernetes matrix at a shared or production namespace. See
+`cicd/integration/README.md` for setup, assertions, and cleanup guarantees.

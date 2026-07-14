@@ -1,0 +1,190 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgion-center
+  labels:
+    app.kubernetes.io/name: edgion-center
+    app.kubernetes.io/component: center
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: edgion-center
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: edgion-center
+        app.kubernetes.io/component: center
+    spec:
+      serviceAccountName: edgion-center
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: center
+          image: ghcr.io/edgion/edgion-center-kubernetes:latest
+          imagePullPolicy: IfNotPresent
+          args: [--config-file, /etc/edgion-center/config.yaml]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RUST_LOG
+              value: info,edgion_center_audit=info
+          ports:
+            - name: probe
+              containerPort: 12200
+            - name: federation
+              containerPort: 12251
+            - name: internal
+              containerPort: 12252
+            - name: metrics
+              containerPort: 12290
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: probe
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: probe
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/edgion-center
+              readOnly: true
+            - name: federation-tls
+              mountPath: /var/run/edgion-center/tls
+              readOnly: true
+            - name: internal-tls
+              mountPath: /var/run/edgion-center/internal-tls
+              readOnly: true
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.2@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OAUTH2_PROXY_PROVIDER
+              value: oidc
+            - name: OAUTH2_PROXY_OIDC_ISSUER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: edgion-center
+                  key: oidc-issuer-url
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: edgion-center
+                  key: oauth2-redirect-url
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: edgion-center-browser-oidc
+                  key: client-id
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: edgion-center-browser-oidc
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: edgion-center-browser-oidc
+                  key: cookie-secret
+            - name: OAUTH2_PROXY_HTTP_ADDRESS
+              value: 0.0.0.0:4180
+            - name: OAUTH2_PROXY_UPSTREAMS
+              value: http://127.0.0.1:12201/
+            - name: OAUTH2_PROXY_EMAIL_DOMAINS
+              value: '*'
+            - name: OAUTH2_PROXY_SCOPE
+              value: openid profile email groups
+            - name: OAUTH2_PROXY_CODE_CHALLENGE_METHOD
+              value: S256
+            - name: OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER
+              value: 'true'
+            - name: OAUTH2_PROXY_PASS_ACCESS_TOKEN
+              value: 'false'
+            - name: OAUTH2_PROXY_SKIP_AUTH_STRIP_HEADERS
+              value: 'true'
+            - name: OAUTH2_PROXY_COOKIE_SECURE
+              value: 'true'
+            - name: OAUTH2_PROXY_COOKIE_NAME
+              value: __Host-edgion-center
+            - name: OAUTH2_PROXY_COOKIE_SAMESITE
+              value: lax
+            - name: OAUTH2_PROXY_PASS_BASIC_AUTH
+              value: 'false'
+            - name: OAUTH2_PROXY_PASS_USER_HEADERS
+              value: 'false'
+            - name: OAUTH2_PROXY_REVERSE_PROXY
+              value: 'true'
+            - name: OAUTH2_PROXY_SKIP_PROVIDER_BUTTON
+              value: 'true'
+          ports:
+            - name: auth-proxy
+              containerPort: 4180
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: auth-proxy
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: auth-proxy
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: config
+          configMap:
+            name: edgion-center
+        - name: federation-tls
+          secret:
+            secretName: edgion-center-federation-tls
+        - name: internal-tls
+          secret:
+            secretName: edgion-center-internal-tls

@@ -15,9 +15,9 @@ import {
   UserOutlined,
   TeamOutlined,
 } from '@ant-design/icons'
-import type { AuthzMode } from '@/hooks/useServerInfo'
 
 export type AppMode = 'center' | 'controller'
+export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin'
 
 export interface MenuLeaf {
   kind: 'item'
@@ -27,14 +27,8 @@ export interface MenuLeaf {
   icon?: ReactNode
   /** Permission key the caller must hold for this item to be visible. */
   requiredPermission?: string
-  /** Requires the authorization mode to be exactly this. Used to gate the Roles
-   *  / permission-matrix page on `rbac` (under `allow_all` everyone implicitly
-   *  has every permission, so the keys alone cannot distinguish the modes). */
-  requiredAuthz?: AuthzMode
-  /** Requires the user-management surface to be in use, i.e. the `users` table
-   *  is backing auth (`authzMode === 'rbac' || dbAuthEnabled`). Gates the Users
-   *  page, which would otherwise be meaningless when DB-backed users are off. */
-  requiredUserMgmt?: true
+  /** Requires an actually resolved backend capability. */
+  requiredCapability?: CenterCapability
 }
 
 export interface MenuGroup {
@@ -132,15 +126,15 @@ export const centerMenu: MenuSection[] = [
       { kind: 'item', key: 'center-gipr', labelKey: 'center.nav.globalIpRestrictions',
         path: '/global-connection-ip-restrictions', icon: <SafetyOutlined /> },
       { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',
-        path: '/admin', icon: <SettingOutlined /> },
+        path: '/admin', icon: <SettingOutlined />, requiredPermission: 'controllers:read', requiredCapability: 'controllerHistory' },
       { kind: 'item', key: 'center-audit', labelKey: 'center.nav.audit',
-        path: '/audit', icon: <AuditOutlined />, requiredPermission: 'audit:read' },
+        path: '/audit', icon: <AuditOutlined />, requiredPermission: 'audit:read', requiredCapability: 'auditQuery' },
       { kind: 'item', key: 'center-users', labelKey: 'center.nav.users',
         path: '/users', icon: <UserOutlined />,
-        requiredPermission: 'users:manage', requiredUserMgmt: true },
+        requiredPermission: 'users:manage', requiredCapability: 'userAdmin' },
       { kind: 'item', key: 'center-roles', labelKey: 'center.nav.roles',
         path: '/roles', icon: <TeamOutlined />,
-        requiredPermission: 'roles:manage', requiredAuthz: 'rbac' },
+        requiredPermission: 'roles:manage', requiredCapability: 'roleAdmin' },
     ],
   },
 ]
@@ -150,30 +144,21 @@ export const getMenuByMode = (mode: AppMode): MenuSection[] =>
 
 /** Context the menu-visibility predicate evaluates an item against. */
 export interface MenuGateContext {
-  /** Current authorization mode reported by `/server-info`. */
-  authzMode: AuthzMode | undefined
-  /** Whether DB-backed (table `users`) authentication is enabled. */
-  dbAuthEnabled: boolean
-  /** Derived: the user-management surface is in use when authz is `rbac` OR
-   *  DB-backed users are enabled. Encodes the "users table in use" OR-gate so
-   *  the predicate can stay a plain AND of independent checks. */
-  userMgmtAvailable: boolean
+  capabilities: Partial<Record<CenterCapability, boolean>>
   permissions: string[]
 }
 
 /**
  * An item is visible IFF every gate it declares is satisfied (AND semantics):
- * `requiredAuthz` must equal `ctx.authzMode`, `requiredUserMgmt` requires
- * `ctx.userMgmtAvailable`, and `requiredPermission` must be held by the caller.
+ * the required capability must be resolved and `requiredPermission` must be held.
  * Items carrying no gates are always visible, so existing menu entries are
  * unaffected.
  */
 export const isMenuItemVisible = (
-  item: { requiredPermission?: string; requiredAuthz?: AuthzMode; requiredUserMgmt?: true },
+  item: { requiredPermission?: string; requiredCapability?: CenterCapability },
   ctx: MenuGateContext,
 ): boolean => {
-  if (item.requiredAuthz && ctx.authzMode !== item.requiredAuthz) return false
-  if (item.requiredUserMgmt && !ctx.userMgmtAvailable) return false
+  if (item.requiredCapability && ctx.capabilities[item.requiredCapability] !== true) return false
   if (item.requiredPermission && !ctx.permissions.includes(item.requiredPermission)) return false
   return true
 }

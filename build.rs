@@ -1,4 +1,4 @@
-//! Build-time support for the compatibility binary.
+//! Shared build-time support for both deployable binaries.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     ensure_embed_dashboard_placeholder();
@@ -17,7 +17,15 @@ fn ensure_embed_dashboard_placeholder() {
     if std::env::var_os("CARGO_FEATURE_EMBED_DASHBOARD").is_none() {
         return;
     }
-    let dir = std::path::Path::new("web/dist");
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| ".".into()),
+    );
+    let workspace_root = if manifest_dir.join("web").is_dir() {
+        manifest_dir
+    } else {
+        manifest_dir.join("../..")
+    };
+    let dir = workspace_root.join("web/dist");
     let index = dir.join("index.html");
     if index.exists() {
         return;

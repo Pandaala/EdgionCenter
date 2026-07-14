@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, useEffect, useState } from 'react'
+import { createContext, createElement, Fragment, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { authApi } from '../api/auth'
 
@@ -22,8 +22,8 @@ const PermissionContext = createContext<PermissionContextValue>({
 
 /**
  * Fetches `/auth/me` once on mount and exposes the caller's permission keys to
- * the subtree. Wrap the authenticated app in this provider. Gating menus/routes
- * on permissions is a later task; for now this only makes `useCan` available.
+ * the subtree. Wrap the authenticated app in this provider so menus and direct
+ * routes enforce the same permission set.
  */
 export function PermissionProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([])
@@ -61,4 +61,21 @@ export function useCan(key: string): boolean {
 /** Access the raw permission list and loading state. */
 export function usePermissions(): PermissionContextValue {
   return useContext(PermissionContext)
+}
+
+export function PermissionGate({
+  permission,
+  children,
+  pending = null,
+  denied = null,
+}: {
+  permission: string
+  children: ReactNode
+  pending?: ReactNode
+  denied?: ReactNode
+}) {
+  const { permissions, loading } = usePermissions()
+  if (loading) return createElement(Fragment, null, pending)
+  if (!permissions.includes(permission)) return createElement(Fragment, null, denied)
+  return createElement(Fragment, null, children)
 }

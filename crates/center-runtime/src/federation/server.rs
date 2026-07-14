@@ -8,9 +8,10 @@
 
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
@@ -24,17 +25,165 @@ use crate::federation::proto::{
     FedWatchEventResponse, FedWatchListResponse, FedWatchRequest, Ping, RegisterAck,
     RegisterRequest,
 };
-use crate::federation::registry::ControllerRegistry;
+use crate::federation::registry::{ControllerRegistry, SessionOwnership};
 use crate::observe::fed_metrics;
 use crate::proxy::PendingProxyMap;
 use crate::watch_cache::{CenterSyncClient, EventType, WatchEventSimple, WatchedConfigData};
-use edgion_center_core::{ControllerDirectory, ControllerId, ControllerRegistration, SessionId};
+use edgion_center_core::{
+    AuditEvent, AuditWriter, ControllerDirectory, ControllerId, ControllerRegistration,
+    ControllerRuntimeObservation, CoordinationRole, Coordinator, Leadership, OfflineOutcome,
+    OwnershipFence, RenewalOutcome, SessionId,
+};
 
 /// Label value used on fed-sync metrics whose `kind` dimension is
 /// currently hardcoded. The federation server only streams EdgionConfigData
 /// today; when new kinds are added, each call site should pass its own
 /// kind instead of this constant.
 const PLUGIN_METADATA_KIND: &str = "EdgionConfigData";
+const RUNTIME_PROJECTION_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Clone)]
+struct RuntimeProjector {
+    directory: Option<Arc<dyn ControllerDirectory>>,
+    slots: Arc<Mutex<HashMap<String, RuntimeProjectionSlot>>>,
+    handle: RuntimeProjectionHandle,
+}
+
+#[derive(Clone, Default)]
+pub struct RuntimeProjectionHandle {
+    cancellation: tokio_util::sync::CancellationToken,
+    tasks: OwnershipTaskTracker,
+}
+
+impl RuntimeProjectionHandle {
+    pub fn stop(&self) {
+        self.cancellation.cancel();
+    }
+
+    pub async fn wait(&self) {
+        self.tasks.wait().await;
+    }
+}
+
+struct RuntimeProjectionSlot {
+    observation: ControllerRuntimeObservation,
+    generation: u64,
+}
+
+impl RuntimeProjector {
+    fn new(directory: Option<Arc<dyn ControllerDirectory>>) -> Self {
+        Self {
+            directory,
+            slots: Arc::new(Mutex::new(HashMap::new())),
+            handle: RuntimeProjectionHandle::default(),
+        }
+    }
+
+    fn submit(&self, observation: ControllerRuntimeObservation) {
+        let Some(directory) = self.directory.clone() else {
+            return;
+        };
+        let key = observation.controller_id.to_string();
+        let should_spawn = {
+            let mut slots = self.slots.lock();
+            match slots.get_mut(&key) {
+                Some(slot) => {
+                    if slot.observation.session_id == observation.session_id
+                        && slot.observation.ownership_fence == observation.ownership_fence
+                    {
+                        if observation.sync_version.is_some() {
+                            slot.observation.sync_version = observation.sync_version;
+                        }
+                        if observation.watch_server_id.is_some() {
+                            slot.observation.watch_server_id = observation.watch_server_id;
+                        }
+                        if observation.resource_count.is_some() {
+                            slot.observation.resource_count = observation.resource_count;
+                        }
+                        if observation.stats_updated_unix_ms.is_some() {
+                            slot.observation.stats_updated_unix_ms =
+                                observation.stats_updated_unix_ms;
+                        }
+                        if observation.watch_updated_unix_ms.is_some() {
+                            slot.observation.watch_updated_unix_ms =
+                                observation.watch_updated_unix_ms;
+                        }
+                        slot.observation.observed_at_unix_ms = slot
+                            .observation
+                            .observed_at_unix_ms
+                            .max(observation.observed_at_unix_ms);
+                        slot.generation = slot.generation.wrapping_add(1);
+                    } else {
+                        slot.observation = observation;
+                        slot.generation = slot.generation.wrapping_add(1);
+                    }
+                    false
+                }
+                None => {
+                    slots.insert(
+                        key.clone(),
+                        RuntimeProjectionSlot {
+                            observation,
+                            generation: 0,
+                        },
+                    );
+                    true
+                }
+            }
+        };
+        if should_spawn {
+            let slots = self.slots.clone();
+            let cancellation = self.handle.cancellation.clone();
+            self.handle.tasks.spawn(async move {
+                let mut failures = 0_u32;
+                loop {
+                    let Some((observation, generation)) = slots
+                        .lock()
+                        .get(&key)
+                        .map(|slot| (slot.observation.clone(), slot.generation))
+                    else {
+                        return;
+                    };
+                    let result = tokio::select! {
+                        _ = cancellation.cancelled() => return,
+                        result = tokio::time::timeout(
+                            RUNTIME_PROJECTION_TIMEOUT,
+                            directory.project_runtime(observation),
+                        ) => result,
+                    };
+                    if matches!(result, Ok(Ok(_))) {
+                        let mut guard = slots.lock();
+                        if guard
+                            .get(&key)
+                            .is_some_and(|slot| slot.generation == generation)
+                        {
+                            guard.remove(&key);
+                            return;
+                        }
+                        failures = 0;
+                        continue;
+                    }
+                    failures = failures.saturating_add(1);
+                    if failures == 1 || failures.is_power_of_two() {
+                        tracing::warn!(
+                            component = "fed_server",
+                            controller_id = %key,
+                            failures,
+                            "Controller runtime projection will retry"
+                        );
+                    }
+                    let exponent = failures.saturating_sub(1).min(5);
+                    let base_ms = 250_u64.saturating_mul(1_u64 << exponent).min(8_000);
+                    let jitter_ms = key.bytes().fold(0_u64, |sum, byte| sum + u64::from(byte)) % 97;
+                    tokio::select! {
+                        _ = cancellation.cancelled() => return,
+                        _ = tokio::time::sleep(Duration::from_millis(base_ms + jitter_ms)) => {}
+                    }
+                }
+            });
+        }
+    }
+}
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -90,21 +239,219 @@ const MAX_LIST_ITEMS: usize = 32;
 /// Per RFC 9113 §6.7 (informative).
 const HEARTBEAT_MISSED_PING_BUDGET: u32 = 3;
 const CONTROLLER_PROJECTION_TIMEOUT: Duration = Duration::from_secs(3);
-const OFFLINE_PROJECTION_ATTEMPTS: u32 = 5;
+const OFFLINE_PROJECTION_MAX_BACKOFF: Duration = Duration::from_secs(30);
+const COORDINATION_OPERATION_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[derive(Default)]
+struct OwnershipTasksInner {
+    active: AtomicU64,
+    completed: tokio::sync::Notify,
+}
+
+/// Tracks detached ownership maintainers so a process composition root can
+/// wait until their final fenced Lease release has completed.
+#[derive(Clone, Default)]
+pub struct OwnershipTaskTracker {
+    inner: Arc<OwnershipTasksInner>,
+}
+
+struct OwnershipTaskGuard(Arc<OwnershipTasksInner>);
+
+impl Drop for OwnershipTaskGuard {
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Ordering::AcqRel);
+        self.0.completed.notify_waiters();
+    }
+}
+
+impl OwnershipTaskTracker {
+    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+        self.inner.active.fetch_add(1, Ordering::AcqRel);
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            let _guard = OwnershipTaskGuard(inner);
+            future.await;
+        });
+    }
+
+    pub async fn wait(&self) {
+        loop {
+            let completed = self.inner.completed.notified();
+            if self.inner.active.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            completed.await;
+        }
+    }
+}
+
+fn unix_now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
+
+fn unix_now_seconds() -> i64 {
+    unix_now_millis() / 1_000
+}
+
+fn record_federation_audit(
+    writer: Option<&Arc<dyn AuditWriter>>,
+    controller_id: &str,
+    session_id: &str,
+    path: &str,
+    status: i32,
+    detail: Option<String>,
+) {
+    if let Some(writer) = writer {
+        writer.record(AuditEvent {
+            ts: unix_now_seconds(),
+            actor: controller_id.to_string(),
+            provider: "mtls".to_string(),
+            method: "FEDERATION".to_string(),
+            path: path.to_string(),
+            target_controller: Some(controller_id.to_string()),
+            status,
+            source_ip: None,
+            request_id: Some(session_id.to_string()),
+            detail,
+        });
+    }
+}
+
+async fn release_ownership(coordinator: &Arc<dyn Coordinator>, leadership: &Leadership) {
+    match tokio::time::timeout(
+        COORDINATION_OPERATION_TIMEOUT,
+        coordinator.release(leadership),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => tracing::warn!(
+            component = "fed_server",
+            %error,
+            "Failed to release controller ownership Lease"
+        ),
+        Err(_) => tracing::warn!(
+            component = "fed_server",
+            "Timed out releasing controller ownership Lease"
+        ),
+    }
+}
+
+async fn maintain_ownership(
+    coordinator: Arc<dyn Coordinator>,
+    mut leadership: Leadership,
+    session_cancel: tokio_util::sync::CancellationToken,
+    ownership_lost: tokio_util::sync::CancellationToken,
+    ownership_valid: Arc<AtomicBool>,
+) {
+    let mut valid_for = Duration::from_millis(leadership.valid_for_millis);
+    let Some(mut deadline) = std::time::Instant::now().checked_add(valid_for) else {
+        ownership_lost.cancel();
+        ownership_valid.store(false, Ordering::SeqCst);
+        session_cancel.cancel();
+        release_ownership(&coordinator, &leadership).await;
+        return;
+    };
+    loop {
+        if valid_for.is_zero() {
+            ownership_lost.cancel();
+            ownership_valid.store(false, Ordering::SeqCst);
+            session_cancel.cancel();
+            break;
+        }
+        let renew_after = (valid_for / 3).max(Duration::from_millis(100));
+        tokio::select! {
+            _ = session_cancel.cancelled() => break,
+            _ = tokio::time::sleep(renew_after) => {}
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            ownership_lost.cancel();
+            ownership_valid.store(false, Ordering::SeqCst);
+            session_cancel.cancel();
+            break;
+        }
+        let renew_timeout = COORDINATION_OPERATION_TIMEOUT.min(remaining);
+        match tokio::time::timeout(renew_timeout, coordinator.renew(&leadership)).await {
+            Ok(Ok(RenewalOutcome::Renewed(renewed))) => {
+                valid_for = Duration::from_millis(renewed.valid_for_millis);
+                let Some(renewed_deadline) = std::time::Instant::now().checked_add(valid_for)
+                else {
+                    ownership_lost.cancel();
+                    ownership_valid.store(false, Ordering::SeqCst);
+                    session_cancel.cancel();
+                    break;
+                };
+                deadline = renewed_deadline;
+                leadership = renewed;
+            }
+            Ok(Ok(RenewalOutcome::Lost)) => {
+                tracing::warn!(
+                    component = "fed_server",
+                    holder = %leadership.holder,
+                    "Controller ownership Lease was fenced; closing session"
+                );
+                ownership_lost.cancel();
+                ownership_valid.store(false, Ordering::SeqCst);
+                session_cancel.cancel();
+                break;
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    component = "fed_server",
+                    %error,
+                    "Controller ownership Lease renewal failed"
+                );
+            }
+            Err(_) => tracing::warn!(
+                component = "fed_server",
+                "Controller ownership Lease renewal timed out"
+            ),
+        }
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!(
+                component = "fed_server",
+                holder = %leadership.holder,
+                "Controller ownership Lease expired without successful renewal"
+            );
+            ownership_lost.cancel();
+            ownership_valid.store(false, Ordering::SeqCst);
+            session_cancel.cancel();
+            break;
+        }
+    }
+    release_ownership(&coordinator, &leadership).await;
+}
 
 async fn project_offline_with_retry(
     directory: Arc<dyn ControllerDirectory>,
     controller_id: ControllerId,
     session_id: SessionId,
+    ownership_fence: Option<OwnershipFence>,
+    observed_at_unix_ms: i64,
+    cancellation: tokio_util::sync::CancellationToken,
 ) {
     let mut delay = Duration::from_millis(100);
-    for attempt in 1..=OFFLINE_PROJECTION_ATTEMPTS {
-        let result = tokio::time::timeout(
-            CONTROLLER_PROJECTION_TIMEOUT,
-            directory.mark_offline(&controller_id, &session_id),
-        )
-        .await;
-        if matches!(result, Ok(Ok(()))) {
+    let mut attempt = 1_u64;
+    loop {
+        let result = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return,
+            result = tokio::time::timeout(
+                CONTROLLER_PROJECTION_TIMEOUT,
+                directory.mark_offline(
+                    &controller_id,
+                    &session_id,
+                    ownership_fence.as_ref(),
+                    observed_at_unix_ms,
+                ),
+            ) => result,
+        };
+        if let Ok(Ok(OfflineOutcome::Marked | OfflineOutcome::NotCurrent)) = result {
             return;
         }
         tracing::warn!(
@@ -114,17 +461,95 @@ async fn project_offline_with_retry(
             attempt,
             "Failed to project controller offline state; retrying"
         );
-        if attempt < OFFLINE_PROJECTION_ATTEMPTS {
-            tokio::time::sleep(delay).await;
-            delay = delay.saturating_mul(2);
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return,
+            _ = tokio::time::sleep(delay) => {}
+        }
+        delay = delay.saturating_mul(2).min(OFFLINE_PROJECTION_MAX_BACKOFF);
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+struct OfflineReconcilerInner {
+    workers: Mutex<HashMap<String, (u64, tokio_util::sync::CancellationToken)>>,
+    next_generation: AtomicU64,
+}
+
+impl Drop for OfflineReconcilerInner {
+    fn drop(&mut self) {
+        for (_, cancellation) in self.workers.get_mut().drain().map(|(_, worker)| worker) {
+            cancellation.cancel();
         }
     }
-    tracing::error!(
-        component = "fed_server",
-        controller_id = %controller_id,
-        session_id = %session_id,
-        "Controller offline projection exhausted retries"
-    );
+}
+
+/// One latest desired offline projection per controller. Reconnect churn
+/// replaces and cancels the previous worker instead of accumulating one
+/// infinite retry task per session during an API-server outage.
+#[derive(Clone)]
+struct OfflineReconciler(Arc<OfflineReconcilerInner>);
+
+impl Default for OfflineReconciler {
+    fn default() -> Self {
+        Self(Arc::new(OfflineReconcilerInner {
+            workers: Mutex::new(HashMap::new()),
+            next_generation: AtomicU64::new(1),
+        }))
+    }
+}
+
+impl OfflineReconciler {
+    fn cancel(&self, controller_id: &str) {
+        if let Some((_, cancellation)) = self.0.workers.lock().remove(controller_id) {
+            cancellation.cancel();
+        }
+    }
+
+    fn schedule(
+        &self,
+        directory: Arc<dyn ControllerDirectory>,
+        controller_id: ControllerId,
+        session_id: SessionId,
+        ownership_fence: Option<OwnershipFence>,
+        observed_at_unix_ms: i64,
+    ) {
+        let generation = self.0.next_generation.fetch_add(1, Ordering::Relaxed);
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        if let Some((_, previous)) = self.0.workers.lock().insert(
+            controller_id.to_string(),
+            (generation, cancellation.clone()),
+        ) {
+            previous.cancel();
+        }
+        let inner = Arc::downgrade(&self.0);
+        let key = controller_id.to_string();
+        tokio::spawn(async move {
+            project_offline_with_retry(
+                directory,
+                controller_id,
+                session_id,
+                ownership_fence,
+                observed_at_unix_ms,
+                cancellation,
+            )
+            .await;
+            if let Some(inner) = inner.upgrade() {
+                let mut workers = inner.workers.lock();
+                if workers
+                    .get(&key)
+                    .is_some_and(|(current, _)| *current == generation)
+                {
+                    workers.remove(&key);
+                }
+            }
+        });
+    }
+
+    #[cfg(test)]
+    fn worker_count(&self) -> usize {
+        self.0.workers.lock().len()
+    }
 }
 
 // Upper bound on total registered controllers (online + offline). Once
@@ -492,6 +917,13 @@ pub struct FederationGrpcServer {
     pub controller_directory: Option<Arc<dyn ControllerDirectory>>,
     /// SPIFFE trust domain for peer-identity binding (always enforced under mTLS).
     pub trust_domain: Option<String>,
+    /// Optional runtime audit sink selected by the platform composition root.
+    pub audit_writer: Option<Arc<dyn AuditWriter>>,
+    /// Optional cross-replica stream ownership selected by Kubernetes mode.
+    pub coordinator: Option<Arc<dyn Coordinator>>,
+    offline_reconciler: OfflineReconciler,
+    ownership_tasks: OwnershipTaskTracker,
+    runtime_projector: RuntimeProjector,
 }
 
 impl FederationGrpcServer {
@@ -511,9 +943,32 @@ impl FederationGrpcServer {
             pending_proxies,
             sync_config,
             sync_client,
+            runtime_projector: RuntimeProjector::new(controller_directory.clone()),
             controller_directory,
             trust_domain,
+            audit_writer: None,
+            coordinator: None,
+            offline_reconciler: OfflineReconciler::default(),
+            ownership_tasks: OwnershipTaskTracker::default(),
         }
+    }
+
+    pub fn with_audit_writer(mut self, audit_writer: Arc<dyn AuditWriter>) -> Self {
+        self.audit_writer = Some(audit_writer);
+        self
+    }
+
+    pub fn with_coordinator(mut self, coordinator: Arc<dyn Coordinator>) -> Self {
+        self.coordinator = Some(coordinator);
+        self
+    }
+
+    pub fn ownership_tasks(&self) -> OwnershipTaskTracker {
+        self.ownership_tasks.clone()
+    }
+
+    pub fn runtime_projection_handle(&self) -> RuntimeProjectionHandle {
+        self.runtime_projector.handle.clone()
     }
 }
 
@@ -626,6 +1081,60 @@ impl FederationSync for FederationGrpcServer {
 
         let controller_id = register_req.controller_id.clone();
         let session_id = Uuid::new_v4().to_string();
+        let observed_at_unix_ms = next_observed_at_ms();
+        let ownership = if let Some(coordinator) = &self.coordinator {
+            // A reconnect can reacquire the same holder's Lease and rotate its
+            // fence. Invalidate the old local stream before the API write so
+            // there is no post-acquire window where local Admin traffic can
+            // still dispatch through the superseded fence.
+            self.registry.fence_owned_session(&controller_id);
+            let role = CoordinationRole::ControllerOwner(controller_id.clone());
+            match tokio::time::timeout(COORDINATION_OPERATION_TIMEOUT, coordinator.acquire(role))
+                .await
+            {
+                Ok(Ok(leadership)) => Some(leadership),
+                Ok(Err(error)) => {
+                    tracing::warn!(
+                        component = "fed_server",
+                        controller_id = %controller_id,
+                        %error,
+                        "Controller ownership acquisition failed"
+                    );
+                    record_federation_audit(
+                        self.audit_writer.as_ref(),
+                        &controller_id,
+                        &session_id,
+                        "/federation/connect",
+                        503,
+                        Some("controller ownership unavailable".to_string()),
+                    );
+                    return Err(Status::unavailable("controller ownership unavailable"));
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        component = "fed_server",
+                        controller_id = %controller_id,
+                        "Controller ownership acquisition timed out"
+                    );
+                    record_federation_audit(
+                        self.audit_writer.as_ref(),
+                        &controller_id,
+                        &session_id,
+                        "/federation/connect",
+                        503,
+                        Some("controller ownership timed out".to_string()),
+                    );
+                    return Err(Status::unavailable("controller ownership unavailable"));
+                }
+            }
+        } else {
+            None
+        };
+        let ownership_fence = ownership.as_ref().map(|leadership| OwnershipFence {
+            token: leadership.fencing_token.clone(),
+            epoch: leadership.fencing_epoch,
+        });
+        let ownership_valid = Arc::new(AtomicBool::new(true));
 
         tracing::info!(
             component = "fed_server",
@@ -636,13 +1145,22 @@ impl FederationSync for FederationGrpcServer {
         );
 
         // 2. Register in registry FIRST (atomic takeover), then aggregator + DB.
-        let registration_outcome = self.registry.register_cancellable(
+        let registration_outcome = self.registry.register_owned_cancellable(
             controller_id.clone(),
             register_req.clone(),
             inner_tx.clone(),
             session_id.clone(),
+            ownership.as_ref().map(|leadership| SessionOwnership {
+                holder: leadership.holder.clone(),
+                fence: ownership_fence.clone().expect("ownership fence exists"),
+                valid: ownership_valid.clone(),
+            }),
         );
         let displaced_session_id = registration_outcome.displaced_session_id.clone();
+        let connect_audit_detail = displaced_session_id
+            .as_deref()
+            .map(|displaced| format!("controller session takeover displaced {displaced}"))
+            .unwrap_or_else(|| "controller session established".to_string());
         if displaced_session_id.is_some() {
             fed_metrics::record_session_takeover();
         }
@@ -667,8 +1185,9 @@ impl FederationSync for FederationGrpcServer {
                 cluster: register_req.cluster.clone(),
                 environments: register_req.env.clone(),
                 tags: register_req.tag.clone(),
-                connected_replica: None,
-                observed_at_unix_ms: next_observed_at_ms(),
+                connected_replica: ownership.as_ref().map(|lease| lease.holder.clone()),
+                ownership_fence: ownership_fence.clone(),
+                observed_at_unix_ms,
             };
             let cid = registration.controller_id.clone();
             match tokio::time::timeout(
@@ -677,7 +1196,7 @@ impl FederationSync for FederationGrpcServer {
             )
             .await
             {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => self.offline_reconciler.cancel(&controller_id),
                 result => {
                     let error = match result {
                         Ok(Err(error)) => error.to_string(),
@@ -690,30 +1209,34 @@ impl FederationSync for FederationGrpcServer {
                     // The write may commit after its future times out. Retry a
                     // conditional offline projection so a late commit is fenced.
                     let current = SessionId::new(session_id.clone()).expect("generated session id");
-                    tokio::spawn(project_offline_with_retry(
+                    self.offline_reconciler.schedule(
                         directory.clone(),
                         cid.clone(),
                         current,
-                    ));
-
-                    // If this was a takeover, fence the displaced projection as
-                    // well. A failed new projection must not leave the canceled
-                    // old transport advertised as online.
-                    if let Some(displaced) = displaced_session_id {
-                        if let Ok(displaced) = SessionId::new(displaced) {
-                            tokio::spawn(project_offline_with_retry(
-                                directory.clone(),
-                                cid.clone(),
-                                displaced,
-                            ));
-                        }
-                    }
+                        ownership_fence.clone(),
+                        observed_at_unix_ms,
+                    );
                     tracing::warn!(
                         component = "fed_server",
                         controller_id = %cid,
                         error = %error,
                         "Controller registration rejected because projection failed"
                     );
+                    record_federation_audit(
+                        self.audit_writer.as_ref(),
+                        &controller_id,
+                        &session_id,
+                        "/federation/connect",
+                        503,
+                        Some(format!(
+                            "{connect_audit_detail}; projection failed: {error}"
+                        )),
+                    );
+                    if let (Some(coordinator), Some(leadership)) =
+                        (&self.coordinator, ownership.as_ref())
+                    {
+                        release_ownership(coordinator, leadership).await;
+                    }
                     return Err(Status::unavailable(
                         "controller registration projection unavailable",
                     ));
@@ -732,6 +1255,14 @@ impl FederationSync for FederationGrpcServer {
         fed_metrics::set_connections_active(
             fed_metrics::labels::role::CENTER,
             self.registry.online_len() as u64,
+        );
+        record_federation_audit(
+            self.audit_writer.as_ref(),
+            &controller_id,
+            &session_id,
+            "/federation/connect",
+            200,
+            Some(connect_audit_detail),
         );
         let session_started_at = std::time::Instant::now();
 
@@ -776,14 +1307,28 @@ impl FederationSync for FederationGrpcServer {
         let pending_proxies = self.pending_proxies.clone();
         let sync_client = self.sync_client.clone();
         let directory_for_offline = self.controller_directory.clone();
+        let runtime_projector = self.runtime_projector.clone();
+        let offline_reconciler = self.offline_reconciler.clone();
         let ping_interval = Duration::from_secs(self.sync_config.ping_interval_secs);
         let heartbeat_timeout = ping_interval * HEARTBEAT_MISSED_PING_BUDGET;
         // Tracks the epoch-ms timestamp of the last received Pong. The heartbeat task reads
         // this to detect idle connections without wrapping message delivery in a timeout,
         // which would falsely fire on large in-flight WatchListResponse payloads.
-        let last_pong_ms = Arc::new(AtomicU64::new(now_ms()));
+        let last_pong_at = Arc::new(Mutex::new(Instant::now()));
         let heartbeat_cancel = registration_outcome.session_cancel;
+        let ownership_lost = tokio_util::sync::CancellationToken::new();
         let cid = controller_id.clone();
+
+        if let (Some(coordinator), Some(leadership)) = (self.coordinator.clone(), ownership.clone())
+        {
+            self.ownership_tasks.spawn(maintain_ownership(
+                coordinator,
+                leadership,
+                heartbeat_cancel.clone(),
+                ownership_lost.clone(),
+                ownership_valid.clone(),
+            ));
+        }
 
         // 3. Forward inner_rx → out_tx
         tokio::spawn({
@@ -801,9 +1346,8 @@ impl FederationSync for FederationGrpcServer {
         tokio::spawn({
             let inner_tx = inner_tx.clone();
             let cid = cid.clone();
-            let last_pong_ms = last_pong_ms.clone();
+            let last_pong_at = last_pong_at.clone();
             let heartbeat_cancel = heartbeat_cancel.clone();
-            let heartbeat_timeout_ms = heartbeat_timeout.as_millis() as u64;
             async move {
                 let mut interval = tokio::time::interval(ping_interval);
                 interval.tick().await; // skip first
@@ -816,9 +1360,7 @@ impl FederationSync for FederationGrpcServer {
                     // Check Pong freshness before sending next Ping. Tracking last-pong-at
                     // rather than wrapping inbound.message() in a timeout avoids false offline
                     // declarations when a large WatchListResponse is in transit (RFC 9113 §6.7).
-                    if now_ms.saturating_sub(last_pong_ms.load(Ordering::Relaxed))
-                        > heartbeat_timeout_ms
-                    {
+                    if last_pong_at.lock().elapsed() > heartbeat_timeout {
                         tracing::warn!(
                             component = "fed_server",
                             controller_id = %cid,
@@ -856,8 +1398,14 @@ impl FederationSync for FederationGrpcServer {
             let pm_cache = pm_cache.clone();
             let inner_tx = inner_tx.clone();
             let directory_for_offline = directory_for_offline.clone();
-            let last_pong_ms = last_pong_ms.clone();
+            let runtime_projector = runtime_projector.clone();
+            let offline_reconciler = offline_reconciler.clone();
+            let last_pong_at = last_pong_at.clone();
             let heartbeat_cancel = heartbeat_cancel.clone();
+            let ownership_lost = ownership_lost.clone();
+            let ownership_fence = ownership_fence.clone();
+            let ownership_valid = ownership_valid.clone();
+            let audit_writer = self.audit_writer.clone();
             async move {
                 // Centralize the three disconnect cleanups (timeout / stream error / stream closed).
                 // Each branch must propagate offline to all four state holders, which previously
@@ -879,7 +1427,13 @@ impl FederationSync for FederationGrpcServer {
                         let directory = directory.clone();
                         let cid = ControllerId::new(cid.clone()).expect("validated controller id");
                         let sid = SessionId::new(sid.clone()).expect("generated session id");
-                        tokio::spawn(project_offline_with_retry(directory, cid, sid));
+                        offline_reconciler.schedule(
+                            directory,
+                            cid,
+                            sid,
+                            ownership_fence.clone(),
+                            observed_at_unix_ms,
+                        );
                     }
                     fed_metrics::record_mark_offline(reason);
                     fed_metrics::record_connection_event(
@@ -896,6 +1450,14 @@ impl FederationSync for FederationGrpcServer {
                         fed_metrics::labels::role::CENTER,
                         registry.online_len() as u64,
                     );
+                    record_federation_audit(
+                        audit_writer.as_ref(),
+                        &cid,
+                        &sid,
+                        "/federation/disconnect",
+                        200,
+                        Some(reason.to_string()),
+                    );
                 };
 
                 // Watch state tracking (local to this session)
@@ -910,9 +1472,15 @@ impl FederationSync for FederationGrpcServer {
 
                 loop {
                     tokio::select! {
+                        biased;
                         // Heartbeat task detected Pong silence > heartbeat_timeout.
                         _ = heartbeat_cancel.cancelled() => {
-                            mark_offline_all(fed_metrics::labels::offline_reason::HEARTBEAT);
+                            let reason = if ownership_lost.is_cancelled() {
+                                fed_metrics::labels::offline_reason::OWNERSHIP_LOST
+                            } else {
+                                fed_metrics::labels::offline_reason::HEARTBEAT
+                            };
+                            mark_offline_all(reason);
                             break;
                         }
                         result = inbound.message() => {
@@ -940,7 +1508,10 @@ impl FederationSync for FederationGrpcServer {
                                 // Stop a stale (superseded) session before it can
                                 // touch shared state — including refreshing the
                                 // current session's last_seen.
-                                if !registry.is_current_session(&cid, &sid) {
+                                if !ownership_valid.load(Ordering::SeqCst)
+                                    || heartbeat_cancel.is_cancelled()
+                                    || !registry.is_current_session(&cid, &sid)
+                                {
                                     tracing::info!(
                                         component = "fed_server",
                                         controller_id = %cid,
@@ -948,25 +1519,72 @@ impl FederationSync for FederationGrpcServer {
                                     );
                                     break;
                                 }
+                                // Re-check immediately before payload mutation;
+                                // the biased select handles the both-ready case.
+                                if !ownership_valid.load(Ordering::SeqCst)
+                                    || heartbeat_cancel.is_cancelled()
+                                {
+                                    continue;
+                                }
                                 registry.update_last_seen(&cid);
+                                if !ownership_valid.load(Ordering::SeqCst)
+                                    || heartbeat_cancel.is_cancelled()
+                                {
+                                    continue;
+                                }
                                 match msg.payload {
                                     Some(CtrlPayload::Pong(_)) => {
-                                        last_pong_ms.store(now_ms(), Ordering::Relaxed);
+                                        if !ownership_valid.load(Ordering::SeqCst) { continue; }
+                                        *last_pong_at.lock() = Instant::now();
+                                        runtime_projector.submit(ControllerRuntimeObservation {
+                                            controller_id: ControllerId::new(cid.clone()).expect("validated controller id"),
+                                            session_id: SessionId::new(sid.clone()).expect("generated session id"),
+                                            ownership_fence: ownership_fence.clone(),
+                                            sync_version: None,
+                                            watch_server_id: None,
+                                            resource_count: None,
+                                            stats_updated_unix_ms: None,
+                                            watch_updated_unix_ms: None,
+                                            observed_at_unix_ms: next_observed_at_ms(),
+                                        });
                                     }
                                 Some(CtrlPayload::CommandResponse(resp)) => {
+                                    if !ownership_valid.load(Ordering::SeqCst) { continue; }
                                     if let Some(sender) = pending_commands.lock().remove(&resp.request_id) {
                                         let _ = sender.send(resp);
                                     }
                                 }
                                 Some(CtrlPayload::HttpProxyResponse(resp)) => {
+                                    if !ownership_valid.load(Ordering::SeqCst) { continue; }
                                     if let Some(tx) = self_pending_proxies.lock().remove(&resp.request_id) {
                                         let _ = tx.send(resp);
                                     }
                                 }
                                 Some(CtrlPayload::WatchListResponse(resp)) => {
-                                    apply_watch_list(&cid, &pm_cache, &mut pm_watch, resp);
+                                    if !ownership_valid.load(Ordering::SeqCst) { continue; }
+                                    let sync_version = resp.sync_version;
+                                    let server_id = resp.server_id.clone();
+                                    if apply_watch_list(&cid, &pm_cache, &mut pm_watch, resp)
+                                        == WatchOutcome::Applied
+                                    {
+                                        let updated_at = next_observed_at_ms();
+                                        runtime_projector.submit(ControllerRuntimeObservation {
+                                                controller_id: ControllerId::new(cid.clone()).expect("validated controller id"),
+                                                session_id: SessionId::new(sid.clone()).expect("generated session id"),
+                                                ownership_fence: ownership_fence.clone(),
+                                                sync_version: Some(sync_version),
+                                                watch_server_id: Some(server_id),
+                                                resource_count: None,
+                                                stats_updated_unix_ms: None,
+                                                watch_updated_unix_ms: Some(updated_at),
+                                                observed_at_unix_ms: updated_at,
+                                            });
+                                    }
                                 }
                                 Some(CtrlPayload::WatchEventResponse(resp)) => {
+                                    if !ownership_valid.load(Ordering::SeqCst) { continue; }
+                                    let sync_version = resp.sync_version;
+                                    let server_id = resp.server_id.clone();
                                     match apply_watch_event(&cid, &pm_cache, &mut pm_watch, resp) {
                                         WatchOutcome::BackoffReWatch => {
                                             // Backoff before retrying to avoid tight loop.
@@ -990,13 +1608,40 @@ impl FederationSync for FederationGrpcServer {
                                             let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
                                             let _ = inner_tx.send(re_watch_msg).await;
                                         }
+                                        WatchOutcome::Applied => {
+                                            let updated_at = next_observed_at_ms();
+                                            runtime_projector.submit(ControllerRuntimeObservation {
+                                                    controller_id: ControllerId::new(cid.clone()).expect("validated controller id"),
+                                                    session_id: SessionId::new(sid.clone()).expect("generated session id"),
+                                                    ownership_fence: ownership_fence.clone(),
+                                                    sync_version: Some(sync_version),
+                                                    watch_server_id: Some(server_id),
+                                                    resource_count: None,
+                                                    stats_updated_unix_ms: None,
+                                                    watch_updated_unix_ms: Some(updated_at),
+                                                    observed_at_unix_ms: updated_at,
+                                                });
+                                        }
                                         _ => {}
                                     }
                                 }
                                 Some(CtrlPayload::StatsReport(report)) => {
+                                    if !ownership_valid.load(Ordering::SeqCst) { continue; }
                                     // Push from Controller summarising per-kind resource counts.
                                     // Stored in aggregator and exposed via the API layer.
                                     aggregator_for_stats.update_stats(&cid, report.per_kind, report.total as u64);
+                                    let updated_at = next_observed_at_ms();
+                                    runtime_projector.submit(ControllerRuntimeObservation {
+                                            controller_id: ControllerId::new(cid.clone()).expect("validated controller id"),
+                                            session_id: SessionId::new(sid.clone()).expect("generated session id"),
+                                            ownership_fence: ownership_fence.clone(),
+                                            sync_version: None,
+                                            watch_server_id: None,
+                                            resource_count: Some(report.total as u64),
+                                            stats_updated_unix_ms: Some(updated_at),
+                                            watch_updated_unix_ms: None,
+                                            observed_at_unix_ms: updated_at,
+                                        });
                                 }
                                 _ => {}
                             }
@@ -1017,10 +1662,163 @@ impl FederationSync for FederationGrpcServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use edgion_center_core::{CoreResult, ReleaseOutcome};
     use std::sync::atomic::AtomicUsize;
+
+    #[derive(Default)]
+    struct CapturingAudit(std::sync::Mutex<Vec<AuditEvent>>);
+
+    impl AuditWriter for CapturingAudit {
+        fn record(&self, event: AuditEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    struct LostCoordinator {
+        releases: AtomicUsize,
+    }
+
+    struct BlockingReleaseCoordinator {
+        release_started: tokio::sync::Notify,
+        release_gate: tokio::sync::Notify,
+    }
+
+    #[tonic::async_trait]
+    impl Coordinator for BlockingReleaseCoordinator {
+        async fn acquire(&self, _: CoordinationRole) -> CoreResult<Leadership> {
+            unreachable!()
+        }
+        async fn renew(&self, _: &Leadership) -> CoreResult<RenewalOutcome> {
+            Ok(RenewalOutcome::Lost)
+        }
+        async fn release(&self, _: &Leadership) -> CoreResult<ReleaseOutcome> {
+            self.release_started.notify_waiters();
+            self.release_gate.notified().await;
+            Ok(ReleaseOutcome::Released)
+        }
+    }
+
+    #[tonic::async_trait]
+    impl Coordinator for LostCoordinator {
+        async fn acquire(&self, _role: CoordinationRole) -> CoreResult<Leadership> {
+            unreachable!("test supplies an acquired leadership")
+        }
+
+        async fn renew(&self, _leadership: &Leadership) -> CoreResult<RenewalOutcome> {
+            Ok(RenewalOutcome::Lost)
+        }
+
+        async fn release(&self, _leadership: &Leadership) -> CoreResult<ReleaseOutcome> {
+            self.releases.fetch_add(1, Ordering::SeqCst);
+            Ok(ReleaseOutcome::Lost)
+        }
+    }
+
+    #[tokio::test]
+    async fn lost_ownership_cancels_session_and_releases_once() {
+        let coordinator = Arc::new(LostCoordinator {
+            releases: AtomicUsize::new(0),
+        });
+        let coordinator_port: Arc<dyn Coordinator> = coordinator.clone();
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let ownership_lost = tokio_util::sync::CancellationToken::new();
+        let ownership_valid = Arc::new(AtomicBool::new(true));
+        let leadership = Leadership {
+            role: CoordinationRole::ControllerOwner("c1".to_string()),
+            holder: "center-0".to_string(),
+            fencing_token: "token-1".to_string(),
+            fencing_epoch: 1,
+            valid_for_millis: 3_000,
+        };
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            maintain_ownership(
+                coordinator_port,
+                leadership,
+                cancellation.clone(),
+                ownership_lost.clone(),
+                ownership_valid.clone(),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(cancellation.is_cancelled());
+        assert!(ownership_lost.is_cancelled());
+        assert!(!ownership_valid.load(Ordering::SeqCst));
+        assert_eq!(coordinator.releases.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn ownership_tracker_waits_for_fenced_release_to_finish() {
+        let coordinator = Arc::new(BlockingReleaseCoordinator {
+            release_started: tokio::sync::Notify::new(),
+            release_gate: tokio::sync::Notify::new(),
+        });
+        let release_started = coordinator.release_started.notified();
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        cancellation.cancel();
+        let tracker = OwnershipTaskTracker::default();
+        tracker.spawn(maintain_ownership(
+            coordinator.clone(),
+            Leadership {
+                role: CoordinationRole::ControllerOwner("c1".to_string()),
+                holder: "center-0".to_string(),
+                fencing_token: "token-1".to_string(),
+                fencing_epoch: 1,
+                valid_for_millis: 3_000,
+            },
+            cancellation,
+            tokio_util::sync::CancellationToken::new(),
+            Arc::new(AtomicBool::new(true)),
+        ));
+        release_started.await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), tracker.wait())
+                .await
+                .is_err(),
+            "drain must remain pending while Lease release is blocked"
+        );
+        coordinator.release_gate.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), tracker.wait())
+            .await
+            .expect("drain should finish after Lease release");
+    }
+
+    #[tokio::test]
+    async fn ownership_cancellation_wins_when_message_is_also_ready() {
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        cancellation.cancel();
+        let mut processed_message = false;
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {}
+            _ = async {} => processed_message = true,
+        }
+        assert!(!processed_message);
+    }
+
+    #[test]
+    fn federation_runtime_audit_preserves_controller_session_and_reason() {
+        let audit = Arc::new(CapturingAudit::default());
+        let writer: Arc<dyn AuditWriter> = audit.clone();
+        record_federation_audit(
+            Some(&writer),
+            "cluster-a/controller-0",
+            "session-1",
+            "/federation/disconnect",
+            200,
+            Some("heartbeat".to_string()),
+        );
+        let event = audit.0.lock().unwrap().pop().unwrap();
+        assert_eq!(event.actor, "cluster-a/controller-0");
+        assert_eq!(event.provider, "mtls");
+        assert_eq!(event.request_id.as_deref(), Some("session-1"));
+        assert_eq!(event.detail.as_deref(), Some("heartbeat"));
+    }
 
     struct FlakyDirectory {
         failures_remaining: AtomicUsize,
+        not_current_remaining: AtomicUsize,
         attempts: AtomicUsize,
     }
 
@@ -1037,7 +1835,9 @@ mod tests {
             &self,
             _id: &ControllerId,
             _observed_session: &SessionId,
-        ) -> edgion_center_core::CoreResult<()> {
+            _ownership_fence: Option<&OwnershipFence>,
+            _observed_at_unix_ms: i64,
+        ) -> edgion_center_core::CoreResult<OfflineOutcome> {
             self.attempts.fetch_add(1, Ordering::SeqCst);
             if self
                 .failures_remaining
@@ -1047,8 +1847,16 @@ mod tests {
                 .is_ok()
             {
                 Err(edgion_center_core::CoreError::Adapter("transient".into()))
+            } else if self
+                .not_current_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                Ok(OfflineOutcome::NotCurrent)
             } else {
-                Ok(())
+                Ok(OfflineOutcome::Marked)
             }
         }
 
@@ -1061,8 +1869,11 @@ mod tests {
         async fn evict(
             &self,
             _id: &ControllerId,
-        ) -> edgion_center_core::CoreResult<edgion_center_core::EvictionOutcome> {
-            Ok(edgion_center_core::EvictionOutcome::AlreadyAbsent)
+        ) -> edgion_center_core::CoreResult<edgion_center_core::EvictionResult> {
+            Ok(edgion_center_core::EvictionResult {
+                outcome: edgion_center_core::EvictionOutcome::AlreadyAbsent,
+                target: None,
+            })
         }
     }
 
@@ -1070,15 +1881,221 @@ mod tests {
     async fn offline_projection_retries_transient_failures() {
         let directory = Arc::new(FlakyDirectory {
             failures_remaining: AtomicUsize::new(2),
+            not_current_remaining: AtomicUsize::new(0),
             attempts: AtomicUsize::new(0),
         });
         project_offline_with_retry(
             directory.clone(),
             ControllerId::new("c1").unwrap(),
             SessionId::new("s1").unwrap(),
+            None,
+            1,
+            tokio_util::sync::CancellationToken::new(),
         )
         .await;
         assert_eq!(directory.attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn newer_durable_revision_ends_offline_reconciliation() {
+        let directory = Arc::new(FlakyDirectory {
+            failures_remaining: AtomicUsize::new(0),
+            not_current_remaining: AtomicUsize::new(2),
+            attempts: AtomicUsize::new(0),
+        });
+        project_offline_with_retry(
+            directory.clone(),
+            ControllerId::new("c1").unwrap(),
+            SessionId::new("late-session").unwrap(),
+            None,
+            7,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(directory.attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn ambiguous_offline_retries_beyond_previous_attempt_limit() {
+        let directory = Arc::new(FlakyDirectory {
+            failures_remaining: AtomicUsize::new(5),
+            not_current_remaining: AtomicUsize::new(0),
+            attempts: AtomicUsize::new(0),
+        });
+        project_offline_with_retry(
+            directory.clone(),
+            ControllerId::new("c1").unwrap(),
+            SessionId::new("late-session").unwrap(),
+            None,
+            9,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(directory.attempts.load(Ordering::SeqCst), 6);
+    }
+
+    struct ProjectionDirectory {
+        failures_remaining: AtomicUsize,
+        attempts: AtomicUsize,
+        applied: std::sync::Mutex<Option<ControllerRuntimeObservation>>,
+    }
+
+    #[tonic::async_trait]
+    impl ControllerDirectory for ProjectionDirectory {
+        async fn upsert_registration(
+            &self,
+            _: ControllerRegistration,
+        ) -> edgion_center_core::CoreResult<()> {
+            unreachable!()
+        }
+
+        async fn mark_offline(
+            &self,
+            _: &ControllerId,
+            _: &SessionId,
+            _: Option<&OwnershipFence>,
+            _: i64,
+        ) -> edgion_center_core::CoreResult<OfflineOutcome> {
+            unreachable!()
+        }
+
+        async fn list(
+            &self,
+        ) -> edgion_center_core::CoreResult<Vec<edgion_center_core::ControllerRecord>> {
+            unreachable!()
+        }
+
+        async fn project_runtime(
+            &self,
+            observation: ControllerRuntimeObservation,
+        ) -> edgion_center_core::CoreResult<bool> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            if self
+                .failures_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(edgion_center_core::CoreError::Adapter(
+                    "transient".to_string(),
+                ));
+            }
+            *self.applied.lock().unwrap() = Some(observation);
+            Ok(true)
+        }
+
+        async fn evict(
+            &self,
+            _: &ControllerId,
+        ) -> edgion_center_core::CoreResult<edgion_center_core::EvictionResult> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_projector_retries_and_coalesces_latest_observation() {
+        let directory = Arc::new(ProjectionDirectory {
+            failures_remaining: AtomicUsize::new(2),
+            attempts: AtomicUsize::new(0),
+            applied: std::sync::Mutex::new(None),
+        });
+        let projector = RuntimeProjector::new(Some(directory.clone()));
+        let base = ControllerRuntimeObservation {
+            controller_id: ControllerId::new("c1").unwrap(),
+            session_id: SessionId::new("s1").unwrap(),
+            ownership_fence: None,
+            sync_version: Some(1),
+            watch_server_id: Some("server-1".to_string()),
+            resource_count: None,
+            stats_updated_unix_ms: None,
+            watch_updated_unix_ms: Some(1),
+            observed_at_unix_ms: 1,
+        };
+        projector.submit(base.clone());
+        projector.submit(ControllerRuntimeObservation {
+            sync_version: Some(2),
+            watch_server_id: Some("server-2".to_string()),
+            resource_count: Some(9),
+            stats_updated_unix_ms: Some(2),
+            watch_updated_unix_ms: Some(2),
+            observed_at_unix_ms: 2,
+            ..base
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if directory.applied.lock().unwrap().is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let applied = directory.applied.lock().unwrap().clone().unwrap();
+        assert_eq!(applied.sync_version, Some(2));
+        assert_eq!(applied.watch_server_id.as_deref(), Some("server-2"));
+        assert_eq!(applied.resource_count, Some(9));
+        assert_eq!(directory.attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn runtime_projector_shutdown_cancels_retry_workers() {
+        let directory = Arc::new(ProjectionDirectory {
+            failures_remaining: AtomicUsize::new(usize::MAX),
+            attempts: AtomicUsize::new(0),
+            applied: std::sync::Mutex::new(None),
+        });
+        let projector = RuntimeProjector::new(Some(directory.clone()));
+        projector.submit(ControllerRuntimeObservation {
+            controller_id: ControllerId::new("c1").unwrap(),
+            session_id: SessionId::new("s1").unwrap(),
+            ownership_fence: None,
+            sync_version: Some(1),
+            watch_server_id: Some("server-1".to_string()),
+            resource_count: None,
+            stats_updated_unix_ms: None,
+            watch_updated_unix_ms: Some(1),
+            observed_at_unix_ms: 1,
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while directory.attempts.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        projector.handle.stop();
+        tokio::time::timeout(Duration::from_secs(1), projector.handle.wait())
+            .await
+            .unwrap();
+        let stopped_at = directory.attempts.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(directory.attempts.load(Ordering::SeqCst), stopped_at);
+    }
+
+    #[tokio::test]
+    async fn offline_reconciler_keeps_only_latest_worker_per_controller() {
+        let directory = Arc::new(FlakyDirectory {
+            failures_remaining: AtomicUsize::new(usize::MAX),
+            not_current_remaining: AtomicUsize::new(0),
+            attempts: AtomicUsize::new(0),
+        });
+        let reconciler = OfflineReconciler::default();
+        for session in ["old", "new"] {
+            reconciler.schedule(
+                directory.clone(),
+                ControllerId::new("c1").unwrap(),
+                SessionId::new(session).unwrap(),
+                None,
+                1,
+            );
+        }
+        assert_eq!(reconciler.worker_count(), 1);
+        reconciler.cancel("c1");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(reconciler.worker_count(), 0);
     }
 
     fn ok_req() -> RegisterRequest {

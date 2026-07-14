@@ -5,6 +5,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = "proto";
     tonic_build::configure()
         .file_descriptor_set_path(out_dir.join("fed_sync_descriptor.bin"))
-        .compile_protos(&[format!("{proto_dir}/fed_sync.proto")], &[proto_dir])?;
+        .compile_protos(
+            &[
+                format!("{proto_dir}/fed_sync.proto"),
+                format!("{proto_dir}/internal_forwarding.proto"),
+            ],
+            &[proto_dir],
+        )?;
     Ok(())
 }

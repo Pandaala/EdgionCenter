@@ -3,7 +3,11 @@ name: center-access-control
 description: Orthogonal access control for EdgionCenter — three independent axes (authentication providers, authz mode, storage backend), the authz/auth/local_auth/db_auth/database/audit config, the permission catalog, RBAC enforcement, unified login, admin bootstrap, the audit log, and known limitations.
 ---
 
-# Access control (three orthogonal axes)
+# Standalone access control (three orthogonal axes)
+
+This page applies to `edgion-center-standalone`. Kubernetes mode has a fixed security
+composition: OIDC authentication plus Kubernetes SubjectAccessReview authorization, with
+no password or database user store.
 
 Center's access control is NOT a single "mode". It is three independent axes that
 combine freely:
@@ -19,10 +23,10 @@ RBAC resolves permissions from the database by the authenticated **subject** (OI
 DB username / single-admin name).
 
 Authoritative config example: [`config/edgion-center.yaml`](../../config/edgion-center.yaml).
-Code of record: `src/config/mod.rs` (`AuthzConfig` / `AuthzMode` / `DbAuthConfig` /
-`DatabaseConfig` / `AuditConfig`), `src/cli/mod.rs` (`build_access_app` / `validate_access` /
-`bootstrap_admin`), `src/common/authz/catalog.rs` (permission catalog + route map),
-`src/common/authz/db_authz.rs` (RBAC store).
+Code of record: `bins/edgion-center-standalone/src/config/mod.rs` (configuration),
+`bins/edgion-center-standalone/src/cli/mod.rs` (composition and bootstrap),
+`crates/center-app/src/common/authz/` (catalog and middleware), and
+`crates/center-adapter-sql/src/users.rs` (RBAC store).
 
 ## The three axes at a glance
 
@@ -42,7 +46,7 @@ config (allow_all + no db_auth) reproduces the old lightweight "login = admin" b
 
 | Authentication | `authz.mode` | DB required | Behavior |
 |----------------|--------------|-------------|----------|
-| OIDC only | `allow_all` | No | SSO login; every authenticated caller is a full admin. |
+| OIDC only | `allow_all` | Yes | SSO login; every authenticated caller is a full admin. |
 | DB users (`db_auth`) | `rbac` | Yes | Username/password login; permissions per user from the `users`/`roles` tables. |
 | OIDC | `rbac` | Yes | Okta login, **DB-driven permissions**: each OIDC `sub` must be pre-provisioned as a `users` row, else 403 everywhere. |
 | DB users (`db_auth`) | `allow_all` | Yes | Username/password login; every authenticated DB user is a full admin (no per-user keys). |
@@ -93,7 +97,7 @@ enabled — startup fails otherwise. OIDC needs no session secret.
 ### `database:`
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enabled` | `true` | When false, Center runs without persistence (rbac / db_auth then refuse to start). |
+| `enabled` | `true` | Must be true for the standalone binary; database-free operation uses the Kubernetes binary. |
 | `backend` | `sqlite` | `sqlite` (embedded) or `mysql` (external). |
 | `sqlite_path` | `data/center.db` | SQLite file path (when `backend = sqlite`). |
 | `mysql_url` | `null` | `mysql://user:pass@host:3306/db` — REQUIRED when `backend = mysql`; ignored otherwise. A `mysql` backend that fails to connect fails startup (no silent degrade). |
@@ -111,7 +115,7 @@ control under `allow_all`, where everyone is an admin.
 
 ## Permission catalog
 
-Source of truth: `src/common/authz/catalog.rs` (`catalog_groups()` / `all_keys()`). **Eleven
+Source of truth: `crates/center-app/src/common/authz/catalog.rs` (`catalog_groups()` / `all_keys()`). **Eleven
 keys in seven groups.** Each business API route + dashboard page maps to exactly one key;
 roles bundle keys; users get roles.
 
@@ -155,7 +159,7 @@ its own bearer-token flow and does not go through this route.
 
 ## Startup validation (fail-close, no silent fallback)
 
-`validate_access` (in `src/cli/mod.rs`) rejects the boot when:
+`validate_access` (in `bins/edgion-center-standalone/src/cli/mod.rs`) rejects the boot when:
 
 - `authz.mode = rbac` but there is no usable database.
 - `db_auth.enabled = true` but there is no usable database.
@@ -200,5 +204,3 @@ is provisioned. Idempotent: a no-op once any user exists.
 
 - Orthogonal design: [`docs/history/superpowers/specs/2026-06-14-center-orthogonal-access-control-design.md`](../../docs/history/superpowers/specs/2026-06-14-center-orthogonal-access-control-design.md)
 - Prior (superseded) dual-tier design: [`docs/history/superpowers/specs/2026-06-13-center-dual-access-control-design.md`](../../docs/history/superpowers/specs/2026-06-13-center-dual-access-control-design.md)
-</content>
-</invoke>

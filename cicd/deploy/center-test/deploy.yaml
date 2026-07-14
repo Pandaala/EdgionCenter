@@ -23,12 +23,19 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-01
       cluster: cluster-east
       env: [testing]
       tag: [team-a]
       ping_interval_secs: 5
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-1.crt
+            key: /edgion/tls/controller-1.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -57,12 +64,19 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-02
       cluster: cluster-west
       env: [testing]
       tag: [team-b]
       ping_interval_secs: 5
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-2.crt
+            key: /edgion/tls/controller-2.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -91,6 +105,22 @@ data:
       list_timeout_secs: 10
       command_timeout_secs: 30
       ping_interval_secs: 5
+
+    database:
+      enabled: true
+      backend: sqlite
+      sqlite_path: /tmp/edgion-center.db
+
+    grpc_security:
+      active: fed
+      certs:
+        - name: fed
+          cert: /edgion/tls/server.crt
+          key: /edgion/tls/server.key
+          ca: /edgion/tls/ca.crt
+
+    peer_identity:
+      trust_domain: edgion.io
 
     local_auth:
       enabled: true
@@ -139,9 +169,8 @@ metadata:
 spec:
   containers:
     - name: center
-      image: edgion-all:local
+      image: edgion-center-standalone:local
       imagePullPolicy: Never
-      command: ["edgion-center"]
       args: ["-c", "/edgion/config/edgion-center.yaml"]
       ports:
         - containerPort: 12251
@@ -156,10 +185,16 @@ spec:
         - name: config
           mountPath: /edgion/config/edgion-center.yaml
           subPath: edgion-center.yaml
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
         name: center-config
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 1 Pod ===
@@ -182,6 +217,9 @@ spec:
           mountPath: /init-data
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   containers:
     - name: controller
       image: edgion-all:local
@@ -208,6 +246,9 @@ spec:
         name: controller-1-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 2 Pod ===
@@ -230,6 +271,9 @@ spec:
           mountPath: /init-data
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   containers:
     - name: controller
       image: edgion-all:local
@@ -256,6 +300,9 @@ spec:
         name: controller-2-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 3 Config (cluster-north) ===
@@ -277,12 +324,19 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-03
       cluster: cluster-north
       env: [testing]
       tag: [team-c]
       ping_interval_secs: 5
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-3.crt
+            key: /edgion/tls/controller-3.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -311,12 +365,19 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-04
       cluster: cluster-south
       env: [testing]
       tag: [team-d]
       ping_interval_secs: 5
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-4.crt
+            key: /edgion/tls/controller-4.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -345,12 +406,19 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-05
       cluster: cluster-dr-east
       env: [testing]
       tag: [team-e]
       ping_interval_secs: 5
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-5.crt
+            key: /edgion/tls/controller-5.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -379,12 +447,19 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-06
       cluster: cluster-dr-west
       env: [testing]
       tag: [team-f]
       ping_interval_secs: 5
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-6.crt
+            key: /edgion/tls/controller-6.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -431,6 +506,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -440,6 +518,9 @@ spec:
         name: controller-3-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 4 Pod ===
@@ -479,6 +560,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -488,6 +572,9 @@ spec:
         name: controller-4-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 5 Pod ===
@@ -527,6 +614,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -536,6 +626,9 @@ spec:
         name: controller-5-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 6 Pod ===
@@ -575,6 +668,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -584,6 +680,9 @@ spec:
         name: controller-6-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 1 Test Data ===

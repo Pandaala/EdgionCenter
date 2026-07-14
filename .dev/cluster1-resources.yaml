@@ -1,0 +1,162 @@
+# Curated resource set for cluster 1 (orbstack k8s, ctrl-orb).
+# Adapted from edgion-tests/integration/conf samples. Namespace: edgion-test.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-http
+  namespace: edgion-test
+spec:
+  ports:
+    - name: http-30001
+      port: 30001
+      protocol: TCP
+      targetPort: 30001
+  type: ClusterIP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: test-http
+  namespace: edgion-test
+  labels:
+    kubernetes.io/service-name: test-http
+addressType: IPv4
+ports:
+  - name: http-30001
+    port: 30001
+    protocol: TCP
+endpoints:
+  - addresses:
+      - "192.0.2.10"
+    conditions:
+      ready: true
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: http-test-gateway
+  namespace: edgion-test
+spec:
+  gatewayClassName: public-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 31000
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: test-http
+  namespace: edgion-test
+spec:
+  parentRefs:
+    - name: http-test-gateway
+      namespace: edgion-test
+  hostnames:
+    - "test.example.com"
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /health
+      backendRefs:
+        - name: test-http
+          port: 30001
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/
+      backendRefs:
+        - name: test-http
+          port: 30001
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: edgiontls-https-gateway
+  namespace: edgion-test
+spec:
+  gatewayClassName: public-gateway
+  listeners:
+    # HTTPS listener with no tls block: EdgionTls supplies the certificate.
+    - name: https
+      protocol: HTTPS
+      port: 31443
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: edgion.io/v1
+kind: EdgionTls
+metadata:
+  name: edgiontls-https
+  namespace: edgion-test
+spec:
+  parentRefs:
+    - name: edgiontls-https-gateway
+      namespace: edgion-test
+      sectionName: https
+  hosts:
+    - test.example.com
+  secretRef:
+    name: edge-tls
+    namespace: edgion-test
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: request-restriction-path-allow
+  namespace: edgion-test
+spec:
+  requestPlugins:
+    - enable: true
+      type: RequestRestriction
+      config:
+        mode: Whitelist
+        ruleGroups:
+          - rules:
+              - name: "api-whitelist"
+                source: Path
+                values:
+                  - "/health"
+                regex:
+                  - "^/api/.*"
+        status: 404
+        message: "Path not allowed"
+---
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: gcir-smoke
+  namespace: edgion-test
+spec:
+  data:
+    type: Selector
+    config:
+      active: p1
+      description: "smoke-test selector for GlobalConnectionIpRestriction"
+---
+apiVersion: edgion.io/v1
+kind: LinkSys
+metadata:
+  name: redis-test
+  namespace: edgion-test
+spec:
+  type: redis
+  config:
+    endpoints:
+      - "redis://127.0.0.1:16379"
+    db: 0
+    auth:
+      secretRef:
+        name: redis-test-auth
+    pool:
+      size: 4
+    timeout:
+      connect: 3000
+      read: 2000
+      write: 2000

@@ -6,7 +6,9 @@
 
 pub mod aggregator;
 pub mod commander;
+pub mod eviction;
 pub mod federation;
+pub mod internal_forwarding;
 pub mod metadata_store;
 pub mod observe;
 pub mod poll;

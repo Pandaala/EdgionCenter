@@ -3,6 +3,7 @@
 use crate::federation::proto::{CenterMessage, RegisterRequest};
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -17,11 +18,25 @@ pub struct ControllerSession {
     pub last_seen: Instant,
     pub offline_since: Option<Instant>,
     session_cancel: CancellationToken,
+    ownership: Option<SessionOwnership>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionOwnership {
+    pub holder: String,
+    pub fence: edgion_center_core::OwnershipFence,
+    pub valid: Arc<AtomicBool>,
+}
+
+impl SessionOwnership {
+    pub fn is_valid(&self) -> bool {
+        self.valid.load(Ordering::Acquire)
+    }
 }
 
 impl ControllerSession {
     pub fn is_online(&self) -> bool {
-        self.stream_tx.is_some()
+        self.stream_tx.is_some() && !self.session_cancel.is_cancelled()
     }
 }
 
@@ -80,6 +95,18 @@ impl ControllerRegistry {
         stream_tx: mpsc::Sender<CenterMessage>,
         session_id: String,
     ) -> RegistrationOutcome {
+        self.register_owned_cancellable(controller_id, info, stream_tx, session_id, None)
+    }
+
+    /// Atomically install a session together with its platform ownership fence.
+    pub fn register_owned_cancellable(
+        &self,
+        controller_id: String,
+        info: RegisterRequest,
+        stream_tx: mpsc::Sender<CenterMessage>,
+        session_id: String,
+        ownership: Option<SessionOwnership>,
+    ) -> RegistrationOutcome {
         let session_cancel = CancellationToken::new();
         let session = ControllerSession {
             controller_id: controller_id.clone(),
@@ -89,6 +116,7 @@ impl ControllerRegistry {
             last_seen: Instant::now(),
             offline_since: None,
             session_cancel: session_cancel.clone(),
+            ownership,
         };
         let mut guard = self.inner.write();
         // Capture a displaced *live* session id (takeover). An entry that is
@@ -126,14 +154,37 @@ impl ControllerRegistry {
 
     pub fn get_session(&self, controller_id: &str) -> Option<SessionView> {
         let map = self.inner.read();
-        map.get(controller_id).map(|s| SessionView {
-            controller_id: s.controller_id.clone(),
-            session_id: s.session_id.clone(),
-            info: s.info.clone(),
-            stream_tx: s.stream_tx.clone(),
-            last_seen: s.last_seen,
-            offline_since: s.offline_since,
+        let session = map.get(controller_id)?;
+        Some(SessionView {
+            controller_id: session.controller_id.clone(),
+            session_id: session.session_id.clone(),
+            info: session.info.clone(),
+            stream_tx: if session.is_online() {
+                session.stream_tx.clone()
+            } else {
+                None
+            },
+            last_seen: session.last_seen,
+            offline_since: session.offline_since,
+            session_cancel: session.session_cancel.clone(),
+            ownership: session.ownership.clone(),
         })
+    }
+
+    /// Fence a locally owned session before attempting a same-replica Lease
+    /// reacquire. This closes the interval in which Kubernetes has committed a
+    /// newer fence but the displaced stream has not reached its next renewal.
+    pub fn fence_owned_session(&self, controller_id: &str) -> bool {
+        let guard = self.inner.read();
+        let Some(session) = guard.get(controller_id) else {
+            return false;
+        };
+        let Some(ownership) = session.ownership.as_ref() else {
+            return false;
+        };
+        ownership.valid.store(false, Ordering::Release);
+        session.session_cancel.cancel();
+        true
     }
 
     /// Seconds elapsed since the controller's last_seen, computed inside the
@@ -150,6 +201,23 @@ impl ControllerRegistry {
         if let Some(session) = self.inner.write().get_mut(controller_id) {
             session.last_seen = Instant::now();
         }
+    }
+
+    /// Cancel every live transport session during process shutdown.
+    ///
+    /// Session handlers retain responsibility for the normal offline
+    /// projection and coordinator release path; this only delivers the shared
+    /// cancellation signal and immediately hides their senders from callers.
+    pub fn cancel_all(&self) -> usize {
+        let mut cancelled = 0;
+        for session in self.inner.write().values_mut() {
+            if session.is_online() {
+                session.session_cancel.cancel();
+                session.stream_tx.take();
+                cancelled += 1;
+            }
+        }
+        cancelled
     }
 
     /// Mark the session offline and release its stream sender.
@@ -205,6 +273,9 @@ impl ControllerRegistry {
             .read()
             .values()
             .filter_map(|s| {
+                if !s.is_online() {
+                    return None;
+                }
                 s.stream_tx
                     .as_ref()
                     .map(|tx| (s.controller_id.clone(), tx.clone()))
@@ -216,11 +287,18 @@ impl ControllerRegistry {
     /// Returns true if an entry was removed. Unlike `mark_offline`, this
     /// drops the session record itself (used by Admin DELETE cascade).
     pub fn remove(&self, controller_id: &str) -> bool {
-        let removed = self.inner.write().remove(controller_id).is_some();
-        if removed {
+        let removed = self.inner.write().remove(controller_id);
+        if let Some(mut session) = removed {
+            if let Some(ownership) = &session.ownership {
+                ownership.valid.store(false, Ordering::Release);
+            }
+            session.session_cancel.cancel();
+            session.stream_tx.take();
             self.metrics.record_eviction();
+            true
+        } else {
+            false
         }
-        removed
     }
 
     /// Current number of registered controller sessions (online + offline).
@@ -259,6 +337,20 @@ pub struct SessionView {
     pub last_seen: Instant,
     #[allow(dead_code)]
     pub offline_since: Option<Instant>,
+    pub(crate) session_cancel: CancellationToken,
+    pub ownership: Option<SessionOwnership>,
+}
+
+impl SessionView {
+    pub fn matches_ownership(
+        &self,
+        holder: &str,
+        fence: &edgion_center_core::OwnershipFence,
+    ) -> bool {
+        self.ownership.as_ref().is_some_and(|ownership| {
+            ownership.is_valid() && ownership.holder == holder && ownership.fence == *fence
+        })
+    }
 }
 
 #[cfg(test)]
@@ -381,8 +473,14 @@ mod tests {
     fn test_remove_drops_entry_and_is_idempotent() {
         let registry = ControllerRegistry::new();
         let (tx, _rx) = mpsc::channel(8);
-        registry.register("cid".to_string(), mock_info("cid"), tx, "s1".to_string());
+        let registration = registry.register_cancellable(
+            "cid".to_string(),
+            mock_info("cid"),
+            tx,
+            "s1".to_string(),
+        );
         assert!(registry.remove("cid"));
+        assert!(registration.session_cancel.is_cancelled());
         assert!(registry.get_session("cid").is_none());
         assert!(!registry.remove("cid"));
     }
@@ -425,6 +523,53 @@ mod tests {
         assert!(first.session_cancel.is_cancelled());
         assert!(!second.session_cancel.is_cancelled());
         assert_eq!(second.displaced_session_id.as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn same_holder_reacquire_fences_owned_session_before_lease_rotation() {
+        let registry = ControllerRegistry::new();
+        let (tx, _rx) = mpsc::channel(8);
+        let valid = Arc::new(AtomicBool::new(true));
+        let registration = registry.register_owned_cancellable(
+            "cid".to_string(),
+            mock_info("cid"),
+            tx,
+            "s1".to_string(),
+            Some(SessionOwnership {
+                holder: "center-0/uid-0".to_string(),
+                fence: edgion_center_core::OwnershipFence {
+                    token: "old-token".to_string(),
+                    epoch: 1,
+                },
+                valid: valid.clone(),
+            }),
+        );
+
+        assert!(registry.fence_owned_session("cid"));
+        assert!(!valid.load(Ordering::Acquire));
+        assert!(registration.session_cancel.is_cancelled());
+        assert!(!registry
+            .get_session("cid")
+            .unwrap()
+            .ownership
+            .unwrap()
+            .is_valid());
+    }
+
+    #[test]
+    fn shutdown_cancels_all_live_sessions_and_hides_senders() {
+        let registry = ControllerRegistry::new();
+        let (tx1, _rx1) = mpsc::channel(8);
+        let first =
+            registry.register_cancellable("c1".to_string(), mock_info("c1"), tx1, "s1".to_string());
+        let (tx2, _rx2) = mpsc::channel(8);
+        registry.register("c2".to_string(), mock_info("c2"), tx2, "s2".to_string());
+        assert!(registry.mark_offline("c2", "s2"));
+
+        assert_eq!(registry.cancel_all(), 1);
+        assert!(first.session_cancel.is_cancelled());
+        assert!(registry.online_senders().is_empty());
+        assert_eq!(registry.cancel_all(), 0);
     }
 
     #[test]

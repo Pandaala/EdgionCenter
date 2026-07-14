@@ -1,0 +1,46 @@
+# Dev config for local frontend debugging.
+# Federation gRPC uses mTLS (controller side forces https); web uses local_auth.
+server:
+  grpc_addr: "0.0.0.0:12251"
+  http_addr: "0.0.0.0:12201"
+  probe_addr: "0.0.0.0:12200"
+  metrics_addr: "0.0.0.0:12290"
+
+sync:
+  list_interval_secs: 15
+  list_timeout_secs: 10
+  command_timeout_secs: 10
+  ping_interval_secs: 10
+
+database:
+  enabled: true
+  backend: sqlite
+  sqlite_path: "/Volumes/ExtStore/ws5/EdgionCenter/.dev/data/center.db"
+
+authz:
+  mode: allow_all
+
+audit:
+  enabled: true
+  log_reads: false
+
+# Single shared admin for web login.
+local_auth:
+  enabled: true
+  username: "admin"
+  password: "edgion-dev"
+  jwt_secret: "dev-jwt-secret-change-me"
+  jwt_expiry_hours: 24
+  cookie_secure: false
+
+# Federation channel mTLS (controller dials https://192.168.139.3:12251).
+grpc_security:
+  active: fed
+  certs:
+    - name: fed
+      cert: /Volumes/ExtStore/ws5/EdgionCenter/.dev/certs/server.crt
+      key: /Volumes/ExtStore/ws5/EdgionCenter/.dev/certs/server.key
+      ca: /Volumes/ExtStore/ws5/EdgionCenter/.dev/certs/ca.crt
+
+peer_identity:
+  trust_domain: "edgion.io"

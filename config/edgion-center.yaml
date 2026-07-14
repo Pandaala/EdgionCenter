@@ -3,7 +3,7 @@
 # ================================================================================
 #
 # Usage:
-#   ./edgion-center --config-file config/edgion-center.yaml
+#   ./target/release/edgion-center-standalone --config-file config/edgion-center.yaml
 #
 # ================================================================================
 
@@ -168,16 +168,16 @@ audit:
 # ============================================================================
 # Federation gRPC Channel Security (mTLS)
 # ============================================================================
-# Omit this section entirely to keep plaintext gRPC (backward compatible).
-# When configured, Center requires valid client certificates from Controllers.
+# This section is mandatory. Federation is mTLS-only and startup fails closed
+# when the server certificate, key, CA, or peer trust domain is absent.
 #
-# --- Option A: Legacy single-cert format (backward compatible) ---
+# --- Option A: Single-cert format ---
 # grpc_security:
 #   tls:
 #     cert: certs/grpc/server.crt   # Center server certificate
 #     key: certs/grpc/server.key    # Center server private key
 #     ca: certs/grpc/ca.crt         # CA certificate (verifies Controller client cert)
-#     skip_tls: false               # Emergency bypass: true = skip TLS (INSECURE)
+#     skip_tls: false               # Must remain false; plaintext is unsupported
 #
 # --- Option B: Multi-cert format (supports cert rotation / CA migration) ---
 # grpc_security:
@@ -191,3 +191,6 @@ audit:
 #       cert: certs/grpc/new-ca/server.crt
 #       key: certs/grpc/new-ca/server.key
 #       ca: certs/grpc/new-ca/ca.crt
+#
+# peer_identity:
+#   trust_domain: edgion.io         # Controller SPIFFE trust domain (required)

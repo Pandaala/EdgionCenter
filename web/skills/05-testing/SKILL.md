@@ -30,10 +30,10 @@ cd /Users/caohao/ws2/edgion
 # Run from the EdgionCenter repo root
 
 # 1. Build
-cargo build --bin edgion-center
+cargo build -p edgion-center-standalone
 
 # 2. Start Center backend (Center Admin API on :12201)
-cargo run --bin edgion-center -- --config-file config/edgion-center.yaml
+cargo run -p edgion-center-standalone -- --config-file config/edgion-center.yaml
 ```
 
 ## Test Ports

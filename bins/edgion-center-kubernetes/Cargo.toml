@@ -1,0 +1,36 @@
+[package]
+name = "edgion-center-kubernetes"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Database-free Kubernetes-native Edgion Center server"
+build = "../../build.rs"
+
+[[bin]]
+name = "edgion-center-kubernetes"
+path = "src/main.rs"
+
+[features]
+embed-dashboard = ["edgion-center-app/embed-dashboard"]
+
+[dependencies]
+edgion-center-core = { path = "../../crates/center-core" }
+edgion-center-runtime = { path = "../../crates/center-runtime" }
+edgion-center-app = { path = "../../crates/center-app", default-features = false }
+edgion-center-adapter-kubernetes = { path = "../../crates/center-adapter-kubernetes" }
+anyhow = "1.0"
+axum = { version = "0.8.8", features = ["macros", "ws"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+kube.workspace = true
+parking_lot = "0.12"
+serde.workspace = true
+serde_yaml = "0.9"
+tokio = { version = "1.49", features = ["full"] }
+tokio-util = "0.7"
+tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+async-trait.workspace = true
+tempfile = "3"

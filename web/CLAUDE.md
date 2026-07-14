@@ -148,7 +148,7 @@ npm run lint             # ESLint check
 npm run preview          # preview production build
 
 # Backend (run from the EdgionCenter repo root)
-cargo run --bin edgion-center -- --config-file config/edgion-center.yaml
+cargo run -p edgion-center-standalone -- --config-file config/edgion-center.yaml
 # Center Admin API: http://localhost:12201
 ```
 

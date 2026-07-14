@@ -4,13 +4,11 @@ import { systemApi } from '@/api/client'
 export type AuthzMode = 'allow_all' | 'rbac'
 
 /**
- * Fetches `/server-info` once (cached) and exposes the access-control fields.
+ * Fetches the public `/server-info` discovery document once and caches it.
  *
- * Access control is orthogonal: `authzMode` (`allow_all` | `rbac`) is the
- * authorization model, and `dbAuthEnabled` reports whether DB-backed (table
- * `users`) authentication is in use. The dashboard derives menu visibility from
- * these — under `allow_all` the backend grants every permission to everyone, so
- * the permission keys alone cannot tell whether user/role management is real.
+ * The dashboard derives login, menu, and route availability from the explicit
+ * capability flags. `authzMode` and `dbAuthEnabled` remain descriptive metadata
+ * for compatibility and must not be used to infer whether a feature exists.
  * This hook keys the query as `['server-info']` — a separate cached entry from
  * the dashboards, which use `['server-info', controllerId ?? '']`. It is
  * therefore NOT deduped with them; with `staleTime: Infinity` it is fetched

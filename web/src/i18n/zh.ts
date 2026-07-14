@@ -555,6 +555,8 @@ const zh = {
   'login.title': '登录',
   'login.subtitle': '登录 Edgion Controller',
   'login.subtitle.center': '登录 Edgion Center',
+  'login.external.title': '需要外部身份认证',
+  'login.external.description': '请通过已配置的 OIDC 网关完成认证，然后刷新此页面。',
   'login.username': '用户名',
   'login.password': '密码',
   'login.submit': '登录',

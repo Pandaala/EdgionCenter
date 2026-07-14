@@ -22,6 +22,7 @@ pub enum AuthzMode {
 pub struct Principal {
     pub subject: String,
     pub provider: String,
+    pub issuer: Option<String>,
     #[serde(default)]
     pub groups: Vec<String>,
 }
@@ -34,6 +35,27 @@ pub struct Action {
     pub permission: String,
     /// Optional canonical controller id targeted by the operation.
     pub controller_id: Option<String>,
+    /// Platform-neutral operation classification used by native policy
+    /// adapters. SQL permission checks may ignore it.
+    #[serde(default)]
+    pub operation: Option<ActionOperation>,
+    /// Concrete Admin API path for Kubernetes non-resource authorization.
+    #[serde(default)]
+    pub request_path: Option<String>,
+    /// Concrete lowercase HTTP verb for non-resource native authorization.
+    #[serde(default)]
+    pub request_verb: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionOperation {
+    List,
+    Get,
+    Create,
+    Update,
+    Delete,
+    Execute,
 }
 
 /// Authorization outcome. Adapter failures are returned separately as errors.
@@ -64,6 +86,35 @@ impl Decision {
 #[async_trait::async_trait]
 pub trait Authorizer: Send + Sync {
     async fn authorize(&self, principal: &Principal, action: &Action) -> CoreResult<Decision>;
+
+    /// Optionally enumerate granted Center permission keys without forcing the
+    /// caller to issue one remote authorization request per candidate. Native
+    /// policies that cannot enumerate safely return `None`.
+    async fn granted_permissions(
+        &self,
+        _principal: &Principal,
+        _candidates: &[String],
+    ) -> CoreResult<Option<Vec<String>>> {
+        Ok(None)
+    }
+}
+
+/// Explicit opt-in policy for simple standalone deployments.
+pub struct AllowAllAuthorizer;
+
+#[async_trait::async_trait]
+impl Authorizer for AllowAllAuthorizer {
+    async fn authorize(&self, _principal: &Principal, _action: &Action) -> CoreResult<Decision> {
+        Ok(Decision::allow())
+    }
+
+    async fn granted_permissions(
+        &self,
+        _principal: &Principal,
+        candidates: &[String],
+    ) -> CoreResult<Option<Vec<String>>> {
+        Ok(Some(candidates.to_vec()))
+    }
 }
 
 #[cfg(test)]
@@ -87,5 +138,28 @@ mod tests {
             Decision::deny("missing permission").reason.as_deref(),
             Some("missing permission")
         );
+    }
+
+    #[tokio::test]
+    async fn allow_all_authorizer_is_an_explicit_core_policy() {
+        let decision = AllowAllAuthorizer
+            .authorize(
+                &Principal {
+                    subject: "alice".to_string(),
+                    provider: "local".to_string(),
+                    issuer: None,
+                    groups: Vec::new(),
+                },
+                &Action {
+                    permission: "future:permission".to_string(),
+                    controller_id: None,
+                    operation: None,
+                    request_path: None,
+                    request_verb: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(decision.allowed);
     }
 }

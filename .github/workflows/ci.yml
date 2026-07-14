@@ -7,81 +7,119 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # The Edgion repo that provides the shared `edgion-resources` crate. Override
-  # via repo/org variable `EDGION_REPO` if it lives under a different owner.
-  EDGION_REPO: ${{ vars.EDGION_REPO || format('{0}/Edgion', github.repository_owner) }}
 
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # ripgrep is preinstalled on ubuntu-latest runners.
-      - name: English-only (everything outside web/)
-        run: cicd/checks/check_english_only.sh
+      - name: Repository policy checks
+        run: |
+          cicd/checks/check_english_only.sh
+          cicd/checks/check_no_legacy_pm.sh
+          git diff --check
 
   build-test:
     runs-on: ubuntu-latest
     steps:
-      # Lay the two repos out side by side so the Cargo path dependency
-      # `edgion-resources = { path = "../Edgion/edgion-resources" }` resolves.
       - name: Checkout EdgionCenter
         uses: actions/checkout@v4
         with:
           path: EdgionCenter
-      - name: Checkout Edgion (shared edgion-resources)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.EDGION_REPO }}
-          path: Edgion
-          # A token with read access to the Edgion repo when it is private.
-          token: ${{ secrets.EDGION_REPO_TOKEN || github.token }}
-
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install native tools
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler ripgrep
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: EdgionCenter
-
-      - name: Format check
+      - uses: azure/setup-kubectl@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: EdgionCenter/web/package-lock.json
+      - name: Hermetic integration matrix
         working-directory: EdgionCenter
-        run: cargo fmt --all -- --check
+        env:
+          KUBECONFIG: /dev/null
+        run: cicd/integration/run-matrix.sh
 
-      - name: Clippy
+  mysql:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: edgion_center
+          MYSQL_USER: edgion
+          MYSQL_PASSWORD: edgion-test
+          MYSQL_ROOT_PASSWORD: root-test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uedgion -pedgion-test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout EdgionCenter
+        uses: actions/checkout@v4
+        with:
+          path: EdgionCenter
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: EdgionCenter
+      - name: SQL adapter tests with MySQL
         working-directory: EdgionCenter
-        # TODO: tighten to `-- -D warnings` once the dead-code warnings from the
-        # copied-but-unused common helpers are cleaned up.
-        run: cargo clippy --all-targets
+        env:
+          EDGION_TEST_MYSQL_URL: mysql://edgion:edgion-test@127.0.0.1:3306/edgion_center
+        run: cargo test -p edgion-center-adapter-sql --all-targets -- --nocapture
 
-      - name: Check (embed-dashboard feature)
-        working-directory: EdgionCenter
-        run: cargo check --features embed-dashboard
-
-      - name: Test
-        working-directory: EdgionCenter
-        run: cargo test
-
-  docker:
+  kubernetes-api:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout EdgionCenter
         uses: actions/checkout@v4
         with:
           path: EdgionCenter
-      - name: Checkout Edgion (shared edgion-resources)
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: EdgionCenter
+      - name: Start disposable Kubernetes API
+        uses: helm/kind-action@v1
+      - name: Install CRD and run real adapter tests
+        working-directory: EdgionCenter
+        env:
+          EDGION_TEST_KUBERNETES: "1"
+          EDGION_TEST_KUBERNETES_NAMESPACE: edgion-center-ci
+        run: |
+          kubectl apply -f cicd/deploy/center-kubernetes/crd.yaml
+          kubectl create namespace "$EDGION_TEST_KUBERNETES_NAMESPACE"
+          cargo test -p edgion-center-adapter-kubernetes --test real_cluster -- --nocapture
+
+  docker:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mode: [standalone, kubernetes]
+    steps:
+      - name: Checkout EdgionCenter
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.EDGION_REPO }}
-          path: Edgion
-          token: ${{ secrets.EDGION_REPO_TOKEN || github.token }}
-      # build.sh stages the two repos into a temp context and runs docker build.
-      - name: Build image
+          path: EdgionCenter
+      - uses: docker/setup-buildx-action@v3
+      - name: Build mode-specific image
         working-directory: EdgionCenter
-        run: cicd/build-image.sh -t pandaala/edgion-center:ci -r ../Edgion
+        run: >-
+          cicd/build-image.sh
+          --mode ${{ matrix.mode }}
+          -t pandaala/edgion-center-${{ matrix.mode }}:ci

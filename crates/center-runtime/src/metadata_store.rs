@@ -18,9 +18,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use std::time::{Duration, Instant};
 
 use crate::watch_cache::CenterConfHandler;
 use crate::watch_cache::WatchedConfigData;
+
+/// Sorted diagnostic counters keyed by effective-state resource identity.
+pub type DiagnosticEntries = Vec<(String, usize)>;
+
+/// Region-route and global-IP-restriction diagnostic summaries.
+pub type MetadataStatusEntries = (DiagnosticEntries, DiagnosticEntries);
 
 /// One controller's effective region route (deserialized from the controller's
 /// /api/v1/region-routes/effective response; field names match that DTO).
@@ -97,6 +104,15 @@ pub struct CenterMetaDataStore {
     // gir_key ("ns/pluginName") → { controller_id → EffectiveGirView }
     // Populated by the background poller; replaces the dead fed-sync GIR feed.
     gir_effective: RwLock<HashMap<String, HashMap<String, EffectiveGirView>>>,
+    coverage: RwLock<HashMap<String, ControllerCoverage>>,
+    expected_revisions: RwLock<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ControllerCoverage {
+    revision: Option<String>,
+    region_routes_at: Option<Instant>,
+    gir_at: Option<Instant>,
 }
 
 impl CenterMetaDataStore {
@@ -104,6 +120,8 @@ impl CenterMetaDataStore {
         Self {
             region_routes: RwLock::new(HashMap::new()),
             gir_effective: RwLock::new(HashMap::new()),
+            coverage: RwLock::new(HashMap::new()),
+            expected_revisions: RwLock::new(HashMap::new()),
         }
     }
 
@@ -129,6 +147,38 @@ impl CenterMetaDataStore {
         }
         // Drop outer keys that became empty.
         map.retain(|_, inner| !inner.is_empty());
+        self.coverage
+            .write()
+            .entry(controller_id.to_string())
+            .or_default()
+            .region_routes_at = Some(Instant::now());
+    }
+
+    pub fn replace_region_routes_fenced(
+        &self,
+        controller_id: &str,
+        revision: &str,
+        routes: Vec<EffectiveRegionRouteView>,
+    ) -> bool {
+        let expected = self.expected_revisions.read();
+        if expected.get(controller_id).map(String::as_str) != Some(revision) {
+            return false;
+        }
+        let mut map = self.region_routes.write();
+        for inner in map.values_mut() {
+            inner.remove(controller_id);
+        }
+        for route in routes {
+            map.entry(region_route_key(&route))
+                .or_default()
+                .insert(controller_id.to_string(), route);
+        }
+        map.retain(|_, inner| !inner.is_empty());
+        let mut coverage = self.coverage.write();
+        let entry = coverage.entry(controller_id.to_string()).or_default();
+        entry.revision = Some(revision.to_string());
+        entry.region_routes_at = Some(Instant::now());
+        true
     }
 
     /// Return aggregated effective region routes across all controllers.
@@ -167,6 +217,80 @@ impl CenterMetaDataStore {
         }
         // Drop outer keys that became empty.
         map.retain(|_, inner| !inner.is_empty());
+        self.coverage
+            .write()
+            .entry(controller_id.to_string())
+            .or_default()
+            .gir_at = Some(Instant::now());
+    }
+
+    pub fn replace_gir_fenced(
+        &self,
+        controller_id: &str,
+        revision: &str,
+        girs: Vec<EffectiveGirView>,
+    ) -> bool {
+        let expected = self.expected_revisions.read();
+        if expected.get(controller_id).map(String::as_str) != Some(revision) {
+            return false;
+        }
+        let mut map = self.gir_effective.write();
+        for inner in map.values_mut() {
+            inner.remove(controller_id);
+        }
+        for gir in girs {
+            map.entry(gir_key(&gir))
+                .or_default()
+                .insert(controller_id.to_string(), gir);
+        }
+        map.retain(|_, inner| !inner.is_empty());
+        let mut coverage = self.coverage.write();
+        let entry = coverage.entry(controller_id.to_string()).or_default();
+        entry.revision = Some(revision.to_string());
+        entry.gir_at = Some(Instant::now());
+        true
+    }
+
+    /// Publish the exact session/fence revision expected for the next sweep.
+    /// Changed identities immediately lose their old data and coverage, so a
+    /// late response from a displaced session cannot make the replica ready.
+    pub fn prepare_revisions(&self, revisions: &HashMap<String, String>) {
+        let changed: HashSet<String> = {
+            let mut expected = self.expected_revisions.write();
+            let changed = revisions
+                .iter()
+                .filter_map(|(id, revision)| {
+                    (expected.get(id) != Some(revision)).then_some(id.clone())
+                })
+                .chain(
+                    expected
+                        .keys()
+                        .filter(|id| !revisions.contains_key(*id))
+                        .cloned(),
+                )
+                .collect();
+            *expected = revisions.clone();
+            changed
+        };
+        if changed.is_empty() {
+            return;
+        }
+        self.region_routes.write().retain(|_, controllers| {
+            controllers.retain(|id, _| !changed.contains(id));
+            !controllers.is_empty()
+        });
+        self.gir_effective.write().retain(|_, controllers| {
+            controllers.retain(|id, _| !changed.contains(id));
+            !controllers.is_empty()
+        });
+        self.coverage.write().retain(|id, _| !changed.contains(id));
+    }
+
+    /// Return whether a sweep would preserve every currently published
+    /// controller revision. The Kubernetes composition uses this to lower
+    /// readiness before `prepare_revisions` clears changed snapshots.
+    pub fn revisions_match(&self, revisions: &HashMap<String, String>) -> bool {
+        *self.expected_revisions.read() == *revisions
     }
 
     /// Return aggregated effective GIR views across all controllers.
@@ -186,6 +310,65 @@ impl CenterMetaDataStore {
             .collect()
     }
 
+    /// Lightweight diagnostic summary used by the Admin API. Values are
+    /// derived from the live read model rather than legacy placeholder maps.
+    pub fn status_entries(&self) -> MetadataStatusEntries {
+        let mut routes: Vec<_> = self
+            .region_routes
+            .read()
+            .iter()
+            .map(|(key, controllers)| (key.clone(), controllers.len()))
+            .collect();
+        let mut restrictions: Vec<_> = self
+            .gir_effective
+            .read()
+            .iter()
+            .map(|(key, controllers)| (key.clone(), controllers.len()))
+            .collect();
+        routes.sort_by(|left, right| left.0.cmp(&right.0));
+        restrictions.sort_by(|left, right| left.0.cmp(&right.0));
+        (routes, restrictions)
+    }
+
+    /// Retain snapshots only for Controllers still present in the durable
+    /// directory. This lets a fresh active-active replica rebuild its local
+    /// read model while also removing projections hidden by an eviction fence.
+    pub fn retain_controllers(&self, controller_ids: &HashSet<String>) {
+        {
+            let mut routes = self.region_routes.write();
+            routes.retain(|_, controllers| {
+                controllers.retain(|id, _| controller_ids.contains(id));
+                !controllers.is_empty()
+            });
+        }
+        {
+            let mut restrictions = self.gir_effective.write();
+            restrictions.retain(|_, controllers| {
+                controllers.retain(|id, _| controller_ids.contains(id));
+                !controllers.is_empty()
+            });
+        }
+        self.coverage
+            .write()
+            .retain(|id, _| controller_ids.contains(id));
+        self.expected_revisions
+            .write()
+            .retain(|id, _| controller_ids.contains(id));
+    }
+
+    pub fn has_fresh_coverage(&self, controller_ids: &HashSet<String>, max_age: Duration) -> bool {
+        let coverage = self.coverage.read();
+        controller_ids.iter().all(|id| {
+            coverage.get(id).is_some_and(|entry| {
+                entry.revision.as_ref() == self.expected_revisions.read().get(id)
+                    && entry
+                        .region_routes_at
+                        .is_some_and(|at| at.elapsed() <= max_age)
+                    && entry.gir_at.is_some_and(|at| at.elapsed() <= max_age)
+            })
+        })
+    }
+
     /// Remove all entries for a given controller from all maps.
     /// If an inner HashMap becomes empty after removal, the outer key is also removed.
     fn remove_all_for_controller(&self, controller_id: &str) {
@@ -196,6 +379,7 @@ impl CenterMetaDataStore {
                 !inner.is_empty()
             });
         }
+        self.coverage.write().remove(controller_id);
         {
             let mut ge = self.gir_effective.write();
             ge.retain(|_, inner| {
@@ -311,5 +495,29 @@ mod tests {
         let list = store.list_region_routes();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].controllers.len(), 2);
+    }
+
+    #[test]
+    fn readiness_coverage_requires_both_snapshots_for_every_online_controller() {
+        let store = CenterMetaDataStore::new();
+        let ids = HashSet::from(["c1".to_string(), "c2".to_string()]);
+        store.replace_region_routes("c1", Vec::new());
+        store.replace_gir("c1", Vec::new());
+        assert!(!store.has_fresh_coverage(&ids, Duration::from_secs(30)));
+        store.replace_region_routes("c2", Vec::new());
+        assert!(!store.has_fresh_coverage(&ids, Duration::from_secs(30)));
+        store.replace_gir("c2", Vec::new());
+        assert!(store.has_fresh_coverage(&ids, Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn revision_change_is_visible_before_snapshot_rebuild() {
+        let store = CenterMetaDataStore::new();
+        let revision_a = HashMap::from([("c1".to_string(), "session-a".to_string())]);
+        let revision_b = HashMap::from([("c1".to_string(), "session-b".to_string())]);
+        assert!(!store.revisions_match(&revision_a));
+        store.prepare_revisions(&revision_a);
+        assert!(store.revisions_match(&revision_a));
+        assert!(!store.revisions_match(&revision_b));
     }
 }

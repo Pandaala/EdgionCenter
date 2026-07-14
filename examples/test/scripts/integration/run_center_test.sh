@@ -69,7 +69,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 # out of that monorepo). Override with EDGION_DIR if it lives elsewhere.
 EDGION_DIR="${EDGION_DIR:-$(cd "$REPO_ROOT/.." && pwd)/Edgion}"
 KILL_ALL="$REPO_ROOT/examples/test/scripts/utils/kill_all.sh"
-CENTER_BIN="$REPO_ROOT/target/debug/edgion-center"
+CENTER_BIN="$REPO_ROOT/target/debug/edgion-center-standalone"
 CTRL_BIN="$EDGION_DIR/target/debug/edgion-controller"
 CONF_SRC="$REPO_ROOT/examples/test/conf/Center"
 
@@ -196,7 +196,7 @@ done
 # ── Build ─────────────────────────────────────────────────────────────────────
 if $BUILD; then
   log "Building binaries..."
-  (cd "$REPO_ROOT" && cargo build --bin edgion-center 2>&1 | tail -5)
+  (cd "$REPO_ROOT" && cargo build -p edgion-center-standalone 2>&1 | tail -5)
   (cd "$EDGION_DIR" && cargo build --bin edgion-controller 2>&1 | tail -5)
   log "Build complete"
 fi
@@ -342,7 +342,9 @@ sync:
   ping_interval_secs: 5
 
 database:
-  enabled: false
+  enabled: true
+  backend: sqlite
+  sqlite_path: "${WORK_DIR}/center.db"
 
 grpc_security:
   active: fed
@@ -440,14 +442,14 @@ write_controller_config 3 "$CTRL3_GRPC_PORT" "$CTRL3_ADMIN_PORT" "$CTRL3_PROBE_P
 for idx in 1 2; do
   local_dir="$WORK_DIR/ctrl${idx}"
   mkdir -p "${local_dir}/config"
-  cp -r "$REPO_ROOT/config/crd" "${local_dir}/config/"
+  cp -r "$EDGION_DIR/config/crd" "${local_dir}/config/"
   cp "$CONF_SRC/ctrl${idx}/"*.yaml "${local_dir}/conf/"
 done
 # controller-3: kill-switch test — copy CRD schemas; no PluginMetaData resources
 # needed because it will not sync with Center.
 local_dir="$WORK_DIR/ctrl3"
 mkdir -p "${local_dir}/config"
-cp -r "$REPO_ROOT/config/crd" "${local_dir}/config/"
+cp -r "$EDGION_DIR/config/crd" "${local_dir}/config/"
 log "Copied CRD schemas and PluginMetaData resources to controller dirs"
 
 # ── Start center ──────────────────────────────────────────────────────────────

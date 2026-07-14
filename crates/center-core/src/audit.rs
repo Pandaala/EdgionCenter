@@ -5,12 +5,14 @@ use crate::CoreResult;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditEvent {
-    pub occurred_at_unix_ms: i64,
+    /// Unix timestamp in seconds, matching the existing Admin API contract.
+    pub ts: i64,
     pub actor: String,
     pub provider: String,
-    pub action: String,
+    pub method: String,
+    pub path: String,
     pub target_controller: Option<String>,
-    pub outcome: String,
+    pub status: i32,
     pub source_ip: Option<String>,
     pub request_id: Option<String>,
     pub detail: Option<String>,
@@ -20,9 +22,9 @@ pub struct AuditEvent {
 #[serde(rename_all = "camelCase")]
 pub struct AuditFilter {
     pub actor: Option<String>,
-    pub controller_id: Option<String>,
-    pub since_unix_ms: Option<i64>,
-    pub until_unix_ms: Option<i64>,
+    pub controller: Option<String>,
+    pub since: Option<i64>,
+    pub until: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

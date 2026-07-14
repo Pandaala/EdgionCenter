@@ -1,23 +1,37 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Form, Input, Button, message } from 'antd'
+import { Form, Input, Button, Alert, Spin, message } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { authApi } from '../../api/auth'
 import { setLoggedIn, isLoggedIn } from '../../utils/auth'
 import { getAppMode } from '../../utils/proxy'
 import { useT } from '../../i18n/index.tsx'
 
-const LoginPage = () => {
+const LoginPage = ({ passwordLogin = true }: { passwordLogin?: boolean }) => {
   const navigate = useNavigate()
   const t = useT()
   const [loading, setLoading] = useState(false)
+  const [externalChecking, setExternalChecking] = useState(!passwordLogin)
   const isCenter = getAppMode() === 'center'
 
   useEffect(() => {
     if (isLoggedIn()) {
       navigate('/', { replace: true })
+      return
     }
-  }, [navigate])
+    if (!passwordLogin) {
+      authApi
+        .me()
+        .then((response) => {
+          if (response.success) {
+            setLoggedIn()
+            navigate('/', { replace: true })
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => setExternalChecking(false))
+    }
+  }, [navigate, passwordLogin])
 
   const handleSubmit = async (values: { username: string; password: string }) => {
     setLoading(true)
@@ -77,7 +91,21 @@ const LoginPage = () => {
         >
           {t(isCenter ? 'login.subtitle.center' : 'login.subtitle')}
         </div>
-        <Form name="login" onFinish={handleSubmit} autoComplete="off" size="large">
+        {!passwordLogin ? (
+          externalChecking ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+              <Spin />
+            </div>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message={t('login.external.title')}
+              description={t('login.external.description')}
+              action={<Button onClick={() => window.location.reload()}>{t('btn.refresh')}</Button>}
+            />
+          )
+        ) : <Form name="login" onFinish={handleSubmit} autoComplete="off" size="large">
           <Form.Item
             name="username"
             rules={[{ required: true, message: t('login.required', { field: t('login.username') }) }]}
@@ -101,7 +129,7 @@ const LoginPage = () => {
               {t('login.submit')}
             </Button>
           </Form.Item>
-        </Form>
+        </Form>}
       </div>
     </div>
   )

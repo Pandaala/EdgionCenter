@@ -84,6 +84,16 @@ systemClient.interceptors.request.use((config) => {
   return config
 })
 
+export interface CenterCapabilities {
+  userAdmin: boolean
+  roleAdmin: boolean
+  auditQuery: boolean
+  controllerHistory: boolean
+  nativeRbac: boolean
+  leaderElection: boolean
+  passwordLogin: boolean
+}
+
 export const systemApi = {
   health: async (): Promise<{ success: boolean; data?: string }> => {
     const { data } = await systemClient.get('health')
@@ -101,6 +111,8 @@ export const systemApi = {
       ready?: boolean
       authzMode?: 'allow_all' | 'rbac'
       dbAuthEnabled?: boolean
+      platformMode?: 'standalone' | 'kubernetes'
+      capabilities?: CenterCapabilities
     }
   }> => {
     const { data } = await apiClient.get('server-info')
@@ -111,4 +123,3 @@ export const systemApi = {
     return data
   },
 }
-

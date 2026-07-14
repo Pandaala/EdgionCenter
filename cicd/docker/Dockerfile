@@ -1,21 +1,11 @@
-# Self-contained multi-stage build for the Edgion federation Hub (Center).
+# Self-contained multi-stage build for one explicit Edgion Center mode.
+# `cicd/build-image.sh --mode standalone|kubernetes` supplies the package and
+# binary. Building only that package preserves the SQL/Kubernetes dependency
+# boundary in the resulting image.
 #
-# Unlike the Edgion monorepo's shared multi-binary Dockerfile, this builds the
-# single edgion-center binary with the dashboard embedded (rust-embed), in one
-# image, with no dependency on the monorepo's CI machinery.
-#
-# Build CONTEXT layout (produced by cicd/build-image.sh — see that script):
-#   <context>/EdgionCenter/                 the center source
-#   <context>/Edgion/Cargo.toml             trimmed workspace root manifest
-#   <context>/Edgion/edgion-resources/      the shared crate (path dependency)
-#
-# The relative layout mirrors local dev so the Cargo path dependency
-# `edgion-resources = { path = "../Edgion/edgion-resources" }` resolves
-# unchanged. (For a CI/registry build you may instead pin edgion-resources to a
-# git rev and build with the EdgionCenter dir alone as context.)
-#
-# Usage: cicd/build-image.sh   (do NOT `docker build .` directly — the context must
-# include the shared crate; the script stages it.)
+# The build context contains only the self-contained EdgionCenter workspace.
+# Use cicd/build-image.sh so local artifacts are excluded and the mode-specific
+# package, binary, platform, tags, and output behavior are selected consistently.
 #
 # Multi-arch: this Dockerfile is platform-agnostic. cicd/build-image.sh drives
 # `docker buildx build --platform linux/amd64,linux/arm64` to emit a single
@@ -34,9 +24,9 @@ ARG RUNTIME_BASE=debian:bookworm-slim
 FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-bookworm AS web
 WORKDIR /web
 # Install deps against the lockfile first (better layer caching).
-COPY EdgionCenter/web/package.json EdgionCenter/web/package-lock.json ./
-RUN npm ci
-COPY EdgionCenter/web/ ./
+COPY web/package.json web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY web/ ./
 RUN npm run build
 # → /web/dist
 
@@ -58,18 +48,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # to the image build via RUSTFLAGS so a local `cargo build --release` keeps its
 # symbols for debugging.
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=lld -C strip=symbols"
-# Shared crate first (path dependency target), then the center sources. The
-# trimmed workspace root manifest must accompany the crate so its
-# `*.workspace = true` inheritance resolves (edgion-resources is a workspace
-# member and cannot be parsed without it).
-COPY Edgion/Cargo.toml /src/Edgion/Cargo.toml
-COPY Edgion/edgion-resources /src/Edgion/edgion-resources
 WORKDIR /src/EdgionCenter
-COPY EdgionCenter/Cargo.toml EdgionCenter/Cargo.lock EdgionCenter/build.rs ./
-COPY EdgionCenter/proto ./proto
-COPY EdgionCenter/src ./src
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY crates ./crates
+COPY bins ./bins
 # Staged dashboard assets so rust-embed (`#[folder = "web/dist/"]`) finds them.
 COPY --from=web /web/dist ./web/dist
+ARG CENTER_PACKAGE=edgion-center-standalone
+ARG CENTER_BINARY=edgion-center-standalone
 # TARGETARCH (auto-provided by BuildKit) keys the per-arch target cache so the
 # amd64 and arm64 builds don't clobber each other's artifacts. Cache mounts are
 # ephemeral and never committed to the image layer, so the compiled binary is
@@ -83,8 +69,8 @@ ARG TARGETARCH
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/EdgionCenter/target,id=center-target-${TARGETARCH},sharing=locked \
-    cargo build --release --features embed-dashboard \
-    && cp target/release/edgion-center /usr/local/bin/edgion-center
+    cargo build --release -p "${CENTER_PACKAGE}" --features embed-dashboard \
+    && cp "target/release/${CENTER_BINARY}" /usr/local/bin/edgion-center
 
 # ── Stage 3: slim runtime ─────────────────────────────────────────────────────
 FROM ${RUNTIME_BASE}
@@ -99,12 +85,14 @@ COPY --from=build /usr/local/bin/edgion-center /usr/local/bin/edgion-center
 USER edgion
 ENV RUST_LOG=info \
     RUST_BACKTRACE=1
-# Informational: admin API / fed-sync gRPC / probe / metrics.
-EXPOSE 12201 12251 12200 12290
+# Informational: admin API / fed-sync gRPC / probe / metrics / internal Kube RPC.
+# The standalone binary does not bind the final port.
+EXPOSE 12201 12251 12200 12290 12252
 ENTRYPOINT ["edgion-center"]
-CMD ["-c", "/etc/edgion/edgion-center.yaml"]
+CMD ["-c", "/etc/edgion-center/config.yaml"]
 
-LABEL org.opencontainers.image.title="edgion-center" \
-      org.opencontainers.image.description="Edgion federation hub (Center): FederationSync server, admin API, embedded dashboard" \
+ARG CENTER_BINARY=edgion-center-standalone
+LABEL org.opencontainers.image.title="${CENTER_BINARY}" \
+      org.opencontainers.image.description="Edgion Center mode-specific federation and management server" \
       org.opencontainers.image.source="https://github.com/Pandaala/EdgionCenter" \
       org.opencontainers.image.licenses="Apache-2.0"

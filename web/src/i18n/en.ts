@@ -555,6 +555,8 @@ const en = {
   'login.title': 'Login',
   'login.subtitle': 'Sign in to Edgion Controller',
   'login.subtitle.center': 'Sign in to Edgion Center',
+  'login.external.title': 'External identity required',
+  'login.external.description': 'Authenticate through the configured OIDC gateway, then refresh this page.',
   'login.username': 'Username',
   'login.password': 'Password',
   'login.submit': 'Sign In',

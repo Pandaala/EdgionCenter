@@ -7,7 +7,7 @@
 # 3. /api/v1/auth/status returns 200
 # 4. /api/v1/controllers (or any business path) without a token returns 503
 #    (middleware fail-close branch: require_auth=true + no provider ready -> 503)
-# 5. Startup log contains the WARN "No authentication configured"
+# 5. Startup log contains the no-provider WARN.
 #
 
 set -euo pipefail
@@ -55,7 +55,9 @@ server:
   probe_addr: "127.0.0.1:58101"
   metrics_addr: "127.0.0.1:58109"
 database:
-  enabled: false
+  enabled: true
+  backend: sqlite
+  sqlite_path: "$TMPDIR/center.db"
 sync:
   command_timeout_secs: 30
 grpc_security:
@@ -80,13 +82,13 @@ for port in 58100 58101 58109 58110; do
     fi
 done
 
-# Make sure edgion-center has been built
-if [ ! -x "$REPO_ROOT/target/debug/edgion-center" ]; then
-    echo "Building edgion-center..."
-    cargo build --bin edgion-center
+# Make sure the standalone Center has been built.
+if [ ! -x "$REPO_ROOT/target/debug/edgion-center-standalone" ]; then
+    echo "Building edgion-center-standalone..."
+    cargo build -p edgion-center-standalone
 fi
 
-"$REPO_ROOT/target/debug/edgion-center" -c "$TMPDIR/center.yaml" > "$TMPDIR/center.log" 2>&1 &
+"$REPO_ROOT/target/debug/edgion-center-standalone" -c "$TMPDIR/center.yaml" > "$TMPDIR/center.log" 2>&1 &
 CENTER_PID=$!
 
 cleanup() {
@@ -143,8 +145,8 @@ if [ "$STATUS" != "503" ]; then
 fi
 
 echo "[4/4] Checking startup WARN log..."
-if ! grep -q "No authentication configured" "$TMPDIR/center.log"; then
-    echo "FAIL: Expected WARN log 'No authentication configured' not found"
+if ! grep -q "No authentication provider configured" "$TMPDIR/center.log"; then
+    echo "FAIL: Expected no-authentication-provider WARN not found"
     cat "$TMPDIR/center.log"
     exit 1
 fi

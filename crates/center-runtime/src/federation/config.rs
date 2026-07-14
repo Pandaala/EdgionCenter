@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Runtime tuning for federation command and heartbeat behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CenterSyncConfig {
     pub command_timeout_secs: u64,
     pub ping_interval_secs: u64,

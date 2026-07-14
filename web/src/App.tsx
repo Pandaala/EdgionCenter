@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { Spin } from 'antd'
+import { Button, Result, Spin } from 'antd'
 import { AppShell } from './components/shell/AppShell'
 import ControllerProxy from './components/Layout/ControllerProxy'
 import { isLoggedIn } from './utils/auth'
-import { PermissionProvider } from './utils/permissions'
+import { PermissionGate, PermissionProvider } from './utils/permissions'
 import { setAppMode } from './utils/proxy'
-import { systemApi } from './api/client'
+import { resolveServerDiscovery } from './utils/discovery'
+import { systemApi, type CenterCapabilities } from './api/client'
 import LoginPage from './pages/Login/LoginPage'
 import Dashboard from './pages/Dashboard'
 import UserDashboard from './pages/Dashboard/UserDashboard'
@@ -49,27 +50,40 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!isLoggedIn()) {
     return <Navigate to="/login" replace />
   }
-  // Fetch /auth/me once for the authenticated subtree so useCan() is available.
-  // (Menu/route gating on permissions is a later task.)
+  // Fetch /auth/me once so menus and direct routes share one permission set.
   return <PermissionProvider>{children}</PermissionProvider>
+}
+
+function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
+  return (
+    <PermissionGate
+      permission={permission}
+      pending={<Spin size="large" />}
+      denied={<Navigate to="/" replace />}
+    >
+      {children}
+    </PermissionGate>
+  )
 }
 
 function App() {
   const [mode, setMode] = useState<'controller' | 'center' | null>(null)
+  const [capabilities, setCapabilities] = useState<CenterCapabilities | null>(null)
   const [loading, setLoading] = useState(true)
+  const [discoveryFailed, setDiscoveryFailed] = useState(false)
 
   useEffect(() => {
     // server-info is unauthenticated — always call it to detect mode
     systemApi
       .serverInfo()
       .then((res) => {
-        const m = res.data?.mode === 'center' ? 'center' : 'controller'
-        setMode(m)
-        setAppMode(m)
+        const discovery = resolveServerDiscovery(res)
+        setMode(discovery.mode)
+        setCapabilities(discovery.capabilities)
+        setAppMode(discovery.mode)
       })
       .catch(() => {
-        setMode('controller')
-        setAppMode('controller')
+        setDiscoveryFailed(true)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -88,10 +102,21 @@ function App() {
     )
   }
 
+  if (discoveryFailed || mode == null) {
+    return (
+      <Result
+        status="warning"
+        title="Unable to discover server capabilities"
+        subTitle="The dashboard will not guess an authentication mode. Check the service and retry."
+        extra={<Button type="primary" onClick={() => window.location.reload()}>Retry</Button>}
+      />
+    )
+  }
+
   if (mode === 'center') {
     return (
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<LoginPage passwordLogin={capabilities?.passwordLogin === true} />} />
         <Route path="/" element={<RequireAuth><AppShell mode="center" /></RequireAuth>}>
           <Route index element={<CenterDashboard />} />
           <Route path="region-routes" element={<RegionRouteList />} />
@@ -103,10 +128,10 @@ function App() {
             path="global-connection-ip-restrictions/:namespace/:name/:controllerId"
             element={<GlobalConnectionIpRestrictionDetail />}
           />
-          <Route path="admin" element={<CenterAdminPage />} />
-          <Route path="audit" element={<AuditLogPage />} />
-          <Route path="users" element={<UserManagementPage />} />
-          <Route path="roles" element={<RoleManagementPage />} />
+          {capabilities?.controllerHistory && <Route path="admin" element={<RequirePermission permission="controllers:read"><CenterAdminPage /></RequirePermission>} />}
+          {capabilities?.auditQuery && <Route path="audit" element={<RequirePermission permission="audit:read"><AuditLogPage /></RequirePermission>} />}
+          {capabilities?.userAdmin && <Route path="users" element={<RequirePermission permission="users:manage"><UserManagementPage /></RequirePermission>} />}
+          {capabilities?.roleAdmin && <Route path="roles" element={<RequirePermission permission="roles:manage"><RoleManagementPage /></RequirePermission>} />}
         </Route>
         <Route path="/controller/:controllerId" element={<RequireAuth><ControllerProxy /></RequireAuth>}>
           <Route index element={<Dashboard />} />

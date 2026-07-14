@@ -16,6 +16,7 @@ pub struct CenterCapabilities {
     pub controller_history: bool,
     pub native_rbac: bool,
     pub leader_election: bool,
+    pub password_login: bool,
 }
 
 impl CenterCapabilities {
@@ -28,6 +29,7 @@ impl CenterCapabilities {
                 controller_history: true,
                 native_rbac: false,
                 leader_election: false,
+                password_login: true,
             },
             CenterMode::Kubernetes => Self {
                 user_admin: false,
@@ -36,7 +38,29 @@ impl CenterCapabilities {
                 controller_history: true,
                 native_rbac: true,
                 leader_election: true,
+                password_login: false,
             },
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub const fn resolved(
+        user_admin: bool,
+        role_admin: bool,
+        audit_query: bool,
+        controller_history: bool,
+        native_rbac: bool,
+        leader_election: bool,
+        password_login: bool,
+    ) -> Self {
+        Self {
+            user_admin,
+            role_admin,
+            audit_query,
+            controller_history,
+            native_rbac,
+            leader_election,
+            password_login,
         }
     }
 }

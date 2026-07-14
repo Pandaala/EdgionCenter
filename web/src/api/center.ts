@@ -60,12 +60,4 @@ export const centerApi = {
     const { data } = await apiClient.delete(`center/admin/controllers/${safeId(id)}`)
     return data
   },
-  clearAdminCache: async (): Promise<{ success: boolean }> => {
-    const { data } = await apiClient.delete('center/admin/cache')
-    return data
-  },
-  triggerAdminSync: async (): Promise<{ success: boolean; data?: number }> => {
-    const { data } = await apiClient.post('center/admin/sync')
-    return data
-  },
 }

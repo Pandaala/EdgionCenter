@@ -1,0 +1,137 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: edgioncontrollers.center.edgion.io
+spec:
+  group: center.edgion.io
+  names:
+    kind: EdgionController
+    listKind: EdgionControllerList
+    plural: edgioncontrollers
+    singular: edgioncontroller
+    shortNames: [ec]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Cluster
+          type: string
+          jsonPath: .status.cluster
+        - name: Replica
+          type: string
+          jsonPath: .status.connectedReplica
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [controllerId]
+              properties:
+                controllerId:
+                  type: string
+                  maxLength: 253
+                  x-kubernetes-validations:
+                    - rule: self != ''
+                      message: controllerId must not be empty
+                    - rule: self == oldSelf
+                      message: controllerId is immutable
+                cluster:
+                  type: string
+                  maxLength: 253
+                  default: ""
+                environments:
+                  type: array
+                  maxItems: 64
+                  default: []
+                  items:
+                    type: string
+                    maxLength: 253
+                tags:
+                  type: array
+                  maxItems: 64
+                  default: []
+                  items:
+                    type: string
+                    maxLength: 253
+            status:
+              type: object
+              nullable: true
+              required:
+                - phase
+                - lastSeenTime
+                - observedAtUnixMs
+              properties:
+                phase:
+                  type: string
+                  enum: [Online, Offline, Stale]
+                sessionId:
+                  type: string
+                  nullable: true
+                cluster:
+                  type: string
+                environments:
+                  type: array
+                  items:
+                    type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                connectedReplica:
+                  type: string
+                  nullable: true
+                ownershipToken:
+                  type: string
+                  nullable: true
+                ownershipEpoch:
+                  type: integer
+                  minimum: 0
+                syncVersion:
+                  type: integer
+                  minimum: 0
+                  nullable: true
+                watchServerId:
+                  type: string
+                  nullable: true
+                resourceCount:
+                  type: integer
+                  minimum: 0
+                  nullable: true
+                statsUpdatedUnixMs:
+                  type: integer
+                  format: int64
+                  nullable: true
+                watchUpdatedUnixMs:
+                  type: integer
+                  format: int64
+                  nullable: true
+                lastSeenTime:
+                  type: string
+                  format: date-time
+                observedAtUnixMs:
+                  type: integer
+                  format: int64
+                evicted:
+                  type: boolean
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  nullable: true

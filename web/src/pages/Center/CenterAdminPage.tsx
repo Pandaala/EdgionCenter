@@ -4,12 +4,14 @@ import { ReloadOutlined } from '@ant-design/icons'
 import { centerApi, type AdminControllerDto } from '@/api/center'
 import { useT } from '@/i18n'
 import PageHeader from '@/components/PageHeader'
+import { useCan } from '@/utils/permissions'
 
 const { Text } = Typography
 
 export default function CenterAdminPage() {
   const t = useT()
   const queryClient = useQueryClient()
+  const canDelete = useCan('controllers:write')
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['center-admin-controllers'],
@@ -30,28 +32,6 @@ export default function CenterAdminPage() {
     },
   })
 
-  const clearCacheMutation = useMutation({
-    mutationFn: centerApi.clearAdminCache,
-    onSuccess: () => {
-      message.success(t('center.admin.clearCacheOk'))
-      // Broad invalidation is intentional: clearing the global cache affects every (sg, cluster, ns).
-      queryClient.invalidateQueries({ queryKey: ['center-region-route-detail'] })
-    },
-    onError: (e: any) => {
-      message.error(t('center.admin.clearCacheFail', { err: e.message }))
-    },
-  })
-
-  const syncMutation = useMutation({
-    mutationFn: centerApi.triggerAdminSync,
-    onSuccess: (res) => {
-      message.success(t('center.admin.syncAllOk', { n: res.data ?? 0 }))
-    },
-    onError: (e: any) => {
-      message.error(t('center.admin.syncAllFail', { err: e.message }))
-    },
-  })
-
   const handleDelete = (record: AdminControllerDto) => {
     Modal.confirm({
       title: t('confirm.deleteTitle'),
@@ -60,17 +40,6 @@ export default function CenterAdminPage() {
       okType: 'danger',
       cancelText: t('btn.cancel'),
       onOk: () => deleteMutation.mutate(record.controllerId),
-    })
-  }
-
-  const handleClearCache = () => {
-    Modal.confirm({
-      title: t('confirm.deleteTitle'),
-      content: t('center.admin.clearCacheConfirm'),
-      okText: t('confirm.okText'),
-      okType: 'danger',
-      cancelText: t('btn.cancel'),
-      onOk: () => clearCacheMutation.mutate(),
     })
   }
 
@@ -118,14 +87,16 @@ export default function CenterAdminPage() {
       title: t('col.actions'),
       key: 'actions',
       render: (_: unknown, record: AdminControllerDto) => (
-        <Button
-          danger
-          size="small"
-          onClick={() => handleDelete(record)}
-          loading={deleteMutation.isPending && deleteMutation.variables === record.controllerId}
-        >
-          {t('center.admin.deleteController')}
-        </Button>
+        canDelete ? (
+          <Button
+            danger
+            size="small"
+            onClick={() => handleDelete(record)}
+            loading={deleteMutation.isPending && deleteMutation.variables === record.controllerId}
+          >
+            {t('center.admin.deleteController')}
+          </Button>
+        ) : null
       ),
     },
   ]
@@ -138,20 +109,6 @@ export default function CenterAdminPage() {
           <>
             <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
-            </Button>
-            <Button
-              danger
-              loading={clearCacheMutation.isPending}
-              onClick={handleClearCache}
-            >
-              {t('center.admin.clearCache')}
-            </Button>
-            <Button
-              type="primary"
-              loading={syncMutation.isPending}
-              onClick={() => syncMutation.mutate()}
-            >
-              {t('center.admin.syncAll')}
             </Button>
           </>
         }

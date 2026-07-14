@@ -101,6 +101,7 @@ pub mod labels {
     pub mod offline_reason {
         pub const HEARTBEAT: &str = "heartbeat";
         pub const DISCONNECT: &str = "disconnect";
+        pub const OWNERSHIP_LOST: &str = "ownership_lost";
         #[allow(dead_code)]
         pub const RELOAD: &str = "reload";
     }
@@ -411,6 +412,10 @@ mod tests {
             ),
             ("offline_reason::HEARTBEAT", offline_reason::HEARTBEAT),
             ("offline_reason::DISCONNECT", offline_reason::DISCONNECT),
+            (
+                "offline_reason::OWNERSHIP_LOST",
+                offline_reason::OWNERSHIP_LOST,
+            ),
             ("offline_reason::RELOAD", offline_reason::RELOAD),
             ("evict_source::REGISTRY", evict_source::REGISTRY),
             ("evict_source::AGGREGATOR", evict_source::AGGREGATOR),
@@ -533,9 +538,10 @@ mod tests {
             &[
                 offline_reason::HEARTBEAT,
                 offline_reason::DISCONNECT,
+                offline_reason::OWNERSHIP_LOST,
                 offline_reason::RELOAD,
             ],
-            &["heartbeat", "disconnect", "reload"],
+            &["heartbeat", "disconnect", "ownership_lost", "reload"],
         );
         check(
             "evict_source",

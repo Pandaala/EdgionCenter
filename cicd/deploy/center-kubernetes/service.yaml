@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgion-center
+  labels:
+    app.kubernetes.io/name: edgion-center
+spec:
+  selector:
+    app.kubernetes.io/name: edgion-center
+  ports:
+    - name: admin
+      port: 12201
+      targetPort: auth-proxy
+    - name: federation
+      port: 12251
+      targetPort: federation
+    - name: metrics
+      port: 12290
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgion-center-internal
+  labels:
+    app.kubernetes.io/name: edgion-center
+    app.kubernetes.io/component: internal-forwarding
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: edgion-center
+  ports:
+    - name: internal
+      port: 12252
+      targetPort: internal
