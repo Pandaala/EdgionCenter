@@ -1118,6 +1118,7 @@ dependencies = [
  "edgion-center-core",
  "edgion-resources",
  "http",
+ "metrics",
  "parking_lot",
  "prost",
  "rcgen",

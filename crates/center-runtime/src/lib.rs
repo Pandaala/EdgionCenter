@@ -8,6 +8,7 @@ pub mod aggregator;
 pub mod commander;
 pub mod federation;
 pub mod metadata_store;
+pub mod observe;
 pub mod poll;
 pub mod proxy;
 pub mod watch_cache;

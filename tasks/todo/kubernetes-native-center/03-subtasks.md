@@ -56,8 +56,10 @@ workspace check, Clippy, and the full repository suite pass.
   missing-controller tests verify fail-fast behavior and pending-map cleanup.
 - Moved SPIFFE certificate parsing and Controller identity matching into the
   runtime federation module with all real-DER tests preserved.
+- Moved federation metrics and bounded-label validation into runtime
+  observability.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total remains 307 passing tests: 252 compatibility, 5 core, and 50
+- Workspace total remains 307 passing tests: 240 compatibility, 5 core, and 62
   runtime tests.

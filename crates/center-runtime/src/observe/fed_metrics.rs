@@ -168,7 +168,8 @@ pub fn record_connection_duration(role: &'static str, seconds: f64) {
 /// "EdgionConfigData"). Never pass raw user input.
 #[inline]
 pub fn record_watch_event(kind: &str, direction: &'static str) {
-    counter!(names::WATCH_EVENTS_TOTAL, "kind" => kind.to_string(), "direction" => direction).increment(1);
+    counter!(names::WATCH_EVENTS_TOTAL, "kind" => kind.to_string(), "direction" => direction)
+        .increment(1);
 }
 
 #[inline]
@@ -178,7 +179,8 @@ pub fn record_watch_list(kind: &str, result: &'static str) {
 
 #[inline]
 pub fn record_watch_error(kind: &str, reason: &'static str) {
-    counter!(names::WATCH_ERRORS_TOTAL, "kind" => kind.to_string(), "reason" => reason).increment(1);
+    counter!(names::WATCH_ERRORS_TOTAL, "kind" => kind.to_string(), "reason" => reason)
+        .increment(1);
 }
 
 // ---------- Lifecycle (Center) ----------
@@ -282,8 +284,14 @@ mod peer_auth_metric_tests {
 
     #[test]
     fn peer_identity_metric_name_is_stable() {
-        assert_eq!(names::PEER_IDENTITY_CHECK_TOTAL, "edgion_fed_peer_identity_check_total");
-        assert_eq!(names::SESSION_TAKEOVER_TOTAL, "edgion_fed_session_takeover_total");
+        assert_eq!(
+            names::PEER_IDENTITY_CHECK_TOTAL,
+            "edgion_fed_peer_identity_check_total"
+        );
+        assert_eq!(
+            names::SESSION_TAKEOVER_TOTAL,
+            "edgion_fed_session_takeover_total"
+        );
     }
 
     #[test]
@@ -345,7 +353,10 @@ mod tests {
     /// any UTF-8, but PromQL queries, label-set serialization and
     /// downstream tools are far happier with this restricted alphabet.
     fn assert_label_value_charset(value: &str, origin: &str) {
-        assert!(!value.is_empty(), "label value for {origin} must not be empty");
+        assert!(
+            !value.is_empty(),
+            "label value for {origin} must not be empty"
+        );
         // Conservative cap. Prometheus has no hard limit on label-value
         // length, but anything beyond ~64 chars for a *bounded enum* would
         // indicate a misuse (free-form strings should never be in `labels`).
@@ -377,12 +388,27 @@ mod tests {
             ("direction::SENT", direction::SENT),
             ("direction::RECV", direction::RECV),
             ("watch_list_result::OK", watch_list_result::OK),
-            ("watch_list_result::VERSION_TOO_OLD", watch_list_result::VERSION_TOO_OLD),
-            ("watch_list_result::PARSE_ERROR", watch_list_result::PARSE_ERROR),
-            ("watch_list_result::READY_WAIT", watch_list_result::READY_WAIT),
-            ("watch_error_reason::PARSE_ERROR", watch_error_reason::PARSE_ERROR),
+            (
+                "watch_list_result::VERSION_TOO_OLD",
+                watch_list_result::VERSION_TOO_OLD,
+            ),
+            (
+                "watch_list_result::PARSE_ERROR",
+                watch_list_result::PARSE_ERROR,
+            ),
+            (
+                "watch_list_result::READY_WAIT",
+                watch_list_result::READY_WAIT,
+            ),
+            (
+                "watch_error_reason::PARSE_ERROR",
+                watch_error_reason::PARSE_ERROR,
+            ),
             ("watch_error_reason::TIMEOUT", watch_error_reason::TIMEOUT),
-            ("watch_error_reason::RECV_ERROR", watch_error_reason::RECV_ERROR),
+            (
+                "watch_error_reason::RECV_ERROR",
+                watch_error_reason::RECV_ERROR,
+            ),
             ("offline_reason::HEARTBEAT", offline_reason::HEARTBEAT),
             ("offline_reason::DISCONNECT", offline_reason::DISCONNECT),
             ("offline_reason::RELOAD", offline_reason::RELOAD),
@@ -425,7 +451,11 @@ mod tests {
         ];
         for n in names {
             assert!(!n.is_empty(), "metric name must not be empty");
-            assert!(n.len() <= 64, "metric name {n:?} exceeds 64 chars ({} bytes)", n.len());
+            assert!(
+                n.len() <= 64,
+                "metric name {n:?} exceeds 64 chars ({} bytes)",
+                n.len()
+            );
             let first = n.chars().next().unwrap();
             assert!(
                 first.is_ascii_lowercase() || first == '_',
@@ -451,19 +481,34 @@ mod tests {
             let mut e: Vec<&str> = expected.to_vec();
             a.sort_unstable();
             e.sort_unstable();
-            assert_eq!(a, e, "{name} value set drifted: expected {expected:?}, got {actual:?}");
+            assert_eq!(
+                a, e,
+                "{name} value set drifted: expected {expected:?}, got {actual:?}"
+            );
             // Uniqueness: no two variants share a string value.
             let mut dedup = a.clone();
             dedup.dedup();
-            assert_eq!(dedup.len(), a.len(), "{name} contains duplicate values: {actual:?}");
+            assert_eq!(
+                dedup.len(),
+                a.len(),
+                "{name} contains duplicate values: {actual:?}"
+            );
         }
-        check("role", &[role::CENTER, role::CONTROLLER], &["center", "controller"]);
+        check(
+            "role",
+            &[role::CENTER, role::CONTROLLER],
+            &["center", "controller"],
+        );
         check(
             "event",
             &[event::CONNECTED, event::DISCONNECTED, event::RELOAD],
             &["connected", "disconnected", "reload"],
         );
-        check("direction", &[direction::SENT, direction::RECV], &["sent", "recv"]);
+        check(
+            "direction",
+            &[direction::SENT, direction::RECV],
+            &["sent", "recv"],
+        );
         check(
             "watch_list_result",
             &[
@@ -497,19 +542,23 @@ mod tests {
             &[evict_source::REGISTRY, evict_source::AGGREGATOR],
             &["registry", "aggregator"],
         );
-        check(
-            "fanout_op",
-            &[fanout_op::PATCH_PROFILE],
-            &["patch_profile"],
-        );
+        check("fanout_op", &[fanout_op::PATCH_PROFILE], &["patch_profile"]);
         check(
             "fanout_result",
-            &[fanout_result::OK, fanout_result::PARTIAL, fanout_result::FAIL],
+            &[
+                fanout_result::OK,
+                fanout_result::PARTIAL,
+                fanout_result::FAIL,
+            ],
             &["ok", "partial", "fail"],
         );
         check(
             "rbac_source",
-            &[rbac_source::CENTER, rbac_source::CLI_TOKEN, rbac_source::UNKNOWN],
+            &[
+                rbac_source::CENTER,
+                rbac_source::CLI_TOKEN,
+                rbac_source::UNKNOWN,
+            ],
             &["center", "cli_token", "unknown"],
         );
     }
@@ -547,7 +596,10 @@ mod rbac_metric_tests {
         assert_eq!(names::KILL_SWITCH_STATE, "edgion_fed_kill_switch_state");
 
         for n in [names::RBAC_DENIED_TOTAL, names::KILL_SWITCH_STATE] {
-            assert!(n.starts_with("edgion_fed_"), "metric {n} must have edgion_fed_ prefix");
+            assert!(
+                n.starts_with("edgion_fed_"),
+                "metric {n} must have edgion_fed_ prefix"
+            );
             assert!(!n.is_empty(), "metric name must not be empty");
             let first = n.chars().next().unwrap();
             assert!(
@@ -586,7 +638,14 @@ mod rbac_metric_tests {
             "unknown",
         ];
         // Bounded kind values: known kinds, synthetic labels, "unknown".
-        let kinds = ["Secret", "EdgionConfigData", "HTTPRoute", "RegionRoute", "*", "unknown"];
+        let kinds = [
+            "Secret",
+            "EdgionConfigData",
+            "HTTPRoute",
+            "RegionRoute",
+            "*",
+            "unknown",
+        ];
         // Bounded source values from labels::rbac_source.
         let sources = [
             labels::rbac_source::CENTER,
@@ -622,7 +681,11 @@ mod rbac_metric_tests {
         record_rbac_denied("list", "EdgionConfigData", rbac_source::CENTER);
         record_rbac_denied("unknown", "unknown", rbac_source::UNKNOWN);
         // All three bounded source values work.
-        for source in [rbac_source::CENTER, rbac_source::CLI_TOKEN, rbac_source::UNKNOWN] {
+        for source in [
+            rbac_source::CENTER,
+            rbac_source::CLI_TOKEN,
+            rbac_source::UNKNOWN,
+        ] {
             record_rbac_denied("watch", "HTTPRoute", source);
         }
     }

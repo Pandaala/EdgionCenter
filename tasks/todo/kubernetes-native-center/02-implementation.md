@@ -62,6 +62,8 @@ the standalone `http` crate, keeping Axum out of this layer.
 SPIFFE URI-SAN parsing and Controller identity matching are runtime-owned, so
 the federation server no longer depends on a compatibility-only security
 module.
+Federation metrics and their bounded-label catalog are runtime-owned as shared
+observability primitives for both deployment compositions.
 
 ### Increment 4: Standalone composition
 
