@@ -53,6 +53,9 @@ independent `ControllerInfo`, and process metrics are supplied through an
 `AggregatorMetrics` hook by the compatibility composition root. The background
 effective-state poller is runtime-owned as well and depends on the narrow
 `ControllerHttpClient` contract instead of the gRPC-backed proxy implementation.
+Federation protobuf generation and the fenced session registry are now owned by
+the runtime crate; registry lifecycle metrics are injected by the composition
+root rather than importing process observability code.
 
 ### Increment 4: Standalone composition
 

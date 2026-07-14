@@ -50,8 +50,10 @@ workspace check, Clippy, and the full repository suite pass.
   process-specific metrics emission.
 - Moved the effective-state poller behind a `ControllerHttpClient` runtime port;
   the existing `ProxyForwarder` now acts as its compatibility adapter.
+- Moved the federation protobuf source/build and session registry into the
+  runtime crate, retaining production metrics through an injected hook.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total is now 304 passing tests: 281 compatibility, 5 core, and 18
+- Workspace total is now 305 passing tests: 271 compatibility, 5 core, and 29
   runtime tests.

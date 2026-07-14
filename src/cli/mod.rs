@@ -95,7 +95,9 @@ impl EdgionCenterCli {
                 .map_err(|e| anyhow::anyhow!("Center config parse error ({}): {}", self.config_file, e))?
         };
 
-        let registry = ControllerRegistry::new();
+        let registry = ControllerRegistry::with_metrics(Arc::new(
+            crate::fed_sync::registry::FedRegistryMetrics,
+        ));
         let aggregator = Arc::new(ResourceAggregator::with_metrics(Arc::new(
             crate::aggregator::FedAggregatorMetrics,
         )));

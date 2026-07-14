@@ -1,7 +1,6 @@
 //! ControllerRegistry: manages per-controller sessions and stream handles.
 
-use crate::common::fed_sync::proto::{CenterMessage, RegisterRequest};
-use crate::common::observe::fed_metrics;
+use crate::federation::proto::{CenterMessage, RegisterRequest};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,12 +26,31 @@ impl ControllerSession {
 #[derive(Clone)]
 pub struct ControllerRegistry {
     inner: Arc<RwLock<HashMap<String, ControllerSession>>>,
+    metrics: Arc<dyn RegistryMetrics>,
+}
+
+/// Session lifecycle metrics supplied by the process composition root.
+pub trait RegistryMetrics: Send + Sync {
+    fn record_session_reentry(&self);
+    fn record_eviction(&self);
+}
+
+struct NoopRegistryMetrics;
+
+impl RegistryMetrics for NoopRegistryMetrics {
+    fn record_session_reentry(&self) {}
+    fn record_eviction(&self) {}
 }
 
 impl ControllerRegistry {
     pub fn new() -> Self {
+        Self::with_metrics(Arc::new(NoopRegistryMetrics))
+    }
+
+    pub fn with_metrics(metrics: Arc<dyn RegistryMetrics>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
+            metrics,
         }
     }
 
@@ -65,7 +83,7 @@ impl ControllerRegistry {
         // exists — a signal for reconnect storms / session races. Covers both
         // the online->online case and the offline->online (recovered) case.
         if guard.contains_key(&controller_id) {
-            fed_metrics::record_session_reentry();
+            self.metrics.record_session_reentry();
         }
         guard.insert(controller_id, session);
         displaced
@@ -160,7 +178,11 @@ impl ControllerRegistry {
         self.inner
             .read()
             .values()
-            .filter_map(|s| s.stream_tx.as_ref().map(|tx| (s.controller_id.clone(), tx.clone())))
+            .filter_map(|s| {
+                s.stream_tx
+                    .as_ref()
+                    .map(|tx| (s.controller_id.clone(), tx.clone()))
+            })
             .collect()
     }
 
@@ -170,7 +192,7 @@ impl ControllerRegistry {
     pub fn remove(&self, controller_id: &str) -> bool {
         let removed = self.inner.write().remove(controller_id).is_some();
         if removed {
-            fed_metrics::record_evict_stale(fed_metrics::labels::evict_source::REGISTRY);
+            self.metrics.record_eviction();
         }
         removed
     }
@@ -192,6 +214,12 @@ impl ControllerRegistry {
     }
 }
 
+impl Default for ControllerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionView {
     #[allow(dead_code)]
@@ -210,6 +238,23 @@ pub struct SessionView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct CountingMetrics {
+        reentries: AtomicUsize,
+        evictions: AtomicUsize,
+    }
+
+    impl RegistryMetrics for CountingMetrics {
+        fn record_session_reentry(&self) {
+            self.reentries.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn record_eviction(&self) {
+            self.evictions.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     fn mock_info(cid: &str) -> RegisterRequest {
         RegisterRequest {
@@ -246,13 +291,18 @@ mod tests {
         let marked = registry.mark_offline("cid", "s1");
         assert!(marked, "first mark_offline should transition");
 
-        let view = registry.get_session("cid").expect("session should still exist");
+        let view = registry
+            .get_session("cid")
+            .expect("session should still exist");
         assert!(view.offline_since.is_some());
         assert!(view.stream_tx.is_none());
         assert_eq!(registry.online_senders().len(), 0);
 
         // Only the registry held a Sender clone; after take() the receiver drains.
-        assert!(rx.recv().await.is_none(), "receiver should see channel close");
+        assert!(
+            rx.recv().await.is_none(),
+            "receiver should see channel close"
+        );
     }
 
     #[test]
@@ -264,7 +314,9 @@ mod tests {
         let marked = registry.mark_offline("cid", "s2");
         assert!(!marked, "mismatched session_id must not transition");
 
-        let view = registry.get_session("cid").expect("session should still exist");
+        let view = registry
+            .get_session("cid")
+            .expect("session should still exist");
         assert!(view.offline_since.is_none());
         assert!(view.stream_tx.is_some());
     }
@@ -318,7 +370,11 @@ mod tests {
 
         let (tx2, _rx2) = mpsc::channel(8);
         let prev = reg.register("cid".to_string(), mock_info("cid"), tx2, "s2".to_string());
-        assert_eq!(prev, Some("s1".to_string()), "second registration displaces s1");
+        assert_eq!(
+            prev,
+            Some("s1".to_string()),
+            "second registration displaces s1"
+        );
     }
 
     #[test]
@@ -329,7 +385,10 @@ mod tests {
         assert!(reg.mark_offline("cid", "s1"));
         let (tx2, _rx2) = mpsc::channel(8);
         let prev = reg.register("cid".to_string(), mock_info("cid"), tx2, "s2".to_string());
-        assert_eq!(prev, None, "an already-offline session is not a live takeover");
+        assert_eq!(
+            prev, None,
+            "an already-offline session is not a live takeover"
+        );
     }
 
     #[test]
@@ -352,5 +411,18 @@ mod tests {
         assert!(!reg.is_current_session("cid", "s1"));
         assert!(reg.is_current_session("cid", "s2"));
         assert!(!reg.is_current_session("unknown", "s2"));
+    }
+
+    #[test]
+    fn lifecycle_metrics_are_emitted_through_the_runtime_hook() {
+        let metrics = Arc::new(CountingMetrics::default());
+        let registry = ControllerRegistry::with_metrics(metrics.clone());
+        let (tx1, _rx1) = mpsc::channel(8);
+        registry.register("cid".to_string(), mock_info("cid"), tx1, "s1".to_string());
+        let (tx2, _rx2) = mpsc::channel(8);
+        registry.register("cid".to_string(), mock_info("cid"), tx2, "s2".to_string());
+        assert!(registry.remove("cid"));
+        assert_eq!(metrics.reentries.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.evictions.load(Ordering::SeqCst), 1);
     }
 }
