@@ -54,8 +54,10 @@ workspace check, Clippy, and the full repository suite pass.
   runtime crate, retaining production metrics through an injected hook.
 - Moved command dispatch and Controller HTTP proxy forwarding into runtime;
   missing-controller tests verify fail-fast behavior and pending-map cleanup.
+- Moved SPIFFE certificate parsing and Controller identity matching into the
+  runtime federation module with all real-DER tests preserved.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total is now 307 passing tests: 271 compatibility, 5 core, and 31
+- Workspace total remains 307 passing tests: 252 compatibility, 5 core, and 50
   runtime tests.

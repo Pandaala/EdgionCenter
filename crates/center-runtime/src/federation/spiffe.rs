@@ -50,7 +50,10 @@ pub fn extract_single_spiffe_uri(der: &[u8]) -> Result<String, PeerIdentityError
                 if let GeneralName::URI(uri) = gn {
                     // `get(..9)` is panic-safe on non-char-boundary input; a
                     // match means the first 9 bytes are ASCII "spiffe://".
-                    if uri.get(..9).is_some_and(|p| p.eq_ignore_ascii_case("spiffe://")) {
+                    if uri
+                        .get(..9)
+                        .is_some_and(|p| p.eq_ignore_ascii_case("spiffe://"))
+                    {
                         spiffe.push((*uri).to_string());
                     }
                 }
@@ -71,7 +74,10 @@ pub fn extract_single_spiffe_uri(der: &[u8]) -> Result<String, PeerIdentityError
 pub fn parse_controller_spiffe(uri: &str) -> Option<ControllerSpiffe> {
     // `get(..9)` is panic-safe even if byte 9 is not a char boundary; a match
     // guarantees the first 9 bytes are ASCII "spiffe://", so `&uri[9..]` is safe.
-    let rest = if uri.get(..9).is_some_and(|p| p.eq_ignore_ascii_case("spiffe://")) {
+    let rest = if uri
+        .get(..9)
+        .is_some_and(|p| p.eq_ignore_ascii_case("spiffe://"))
+    {
         &uri[9..]
     } else {
         return None;
@@ -183,18 +189,27 @@ mod tests {
             ],
             &[],
         );
-        assert_eq!(extract_single_spiffe_uri(&der), Err(PeerIdentityError::MultiSan));
+        assert_eq!(
+            extract_single_spiffe_uri(&der),
+            Err(PeerIdentityError::MultiSan)
+        );
     }
 
     #[test]
     fn real_cert_no_spiffe_san_rejected() {
         let der = cert_der_with_sans(&[], &["edge.example.com"]);
-        assert_eq!(extract_single_spiffe_uri(&der), Err(PeerIdentityError::NoSpiffeSan));
+        assert_eq!(
+            extract_single_spiffe_uri(&der),
+            Err(PeerIdentityError::NoSpiffeSan)
+        );
     }
 
     #[test]
     fn real_cert_dns_plus_one_spiffe_ok() {
-        let der = cert_der_with_sans(&["spiffe://edgion.io/controllers/prod/ctrl-1"], &["edge.example.com"]);
+        let der = cert_der_with_sans(
+            &["spiffe://edgion.io/controllers/prod/ctrl-1"],
+            &["edge.example.com"],
+        );
         let uri = extract_single_spiffe_uri(&der).expect("dns ignored, one spiffe");
         assert_eq!(uri, "spiffe://edgion.io/controllers/prod/ctrl-1");
     }
@@ -217,7 +232,10 @@ mod tests {
     #[test]
     fn real_cert_garbage_der_parse_error() {
         let garbage = vec![0x30, 0x03, 0x01, 0x02, 0x03];
-        assert_eq!(extract_single_spiffe_uri(&garbage), Err(PeerIdentityError::ParseError));
+        assert_eq!(
+            extract_single_spiffe_uri(&garbage),
+            Err(PeerIdentityError::ParseError)
+        );
     }
 
     // ── Original string-level tests ───────────────────────────────────────────
@@ -232,7 +250,9 @@ mod tests {
 
     #[test]
     fn parse_rejects_wrong_segment_count() {
-        assert!(parse_controller_spiffe("spiffe://edgion.io/controllers/prod/ctrl/extra").is_none());
+        assert!(
+            parse_controller_spiffe("spiffe://edgion.io/controllers/prod/ctrl/extra").is_none()
+        );
         assert!(parse_controller_spiffe("spiffe://edgion.io/controllers/prod").is_none());
     }
 

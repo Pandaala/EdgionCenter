@@ -6,4 +6,4 @@
 //! runtime logic lives under `crate::server` (moved with Center in Phase 3).
 
 pub use edgion_center_runtime::federation::proto;
-pub mod spiffe;
+pub use edgion_center_runtime::federation::spiffe;

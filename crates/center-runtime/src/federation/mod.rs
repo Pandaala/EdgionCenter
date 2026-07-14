@@ -2,3 +2,4 @@
 
 pub mod proto;
 pub mod registry;
+pub mod spiffe;

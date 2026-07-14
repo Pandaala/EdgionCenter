@@ -69,9 +69,6 @@ prost = "0.13"
 rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 
-# SPIFFE peer-identity verification (mTLS certificate SAN parsing).
-x509-parser = { version = "0.18", features = ["verify"] }
-
 # Auth (local users + OIDC bearer validation)
 bcrypt = "0.18"
 jsonwebtoken = "9"

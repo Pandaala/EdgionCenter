@@ -1098,7 +1098,6 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wiremock",
- "x509-parser",
 ]
 
 [[package]]
@@ -1121,6 +1120,7 @@ dependencies = [
  "http",
  "parking_lot",
  "prost",
+ "rcgen",
  "serde",
  "serde_json",
  "tokio",
@@ -1128,6 +1128,7 @@ dependencies = [
  "tonic-build",
  "tracing",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]

@@ -59,6 +59,9 @@ root rather than importing process observability code.
 Command dispatch and Controller HTTP proxy forwarding now live beside the
 registry and wire types in the runtime crate. Their transport-facing errors use
 the standalone `http` crate, keeping Axum out of this layer.
+SPIFFE URI-SAN parsing and Controller identity matching are runtime-owned, so
+the federation server no longer depends on a compatibility-only security
+module.
 
 ### Increment 4: Standalone composition
 

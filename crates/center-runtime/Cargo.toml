@@ -22,8 +22,10 @@ tokio = { version = "1.49", features = ["sync", "time"] }
 tonic = "0.12"
 tracing = "0.1"
 uuid = { version = "1.19", features = ["v4"] }
+x509-parser = { version = "0.18", features = ["verify"] }
 
 [dev-dependencies]
+rcgen = { version = "0.14.7", features = ["x509-parser"] }
 tokio = { version = "1.49", features = ["macros", "rt"] }
 
 [build-dependencies]
