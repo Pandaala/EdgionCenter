@@ -20,16 +20,17 @@ export default defineConfig({
     // Center mode (dev): change /api -> 12201 (Admin), /health & /ready -> 12200 (probe)
     // /api/v1/proxy/* is handled by the Center service (covered by the /api prefix).
     proxy: {
+      // Center mode (dev): Admin API on 12201, probe on 12200.
       '/api': {
-        target: 'http://localhost:12101',
+        target: 'http://localhost:12201',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:12100',
+        target: 'http://localhost:12200',
         changeOrigin: true,
       },
       '/ready': {
-        target: 'http://localhost:12100',
+        target: 'http://localhost:12200',
         changeOrigin: true,
       },
     },
