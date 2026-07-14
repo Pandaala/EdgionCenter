@@ -17,6 +17,7 @@ use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 
 use crate::aggregator::{ControllerInfo, ResourceAggregator};
+use crate::commander::PendingCommandMap;
 use crate::config::CenterSyncConfig;
 use crate::store::Store;
 use crate::fed_sync::registry::ControllerRegistry;
@@ -201,9 +202,6 @@ enum WatchOutcome {
     /// Error field set — back off 3 s then re-watch from version 0.
     BackoffReWatch,
 }
-
-pub type PendingCommandMap =
-    Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<crate::common::fed_sync::proto::CommandResponse>>>>;
 
 /// Handle a `FedWatchListResponse` from the controller.
 ///

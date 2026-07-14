@@ -1114,9 +1114,11 @@ dependencies = [
 name = "edgion-center-runtime"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "edgion-center-core",
  "edgion-resources",
+ "http",
  "parking_lot",
  "prost",
  "serde",
@@ -1125,6 +1127,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

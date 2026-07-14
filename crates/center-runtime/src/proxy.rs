@@ -1,6 +1,6 @@
 //! ProxyForwarder: forwards HTTP requests to a specific controller via the gRPC bidirectional stream.
 
-use axum::http::StatusCode;
+use http::StatusCode;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,10 +8,10 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use crate::fed_sync::registry::ControllerRegistry;
-use crate::common::fed_sync::proto::{
+use crate::federation::proto::{
     center_message::Payload as CenterPayload, CenterMessage, HttpProxyRequest, HttpProxyResponse,
 };
+use crate::federation::registry::ControllerRegistry;
 
 pub type PendingProxyMap = Arc<Mutex<HashMap<String, oneshot::Sender<HttpProxyResponse>>>>;
 
@@ -85,13 +85,16 @@ impl ProxyForwarder {
             })?
             .map_err(|_| {
                 self.pending.lock().remove(&request_id);
-                (StatusCode::BAD_GATEWAY, "Proxy response channel dropped".to_string())
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "Proxy response channel dropped".to_string(),
+                )
             })
     }
 }
 
 #[async_trait::async_trait]
-impl edgion_center_runtime::poll::ControllerHttpClient for ProxyForwarder {
+impl crate::poll::ControllerHttpClient for ProxyForwarder {
     async fn request(
         &self,
         controller_id: &str,
@@ -99,13 +102,36 @@ impl edgion_center_runtime::poll::ControllerHttpClient for ProxyForwarder {
         path: String,
         headers: HashMap<String, String>,
         body: Vec<u8>,
-    ) -> Result<edgion_center_runtime::poll::ControllerHttpResponse, String> {
+    ) -> Result<crate::poll::ControllerHttpResponse, String> {
         self.forward(controller_id, method, path, headers, body)
             .await
-            .map(|response| edgion_center_runtime::poll::ControllerHttpResponse {
+            .map(|response| crate::poll::ControllerHttpResponse {
                 status_code: response.status_code,
                 body: response.body,
             })
             .map_err(|(_, message)| message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn missing_controller_returns_not_found_without_pending_state() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let proxy = ProxyForwarder::new(ControllerRegistry::new(), pending.clone(), 1);
+        let error = proxy
+            .forward(
+                "missing",
+                "GET".to_string(),
+                "/health".to_string(),
+                HashMap::new(),
+                Vec::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, StatusCode::NOT_FOUND);
+        assert!(pending.lock().is_empty());
     }
 }

@@ -56,6 +56,9 @@ effective-state poller is runtime-owned as well and depends on the narrow
 Federation protobuf generation and the fenced session registry are now owned by
 the runtime crate; registry lifecycle metrics are injected by the composition
 root rather than importing process observability code.
+Command dispatch and Controller HTTP proxy forwarding now live beside the
+registry and wire types in the runtime crate. Their transport-facing errors use
+the standalone `http` crate, keeping Axum out of this layer.
 
 ### Increment 4: Standalone composition
 

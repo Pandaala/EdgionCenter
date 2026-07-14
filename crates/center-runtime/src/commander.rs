@@ -1,15 +1,19 @@
 //! CommandDispatcher: sends CommandRequest to a specific controller and awaits response.
 
 use anyhow::{anyhow, Result};
+use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use crate::fed_sync::registry::ControllerRegistry;
-use crate::fed_sync::server::PendingCommandMap;
-use crate::common::fed_sync::proto::{
+use crate::federation::proto::{
     center_message::Payload as CenterPayload, CenterMessage, CommandRequest, CommandResponse,
 };
+use crate::federation::registry::ControllerRegistry;
+
+pub type PendingCommandMap = Arc<Mutex<HashMap<String, oneshot::Sender<CommandResponse>>>>;
 
 pub struct Commander {
     registry: ControllerRegistry,
@@ -18,7 +22,11 @@ pub struct Commander {
 }
 
 impl Commander {
-    pub fn new(registry: ControllerRegistry, pending: PendingCommandMap, timeout_secs: u64) -> Self {
+    pub fn new(
+        registry: ControllerRegistry,
+        pending: PendingCommandMap,
+        timeout_secs: u64,
+    ) -> Self {
         Self {
             registry,
             pending,
@@ -29,7 +37,7 @@ impl Commander {
     pub async fn send_command(
         &self,
         controller_id: &str,
-        command: crate::common::fed_sync::proto::command_request::Command,
+        command: crate::federation::proto::command_request::Command,
     ) -> Result<CommandResponse> {
         let session = self
             .registry
@@ -67,5 +75,23 @@ impl Commander {
                 self.pending.lock().remove(&request_id);
                 anyhow!("Command response channel dropped")
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::federation::proto::{command_request::Command, ReloadCommand};
+
+    #[tokio::test]
+    async fn missing_controller_fails_without_leaking_pending_requests() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let commander = Commander::new(ControllerRegistry::new(), pending.clone(), 1);
+        let error = commander
+            .send_command("missing", Command::Reload(ReloadCommand {}))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("not found or offline"));
+        assert!(pending.lock().is_empty());
     }
 }

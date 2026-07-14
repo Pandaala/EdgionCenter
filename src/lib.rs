@@ -23,7 +23,9 @@ mod aggregator {
 }
 mod api;
 mod cli;
-mod commander;
+mod commander {
+    pub use edgion_center_runtime::commander::*;
+}
 mod common;
 mod config;
 mod core_ports;
@@ -34,7 +36,9 @@ mod metadata_store {
 mod poll {
     pub use edgion_center_runtime::poll::*;
 }
-mod proxy;
+mod proxy {
+    pub use edgion_center_runtime::proxy::*;
+}
 mod store;
 mod watch_cache {
     pub use edgion_center_runtime::watch_cache::*;

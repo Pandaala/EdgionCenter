@@ -52,8 +52,10 @@ workspace check, Clippy, and the full repository suite pass.
   the existing `ProxyForwarder` now acts as its compatibility adapter.
 - Moved the federation protobuf source/build and session registry into the
   runtime crate, retaining production metrics through an injected hook.
+- Moved command dispatch and Controller HTTP proxy forwarding into runtime;
+  missing-controller tests verify fail-fast behavior and pending-map cleanup.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total is now 305 passing tests: 271 compatibility, 5 core, and 29
+- Workspace total is now 307 passing tests: 271 compatibility, 5 core, and 31
   runtime tests.

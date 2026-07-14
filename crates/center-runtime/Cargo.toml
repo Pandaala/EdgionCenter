@@ -10,15 +10,18 @@ test-support = []
 
 [dependencies]
 async-trait.workspace = true
+anyhow = "1.0"
 edgion-center-core = { path = "../center-core" }
 edgion-resources = { path = "../../../Edgion/edgion-resources" }
+http = "1.4"
 parking_lot = "0.12"
 prost = "0.13"
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.49", features = ["sync"] }
+tokio = { version = "1.49", features = ["sync", "time"] }
 tonic = "0.12"
 tracing = "0.1"
+uuid = { version = "1.19", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1.49", features = ["macros", "rt"] }
