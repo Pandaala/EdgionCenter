@@ -90,6 +90,42 @@ const MAX_LIST_ITEMS: usize = 32;
 /// Per RFC 9113 §6.7 (informative).
 const HEARTBEAT_MISSED_PING_BUDGET: u32 = 3;
 const CONTROLLER_PROJECTION_TIMEOUT: Duration = Duration::from_secs(3);
+const OFFLINE_PROJECTION_ATTEMPTS: u32 = 5;
+
+async fn project_offline_with_retry(
+    directory: Arc<dyn ControllerDirectory>,
+    controller_id: ControllerId,
+    session_id: SessionId,
+) {
+    let mut delay = Duration::from_millis(100);
+    for attempt in 1..=OFFLINE_PROJECTION_ATTEMPTS {
+        let result = tokio::time::timeout(
+            CONTROLLER_PROJECTION_TIMEOUT,
+            directory.mark_offline(&controller_id, &session_id),
+        )
+        .await;
+        if matches!(result, Ok(Ok(()))) {
+            return;
+        }
+        tracing::warn!(
+            component = "fed_server",
+            controller_id = %controller_id,
+            session_id = %session_id,
+            attempt,
+            "Failed to project controller offline state; retrying"
+        );
+        if attempt < OFFLINE_PROJECTION_ATTEMPTS {
+            tokio::time::sleep(delay).await;
+            delay = delay.saturating_mul(2);
+        }
+    }
+    tracing::error!(
+        component = "fed_server",
+        controller_id = %controller_id,
+        session_id = %session_id,
+        "Controller offline projection exhausted retries"
+    );
+}
 
 // Upper bound on total registered controllers (online + offline). Once
 // this is reached, registration of a *new* controller_id is refused;
@@ -651,16 +687,25 @@ impl FederationSync for FederationGrpcServer {
                     self.registry.mark_offline(&controller_id, &session_id);
                     self.aggregator.mark_offline(&controller_id);
 
+                    // The write may commit after its future times out. Retry a
+                    // conditional offline projection so a late commit is fenced.
+                    let current = SessionId::new(session_id.clone()).expect("generated session id");
+                    tokio::spawn(project_offline_with_retry(
+                        directory.clone(),
+                        cid.clone(),
+                        current,
+                    ));
+
                     // If this was a takeover, fence the displaced projection as
                     // well. A failed new projection must not leave the canceled
                     // old transport advertised as online.
                     if let Some(displaced) = displaced_session_id {
                         if let Ok(displaced) = SessionId::new(displaced) {
-                            let _ = tokio::time::timeout(
-                                CONTROLLER_PROJECTION_TIMEOUT,
-                                directory.mark_offline(&cid, &displaced),
-                            )
-                            .await;
+                            tokio::spawn(project_offline_with_retry(
+                                directory.clone(),
+                                cid.clone(),
+                                displaced,
+                            ));
                         }
                     }
                     tracing::warn!(
@@ -763,7 +808,10 @@ impl FederationSync for FederationGrpcServer {
                 let mut interval = tokio::time::interval(ping_interval);
                 interval.tick().await; // skip first
                 loop {
-                    interval.tick().await;
+                    tokio::select! {
+                        _ = heartbeat_cancel.cancelled() => break,
+                        _ = interval.tick() => {}
+                    }
                     let now_ms = now_ms();
                     // Check Pong freshness before sending next Ping. Tracking last-pong-at
                     // rather than wrapping inbound.message() in a timeout avoids false offline
@@ -779,13 +827,13 @@ impl FederationSync for FederationGrpcServer {
                         heartbeat_cancel.cancel();
                         break;
                     }
-                    if inner_tx
-                        .send(CenterMessage {
+                    let send_result = tokio::select! {
+                        _ = heartbeat_cancel.cancelled() => break,
+                        result = inner_tx.send(CenterMessage {
                             payload: Some(CenterPayload::Ping(Ping { timestamp: now_ms })),
-                        })
-                        .await
-                        .is_err()
-                    {
+                        }) => result,
+                    };
+                    if send_result.is_err() {
                         tracing::info!(
                             component = "fed_server",
                             controller_id = %cid,
@@ -831,16 +879,7 @@ impl FederationSync for FederationGrpcServer {
                         let directory = directory.clone();
                         let cid = ControllerId::new(cid.clone()).expect("validated controller id");
                         let sid = SessionId::new(sid.clone()).expect("generated session id");
-                        tokio::spawn(async move {
-                            if let Err(e) = directory.mark_offline(&cid, &sid).await {
-                                tracing::warn!(
-                                    component = "fed_server",
-                                    controller_id = %cid,
-                                    error = %e,
-                                    "Failed to project controller offline state"
-                                );
-                            }
-                        });
+                        tokio::spawn(project_offline_with_retry(directory, cid, sid));
                     }
                     fed_metrics::record_mark_offline(reason);
                     fed_metrics::record_connection_event(
@@ -934,6 +973,7 @@ impl FederationSync for FederationGrpcServer {
                                             // Use select! to detect session close during sleep.
                                             tokio::select! {
                                                 _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
+                                                _ = heartbeat_cancel.cancelled() => break,
                                                 _ = inner_tx.closed() => {
                                                     tracing::debug!(
                                                         component = "fed_server",
@@ -977,6 +1017,69 @@ impl FederationSync for FederationGrpcServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    struct FlakyDirectory {
+        failures_remaining: AtomicUsize,
+        attempts: AtomicUsize,
+    }
+
+    #[tonic::async_trait]
+    impl ControllerDirectory for FlakyDirectory {
+        async fn upsert_registration(
+            &self,
+            _registration: ControllerRegistration,
+        ) -> edgion_center_core::CoreResult<()> {
+            Ok(())
+        }
+
+        async fn mark_offline(
+            &self,
+            _id: &ControllerId,
+            _observed_session: &SessionId,
+        ) -> edgion_center_core::CoreResult<()> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            if self
+                .failures_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                Err(edgion_center_core::CoreError::Adapter("transient".into()))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn list(
+            &self,
+        ) -> edgion_center_core::CoreResult<Vec<edgion_center_core::ControllerRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn evict(
+            &self,
+            _id: &ControllerId,
+        ) -> edgion_center_core::CoreResult<edgion_center_core::EvictionOutcome> {
+            Ok(edgion_center_core::EvictionOutcome::AlreadyAbsent)
+        }
+    }
+
+    #[tokio::test]
+    async fn offline_projection_retries_transient_failures() {
+        let directory = Arc::new(FlakyDirectory {
+            failures_remaining: AtomicUsize::new(2),
+            attempts: AtomicUsize::new(0),
+        });
+        project_offline_with_retry(
+            directory.clone(),
+            ControllerId::new("c1").unwrap(),
+            SessionId::new("s1").unwrap(),
+        )
+        .await;
+        assert_eq!(directory.attempts.load(Ordering::SeqCst), 3);
+    }
 
     fn ok_req() -> RegisterRequest {
         RegisterRequest {

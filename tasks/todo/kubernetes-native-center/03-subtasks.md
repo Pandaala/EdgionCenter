@@ -69,6 +69,6 @@ workspace check, Clippy, and the full repository suite pass.
   Kube dependency, added immediate takeover cancellation, persisted SQL session
   fencing/revisions, bounded projection latency, and reset stale standalone
   ownership during startup.
-- Workspace total is 308 passing tests: 214 compatibility, 5 core, and 89
+- Workspace total is 309 passing tests: 214 compatibility, 5 core, and 90
   runtime tests. Two compatibility-only clock helper tests were removed when the
   helper became private federation runtime behavior.

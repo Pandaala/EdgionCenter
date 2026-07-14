@@ -78,7 +78,10 @@ its normal dependency graph contains no Kube, k8s-openapi, or SQLx crates.
 Session takeover actively cancels the displaced transport. The compatibility
 SQL projection persists session fencing tokens and monotonic observation
 revisions, rejects stale offline/projection writes, clears ephemeral ownership
-at startup, and bounds registration projection latency.
+and revision state at startup, bounds registration projection latency, and
+retries conditional offline reconciliation after ambiguous write timeouts. The
+MySQL schema change uses one atomic ALTER statement; its environment-gated test
+exercises the same projection and fencing operations as SQLite.
 
 ### Increment 4: Standalone composition
 

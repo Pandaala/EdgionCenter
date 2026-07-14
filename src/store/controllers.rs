@@ -35,7 +35,7 @@ impl Store {
     /// Clear ephemeral transport ownership left by a previous standalone
     /// process. A live gRPC stream cannot survive process restart.
     pub async fn reset_controller_sessions(&self) -> anyhow::Result<()> {
-        let sql = "UPDATE controllers SET online = 0, session_id = NULL, connected_replica = NULL";
+        let sql = "UPDATE controllers SET online = 0, session_id = NULL, connected_replica = NULL, observed_at_ms = 0";
         match &self.pool {
             Pool::Sqlite(pool) => {
                 sqlx::query(sql).execute(pool).await?;
@@ -56,7 +56,7 @@ impl Store {
             serde_json::to_string(&registration.environments).unwrap_or_else(|_| "[]".to_string());
         let tag_json =
             serde_json::to_string(&registration.tags).unwrap_or_else(|_| "[]".to_string());
-        match &self.pool {
+        let affected = match &self.pool {
             Pool::Sqlite(pool) => {
                 sqlx::query(
                     "INSERT INTO controllers(controller_id, cluster, env, tag, online, session_id, connected_replica, observed_at_ms, last_seen_at, created_at)
@@ -82,7 +82,8 @@ impl Store {
                 .bind(now)
                 .bind(now)
                 .execute(pool)
-                .await?;
+                .await?
+                .rows_affected()
             }
             Pool::Mysql(pool) => {
                 // Assignments are ordered: observed_at_ms is updated last so each
@@ -110,8 +111,15 @@ impl Store {
                 .bind(now)
                 .bind(now)
                 .execute(pool)
-                .await?;
+                .await?
+                .rows_affected()
             }
+        };
+        if affected == 0 {
+            anyhow::bail!(
+                "stale controller registration revision for {}",
+                registration.controller_id
+            );
         }
         Ok(())
     }
@@ -433,15 +441,16 @@ mod tests {
         ))
         .await
         .unwrap();
-        db.project_controller_registration(&registration(
-            "s1",
-            "cluster-stale",
-            "dev",
-            "center-old",
-            1,
-        ))
-        .await
-        .unwrap();
+        let stale_result = db
+            .project_controller_registration(&registration(
+                "s1",
+                "cluster-stale",
+                "dev",
+                "center-old",
+                1,
+            ))
+            .await;
+        assert!(stale_result.is_err());
 
         assert!(!db.mark_session_offline("c1", "s1").await.unwrap());
         let row = db.list_controllers().await.unwrap().pop().unwrap();
@@ -459,15 +468,24 @@ mod tests {
     #[tokio::test]
     async fn startup_reset_clears_ephemeral_session_ownership() {
         let db = Store::open_in_memory().await.unwrap();
-        db.project_controller_registration(&registration("s1", "cluster-a", "prod", "center-0", 1))
-            .await
-            .unwrap();
+        db.project_controller_registration(&registration(
+            "s1",
+            "cluster-a",
+            "prod",
+            "center-0",
+            i64::MAX - 1,
+        ))
+        .await
+        .unwrap();
 
         db.reset_controller_sessions().await.unwrap();
+        db.project_controller_registration(&registration("s2", "cluster-b", "prod", "center-1", 1))
+            .await
+            .unwrap();
         let row = db.list_controllers().await.unwrap().pop().unwrap();
-        assert!(!row.online);
-        assert!(row.session_id.is_none());
-        assert!(row.connected_replica.is_none());
+        assert!(row.online);
+        assert_eq!(row.session_id.as_deref(), Some("s2"));
+        assert_eq!(row.connected_replica.as_deref(), Some("center-1"));
     }
 
     #[tokio::test]
@@ -501,15 +519,11 @@ mod tests {
         // Clean slate for a deterministic assertion.
         db.delete_controller("mysql-ctrl-1").await.unwrap();
 
-        db.upsert_controller(
-            "mysql-ctrl-1",
-            "cluster-m",
-            &["prod".to_string()],
-            &["edge".to_string()],
-            true,
-        )
-        .await
-        .unwrap();
+        let mut projected = registration("mysql-s2", "cluster-m", "prod", "center-m", 2);
+        projected.controller_id = ControllerId::new("mysql-ctrl-1").unwrap();
+        db.project_controller_registration(&projected)
+            .await
+            .unwrap();
         let rows = db.list_controllers().await.unwrap();
         let row = rows
             .iter()
@@ -519,9 +533,21 @@ mod tests {
         assert_eq!(row.env, vec!["prod".to_string()]);
         assert_eq!(row.tag, vec!["edge".to_string()]);
         assert!(row.online);
+        assert_eq!(row.session_id.as_deref(), Some("mysql-s2"));
         assert!(row.last_seen_at > 0);
 
-        db.mark_offline("mysql-ctrl-1").await.unwrap();
+        let mut stale = registration("mysql-s1", "cluster-stale", "dev", "center-old", 1);
+        stale.controller_id = ControllerId::new("mysql-ctrl-1").unwrap();
+        assert!(db.project_controller_registration(&stale).await.is_err());
+        assert!(!db
+            .mark_session_offline("mysql-ctrl-1", "mysql-s1")
+            .await
+            .unwrap());
+
+        assert!(db
+            .mark_session_offline("mysql-ctrl-1", "mysql-s2")
+            .await
+            .unwrap());
         let rows = db.list_controllers().await.unwrap();
         let row = rows
             .iter()
