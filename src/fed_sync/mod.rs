@@ -15,4 +15,4 @@ pub mod registry {
         }
     }
 }
-pub mod server;
+pub use edgion_center_runtime::federation::server;

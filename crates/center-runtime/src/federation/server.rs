@@ -18,16 +18,17 @@ use uuid::Uuid;
 
 use crate::aggregator::{ControllerInfo, ResourceAggregator};
 use crate::commander::PendingCommandMap;
-use crate::config::CenterSyncConfig;
-use crate::fed_sync::registry::ControllerRegistry;
+use crate::federation::config::CenterSyncConfig;
+use crate::federation::proto::{
+    center_message::Payload as CenterPayload, controller_message::Payload as CtrlPayload,
+    federation_sync_server::FederationSync, CenterMessage, ControllerMessage,
+    FedWatchEventResponse, FedWatchListResponse, FedWatchRequest, Ping, RegisterAck,
+    RegisterRequest,
+};
+use crate::federation::registry::ControllerRegistry;
+use crate::observe::fed_metrics;
 use crate::proxy::PendingProxyMap;
 use crate::watch_cache::{CenterSyncClient, EventType, WatchEventSimple};
-use crate::common::fed_sync::proto::{
-    center_message::Payload as CenterPayload, controller_message::Payload as CtrlPayload,
-    federation_sync_server::FederationSync, CenterMessage, ControllerMessage, FedWatchEventResponse,
-    FedWatchListResponse, FedWatchRequest, Ping, RegisterAck, RegisterRequest,
-};
-use crate::common::observe::fed_metrics;
 use edgion_center_core::{ControllerDirectory, ControllerId, ControllerRegistration, SessionId};
 use edgion_resources::resource::meta::ResourceMeta;
 use edgion_resources::resources::edgion_config_data::EdgionConfigData;
@@ -133,7 +134,11 @@ fn validate_string_list(items: &[String], field: &'static str) -> Result<(), &'s
 /// already known. Reconnect of a known controller is always allowed —
 /// only inflation by new ids is refused, which preserves operator
 /// recovery during a flood while still blocking unbounded growth.
-fn registry_capacity_exceeded(registry: &ControllerRegistry, incoming_id: &str, cap: usize) -> bool {
+fn registry_capacity_exceeded(
+    registry: &ControllerRegistry,
+    incoming_id: &str,
+    cap: usize,
+) -> bool {
     registry.len() >= cap && registry.get_session(incoming_id).is_none()
 }
 
@@ -294,10 +299,7 @@ fn apply_watch_event(
     }
 
     // (2) Record delivery metric (direction = recv from Center's perspective).
-    fed_metrics::record_watch_event(
-        PLUGIN_METADATA_KIND,
-        fed_metrics::labels::direction::RECV,
-    );
+    fed_metrics::record_watch_event(PLUGIN_METADATA_KIND, fed_metrics::labels::direction::RECV);
 
     // (3) Error set — back off then re-watch.
     if !resp.error.is_empty() {
@@ -451,7 +453,10 @@ impl FederationGrpcServer {
 impl FederationSync for FederationGrpcServer {
     type SyncStream = tokio_stream::wrappers::ReceiverStream<Result<CenterMessage, Status>>;
 
-    async fn sync(&self, request: Request<Streaming<ControllerMessage>>) -> Result<Response<Self::SyncStream>, Status> {
+    async fn sync(
+        &self,
+        request: Request<Streaming<ControllerMessage>>,
+    ) -> Result<Response<Self::SyncStream>, Status> {
         // peer_certs() must be read before into_inner() consumes the request.
         let peer_certs = request.peer_certs();
         let mut inbound = request.into_inner();
@@ -461,13 +466,19 @@ impl FederationSync for FederationGrpcServer {
         // 1. Wait for RegisterRequest (5s timeout)
         let first_msg = tokio::time::timeout(Duration::from_secs(5), inbound.message())
             .await
-            .map_err(|_| Status::deadline_exceeded("Registration timeout: no RegisterRequest within 5s"))?
+            .map_err(|_| {
+                Status::deadline_exceeded("Registration timeout: no RegisterRequest within 5s")
+            })?
             .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::cancelled("Stream closed before RegisterRequest"))?;
 
         let register_req = match first_msg.payload {
             Some(CtrlPayload::Register(r)) => r,
-            _ => return Err(Status::invalid_argument("First message must be RegisterRequest")),
+            _ => {
+                return Err(Status::invalid_argument(
+                    "First message must be RegisterRequest",
+                ))
+            }
         };
 
         // Boundary checks must run before any state mutation (registry,
@@ -485,21 +496,29 @@ impl FederationSync for FederationGrpcServer {
                 supported_kinds_len = register_req.supported_kinds.len(),
                 "Rejected RegisterRequest: shape validation failed"
             );
-            return Err(Status::invalid_argument("RegisterRequest validation failed"));
+            return Err(Status::invalid_argument(
+                "RegisterRequest validation failed",
+            ));
         }
-        if registry_capacity_exceeded(&self.registry, &register_req.controller_id, MAX_REGISTRY_ENTRIES) {
+        if registry_capacity_exceeded(
+            &self.registry,
+            &register_req.controller_id,
+            MAX_REGISTRY_ENTRIES,
+        ) {
             tracing::warn!(
                 component = "fed_server",
                 registry_len = self.registry.len(),
                 cap = MAX_REGISTRY_ENTRIES,
                 "Rejected RegisterRequest: registry at capacity"
             );
-            return Err(Status::resource_exhausted("Federation registry is at capacity"));
+            return Err(Status::resource_exhausted(
+                "Federation registry is at capacity",
+            ));
         }
 
         // Peer-identity binding — always enforced (federation is mTLS-only).
         {
-            use crate::common::observe::fed_metrics::labels::peer_identity_result as pir;
+            use crate::observe::fed_metrics::labels::peer_identity_result as pir;
             let leaf = peer_certs.as_ref().and_then(|c| c.first());
             let Some(leaf) = leaf else {
                 // Under mTLS the handshake guarantees a client cert; absence is
@@ -507,7 +526,7 @@ impl FederationSync for FederationGrpcServer {
                 return Err(Status::internal("missing client certificate under mTLS"));
             };
             let trust_domain = self.trust_domain.as_deref().unwrap_or_default();
-            match crate::common::fed_sync::spiffe::verify(
+            match crate::federation::spiffe::verify(
                 leaf.as_ref(),
                 trust_domain,
                 &register_req.cluster,
@@ -515,7 +534,7 @@ impl FederationSync for FederationGrpcServer {
             ) {
                 Ok(()) => fed_metrics::record_peer_identity_check(pir::OK),
                 Err(e) => {
-                    use crate::common::fed_sync::spiffe::PeerIdentityError as E;
+                    use crate::federation::spiffe::PeerIdentityError as E;
                     let result = match e {
                         E::Mismatch => pir::MISMATCH,
                         E::NoSpiffeSan => pir::NO_SPIFFE_SAN,
@@ -530,7 +549,9 @@ impl FederationSync for FederationGrpcServer {
                         cluster_len = register_req.cluster.len(),
                         "Rejected RegisterRequest: peer identity check failed"
                     );
-                    return Err(Status::permission_denied("peer identity verification failed"));
+                    return Err(Status::permission_denied(
+                        "peer identity verification failed",
+                    ));
                 }
             }
         }
@@ -596,8 +617,14 @@ impl FederationSync for FederationGrpcServer {
         // the active-sessions gauge. `online_len` captures the number of
         // controllers with a live `stream_tx`, so it naturally drops on
         // mark_offline without us counting in two places.
-        fed_metrics::record_connection_event(fed_metrics::labels::role::CENTER, fed_metrics::labels::event::CONNECTED);
-        fed_metrics::set_connections_active(fed_metrics::labels::role::CENTER, self.registry.online_len() as u64);
+        fed_metrics::record_connection_event(
+            fed_metrics::labels::role::CENTER,
+            fed_metrics::labels::event::CONNECTED,
+        );
+        fed_metrics::set_connections_active(
+            fed_metrics::labels::role::CENTER,
+            self.registry.online_len() as u64,
+        );
         let session_started_at = std::time::Instant::now();
 
         // Send RegisterAck
@@ -610,7 +637,10 @@ impl FederationSync for FederationGrpcServer {
             .await;
 
         // Send FedWatchRequest for EdgionConfigData
-        let pm_cache = self.sync_client.plugin_metadata.get_or_create(&controller_id);
+        let pm_cache = self
+            .sync_client
+            .plugin_metadata
+            .get_or_create(&controller_id);
         let from_version = pm_cache.get_sync_version();
         let watch_request_id = Uuid::new_v4().to_string();
 
@@ -675,7 +705,9 @@ impl FederationSync for FederationGrpcServer {
                     // Check Pong freshness before sending next Ping. Tracking last-pong-at
                     // rather than wrapping inbound.message() in a timeout avoids false offline
                     // declarations when a large WatchListResponse is in transit (RFC 9113 §6.7).
-                    if now_ms.saturating_sub(last_pong_ms.load(Ordering::Relaxed)) > heartbeat_timeout_ms {
+                    if now_ms.saturating_sub(last_pong_ms.load(Ordering::Relaxed))
+                        > heartbeat_timeout_ms
+                    {
                         tracing::warn!(
                             component = "fed_server",
                             controller_id = %cid,
@@ -873,7 +905,9 @@ impl FederationSync for FederationGrpcServer {
             } // async move
         });
 
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(out_rx)))
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+            out_rx,
+        )))
     }
 }
 
@@ -1016,7 +1050,7 @@ mod tests {
             reg,
             agg,
             pp,
-            crate::config::CenterSyncConfig::default(),
+            crate::federation::config::CenterSyncConfig::default(),
             sc,
             None,
             None,
@@ -1119,7 +1153,11 @@ mod tests {
         let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
 
         assert_eq!(outcome, WatchOutcome::Skipped);
-        assert_eq!(pm_cache.get_sync_version(), 0, "cache must be untouched on stale request");
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "cache must be untouched on stale request"
+        );
     }
 
     #[test]
@@ -1137,7 +1175,11 @@ mod tests {
         let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
 
         assert_eq!(outcome, WatchOutcome::ParseError);
-        assert_eq!(pm_cache.get_sync_version(), 0, "cache must be untouched on parse error");
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "cache must be untouched on parse error"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1194,7 +1236,12 @@ mod tests {
         //   • update treated as delete → seed1 removed → 1 key
         //   • add treated as delete (no-op on absent key) → new-pm absent → 1 key (or seed2 absent too)
         let keys = pm_cache.snapshot_keys();
-        assert_eq!(keys.len(), 2, "expected exactly 2 keys after add+update+delete; got: {:?}", keys);
+        assert_eq!(
+            keys.len(),
+            2,
+            "expected exactly 2 keys after add+update+delete; got: {:?}",
+            keys
+        );
 
         // Add: "default/new-pm" must have been inserted.
         assert!(
@@ -1229,7 +1276,11 @@ mod tests {
         let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
 
         assert_eq!(outcome, WatchOutcome::Skipped);
-        assert_eq!(pm_cache.get_sync_version(), 0, "cache must be untouched on stale request");
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "cache must be untouched on stale request"
+        );
     }
 
     #[test]
@@ -1248,7 +1299,11 @@ mod tests {
         let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
 
         assert_eq!(outcome, WatchOutcome::ReWatch);
-        assert_eq!(pm_cache.get_sync_version(), 0, "data must not be applied on server_id mismatch");
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "data must not be applied on server_id mismatch"
+        );
     }
 
     #[test]
@@ -1301,7 +1356,13 @@ mod tests {
         // One unknown event (warned and skipped) plus one valid add event.
         let resp = FedWatchEventResponse {
             request_id: "req-1".to_string(),
-            data: event_json(&[("bogus_type", "default", "pm-x"), ("add", "default", "pm-valid")], 1),
+            data: event_json(
+                &[
+                    ("bogus_type", "default", "pm-x"),
+                    ("add", "default", "pm-valid"),
+                ],
+                1,
+            ),
             sync_version: 1,
             server_id: "srv-1".to_string(),
             error: String::new(),
@@ -1319,7 +1380,12 @@ mod tests {
         // If the unknown type were mistakenly treated as an add, there would be 2 keys.
         // If the valid add were also dropped, there would be 0 keys.
         let keys = pm_cache.snapshot_keys();
-        assert_eq!(keys.len(), 1, "unknown-type event must be dropped; exactly 1 key expected; got: {:?}", keys);
+        assert_eq!(
+            keys.len(),
+            1,
+            "unknown-type event must be dropped; exactly 1 key expected; got: {:?}",
+            keys
+        );
 
         // The valid add must be present.
         assert!(

@@ -1,9 +1,7 @@
-//! Fed-sync gRPC type definitions and shared identity helpers.
+//! Compatibility re-export for fed-sync gRPC type definitions.
 //!
 //! The wire contract (`proto`) is regenerated from the copied
-//! `proto/fed_sync.proto`. `spiffe` is the SPIFFE peer-identity verification
-//! used to authenticate controllers over the mTLS stream. The fed-sync SERVER
-//! runtime logic lives under `crate::server` (moved with Center in Phase 3).
+//! `proto/fed_sync.proto`. Runtime behavior and peer-identity verification live
+//! in `edgion-center-runtime`.
 
 pub use edgion_center_runtime::federation::proto;
-pub use edgion_center_runtime::federation::spiffe;

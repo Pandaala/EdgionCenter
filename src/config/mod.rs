@@ -4,6 +4,7 @@ use crate::common::local_auth::LocalAuthConfig;
 use serde::{Deserialize, Serialize};
 
 pub use edgion_center_core::AuthzMode;
+pub use edgion_center_runtime::federation::config::CenterSyncConfig;
 
 /// Persistence backend selector for the Center metadata store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -237,24 +238,6 @@ impl Default for CenterServerConfig {
             admin_tls: None,
             allow_admin_ips: Vec::new(),
             allow_tcp_ips: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CenterSyncConfig {
-    /// Timeout waiting for CommandResponse (seconds, default: 30)
-    pub command_timeout_secs: u64,
-    /// Heartbeat ping interval sent to controllers (seconds, default: 30)
-    pub ping_interval_secs: u64,
-}
-
-impl Default for CenterSyncConfig {
-    fn default() -> Self {
-        Self {
-            command_timeout_secs: 30,
-            ping_interval_secs: 30,
         }
     }
 }

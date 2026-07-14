@@ -60,9 +60,11 @@ workspace check, Clippy, and the full repository suite pass.
   observability.
 - Replaced the federation server's concrete SQL `Store` dependency with the
   `ControllerDirectory` port and ordered registration before offline projection.
+- Moved the federation server and transport configuration into `center-runtime`;
+  the compatibility crate now only re-exports the server module.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total is 305 passing tests: 238 compatibility, 5 core, and 62
+- Workspace total is 305 passing tests: 212 compatibility, 5 core, and 88
   runtime tests. Two compatibility-only clock helper tests were removed when the
   helper became private federation runtime behavior.
