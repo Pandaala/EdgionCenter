@@ -4,35 +4,24 @@
 //! into their final workspace crates. They intentionally contain translation
 //! only; application behavior remains in the existing modules.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use edgion_center_core::{
     Action, Authorizer, ControllerDirectory, ControllerId, ControllerPhase, ControllerRecord,
     ControllerRegistration, CoreError, CoreResult, Decision, EvictionOutcome, Principal, SessionId,
 };
-use tokio::sync::Mutex;
 
 use crate::common::authz::{AuthzStore, Principal as LegacyPrincipal};
 use crate::store::Store;
 
-/// SQL-backed controller projection with process-local session fencing.
-///
-/// The current SQL schema predates session ids. The compatibility adapter keeps
-/// active session ids in memory so a stale disconnect cannot mark a newer
-/// registration offline. The final SQL adapter will persist the projection
-/// fields required by its contract.
+/// SQL-backed controller projection with persistent session fencing.
 pub(crate) struct SqlControllerDirectory {
     store: Arc<Store>,
-    active_sessions: Mutex<HashMap<ControllerId, SessionId>>,
 }
 
 impl SqlControllerDirectory {
     pub(crate) fn new(store: Arc<Store>) -> Self {
-        Self {
-            store,
-            active_sessions: Mutex::new(HashMap::new()),
-        }
+        Self { store }
     }
 
     fn adapter_error(error: impl std::fmt::Display) -> CoreError {
@@ -43,20 +32,10 @@ impl SqlControllerDirectory {
 #[async_trait::async_trait]
 impl ControllerDirectory for SqlControllerDirectory {
     async fn upsert_registration(&self, registration: ControllerRegistration) -> CoreResult<()> {
-        // Serialize the SQL projection and fencing-token update so an older
-        // disconnect cannot race a newer registration into an offline row.
-        let mut sessions = self.active_sessions.lock().await;
         self.store
-            .upsert_controller(
-                registration.controller_id.as_str(),
-                &registration.cluster,
-                &registration.environments,
-                &registration.tags,
-                true,
-            )
+            .project_controller_registration(&registration)
             .await
             .map_err(Self::adapter_error)?;
-        sessions.insert(registration.controller_id, registration.session_id);
         Ok(())
     }
 
@@ -65,27 +44,14 @@ impl ControllerDirectory for SqlControllerDirectory {
         id: &ControllerId,
         observed_session: &SessionId,
     ) -> CoreResult<()> {
-        let mut sessions = self.active_sessions.lock().await;
-        match sessions.get(id) {
-            Some(current) if current == observed_session => {}
-            Some(_) => {
-                return Err(CoreError::Conflict(format!(
-                    "stale session attempted to mark controller {id} offline"
-                )))
-            }
-            None => return Ok(()),
-        }
-
         self.store
-            .mark_offline(id.as_str())
+            .mark_session_offline(id.as_str(), observed_session.as_str())
             .await
             .map_err(Self::adapter_error)?;
-        sessions.remove(id);
         Ok(())
     }
 
     async fn list(&self) -> CoreResult<Vec<ControllerRecord>> {
-        let sessions = self.active_sessions.lock().await;
         let rows = self
             .store
             .list_controllers()
@@ -95,12 +61,12 @@ impl ControllerDirectory for SqlControllerDirectory {
             .map(|row| {
                 let controller_id = ControllerId::new(row.controller_id)?;
                 Ok(ControllerRecord {
-                    current_session_id: sessions.get(&controller_id).cloned(),
+                    current_session_id: row.session_id.map(SessionId::new).transpose()?,
                     controller_id,
                     cluster: row.cluster,
                     environments: row.env,
                     tags: row.tag,
-                    connected_replica: None,
+                    connected_replica: row.connected_replica,
                     phase: if row.online {
                         ControllerPhase::Online
                     } else {
@@ -113,13 +79,11 @@ impl ControllerDirectory for SqlControllerDirectory {
     }
 
     async fn evict(&self, id: &ControllerId) -> CoreResult<EvictionOutcome> {
-        let mut sessions = self.active_sessions.lock().await;
         let removed = self
             .store
             .evict_controller(id.as_str())
             .await
             .map_err(Self::adapter_error)?;
-        sessions.remove(id);
         Ok(if removed {
             EvictionOutcome::Evicted
         } else {
@@ -192,10 +156,7 @@ mod tests {
         let stale = SessionId::new("s1").unwrap();
         let current = SessionId::new("s2").unwrap();
         let id = ControllerId::new("c1").unwrap();
-        assert!(matches!(
-            directory.mark_offline(&id, &stale).await,
-            Err(CoreError::Conflict(_))
-        ));
+        directory.mark_offline(&id, &stale).await.unwrap();
         assert_eq!(
             directory.list().await.unwrap()[0].phase,
             ControllerPhase::Online

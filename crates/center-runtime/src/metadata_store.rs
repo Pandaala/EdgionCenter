@@ -20,7 +20,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::watch_cache::CenterConfHandler;
-use edgion_resources::resources::edgion_config_data::EdgionConfigData;
+use crate::watch_cache::WatchedConfigData;
 
 /// One controller's effective region route (deserialized from the controller's
 /// /api/v1/region-routes/effective response; field names match that DTO).
@@ -212,8 +212,8 @@ impl Default for CenterMetaDataStore {
     }
 }
 
-impl CenterConfHandler<EdgionConfigData> for CenterMetaDataStore {
-    fn full_set(&self, controller_id: &str, data: &HashMap<String, Arc<EdgionConfigData>>) {
+impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
+    fn full_set(&self, controller_id: &str, data: &HashMap<String, Arc<WatchedConfigData>>) {
         // No-op: GIR and RegionRoute feeding via fed_sync (EdgionConfigData watch) has been
         // replaced by the background poller (`poll` module) which calls replace_region_routes
         // and replace_gir directly. The trait impl must remain so the generic EdgionConfigData
@@ -224,8 +224,8 @@ impl CenterConfHandler<EdgionConfigData> for CenterMetaDataStore {
     fn partial_update(
         &self,
         controller_id: &str,
-        add: HashMap<String, Arc<EdgionConfigData>>,
-        update: HashMap<String, Arc<EdgionConfigData>>,
+        add: HashMap<String, Arc<WatchedConfigData>>,
+        update: HashMap<String, Arc<WatchedConfigData>>,
         remove: HashSet<String>,
     ) {
         // No-op: see full_set comment.

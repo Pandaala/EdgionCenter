@@ -1116,7 +1116,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "edgion-center-core",
- "edgion-resources",
  "http",
  "metrics",
  "parking_lot",

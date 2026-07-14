@@ -65,6 +65,10 @@ workspace check, Clippy, and the full repository suite pass.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total is 305 passing tests: 212 compatibility, 5 core, and 88
+- Closed the first independent review findings: removed the runtime's transitive
+  Kube dependency, added immediate takeover cancellation, persisted SQL session
+  fencing/revisions, bounded projection latency, and reset stale standalone
+  ownership during startup.
+- Workspace total is 308 passing tests: 214 compatibility, 5 core, and 89
   runtime tests. Two compatibility-only clock helper tests were removed when the
   helper became private federation runtime behavior.

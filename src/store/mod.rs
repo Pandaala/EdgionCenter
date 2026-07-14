@@ -74,6 +74,7 @@ impl Store {
             }
         };
         store.migrate().await?;
+        store.reset_controller_sessions().await?;
         Ok(store)
     }
 
@@ -82,10 +83,14 @@ impl Store {
     pub async fn migrate(&self) -> anyhow::Result<()> {
         match &self.pool {
             Pool::Sqlite(pool) => {
-                sqlx::migrate!("src/store/migrations/sqlite").run(pool).await?;
+                sqlx::migrate!("src/store/migrations/sqlite")
+                    .run(pool)
+                    .await?;
             }
             Pool::Mysql(pool) => {
-                sqlx::migrate!("src/store/migrations/mysql").run(pool).await?;
+                sqlx::migrate!("src/store/migrations/mysql")
+                    .run(pool)
+                    .await?;
             }
         }
         Ok(())

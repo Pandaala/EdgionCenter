@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug)]
 pub struct ControllerSession {
@@ -15,6 +16,7 @@ pub struct ControllerSession {
     pub stream_tx: Option<mpsc::Sender<CenterMessage>>,
     pub last_seen: Instant,
     pub offline_since: Option<Instant>,
+    session_cancel: CancellationToken,
 }
 
 impl ControllerSession {
@@ -27,6 +29,11 @@ impl ControllerSession {
 pub struct ControllerRegistry {
     inner: Arc<RwLock<HashMap<String, ControllerSession>>>,
     metrics: Arc<dyn RegistryMetrics>,
+}
+
+pub struct RegistrationOutcome {
+    pub displaced_session_id: Option<String>,
+    pub session_cancel: CancellationToken,
 }
 
 /// Session lifecycle metrics supplied by the process composition root.
@@ -61,6 +68,19 @@ impl ControllerRegistry {
         stream_tx: mpsc::Sender<CenterMessage>,
         session_id: String,
     ) -> Option<String> {
+        self.register_cancellable(controller_id, info, stream_tx, session_id)
+            .displaced_session_id
+    }
+
+    /// Atomically install a session and cancel any live session it replaces.
+    pub fn register_cancellable(
+        &self,
+        controller_id: String,
+        info: RegisterRequest,
+        stream_tx: mpsc::Sender<CenterMessage>,
+        session_id: String,
+    ) -> RegistrationOutcome {
+        let session_cancel = CancellationToken::new();
         let session = ControllerSession {
             controller_id: controller_id.clone(),
             session_id,
@@ -68,12 +88,14 @@ impl ControllerRegistry {
             stream_tx: Some(stream_tx),
             last_seen: Instant::now(),
             offline_since: None,
+            session_cancel: session_cancel.clone(),
         };
         let mut guard = self.inner.write();
         // Capture a displaced *live* session id (takeover). An entry that is
         // already offline (stream_tx == None) is not a live takeover.
         let displaced = guard.get(&controller_id).and_then(|s| {
             if s.stream_tx.is_some() {
+                s.session_cancel.cancel();
                 Some(s.session_id.clone())
             } else {
                 None
@@ -86,7 +108,10 @@ impl ControllerRegistry {
             self.metrics.record_session_reentry();
         }
         guard.insert(controller_id, session);
-        displaced
+        RegistrationOutcome {
+            displaced_session_id: displaced,
+            session_cancel,
+        }
     }
 
     /// True iff `controller_id` currently maps to a session with this
@@ -152,6 +177,7 @@ impl ControllerRegistry {
         if session.offline_since.is_some() {
             return false;
         }
+        session.session_cancel.cancel();
         session.offline_since = Some(Instant::now());
         session.stream_tx.take();
         tracing::info!(
@@ -375,6 +401,30 @@ mod tests {
             Some("s1".to_string()),
             "second registration displaces s1"
         );
+    }
+
+    #[test]
+    fn takeover_immediately_cancels_displaced_session() {
+        let registry = ControllerRegistry::new();
+        let (tx1, _rx1) = mpsc::channel(8);
+        let first = registry.register_cancellable(
+            "cid".to_string(),
+            mock_info("cid"),
+            tx1,
+            "s1".to_string(),
+        );
+        assert!(!first.session_cancel.is_cancelled());
+
+        let (tx2, _rx2) = mpsc::channel(8);
+        let second = registry.register_cancellable(
+            "cid".to_string(),
+            mock_info("cid"),
+            tx2,
+            "s2".to_string(),
+        );
+        assert!(first.session_cancel.is_cancelled());
+        assert!(!second.session_cancel.is_cancelled());
+        assert_eq!(second.displaced_session_id.as_deref(), Some("s1"));
     }
 
     #[test]

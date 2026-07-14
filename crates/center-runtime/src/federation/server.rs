@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 
@@ -28,10 +27,8 @@ use crate::federation::proto::{
 use crate::federation::registry::ControllerRegistry;
 use crate::observe::fed_metrics;
 use crate::proxy::PendingProxyMap;
-use crate::watch_cache::{CenterSyncClient, EventType, WatchEventSimple};
+use crate::watch_cache::{CenterSyncClient, EventType, WatchEventSimple, WatchedConfigData};
 use edgion_center_core::{ControllerDirectory, ControllerId, ControllerRegistration, SessionId};
-use edgion_resources::resource::meta::ResourceMeta;
-use edgion_resources::resources::edgion_config_data::EdgionConfigData;
 
 /// Label value used on fed-sync metrics whose `kind` dimension is
 /// currently hardcoded. The federation server only streams EdgionConfigData
@@ -44,6 +41,36 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn next_observed_at_ms() -> i64 {
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let wall = now_ms();
+    let mut previous = LAST.load(Ordering::Relaxed);
+    loop {
+        let next = wall.max(previous.saturating_add(1));
+        match LAST.compare_exchange_weak(previous, next, Ordering::SeqCst, Ordering::Relaxed) {
+            Ok(_) => return next.min(i64::MAX as u64) as i64,
+            Err(actual) => previous = actual,
+        }
+    }
+}
+
+fn resource_key(value: &WatchedConfigData) -> Option<String> {
+    let metadata = value.get("metadata")?.as_object()?;
+    let name = metadata.get("name")?.as_str()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(
+        metadata
+            .get("namespace")
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(
+                || name.to_string(),
+                |namespace| format!("{namespace}/{name}"),
+            ),
+    )
 }
 
 // Boundary caps on RegisterRequest fields. The federation gRPC server requires
@@ -62,6 +89,7 @@ const MAX_LIST_ITEMS: usize = 32;
 /// Three intervals allow one transient packet loss without spurious offline marking.
 /// Per RFC 9113 §6.7 (informative).
 const HEARTBEAT_MISSED_PING_BUDGET: u32 = 3;
+const CONTROLLER_PROJECTION_TIMEOUT: Duration = Duration::from_secs(3);
 
 // Upper bound on total registered controllers (online + offline). Once
 // this is reached, registration of a *new* controller_id is refused;
@@ -221,7 +249,7 @@ enum WatchOutcome {
 /// `Skipped` or `ParseError`. On `Applied`, `pm_watch` state is updated.
 fn apply_watch_list(
     cid: &str,
-    pm_cache: &crate::watch_cache::CenterWatchCache<EdgionConfigData>,
+    pm_cache: &crate::watch_cache::CenterWatchCache<WatchedConfigData>,
     pm_watch: &mut FedWatchState,
     resp: FedWatchListResponse,
 ) -> WatchOutcome {
@@ -235,14 +263,11 @@ fn apply_watch_list(
         );
         return WatchOutcome::Skipped;
     }
-    match serde_json::from_str::<Vec<EdgionConfigData>>(&resp.data) {
+    match serde_json::from_str::<Vec<WatchedConfigData>>(&resp.data) {
         Ok(items) => {
-            let keyed: Vec<(String, EdgionConfigData)> = items
+            let keyed: Vec<(String, WatchedConfigData)> = items
                 .into_iter()
-                .map(|pm| {
-                    let key = pm.key_name();
-                    (key, pm)
-                })
+                .filter_map(|item| resource_key(&item).map(|key| (key, item)))
                 .collect();
             pm_cache.replace_all(keyed, resp.sync_version, resp.server_id.clone());
             pm_watch.server_id = Some(resp.server_id);
@@ -282,7 +307,7 @@ fn apply_watch_list(
 /// the backoff sleep and sending the new `FedWatchRequest`.
 fn apply_watch_event(
     cid: &str,
-    pm_cache: &crate::watch_cache::CenterWatchCache<EdgionConfigData>,
+    pm_cache: &crate::watch_cache::CenterWatchCache<WatchedConfigData>,
     pm_watch: &mut FedWatchState,
     resp: FedWatchEventResponse,
 ) -> WatchOutcome {
@@ -365,13 +390,20 @@ fn apply_watch_event(
                         continue;
                     }
                 };
-                match serde_json::from_str::<EdgionConfigData>(raw.data.get()) {
-                    Ok(pm) => {
-                        let key = pm.key_name();
+                match serde_json::from_str::<WatchedConfigData>(raw.data.get()) {
+                    Ok(item) => {
+                        let Some(key) = resource_key(&item) else {
+                            tracing::warn!(
+                                component = "fed_server",
+                                controller_id = %cid,
+                                "Watch event resource is missing metadata.name"
+                            );
+                            continue;
+                        };
                         events.push(WatchEventSimple {
                             event_type,
                             key,
-                            data: pm,
+                            data: item,
                         });
                     }
                     Err(e) => {
@@ -568,13 +600,14 @@ impl FederationSync for FederationGrpcServer {
         );
 
         // 2. Register in registry FIRST (atomic takeover), then aggregator + DB.
-        let displaced = self.registry.register(
+        let registration_outcome = self.registry.register_cancellable(
             controller_id.clone(),
             register_req.clone(),
             inner_tx.clone(),
             session_id.clone(),
         );
-        if displaced.is_some() {
+        let displaced_session_id = registration_outcome.displaced_session_id.clone();
+        if displaced_session_id.is_some() {
             fed_metrics::record_session_takeover();
         }
         self.aggregator.set_controller_info(
@@ -586,10 +619,9 @@ impl FederationSync for FederationGrpcServer {
                 tags: register_req.tag.clone(),
             },
         );
-        // Persist registration to the metadata store (best-effort, isolated from the hot path).
-        // Any failure here is logged and swallowed — we refuse to block fed-sync
-        // registration on DB availability, since the controller is already live
-        // in-memory and remains operational without persistence.
+        // Project registration with a strict deadline before acknowledging it.
+        // When a directory is configured, accepting an unprojected session would
+        // leave management state claiming that a canceled predecessor is online.
         if let Some(directory) = &self.controller_directory {
             let directory = directory.clone();
             let registration = ControllerRegistration {
@@ -600,16 +632,47 @@ impl FederationSync for FederationGrpcServer {
                 environments: register_req.env.clone(),
                 tags: register_req.tag.clone(),
                 connected_replica: None,
-                observed_at_unix_ms: now_ms() as i64,
+                observed_at_unix_ms: next_observed_at_ms(),
             };
             let cid = registration.controller_id.clone();
-            if let Err(e) = directory.upsert_registration(registration).await {
-                tracing::warn!(
-                    component = "fed_server",
-                    controller_id = %cid,
-                    error = %e,
-                    "Failed to project controller registration"
-                );
+            match tokio::time::timeout(
+                CONTROLLER_PROJECTION_TIMEOUT,
+                directory.upsert_registration(registration),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                result => {
+                    let error = match result {
+                        Ok(Err(error)) => error.to_string(),
+                        Err(_) => "controller projection timed out".to_string(),
+                        Ok(Ok(())) => unreachable!(),
+                    };
+                    self.registry.mark_offline(&controller_id, &session_id);
+                    self.aggregator.mark_offline(&controller_id);
+
+                    // If this was a takeover, fence the displaced projection as
+                    // well. A failed new projection must not leave the canceled
+                    // old transport advertised as online.
+                    if let Some(displaced) = displaced_session_id {
+                        if let Ok(displaced) = SessionId::new(displaced) {
+                            let _ = tokio::time::timeout(
+                                CONTROLLER_PROJECTION_TIMEOUT,
+                                directory.mark_offline(&cid, &displaced),
+                            )
+                            .await;
+                        }
+                    }
+                    tracing::warn!(
+                        component = "fed_server",
+                        controller_id = %cid,
+                        error = %error,
+                        "Controller registration rejected because projection failed"
+                    );
+                    return Err(Status::unavailable(
+                        "controller registration projection unavailable",
+                    ));
+                }
             }
         }
 
@@ -674,7 +737,7 @@ impl FederationSync for FederationGrpcServer {
         // this to detect idle connections without wrapping message delivery in a timeout,
         // which would falsely fire on large in-flight WatchListResponse payloads.
         let last_pong_ms = Arc::new(AtomicU64::new(now_ms()));
-        let heartbeat_cancel = CancellationToken::new();
+        let heartbeat_cancel = registration_outcome.session_cancel;
         let cid = controller_id.clone();
 
         // 3. Forward inner_rx → out_tx
@@ -1064,9 +1127,10 @@ mod tests {
 
     /// Build a per-controller EdgionConfigData watch cache backed by the real
     /// CenterMetaDataStore handler (same construction used by the server).
-    fn make_pm_cache() -> std::sync::Arc<crate::watch_cache::CenterWatchCache<EdgionConfigData>> {
+    fn make_pm_cache() -> std::sync::Arc<crate::watch_cache::CenterWatchCache<WatchedConfigData>> {
         let store = std::sync::Arc::new(crate::metadata_store::CenterMetaDataStore::new());
-        let registry = crate::watch_cache::CenterWatchCacheRegistry::<EdgionConfigData>::new(store);
+        let registry =
+            crate::watch_cache::CenterWatchCacheRegistry::<WatchedConfigData>::new(store);
         registry.get_or_create("test-ctrl")
     }
 
@@ -1193,11 +1257,11 @@ mod tests {
         let keyed = vec![
             (
                 "default/seed1".to_string(),
-                serde_json::from_str::<EdgionConfigData>(&pm_json("default", "seed1")).unwrap(),
+                serde_json::from_str::<WatchedConfigData>(&pm_json("default", "seed1")).unwrap(),
             ),
             (
                 "default/seed2".to_string(),
-                serde_json::from_str::<EdgionConfigData>(&pm_json("default", "seed2")).unwrap(),
+                serde_json::from_str::<WatchedConfigData>(&pm_json("default", "seed2")).unwrap(),
             ),
         ];
         pm_cache.replace_all(keyed, 1, "srv-1".to_string());

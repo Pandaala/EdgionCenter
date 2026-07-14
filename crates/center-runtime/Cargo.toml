@@ -12,7 +12,6 @@ test-support = []
 async-trait.workspace = true
 anyhow = "1.0"
 edgion-center-core = { path = "../center-core" }
-edgion-resources = { path = "../../../Edgion/edgion-resources" }
 http = "1.4"
 metrics = "0.24"
 parking_lot = "0.12"

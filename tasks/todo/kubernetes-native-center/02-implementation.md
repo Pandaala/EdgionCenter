@@ -72,6 +72,14 @@ delayed online upsert. API composition, authentication middleware, and the
 remaining process-level observability modules still need extraction before this
 increment is complete.
 
+Independent review follow-up: the runtime watch cache now retains platform-
+neutral JSON envelopes rather than Kubernetes-generated resource structs, so
+its normal dependency graph contains no Kube, k8s-openapi, or SQLx crates.
+Session takeover actively cancels the displaced transport. The compatibility
+SQL projection persists session fencing tokens and monotonic observation
+revisions, rejects stale offline/projection writes, clears ephemeral ownership
+at startup, and bounds registration projection latency.
+
 ### Increment 4: Standalone composition
 
 - Move SQL persistence and DB management into `center-adapter-sql`.
