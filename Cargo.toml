@@ -115,9 +115,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # CLI
 clap = { version = "4.5", features = ["derive", "env"] }
 
-[build-dependencies]
-tonic-build = "0.12"
-
 [dev-dependencies]
 edgion-center-runtime = { path = "crates/center-runtime", features = ["test-support"] }
 wiremock = "0.6"

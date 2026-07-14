@@ -1093,7 +1093,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
- "tonic-build",
  "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
@@ -1119,9 +1118,12 @@ dependencies = [
  "edgion-center-core",
  "edgion-resources",
  "parking_lot",
+ "prost",
  "serde",
  "serde_json",
  "tokio",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]

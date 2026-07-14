@@ -5,6 +5,7 @@
 //! Kubernetes adapters.
 
 pub mod aggregator;
+pub mod federation;
 pub mod metadata_store;
 pub mod poll;
 pub mod watch_cache;

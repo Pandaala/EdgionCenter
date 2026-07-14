@@ -1,19 +1,6 @@
-//! Build script: regenerate the fed_sync gRPC bindings.
-//!
-//! The fed_sync wire contract is COPIED (not shared source) from the Edgion
-//! repo (`src/core/common/fed_sync/proto/fed_sync.proto`) into `proto/`. Keep
-//! it byte-compatible with the Edgion controllers (the gRPC clients) so the
-//! federation stream stays interoperable; bump deliberately when the contract
-//! changes on both sides.
+//! Build-time support for the compatibility binary.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-
-    let proto_dir = "proto";
-    tonic_build::configure()
-        .file_descriptor_set_path(out_dir.join("fed_sync_descriptor.bin"))
-        .compile_protos(&[format!("{proto_dir}/fed_sync.proto")], &[proto_dir])?;
-
     ensure_embed_dashboard_placeholder();
 
     Ok(())

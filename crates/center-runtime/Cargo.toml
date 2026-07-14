@@ -13,8 +13,13 @@ async-trait.workspace = true
 edgion-center-core = { path = "../center-core" }
 edgion-resources = { path = "../../../Edgion/edgion-resources" }
 parking_lot = "0.12"
+prost = "0.13"
 serde.workspace = true
 serde_json.workspace = true
+tonic = "0.12"
 
 [dev-dependencies]
 tokio = { version = "1.49", features = ["macros", "rt"] }
+
+[build-dependencies]
+tonic-build = "0.12"

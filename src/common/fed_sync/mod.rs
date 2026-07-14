@@ -5,5 +5,5 @@
 //! used to authenticate controllers over the mTLS stream. The fed-sync SERVER
 //! runtime logic lives under `crate::server` (moved with Center in Phase 3).
 
-pub mod proto;
+pub use edgion_center_runtime::federation::proto;
 pub mod spiffe;
