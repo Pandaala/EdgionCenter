@@ -41,6 +41,13 @@ authorization resolver, including stale-session fencing and idempotent eviction.
 - Keep SQL implementation connected through the new ports.
 - Prove the existing integration scripts still address the compatibility binary.
 
+Progress (2026-07-14): created `center-runtime` and moved the metadata
+aggregation store plus generic watch cache into it as the first vertical slice.
+The compatibility crate temporarily re-exports these modules, preserving all
+call sites while establishing the final dependency direction. Remaining
+federation, API, aggregation, proxy, command, authentication, and observability
+modules still need extraction before this increment is complete.
+
 ### Increment 4: Standalone composition
 
 - Move SQL persistence and DB management into `center-adapter-sql`.

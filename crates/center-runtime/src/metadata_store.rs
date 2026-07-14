@@ -110,7 +110,11 @@ impl CenterMetaDataStore {
     /// Replace all region routes for one controller (full snapshot from a poll).
     /// Prunes all old entries for this controller across all route keys, then inserts
     /// the new snapshot; drops any outer key that becomes empty.
-    pub fn replace_region_routes(&self, controller_id: &str, routes: Vec<EffectiveRegionRouteView>) {
+    pub fn replace_region_routes(
+        &self,
+        controller_id: &str,
+        routes: Vec<EffectiveRegionRouteView>,
+    ) {
         let mut map = self.region_routes.write();
         // Prune this controller's old entries across all keys.
         for inner in map.values_mut() {
@@ -119,7 +123,9 @@ impl CenterMetaDataStore {
         // Insert new entries.
         for r in routes {
             let key = region_route_key(&r);
-            map.entry(key).or_default().insert(controller_id.to_string(), r);
+            map.entry(key)
+                .or_default()
+                .insert(controller_id.to_string(), r);
         }
         // Drop outer keys that became empty.
         map.retain(|_, inner| !inner.is_empty());
@@ -155,7 +161,9 @@ impl CenterMetaDataStore {
         // Insert new entries.
         for g in girs {
             let key = gir_key(&g);
-            map.entry(key).or_default().insert(controller_id.to_string(), g);
+            map.entry(key)
+                .or_default()
+                .insert(controller_id.to_string(), g);
         }
         // Drop outer keys that became empty.
         map.retain(|_, inner| !inner.is_empty());
@@ -236,7 +244,12 @@ impl CenterConfHandler<EdgionConfigData> for CenterMetaDataStore {
 /// Build the canonical storage key for a region route: "namespace/plugin_name/alias".
 /// When alias is None the trailing segment is an empty string ("ns/plugin/").
 fn region_route_key(r: &EffectiveRegionRouteView) -> String {
-    format!("{}/{}/{}", r.namespace, r.plugin_name, r.alias.as_deref().unwrap_or(""))
+    format!(
+        "{}/{}/{}",
+        r.namespace,
+        r.plugin_name,
+        r.alias.as_deref().unwrap_or("")
+    )
 }
 
 /// Build the canonical storage key for a GIR entry: "namespace/plugin_name".
@@ -265,8 +278,16 @@ mod tests {
         store.replace_gir("ctrl-a", vec![g.clone()]);
         store.replace_gir("ctrl-b", vec![g.clone()]);
         let list = store.list_gir_effective();
-        assert_eq!(list.len(), 1, "should aggregate to one row per (ns, plugin_name)");
-        assert_eq!(list[0].controllers.len(), 2, "both controllers should appear");
+        assert_eq!(
+            list.len(),
+            1,
+            "should aggregate to one row per (ns, plugin_name)"
+        );
+        assert_eq!(
+            list[0].controllers.len(),
+            2,
+            "both controllers should appear"
+        );
         assert!(list[0].controllers.contains_key("ctrl-a"));
         assert!(list[0].controllers.contains_key("ctrl-b"));
     }

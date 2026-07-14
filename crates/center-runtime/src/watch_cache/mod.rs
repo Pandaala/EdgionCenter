@@ -2,7 +2,7 @@ pub mod cache;
 pub mod registry;
 pub mod traits;
 
-pub use cache::{CenterWatchCache, WatchEventSimple};
+pub use cache::{CenterWatchCache, EventType, WatchEventSimple};
 pub use registry::CenterWatchCacheRegistry;
 pub use traits::CenterConfHandler;
 

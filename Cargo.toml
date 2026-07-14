@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/center-core"]
+members = [".", "crates/center-core", "crates/center-runtime"]
 default-members = ["."]
 resolver = "2"
 
@@ -32,6 +32,7 @@ embed-dashboard = ["dep:rust-embed"]
 
 [dependencies]
 edgion-center-core = { path = "crates/center-core" }
+edgion-center-runtime = { path = "crates/center-runtime" }
 # Embedded web UI assets (feature `embed-dashboard`). Optional so the default
 # build does not compile them in.
 rust-embed = { version = "8", optional = true }
@@ -118,6 +119,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 tonic-build = "0.12"
 
 [dev-dependencies]
+edgion-center-runtime = { path = "crates/center-runtime", features = ["test-support"] }
 wiremock = "0.6"
 tempfile = "3"
 # Mint RSA keypairs + JWKS for OIDC validation tests (sign test tokens with

@@ -21,8 +21,7 @@ use crate::config::CenterSyncConfig;
 use crate::store::Store;
 use crate::fed_sync::registry::ControllerRegistry;
 use crate::proxy::PendingProxyMap;
-use crate::watch_cache::{CenterSyncClient, WatchEventSimple};
-use crate::common::conf_sync::types::EventType;
+use crate::watch_cache::{CenterSyncClient, EventType, WatchEventSimple};
 use crate::common::fed_sync::proto::{
     center_message::Payload as CenterPayload, controller_message::Payload as CtrlPayload,
     federation_sync_server::FederationSync, CenterMessage, ControllerMessage, FedWatchEventResponse,

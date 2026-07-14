@@ -41,3 +41,13 @@ scoped rustfmt check for all touched Rust files.
 
 KN-02 completed on 2026-07-14. Targeted core and compatibility contract tests,
 workspace check, Clippy, and the full repository suite pass.
+
+## KN-03 progress
+
+- Added the `center-runtime` workspace crate with no SQLx or Kube dependency.
+- Moved `metadata_store` and `watch_cache` into the runtime crate.
+- Added a test-support feature so cross-crate federation tests can inspect cache
+  state without exposing those helpers in production builds.
+- Preserved the compatibility package through temporary module re-exports.
+- Workspace total remains 303 passing tests: 288 compatibility, 5 core, and 10
+  runtime tests.

@@ -12,11 +12,15 @@ mod common;
 mod config;
 mod core_ports;
 mod fed_sync;
-mod metadata_store;
+mod metadata_store {
+    pub use edgion_center_runtime::metadata_store::*;
+}
 mod poll;
 mod proxy;
 mod store;
-mod watch_cache;
+mod watch_cache {
+    pub use edgion_center_runtime::watch_cache::*;
+}
 
 use cli::EdgionCenterCli;
 use common::startup::{init_crypto, install_panic_hook};

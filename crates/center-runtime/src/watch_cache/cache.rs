@@ -3,9 +3,16 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use crate::common::conf_sync::types::EventType;
-
 use super::traits::CenterConfHandler;
+
+/// Change classification received from a Controller watch stream.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventType {
+    Update,
+    Delete,
+    Add,
+}
 
 /// Simplified watch event for Center consumption.
 pub struct WatchEventSimple<T> {
@@ -29,7 +36,10 @@ struct CacheState<T> {
 }
 
 impl<T: Send + Sync + 'static> CenterWatchCache<T> {
-    pub fn new(controller_id: String, handler: Arc<dyn CenterConfHandler<T> + Send + Sync>) -> Self {
+    pub fn new(
+        controller_id: String,
+        handler: Arc<dyn CenterConfHandler<T> + Send + Sync>,
+    ) -> Self {
         Self {
             controller_id,
             inner: RwLock::new(CacheState {
@@ -61,7 +71,12 @@ impl<T: Send + Sync + 'static> CenterWatchCache<T> {
     /// handler.partial_update().
     ///
     /// Handler call happens OUTSIDE the lock to avoid deadlocks.
-    pub fn apply_events(&self, events: Vec<WatchEventSimple<T>>, sync_version: u64, server_id: String) {
+    pub fn apply_events(
+        &self,
+        events: Vec<WatchEventSimple<T>>,
+        sync_version: u64,
+        server_id: String,
+    ) {
         let (add, update, remove) = {
             let mut state = self.inner.write();
 
@@ -94,7 +109,8 @@ impl<T: Send + Sync + 'static> CenterWatchCache<T> {
             (add, update, remove)
         };
 
-        self.handler.partial_update(&self.controller_id, add, update, remove);
+        self.handler
+            .partial_update(&self.controller_id, add, update, remove);
     }
 
     pub fn get_sync_version(&self) -> u64 {
@@ -109,7 +125,7 @@ impl<T: Send + Sync + 'static> CenterWatchCache<T> {
     ///
     /// Available in `#[cfg(test)]` only — used by unit tests to assert which
     /// keys are present after add/update/delete classification.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn snapshot_keys(&self) -> Vec<String> {
         let state = self.inner.read();
         let mut keys: Vec<String> = state.data.keys().cloned().collect();
@@ -121,7 +137,7 @@ impl<T: Send + Sync + 'static> CenterWatchCache<T> {
     ///
     /// Available in `#[cfg(test)]` only — used by unit tests to assert
     /// key-level presence/absence after classification.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn get_entry(&self, key: &str) -> Option<Arc<T>> {
         self.inner.read().data.get(key).cloned()
     }
