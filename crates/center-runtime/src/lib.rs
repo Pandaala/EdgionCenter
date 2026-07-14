@@ -6,4 +6,5 @@
 
 pub mod aggregator;
 pub mod metadata_store;
+pub mod poll;
 pub mod watch_cache;

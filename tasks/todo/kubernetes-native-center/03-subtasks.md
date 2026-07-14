@@ -48,8 +48,10 @@ workspace check, Clippy, and the full repository suite pass.
 - Moved `metadata_store` and `watch_cache` into the runtime crate.
 - Moved `aggregator` into the runtime crate and separated protobuf input from
   process-specific metrics emission.
+- Moved the effective-state poller behind a `ControllerHttpClient` runtime port;
+  the existing `ProxyForwarder` now acts as its compatibility adapter.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total remains 303 passing tests: 285 compatibility, 5 core, and 13
+- Workspace total is now 304 passing tests: 281 compatibility, 5 core, and 18
   runtime tests.

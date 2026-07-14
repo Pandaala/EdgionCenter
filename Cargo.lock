@@ -1115,11 +1115,13 @@ dependencies = [
 name = "edgion-center-runtime"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "edgion-center-core",
  "edgion-resources",
  "parking_lot",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

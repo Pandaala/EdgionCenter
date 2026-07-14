@@ -275,7 +275,8 @@ impl EdgionCenterCli {
                         .map(|s| s.controller_id.clone())
                         .collect();
                     for cid in online {
-                        crate::poll::poll_controller_once(&proxy, &metadata_store, &cid).await;
+                        crate::poll::poll_controller_once(proxy.as_ref(), &metadata_store, &cid)
+                            .await;
                     }
                 }
             });

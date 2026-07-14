@@ -50,7 +50,9 @@ modules still need extraction before this increment is complete.
 
 The controller aggregator is also runtime-owned. Its input is now a protobuf-
 independent `ControllerInfo`, and process metrics are supplied through an
-`AggregatorMetrics` hook by the compatibility composition root.
+`AggregatorMetrics` hook by the compatibility composition root. The background
+effective-state poller is runtime-owned as well and depends on the narrow
+`ControllerHttpClient` contract instead of the gRPC-backed proxy implementation.
 
 ### Increment 4: Standalone composition
 

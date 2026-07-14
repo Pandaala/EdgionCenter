@@ -31,7 +31,9 @@ mod fed_sync;
 mod metadata_store {
     pub use edgion_center_runtime::metadata_store::*;
 }
-mod poll;
+mod poll {
+    pub use edgion_center_runtime::poll::*;
+}
 mod proxy;
 mod store;
 mod watch_cache {

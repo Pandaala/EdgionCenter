@@ -89,3 +89,23 @@ impl ProxyForwarder {
             })
     }
 }
+
+#[async_trait::async_trait]
+impl edgion_center_runtime::poll::ControllerHttpClient for ProxyForwarder {
+    async fn request(
+        &self,
+        controller_id: &str,
+        method: String,
+        path: String,
+        headers: HashMap<String, String>,
+        body: Vec<u8>,
+    ) -> Result<edgion_center_runtime::poll::ControllerHttpResponse, String> {
+        self.forward(controller_id, method, path, headers, body)
+            .await
+            .map(|response| edgion_center_runtime::poll::ControllerHttpResponse {
+                status_code: response.status_code,
+                body: response.body,
+            })
+            .map_err(|(_, message)| message)
+    }
+}

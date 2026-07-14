@@ -4,7 +4,25 @@
 use std::collections::HashMap;
 
 use crate::metadata_store::{CenterMetaDataStore, EffectiveGirView, EffectiveRegionRouteView};
-use crate::proxy::ProxyForwarder;
+
+/// HTTP response returned through a connected Controller.
+pub struct ControllerHttpResponse {
+    pub status_code: u32,
+    pub body: Vec<u8>,
+}
+
+/// Narrow runtime contract for Controller-bound HTTP requests.
+#[async_trait::async_trait]
+pub trait ControllerHttpClient: Send + Sync {
+    async fn request(
+        &self,
+        controller_id: &str,
+        method: String,
+        path: String,
+        headers: HashMap<String, String>,
+        body: Vec<u8>,
+    ) -> Result<ControllerHttpResponse, String>;
+}
 
 /// Tolerant element-wise parse: a single bad element is dropped, not the whole batch.
 /// A non-JSON body yields an empty Vec.
@@ -13,7 +31,11 @@ pub fn parse_region_effective(body: &[u8]) -> Vec<EffectiveRegionRouteView> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let arr = v.get("data").and_then(|d| d.as_array()).cloned().unwrap_or_default();
+    let arr = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
     arr.into_iter()
         .filter_map(|el| serde_json::from_value::<EffectiveRegionRouteView>(el).ok())
         .collect()
@@ -26,7 +48,11 @@ pub fn parse_gir_effective(body: &[u8]) -> Vec<EffectiveGirView> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let arr = v.get("data").and_then(|d| d.as_array()).cloned().unwrap_or_default();
+    let arr = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
     arr.into_iter()
         .filter_map(|el| serde_json::from_value::<EffectiveGirView>(el).ok())
         .collect()
@@ -35,13 +61,13 @@ pub fn parse_gir_effective(body: &[u8]) -> Vec<EffectiveGirView> {
 /// Poll one controller's two effective endpoints and update the store.
 /// On a non-200 response or forwarding error the store is left unchanged for that
 /// endpoint (fail-open: keep the previous snapshot rather than clearing it).
-pub async fn poll_controller_once(
-    proxy: &ProxyForwarder,
+pub async fn poll_controller_once<C: ControllerHttpClient + ?Sized>(
+    client: &C,
     store: &CenterMetaDataStore,
     controller_id: &str,
 ) {
-    if let Ok(resp) = proxy
-        .forward(
+    if let Ok(resp) = client
+        .request(
             controller_id,
             "GET".to_string(),
             "/api/v1/region-routes/effective".to_string(),
@@ -54,8 +80,8 @@ pub async fn poll_controller_once(
             store.replace_region_routes(controller_id, parse_region_effective(&resp.body));
         }
     }
-    if let Ok(resp) = proxy
-        .forward(
+    if let Ok(resp) = client
+        .request(
             controller_id,
             "GET".to_string(),
             "/api/v1/global-ip-restrictions/effective".to_string(),
@@ -73,6 +99,29 @@ pub async fn poll_controller_once(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    struct FakeClient {
+        responses: Mutex<HashMap<String, Result<ControllerHttpResponse, String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ControllerHttpClient for FakeClient {
+        async fn request(
+            &self,
+            _controller_id: &str,
+            _method: String,
+            path: String,
+            _headers: HashMap<String, String>,
+            _body: Vec<u8>,
+        ) -> Result<ControllerHttpResponse, String> {
+            self.responses
+                .lock()
+                .unwrap()
+                .remove(&path)
+                .unwrap_or_else(|| Err("missing fake response".to_string()))
+        }
+    }
 
     #[test]
     fn tolerant_parse_drops_bad_keeps_good() {
@@ -106,5 +155,40 @@ mod tests {
         let parsed = parse_gir_effective(body);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].plugin_name, "gir1");
+    }
+
+    #[tokio::test]
+    async fn polling_contract_updates_successes_and_preserves_failed_snapshots() {
+        let store = CenterMetaDataStore::new();
+        let responses = HashMap::from([
+            (
+                "/api/v1/region-routes/effective".to_string(),
+                Ok(ControllerHttpResponse {
+                    status_code: 200,
+                    body: br#"{"data":[{"namespace":"default","pluginName":"ep1","myRegion":"east","regions":[]}]}"#.to_vec(),
+                }),
+            ),
+            (
+                "/api/v1/global-ip-restrictions/effective".to_string(),
+                Ok(ControllerHttpResponse {
+                    status_code: 200,
+                    body: br#"{"data":[{"namespace":"default","pluginName":"gir1","enable":true,"activeProfile":"strict","profiles":{}}]}"#.to_vec(),
+                }),
+            ),
+        ]);
+        let client = FakeClient {
+            responses: Mutex::new(responses),
+        };
+
+        poll_controller_once(&client, &store, "c1").await;
+        assert_eq!(store.list_region_routes().len(), 1);
+        assert_eq!(store.list_gir_effective().len(), 1);
+
+        let failing = FakeClient {
+            responses: Mutex::new(HashMap::new()),
+        };
+        poll_controller_once(&failing, &store, "c1").await;
+        assert_eq!(store.list_region_routes().len(), 1);
+        assert_eq!(store.list_gir_effective().len(), 1);
     }
 }
