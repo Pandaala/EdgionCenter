@@ -4,5 +4,6 @@
 //! executable. This crate may depend on `center-core`, but never on SQL or
 //! Kubernetes adapters.
 
+pub mod aggregator;
 pub mod metadata_store;
 pub mod watch_cache;

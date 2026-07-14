@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 
-use crate::aggregator::ResourceAggregator;
+use crate::aggregator::{ControllerInfo, ResourceAggregator};
 use crate::config::CenterSyncConfig;
 use crate::store::Store;
 use crate::fed_sync::registry::ControllerRegistry;
@@ -553,8 +553,15 @@ impl FederationSync for FederationGrpcServer {
         if displaced.is_some() {
             fed_metrics::record_session_takeover();
         }
-        self.aggregator
-            .set_controller_info(&controller_id, register_req.clone());
+        self.aggregator.set_controller_info(
+            &controller_id,
+            ControllerInfo {
+                controller_id: register_req.controller_id.clone(),
+                cluster: register_req.cluster.clone(),
+                environments: register_req.env.clone(),
+                tags: register_req.tag.clone(),
+            },
+        );
         // Persist registration to the metadata store (best-effort, isolated from the hot path).
         // Any failure here is logged and swallowed — we refuse to block fed-sync
         // registration on DB availability, since the controller is already live
@@ -1336,10 +1343,16 @@ mod tests {
         // New session s2 is authoritative.
         let (tx1, _rx1) = tokio::sync::mpsc::channel(8);
         registry.register("cid".to_string(), cid_req.clone(), tx1, "s1".to_string());
-        aggregator.set_controller_info("cid", cid_req.clone());
+        let aggregate_info = ControllerInfo {
+            controller_id: cid_req.controller_id.clone(),
+            cluster: cid_req.cluster.clone(),
+            environments: cid_req.env.clone(),
+            tags: cid_req.tag.clone(),
+        };
+        aggregator.set_controller_info("cid", aggregate_info.clone());
         let (tx2, _rx2) = tokio::sync::mpsc::channel(8);
         registry.register("cid".to_string(), cid_req.clone(), tx2, "s2".to_string());
-        aggregator.set_controller_info("cid", cid_req.clone());
+        aggregator.set_controller_info("cid", aggregate_info);
 
         // Old task (s1) runs the guarded offline path.
         let transitioned = registry.mark_offline("cid", "s1");

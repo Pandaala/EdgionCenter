@@ -96,7 +96,9 @@ impl EdgionCenterCli {
         };
 
         let registry = ControllerRegistry::new();
-        let aggregator = Arc::new(ResourceAggregator::new());
+        let aggregator = Arc::new(ResourceAggregator::with_metrics(Arc::new(
+            crate::aggregator::FedAggregatorMetrics,
+        )));
         let pending_proxies: PendingProxyMap = Arc::new(Mutex::new(HashMap::new()));
 
         let metadata_store = Arc::new(CenterMetaDataStore::new());

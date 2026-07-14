@@ -121,10 +121,9 @@ pub async fn region_routes_consistency(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aggregator::ResourceAggregator;
+    use crate::aggregator::{ControllerInfo, ResourceAggregator};
     use crate::api::ApiState;
     use crate::commander::Commander;
-    use crate::common::fed_sync::proto::RegisterRequest;
     use crate::config::AuthzMode;
     use crate::fed_sync::registry::ControllerRegistry;
     use crate::metadata_store::{CenterMetaDataStore, EffectiveRegionRouteView};
@@ -165,13 +164,12 @@ mod tests {
         }
     }
 
-    fn make_register_info(controller_id: &str) -> RegisterRequest {
-        RegisterRequest {
+    fn make_register_info(controller_id: &str) -> ControllerInfo {
+        ControllerInfo {
             controller_id: controller_id.to_string(),
             cluster: "test-cluster".to_string(),
-            env: vec![],
-            tag: vec![],
-            supported_kinds: vec![],
+            environments: vec![],
+            tags: vec![],
         }
     }
 

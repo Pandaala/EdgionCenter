@@ -417,13 +417,12 @@ mod tests {
         }
     }
 
-    fn make_register_info(controller_id: &str) -> crate::common::fed_sync::proto::RegisterRequest {
-        crate::common::fed_sync::proto::RegisterRequest {
+    fn make_register_info(controller_id: &str) -> crate::aggregator::ControllerInfo {
+        crate::aggregator::ControllerInfo {
             controller_id: controller_id.to_string(),
             cluster: "test-cluster".to_string(),
-            env: vec![],
-            tag: vec![],
-            supported_kinds: vec![],
+            environments: vec![],
+            tags: vec![],
         }
     }
 

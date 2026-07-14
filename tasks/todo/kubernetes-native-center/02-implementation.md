@@ -45,8 +45,12 @@ Progress (2026-07-14): created `center-runtime` and moved the metadata
 aggregation store plus generic watch cache into it as the first vertical slice.
 The compatibility crate temporarily re-exports these modules, preserving all
 call sites while establishing the final dependency direction. Remaining
-federation, API, aggregation, proxy, command, authentication, and observability
+federation, API, proxy, command, authentication, and observability
 modules still need extraction before this increment is complete.
+
+The controller aggregator is also runtime-owned. Its input is now a protobuf-
+independent `ControllerInfo`, and process metrics are supplied through an
+`AggregatorMetrics` hook by the compatibility composition root.
 
 ### Increment 4: Standalone composition
 

@@ -5,15 +5,13 @@
 //! Offline entries are retained in memory and must be removed explicitly via
 //! the Admin DELETE API (see ticket #20).
 
-use crate::common::fed_sync::proto::RegisterRequest;
-use crate::common::observe::fed_metrics;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug)]
 struct ControllerSnapshot {
-    info: RegisterRequest,
+    info: ControllerInfo,
     offline_since: Option<std::time::Instant>,
     /// Most recent stats push from the controller (None until the first
     /// StatsReport arrives over fed_sync).
@@ -33,7 +31,7 @@ struct StatsEntry {
 }
 
 impl ControllerSnapshot {
-    fn new(info: RegisterRequest) -> Self {
+    fn new(info: ControllerInfo) -> Self {
         Self {
             info,
             offline_since: None,
@@ -45,17 +43,46 @@ impl ControllerSnapshot {
 #[derive(Clone)]
 pub struct ResourceAggregator {
     inner: Arc<RwLock<HashMap<String, ControllerSnapshot>>>,
+    metrics: Arc<dyn AggregatorMetrics>,
+}
+
+/// Registration fields needed by aggregation, independent of the gRPC schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllerInfo {
+    pub controller_id: String,
+    pub cluster: String,
+    pub environments: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+/// Observability hook supplied by the process composition root.
+pub trait AggregatorMetrics: Send + Sync {
+    fn set_controller_count(&self, cluster: &str, count: u64);
+    fn record_eviction(&self);
+}
+
+struct NoopAggregatorMetrics;
+
+impl AggregatorMetrics for NoopAggregatorMetrics {
+    fn set_controller_count(&self, _cluster: &str, _count: u64) {}
+
+    fn record_eviction(&self) {}
 }
 
 impl ResourceAggregator {
     pub fn new() -> Self {
+        Self::with_metrics(Arc::new(NoopAggregatorMetrics))
+    }
+
+    pub fn with_metrics(metrics: Arc<dyn AggregatorMetrics>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
+            metrics,
         }
     }
 
     /// Called when controller registers (or reconnects).
-    pub fn set_controller_info(&self, controller_id: &str, info: RegisterRequest) {
+    pub fn set_controller_info(&self, controller_id: &str, info: ControllerInfo) {
         let snapshot = {
             let mut map = self.inner.write();
             let snap = map
@@ -65,7 +92,7 @@ impl ResourceAggregator {
             snap.offline_since = None;
             Self::compute_gauge_snapshot(&map)
         };
-        Self::emit_gauges(&snapshot);
+        self.emit_gauges(&snapshot);
     }
 
     pub fn mark_offline(&self, controller_id: &str) {
@@ -78,7 +105,7 @@ impl ResourceAggregator {
             }
             Self::compute_gauge_snapshot(&map)
         };
-        Self::emit_gauges(&snapshot);
+        self.emit_gauges(&snapshot);
     }
 
     /// Remove a controller's snapshot entirely. Used by Admin DELETE cascade.
@@ -120,10 +147,10 @@ impl ResourceAggregator {
         let Some((snapshot, zero_cluster)) = outcome else {
             return false;
         };
-        fed_metrics::record_evict_stale(fed_metrics::labels::evict_source::AGGREGATOR);
-        Self::emit_gauges(&snapshot);
+        self.metrics.record_eviction();
+        self.emit_gauges(&snapshot);
         if let Some(cluster) = zero_cluster {
-            fed_metrics::set_aggregator_controllers(&cluster, 0);
+            self.metrics.set_controller_count(&cluster, 0);
         }
         true
     }
@@ -157,9 +184,9 @@ impl ResourceAggregator {
     /// Emit the gauge snapshot to the `metrics` backend. Must be called
     /// OUTSIDE the write lock so a future metrics backend with non-trivial
     /// emit cost cannot stall registration / disconnect handling.
-    fn emit_gauges(snapshot: &HashMap<String, u64>) {
+    fn emit_gauges(&self, snapshot: &HashMap<String, u64>) {
         for (cluster, count) in snapshot {
-            fed_metrics::set_aggregator_controllers(cluster, *count);
+            self.metrics.set_controller_count(cluster, *count);
         }
     }
 
@@ -191,14 +218,20 @@ impl ResourceAggregator {
             .map(|s| ControllerSummary {
                 controller_id: s.info.controller_id.clone(),
                 cluster: s.info.cluster.clone(),
-                env: s.info.env.clone(),
-                tag: s.info.tag.clone(),
+                env: s.info.environments.clone(),
+                tag: s.info.tags.clone(),
                 online: s.offline_since.is_none(),
                 key_count: s.stats.as_ref().map(|e| e.total),
                 stats_updated_secs_ago: s.stats.as_ref().map(|e| e.updated_at.elapsed().as_secs()),
                 last_seen_secs_ago: None,
             })
             .collect()
+    }
+}
+
+impl Default for ResourceAggregator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -224,15 +257,12 @@ pub struct ControllerSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::fed_sync::proto::RegisterRequest;
-
-    fn mock_register_info(cid: &str, cluster: &str) -> RegisterRequest {
-        RegisterRequest {
+    fn mock_register_info(cid: &str, cluster: &str) -> ControllerInfo {
+        ControllerInfo {
             controller_id: cid.to_string(),
             cluster: cluster.to_string(),
-            env: vec![],
-            tag: vec![],
-            supported_kinds: vec![],
+            environments: vec![],
+            tags: vec![],
         }
     }
 
