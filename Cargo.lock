@@ -1064,6 +1064,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "clap",
+ "edgion-center-core",
  "edgion-resources",
  "futures",
  "http",
@@ -1101,6 +1102,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "edgion-center-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "edgion-dsl"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "indexmap 2.14.0",
+ "nom",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "edgion-resources"
 version = "0.1.0"
 dependencies = [
@@ -1108,6 +1130,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "edgion-dsl",
+ "hex",
  "jsonwebtoken",
  "k8s-openapi",
  "kube",
@@ -1119,9 +1143,11 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "smallvec",
  "thiserror 2.0.18",
  "tracing",
+ "url",
  "zeroize",
 ]
 

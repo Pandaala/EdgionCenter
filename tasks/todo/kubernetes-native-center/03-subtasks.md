@@ -1,0 +1,43 @@
+# Subtasks
+
+| ID | Status | Deliverable |
+|---|---|---|
+| KN-01 | done | Cargo workspace, `center-core`, library seam, compatibility binary |
+| KN-02 | done | Core domain types, narrow ports, capabilities, and contract tests |
+| KN-03 | in-progress | Shared `center-runtime` extraction |
+| KN-04 | pending | SQL adapter extraction and `edgion-center-standalone` binary |
+| KN-05 | pending | Kubernetes CRDs and controller directory adapter |
+| KN-06 | pending | Kubernetes SubjectAccessReview authorizer |
+| KN-07 | pending | Kubernetes Lease coordination and ownership state machine |
+| KN-08 | pending | `edgion-center-kubernetes` binary and manifests |
+| KN-09 | pending | Capability-driven Admin API and dashboard behavior |
+| KN-10 | pending | Owner-aware internal forwarding for command/proxy operations |
+| KN-11 | pending | Standalone and Kubernetes integration matrices |
+| KN-12 | pending | Separate images, CI, docs, skills, and compatibility-binary retirement |
+
+## KN-01 acceptance
+
+- Root Cargo invocation recognizes a workspace.
+- `center-core` has no Axum, Tonic, SQLx, or Kube dependencies.
+- Current application code is compiled as a library.
+- `edgion-center` is a thin compatibility binary with unchanged CLI behavior.
+- Existing tests and repository checks pass.
+
+KN-01 completed on 2026-07-14. Validation: `cargo check --workspace
+--all-targets`, `cargo test --workspace --all-targets`, `cargo clippy
+--workspace --all-targets`, both repository guards, `git diff --check`, and a
+scoped rustfmt check for all touched Rust files.
+
+## KN-02 acceptance
+
+- Platform ports do not expose Axum, Tonic, SQLx, or Kube types.
+- Controller and session identifiers reject empty and control-character values.
+- Authorization denial remains distinct from adapter failure.
+- Standalone capabilities and Kubernetes capabilities are explicit.
+- The existing SQL controller projection is covered by stale-session fencing,
+  offline transition, and idempotent eviction contract tests.
+- The existing allow-all and explicit-permission authorization behavior is
+  covered through the new `Authorizer` contract.
+
+KN-02 completed on 2026-07-14. Targeted core and compatibility contract tests,
+workspace check, Clippy, and the full repository suite pass.

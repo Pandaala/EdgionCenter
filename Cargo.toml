@@ -1,3 +1,18 @@
+[workspace]
+members = [".", "crates/center-core"]
+default-members = ["."]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["pandalaa"]
+
+[workspace.dependencies]
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+
 [package]
 name = "edgion-center"
 version = "0.1.0"
@@ -16,6 +31,7 @@ path = "src/main.rs"
 embed-dashboard = ["dep:rust-embed"]
 
 [dependencies]
+edgion-center-core = { path = "crates/center-core" }
 # Embedded web UI assets (feature `embed-dashboard`). Optional so the default
 # build does not compile them in.
 rust-embed = { version = "8", optional = true }
@@ -33,10 +49,10 @@ tokio = { version = "1.49", features = ["full"] }
 tokio-util = "0.7"
 tokio-stream = "0.1"
 anyhow = "1.0"
-async-trait = "0.1"
+async-trait.workspace = true
 
 # Serialization
-serde = { version = "1.0", features = ["derive", "rc"] }
+serde.workspace = true
 serde_json = "1.0"
 serde_yaml = "0.9"
 

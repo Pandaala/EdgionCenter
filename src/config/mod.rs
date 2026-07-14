@@ -3,6 +3,8 @@ use crate::common::config::{AdminTlsConfig, ConfSyncSecurityConfig};
 use crate::common::local_auth::LocalAuthConfig;
 use serde::{Deserialize, Serialize};
 
+pub use edgion_center_core::AuthzMode;
+
 /// Persistence backend selector for the Center metadata store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -47,17 +49,6 @@ impl Default for DatabaseConfig {
 /// `DbAuthz`, which resolves each caller's permissions from the `users`/`roles`
 /// tables by subject — regardless of which authentication provider issued the
 /// token. `Rbac` requires a usable database.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthzMode {
-    /// Login = admin. Everyone authenticated gets every permission.
-    #[default]
-    AllowAll,
-    /// Database-backed RBAC. Permissions resolved per subject from the DB.
-    /// Requires a usable database; startup fails without one.
-    Rbac,
-}
-
 /// Authorization configuration. Selects which `AuthzStore` is installed. This is
 /// orthogonal to authentication: any authn provider (OIDC, single-admin, DB
 /// users) can be combined with either authz mode.

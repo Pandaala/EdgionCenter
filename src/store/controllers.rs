@@ -131,8 +131,24 @@ impl Store {
 
     /// Delete a controller record from DB.
     pub async fn delete_controller(&self, id: &str) -> anyhow::Result<()> {
-        self.exec_by_id("DELETE FROM controllers WHERE controller_id = ?", None, id)
-            .await
+        self.evict_controller(id).await.map(|_| ())
+    }
+
+    /// Delete a controller and report whether a row existed.
+    pub async fn evict_controller(&self, id: &str) -> anyhow::Result<bool> {
+        let affected = match &self.pool {
+            Pool::Sqlite(pool) => sqlx::query("DELETE FROM controllers WHERE controller_id = ?")
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            Pool::Mysql(pool) => sqlx::query("DELETE FROM controllers WHERE controller_id = ?")
+                .bind(id)
+                .execute(pool)
+                .await?
+                .rows_affected(),
+        };
+        Ok(affected > 0)
     }
 
     /// List all controller records, ordered by `controller_id`.

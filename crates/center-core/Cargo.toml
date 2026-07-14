@@ -1,0 +1,13 @@
+[package]
+name = "edgion-center-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
