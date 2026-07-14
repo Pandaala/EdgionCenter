@@ -164,6 +164,10 @@ impl EdgionCenterCli {
         };
         let audit_log_reads = config.audit.log_reads;
 
+        let controller_directory: Option<Arc<dyn edgion_center_core::ControllerDirectory>> = db
+            .clone()
+            .map(|store| Arc::new(crate::core_ports::SqlControllerDirectory::new(store)) as Arc<_>);
+
         // Decide federation transport (fail-close) before constructing the server.
         config
             .grpc_security
@@ -202,7 +206,7 @@ impl EdgionCenterCli {
             pending_proxies.clone(),
             config.sync.clone(),
             sync_client.clone(),
-            db.clone(),
+            controller_directory,
             trust_domain.clone(),
         );
         let pending_commands = grpc_server.pending_commands.clone();

@@ -19,7 +19,6 @@ use uuid::Uuid;
 use crate::aggregator::{ControllerInfo, ResourceAggregator};
 use crate::commander::PendingCommandMap;
 use crate::config::CenterSyncConfig;
-use crate::store::Store;
 use crate::fed_sync::registry::ControllerRegistry;
 use crate::proxy::PendingProxyMap;
 use crate::watch_cache::{CenterSyncClient, EventType, WatchEventSimple};
@@ -28,8 +27,8 @@ use crate::common::fed_sync::proto::{
     federation_sync_server::FederationSync, CenterMessage, ControllerMessage, FedWatchEventResponse,
     FedWatchListResponse, FedWatchRequest, Ping, RegisterAck, RegisterRequest,
 };
-use crate::common::now_ms;
 use crate::common::observe::fed_metrics;
+use edgion_center_core::{ControllerDirectory, ControllerId, ControllerRegistration, SessionId};
 use edgion_resources::resource::meta::ResourceMeta;
 use edgion_resources::resources::edgion_config_data::EdgionConfigData;
 
@@ -38,6 +37,13 @@ use edgion_resources::resources::edgion_config_data::EdgionConfigData;
 /// today; when new kinds are added, each call site should pass its own
 /// kind instead of this constant.
 const PLUGIN_METADATA_KIND: &str = "EdgionConfigData";
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 // Boundary caps on RegisterRequest fields. The federation gRPC server requires
 // mTLS, but input validation is kept independent of the TLS layer: any peer
@@ -412,9 +418,8 @@ pub struct FederationGrpcServer {
     pub pending_proxies: PendingProxyMap,
     pub sync_config: CenterSyncConfig,
     pub sync_client: Arc<CenterSyncClient>,
-    /// Optional — Center only persists controller registration when
-    /// `database.enabled=true`. Absent DB means upsert/mark_offline are skipped.
-    pub db: Option<Arc<Store>>,
+    /// Optional durable/queryable projection selected by the composition root.
+    pub controller_directory: Option<Arc<dyn ControllerDirectory>>,
     /// SPIFFE trust domain for peer-identity binding (always enforced under mTLS).
     pub trust_domain: Option<String>,
 }
@@ -426,7 +431,7 @@ impl FederationGrpcServer {
         pending_proxies: PendingProxyMap,
         sync_config: CenterSyncConfig,
         sync_client: Arc<CenterSyncClient>,
-        db: Option<Arc<Store>>,
+        controller_directory: Option<Arc<dyn ControllerDirectory>>,
         trust_domain: Option<String>,
     ) -> Self {
         Self {
@@ -436,7 +441,7 @@ impl FederationGrpcServer {
             pending_proxies,
             sync_config,
             sync_client,
-            db,
+            controller_directory,
             trust_domain,
         }
     }
@@ -564,22 +569,27 @@ impl FederationSync for FederationGrpcServer {
         // Any failure here is logged and swallowed — we refuse to block fed-sync
         // registration on DB availability, since the controller is already live
         // in-memory and remains operational without persistence.
-        if let Some(db) = &self.db {
-            let db = db.clone();
-            let cid = controller_id.clone();
-            let cluster = register_req.cluster.clone();
-            let env = register_req.env.clone();
-            let tag = register_req.tag.clone();
-            tokio::spawn(async move {
-                if let Err(e) = db.upsert_controller(&cid, &cluster, &env, &tag, true).await {
-                    tracing::warn!(
-                        component = "fed_server",
-                        controller_id = %cid,
-                        error = %e,
-                        "Failed to upsert controller on register"
-                    );
-                }
-            });
+        if let Some(directory) = &self.controller_directory {
+            let directory = directory.clone();
+            let registration = ControllerRegistration {
+                controller_id: ControllerId::new(controller_id.clone())
+                    .expect("validated controller id"),
+                session_id: SessionId::new(session_id.clone()).expect("generated session id"),
+                cluster: register_req.cluster.clone(),
+                environments: register_req.env.clone(),
+                tags: register_req.tag.clone(),
+                connected_replica: None,
+                observed_at_unix_ms: now_ms() as i64,
+            };
+            let cid = registration.controller_id.clone();
+            if let Err(e) = directory.upsert_registration(registration).await {
+                tracing::warn!(
+                    component = "fed_server",
+                    controller_id = %cid,
+                    error = %e,
+                    "Failed to project controller registration"
+                );
+            }
         }
 
         // Federation connection metrics: record the connect event and refresh
@@ -627,7 +637,7 @@ impl FederationSync for FederationGrpcServer {
         let pending_commands = self.pending_commands.clone();
         let pending_proxies = self.pending_proxies.clone();
         let sync_client = self.sync_client.clone();
-        let db_for_offline = self.db.clone();
+        let directory_for_offline = self.controller_directory.clone();
         let ping_interval = Duration::from_secs(self.sync_config.ping_interval_secs);
         let heartbeat_timeout = ping_interval * HEARTBEAT_MISSED_PING_BUDGET;
         // Tracks the epoch-ms timestamp of the last received Pong. The heartbeat task reads
@@ -661,7 +671,7 @@ impl FederationSync for FederationGrpcServer {
                 interval.tick().await; // skip first
                 loop {
                     interval.tick().await;
-                    let now_ms = crate::common::now_ms();
+                    let now_ms = now_ms();
                     // Check Pong freshness before sending next Ping. Tracking last-pong-at
                     // rather than wrapping inbound.message() in a timeout avoids false offline
                     // declarations when a large WatchListResponse is in transit (RFC 9113 §6.7).
@@ -702,7 +712,7 @@ impl FederationSync for FederationGrpcServer {
             let self_pending_proxies = pending_proxies.clone();
             let pm_cache = pm_cache.clone();
             let inner_tx = inner_tx.clone();
-            let db_for_offline = db_for_offline.clone();
+            let directory_for_offline = directory_for_offline.clone();
             let last_pong_ms = last_pong_ms.clone();
             let heartbeat_cancel = heartbeat_cancel.clone();
             async move {
@@ -722,16 +732,17 @@ impl FederationSync for FederationGrpcServer {
                     }
                     aggregator_for_offline.mark_offline(&cid);
                     sync_client.plugin_metadata.mark_offline(&cid);
-                    if let Some(db) = &db_for_offline {
-                        let db = db.clone();
-                        let cid_db = cid.clone();
+                    if let Some(directory) = &directory_for_offline {
+                        let directory = directory.clone();
+                        let cid = ControllerId::new(cid.clone()).expect("validated controller id");
+                        let sid = SessionId::new(sid.clone()).expect("generated session id");
                         tokio::spawn(async move {
-                            if let Err(e) = db.mark_offline(&cid_db).await {
+                            if let Err(e) = directory.mark_offline(&cid, &sid).await {
                                 tracing::warn!(
                                     component = "fed_server",
-                                    controller_id = %cid_db,
+                                    controller_id = %cid,
                                     error = %e,
-                                    "Failed to mark controller offline in DB"
+                                    "Failed to project controller offline state"
                                 );
                             }
                         });

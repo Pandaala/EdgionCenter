@@ -58,8 +58,11 @@ workspace check, Clippy, and the full repository suite pass.
   runtime federation module with all real-DER tests preserved.
 - Moved federation metrics and bounded-label validation into runtime
   observability.
+- Replaced the federation server's concrete SQL `Store` dependency with the
+  `ControllerDirectory` port and ordered registration before offline projection.
 - Added a test-support feature so cross-crate federation tests can inspect cache
   state without exposing those helpers in production builds.
 - Preserved the compatibility package through temporary module re-exports.
-- Workspace total remains 307 passing tests: 240 compatibility, 5 core, and 62
-  runtime tests.
+- Workspace total is 305 passing tests: 238 compatibility, 5 core, and 62
+  runtime tests. Two compatibility-only clock helper tests were removed when the
+  helper became private federation runtime behavior.

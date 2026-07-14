@@ -22,15 +22,13 @@ use crate::store::Store;
 /// active session ids in memory so a stale disconnect cannot mark a newer
 /// registration offline. The final SQL adapter will persist the projection
 /// fields required by its contract.
-#[allow(dead_code)] // Wired when the SQL adapter extraction starts in KN-04.
 pub(crate) struct SqlControllerDirectory {
     store: Arc<Store>,
     active_sessions: Mutex<HashMap<ControllerId, SessionId>>,
 }
 
-#[allow(dead_code)] // Constructors become live at the KN-04 composition root.
 impl SqlControllerDirectory {
-    fn new(store: Arc<Store>) -> Self {
+    pub(crate) fn new(store: Arc<Store>) -> Self {
         Self {
             store,
             active_sessions: Mutex::new(HashMap::new()),

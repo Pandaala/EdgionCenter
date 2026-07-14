@@ -64,6 +64,10 @@ the federation server no longer depends on a compatibility-only security
 module.
 Federation metrics and their bounded-label catalog are runtime-owned as shared
 observability primitives for both deployment compositions.
+The compatibility federation server now persists controller state exclusively
+through `ControllerDirectory`. Registration projection completes before the
+session loop begins, preventing a short-lived session's asynchronous offline
+write from being overtaken by a delayed online upsert.
 
 ### Increment 4: Standalone composition
 
