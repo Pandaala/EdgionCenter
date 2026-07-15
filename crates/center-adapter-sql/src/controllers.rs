@@ -5,7 +5,7 @@
 //! `mark_offline` is a narrow no-op-on-missing update.
 
 use super::{Pool, Store};
-use edgion_center_core::ControllerRegistration;
+use edgion_center_core::{ControllerRegistration, ControllerRuntimeObservation};
 use sqlx::Row;
 
 fn unix_now() -> i64 {
@@ -143,6 +143,40 @@ impl Store {
             );
         }
         Ok(())
+    }
+
+    /// Refresh runtime liveness for the current live session.
+    ///
+    /// `observed_at_ms` is the registration/eviction fencing revision and must
+    /// not be advanced by heartbeats: doing so would cause the matching stream's
+    /// later offline tombstone to look stale. Standalone SQL currently persists
+    /// only the liveness timestamp; richer runtime diagnostics remain available
+    /// from the in-process aggregator.
+    pub async fn project_controller_runtime(
+        &self,
+        observation: &ControllerRuntimeObservation,
+    ) -> anyhow::Result<bool> {
+        let last_seen_at = observation.observed_at_unix_ms.saturating_div(1_000);
+        let sql = "UPDATE controllers
+                   SET last_seen_at = ?
+                   WHERE controller_id = ? AND session_id = ? AND online = 1 AND evicted = 0";
+        let affected = match &self.pool {
+            Pool::Sqlite(pool) => sqlx::query(sql)
+                .bind(last_seen_at)
+                .bind(observation.controller_id.as_str())
+                .bind(observation.session_id.as_str())
+                .execute(pool)
+                .await?
+                .rows_affected(),
+            Pool::Mysql(pool) => sqlx::query(sql)
+                .bind(last_seen_at)
+                .bind(observation.controller_id.as_str())
+                .bind(observation.session_id.as_str())
+                .execute(pool)
+                .await?
+                .rows_affected(),
+        };
+        Ok(affected > 0)
     }
 
     /// Upsert a controller record (online or offline state update).
@@ -453,6 +487,20 @@ mod tests {
         }
     }
 
+    fn runtime(session: &str, observed_at: i64) -> ControllerRuntimeObservation {
+        ControllerRuntimeObservation {
+            controller_id: ControllerId::new("c1").unwrap(),
+            session_id: SessionId::new(session).unwrap(),
+            ownership_fence: None,
+            sync_version: None,
+            watch_server_id: None,
+            resource_count: None,
+            stats_updated_unix_ms: None,
+            watch_updated_unix_ms: None,
+            observed_at_unix_ms: observed_at,
+        }
+    }
+
     #[tokio::test]
     async fn upsert_then_list_roundtrips_fields() {
         let db = Store::open_in_memory().await.unwrap();
@@ -574,6 +622,48 @@ mod tests {
         let row = db.list_controllers().await.unwrap().pop().unwrap();
         assert!(!row.online);
         assert_eq!(row.session_id.as_deref(), Some("s2"));
+    }
+
+    #[tokio::test]
+    async fn runtime_projection_refreshes_only_the_current_live_session() {
+        let db = Store::open_in_memory().await.unwrap();
+        db.project_controller_registration(&registration(
+            "s2",
+            "cluster-new",
+            "prod",
+            "center-0",
+            2,
+        ))
+        .await
+        .unwrap();
+
+        assert!(db
+            .project_controller_runtime(&runtime("s2", 50_000))
+            .await
+            .unwrap());
+        let row = db.list_controllers().await.unwrap().pop().unwrap();
+        assert_eq!(row.last_seen_at, 50);
+
+        assert!(!db
+            .project_controller_runtime(&runtime("s1", 60_000))
+            .await
+            .unwrap());
+        let row = db.list_controllers().await.unwrap().pop().unwrap();
+        assert_eq!(
+            row.last_seen_at, 50,
+            "a stale session must not refresh liveness"
+        );
+
+        assert!(db.mark_session_offline("c1", "s2", 2).await.unwrap());
+        assert!(!db
+            .project_controller_runtime(&runtime("s2", 70_000))
+            .await
+            .unwrap());
+        let row = db.list_controllers().await.unwrap().pop().unwrap();
+        assert_ne!(
+            row.last_seen_at, 70,
+            "an offline session must not refresh liveness"
+        );
     }
 
     #[tokio::test]

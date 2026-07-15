@@ -1,0 +1,6 @@
+ARG CONTROLLER_IMAGE=pandaala/edgion-controller:latest
+FROM ${CONTROLLER_IMAGE}
+
+# File-system mode validates resources against the checked-in CRDs. Production
+# Kubernetes Controller images do not otherwise need these files at runtime.
+COPY --chown=edgion:edgion config/crd /tmp/edgion/config/crd

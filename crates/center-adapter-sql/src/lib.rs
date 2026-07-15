@@ -470,6 +470,16 @@ impl ControllerDirectory for SqlControllerDirectory {
             .collect()
     }
 
+    async fn project_runtime(
+        &self,
+        observation: edgion_center_core::ControllerRuntimeObservation,
+    ) -> CoreResult<bool> {
+        self.store
+            .project_controller_runtime(&observation)
+            .await
+            .map_err(Self::adapter_error)
+    }
+
     async fn evict(&self, id: &ControllerId) -> CoreResult<EvictionResult> {
         let removed = self
             .store

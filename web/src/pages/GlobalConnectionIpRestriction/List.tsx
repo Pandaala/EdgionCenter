@@ -84,10 +84,31 @@ export default function GlobalConnectionIpRestrictionList() {
         }
       })
 
-      // Delayed invalidate to reconcile with the eventual real state once fed_sync converges.
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ['global-connection-ip-restrictions'] })
-      }, 1500)
+      // Reconcile without publishing an intermediate stale snapshot. A successful
+      // Controller write can take multiple federation ping intervals to arrive in
+      // Center's metadata store; invalidating after a fixed short delay would make
+      // the optimistic value visibly jump back to the old profile.
+      const delays = [1500, 3000, 5000, 8000, 12000]
+      const reconcile = async (attempt: number): Promise<void> => {
+        await new Promise((resolve) => setTimeout(resolve, delays[attempt]))
+        try {
+          const fresh = await globalConnectionIpRestrictionApi.list()
+          const current = fresh.data
+            ?.find((item) => item.namespace === variables.ns && item.pluginName === variables.name)
+            ?.controllers?.[variables.ctrl]?.activeProfile
+
+          if (current === variables.profile || attempt === delays.length - 1) {
+            queryClient.setQueryData(['global-connection-ip-restrictions'], fresh)
+            return
+          }
+        } catch {
+          // A transient reconciliation read must not turn a successful write into
+          // a user-visible error. The next bounded attempt can still converge.
+        }
+
+        if (attempt + 1 < delays.length) void reconcile(attempt + 1)
+      }
+      void reconcile(0)
     },
     onError: (e: Error) => message.error(`Profile switch error: ${e.message}`),
   })

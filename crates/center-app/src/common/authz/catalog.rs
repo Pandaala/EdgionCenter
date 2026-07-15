@@ -172,9 +172,10 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         return Some(ROLES_MANAGE);
     }
 
-    // Region routes (cluster + service): list/consistency are GET reads,
-    // failover/sync are POST writes.
-    if under_segment(path, "/api/v1/center/cluster-region-routes")
+    // Region routes: list/consistency are GET reads, failover/sync are writes.
+    // Keep the two legacy prefixes mapped while their redirect routes remain.
+    if under_segment(path, "/api/v1/center/region-routes")
+        || under_segment(path, "/api/v1/center/cluster-region-routes")
         || under_segment(path, "/api/v1/center/service-region-routes")
     {
         return Some(if is_get {
@@ -374,6 +375,14 @@ mod tests {
     /// GET endpoints resolve to `:read`, mutations to `:write`.
     #[test]
     fn read_vs_write_keys() {
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/region-routes"),
+            Some(REGION_ROUTES_READ)
+        );
+        assert_eq!(
+            route_permission(&Method::POST, "/api/v1/center/region-routes/failover"),
+            Some(REGION_ROUTES_WRITE)
+        );
         assert_eq!(
             route_permission(&Method::GET, "/api/v1/center/cluster-region-routes"),
             Some(REGION_ROUTES_READ)
