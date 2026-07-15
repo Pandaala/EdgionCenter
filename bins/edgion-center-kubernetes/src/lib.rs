@@ -976,6 +976,7 @@ mod tests {
         let deployment = include_str!("../../../cicd/deploy/center-kubernetes/deployment.yaml");
         let config = include_str!("../../../cicd/deploy/center-kubernetes/config.yaml");
         let service = include_str!("../../../cicd/deploy/center-kubernetes/service.yaml");
+        let dockerfile = include_str!("../../../cicd/docker/Dockerfile");
 
         assert!(deployment.contains("name: oauth2-proxy"));
         assert!(deployment.contains(
@@ -987,6 +988,8 @@ mod tests {
         assert!(deployment.contains("edgion-center-browser-oidc"));
         assert!(config.contains("http_addr: 127.0.0.1:12201"));
         assert!(service.contains("targetPort: auth-proxy"));
+        assert!(dockerfile.contains("USER 1000:1000"));
+        assert!(!dockerfile.contains("USER edgion"));
     }
 
     #[test]

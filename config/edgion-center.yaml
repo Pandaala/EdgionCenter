@@ -130,6 +130,7 @@ audit:
 #   enabled: true
 #   discovery: "https://your-idp.example.com/.well-known/openid-configuration"
 #   audiences: ["edgion-admin"]   # optional; empty = skip audience check
+#   ca_file: /var/run/secrets/oidc/ca.crt  # optional private OIDC CA bundle
 #
 # --- Single shared admin (`local_auth:`) ---
 # One username + password plus the JWT signing secret. The `jwt_secret` here is

@@ -86,7 +86,7 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
       resourceApi.create('edgionplugins', namespace, content),
     onSuccess: () => {
       message.success(t('msg.createOk'))
-      queryClient.invalidateQueries({ queryKey: ['edgionplugins'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionplugins'] })
       onClose()
     },
     onError: (error: any) => {
@@ -100,7 +100,7 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
       resourceApi.update('edgionplugins', namespace, name, content),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
-      queryClient.invalidateQueries({ queryKey: ['edgionplugins'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionplugins'] })
       onClose()
     },
     onError: (error: any) => {

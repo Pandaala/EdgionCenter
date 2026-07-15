@@ -82,7 +82,7 @@ RUN groupadd -g 1000 edgion 2>/dev/null || groupadd edgion && \
     useradd -r -u 1000 -g edgion edgion 2>/dev/null || useradd -r -g edgion edgion
 WORKDIR /usr/local/edgion
 COPY --from=build /usr/local/bin/edgion-center /usr/local/bin/edgion-center
-USER edgion
+USER 1000:1000
 ENV RUST_LOG=info \
     RUST_BACKTRACE=1
 # Informational: admin API / fed-sync gRPC / probe / metrics / internal Kube RPC.

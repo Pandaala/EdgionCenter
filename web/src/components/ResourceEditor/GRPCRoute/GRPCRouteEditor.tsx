@@ -62,7 +62,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
       resourceApi.create('grpcroute', namespace, yamlStr),
     onSuccess: () => {
       message.success(t('msg.createOk'))
-      queryClient.invalidateQueries({ queryKey: ['grpcroute'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'grpcroute'] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
@@ -73,7 +73,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
       resourceApi.update('grpcroute', namespace, name, yamlStr),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
-      queryClient.invalidateQueries({ queryKey: ['grpcroute'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'grpcroute'] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),

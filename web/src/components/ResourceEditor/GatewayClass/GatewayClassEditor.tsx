@@ -51,14 +51,14 @@ const GatewayClassEditor: React.FC<GatewayClassEditorProps> = ({ visible, mode, 
   const createMutation = useMutation({
     mutationFn: ({ yamlStr }: { yamlStr: string }) =>
       clusterResourceApi.create('gatewayclass', yamlStr),
-    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['gatewayclass'] }); onClose() },
+    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'gatewayclass'] }); onClose() },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ name, yamlStr }: { name: string; yamlStr: string }) =>
       clusterResourceApi.update('gatewayclass', name, yamlStr),
-    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['gatewayclass'] }); onClose() },
+    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'gatewayclass'] }); onClose() },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),
   })
 

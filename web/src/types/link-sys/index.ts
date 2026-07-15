@@ -1,45 +1,88 @@
-/**
- * LinkSys 类型定义
- * apiVersion: edgion.io/v1
- */
-
 import type { K8sObjectMeta } from '@/types/gateway-api/common'
 
-export type LinkSysType = 'redis' | 'elasticsearch' | 'etcd' | 'webhook'
+export type LinkSysType = 'redis' | 'elasticsearch' | 'etcd' | 'webhook' | 'kafka' | 'httpdns'
+
+export interface SecretObjectReference {
+  name: string
+  namespace?: string
+}
+
+export interface SecretAuth {
+  secretRef: SecretObjectReference
+}
 
 export interface RedisConfig {
-  addresses?: string[]
-  password?: string
-  database?: number
-  clusterMode?: boolean
-  tls?: { enable?: boolean }
+  endpoints: string[]
+  db?: number
+  auth?: SecretAuth
+  topology?: {
+    mode: 'standalone' | 'sentinel' | 'cluster'
+    sentinel?: { masterName: string; sentinels: string[] }
+    cluster?: { readFromReplicas?: boolean; maxRedirects?: number }
+  }
 }
 
 export interface ElasticsearchConfig {
-  addresses?: string[]
-  username?: string
-  password?: string
+  endpoints: string[]
+  auth?: SecretAuth & { type: 'basic' | 'apiKey' | 'bearer' }
 }
 
 export interface EtcdConfig {
-  endpoints?: string[]
-  username?: string
-  password?: string
+  endpoints: string[]
+  auth?: SecretAuth
 }
 
 export interface WebhookConfig {
-  url?: string
-  method?: string
-  headers?: Record<string, string>
+  target: {
+    url?: string
+    blockPrivate?: boolean
+    group?: string
+    kind?: string
+    name?: string
+    namespace?: string
+    port?: number
+  }
+  request?: {
+    path?: unknown
+    method?: { template: string }
+    args?: unknown
+    headers?: unknown
+    cookies?: unknown
+    body?: unknown
+  }
   timeoutMs?: number
 }
 
+export interface KafkaConfig {
+  brokers: string[]
+  channelSize?: number
+  lingerMs?: number
+}
+
+export interface HttpDnsConfig {
+  preset?: 'aliyun' | 'tencent'
+  urlTemplate?: string
+  response?: {
+    kind?: 'json' | 'delimited'
+    ipPath?: string
+    delimiter?: string
+    ttlPath?: string
+  }
+  fallback?: { type: 'system' | 'none' | 'dns'; servers?: string[] }
+  connection?: { timeoutMs?: number }
+}
+
+export type LinkSysConfig =
+  | RedisConfig
+  | ElasticsearchConfig
+  | EtcdConfig
+  | WebhookConfig
+  | KafkaConfig
+  | HttpDnsConfig
+
 export interface LinkSysSpec {
   type: LinkSysType
-  redis?: RedisConfig
-  elasticsearch?: ElasticsearchConfig
-  etcd?: EtcdConfig
-  webhook?: WebhookConfig
+  config: LinkSysConfig
 }
 
 export interface LinkSys {

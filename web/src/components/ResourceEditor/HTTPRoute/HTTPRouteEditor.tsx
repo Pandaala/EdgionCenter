@@ -95,7 +95,7 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
       resourceApi.create('httproute', namespace, content),
     onSuccess: () => {
       message.success(t('msg.createOk'));
-      queryClient.invalidateQueries({ queryKey: ['httproutes'] });
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'httproute'] });
       onClose();
     },
     onError: (error: any) => {
@@ -109,7 +109,7 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
       resourceApi.update('httproute', namespace, name, content),
     onSuccess: () => {
       message.success(t('msg.updateOk'));
-      queryClient.invalidateQueries({ queryKey: ['httproutes'] });
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'httproute'] });
       onClose();
     },
     onError: (error: any) => {

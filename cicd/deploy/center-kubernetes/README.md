@@ -13,7 +13,11 @@ Before applying the Kustomization:
 2. Set `oidc-issuer-url`, `oauth2-redirect-url`, `auth.discovery`, and
    `auth.audiences` in `config.yaml`. The sole configured audience must match
    the OAuth client ID. Configure the provider to include the `groups` claim in
-   the ID token requested by this client.
+   the ID token requested by this client. When the issuer uses a private CA,
+   mount its PEM bundle read-only into the Center container and set
+   `auth.ca_file` to that mounted path. Do not disable issuer TLS verification
+   in production; the operating-system trust store alone is not sufficient for
+   the Center binary's rustls/webpki client.
 3. Create the required Secret without committing credentials:
 
    ```sh

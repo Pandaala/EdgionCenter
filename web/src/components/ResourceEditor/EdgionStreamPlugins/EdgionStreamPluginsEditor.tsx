@@ -39,12 +39,12 @@ const EdgionStreamPluginsEditor: React.FC<Props> = ({ visible, mode, resource, o
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, y }: { namespace: string; y: string }) => resourceApi.create('edgionstreamplugins', namespace, y),
-    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['edgionstreamplugins'] }); onClose() },
+    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionstreamplugins'] }); onClose() },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
   })
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, y }: { namespace: string; name: string; y: string }) => resourceApi.update('edgionstreamplugins', namespace, name, y),
-    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['edgionstreamplugins'] }); onClose() },
+    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionstreamplugins'] }); onClose() },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),
   })
 

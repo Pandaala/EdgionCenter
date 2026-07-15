@@ -5,7 +5,7 @@ import { resourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
 import LinkSysForm from './LinkSysForm'
 import type { LinkSys } from '@/types/link-sys'
-import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/linksys'
+import { createEmpty, normalize, toYaml, fromYaml, validateLinkSys } from '@/utils/linksys'
 import { useT } from '@/i18n'
 
 interface Props {
@@ -39,12 +39,12 @@ const LinkSysEditor: React.FC<Props> = ({ visible, mode, resource, onClose }) =>
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, y }: { namespace: string; y: string }) => resourceApi.create('linksys', namespace, y),
-    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['linksys'] }); onClose() },
+    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'linksys'] }); onClose() },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
   })
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, y }: { namespace: string; name: string; y: string }) => resourceApi.update('linksys', namespace, name, y),
-    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['linksys'] }); onClose() },
+    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'linksys'] }); onClose() },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),
   })
 
@@ -52,6 +52,7 @@ const LinkSysEditor: React.FC<Props> = ({ visible, mode, resource, onClose }) =>
     try {
       const y = activeTab === 'yaml' ? yamlContent : toYaml(formData)
       const parsed = fromYaml(y)
+      validateLinkSys(parsed)
       const name = parsed.metadata?.name
       const namespace = parsed.metadata?.namespace
       if (!name || !namespace) {

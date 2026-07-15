@@ -22,6 +22,9 @@ data:
       # Must equal the OAuth client ID stored in edgion-center-browser-oidc.
       audiences: [edgion-center-dashboard]
       groups_claim: groups
+      # Mount a private issuer CA and set ca_file when the IdP is not signed by
+      # a public WebPKI root.
+      # ca_file: /var/run/edgion-center/oidc/ca.crt
     grpc_security:
       tls:
         cert: /var/run/edgion-center/tls/tls.crt

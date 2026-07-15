@@ -67,6 +67,12 @@ pub struct AdminAuthConfig {
     #[serde(default = "default_true")]
     pub ssl_verify: bool,
 
+    /// Optional PEM CA bundle used to verify a private OIDC provider.
+    /// Public WebPKI roots remain enabled; certificates from this file are
+    /// added to the trust store used for discovery and JWKS requests.
+    #[serde(default)]
+    pub ca_file: Option<String>,
+
     /// Max response body size accepted for the OIDC discovery document.
     /// Default: 65 536 bytes (64 KB). Raise only if your IdP returns an
     /// unusually large discovery document — the typical document is < 4 KB.
@@ -96,6 +102,7 @@ impl Default for AdminAuthConfig {
             jwks_min_refresh_interval: default_jwks_min_refresh_interval(),
             skip_paths: default_skip_paths(),
             ssl_verify: true,
+            ca_file: None,
             discovery_max_response_bytes: default_discovery_max_response_bytes(),
             jwks_max_response_bytes: default_jwks_max_response_bytes(),
         }
@@ -131,6 +138,13 @@ impl AdminAuthConfig {
             || self.groups_claim.chars().any(char::is_control)
         {
             return Some("auth.groups_claim must be a non-empty claim name of at most 128 bytes");
+        }
+        if self
+            .ca_file
+            .as_ref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            return Some("auth.ca_file must not be empty when configured");
         }
         // Guard against fr-cauth-01: an operator must not be able to add a business
         // route to the auth skip-set. A skipped business route slips past unified_auth
@@ -282,6 +296,7 @@ mod tests {
         let yaml = r#"
 discovery: "https://idp.example.com/.well-known/openid-configuration"
 audiences: [edgion-admin]
+ca_file: /var/run/secrets/oidc/ca.crt
 clock_skew_seconds: 60
 "#;
         let config: AdminAuthConfig = serde_yaml::from_str(yaml).unwrap();
@@ -290,8 +305,25 @@ clock_skew_seconds: 60
             "https://idp.example.com/.well-known/openid-configuration"
         );
         assert_eq!(config.audiences, vec!["edgion-admin"]);
+        assert_eq!(
+            config.ca_file.as_deref(),
+            Some("/var/run/secrets/oidc/ca.crt")
+        );
         assert_eq!(config.clock_skew_seconds, 60);
         assert_eq!(config.jwks_cache_ttl, 300); // default
+    }
+
+    #[test]
+    fn empty_oidc_ca_file_is_rejected() {
+        let config = AdminAuthConfig {
+            discovery: "https://idp.example.com/.well-known/openid-configuration".into(),
+            ca_file: Some("  ".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.validate(),
+            Some("auth.ca_file must not be empty when configured")
+        );
     }
 
     #[test]

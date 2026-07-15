@@ -112,7 +112,7 @@ const StreamRouteEditor: React.FC<StreamRouteEditorProps> = ({
       resourceApi.create(meta.apiKind, namespace, yamlStr),
     onSuccess: () => {
       message.success(t('msg.createOk'))
-      queryClient.invalidateQueries({ queryKey: [meta.apiKind] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', meta.apiKind] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
@@ -123,7 +123,7 @@ const StreamRouteEditor: React.FC<StreamRouteEditorProps> = ({
       resourceApi.update(meta.apiKind, namespace, name, yamlStr),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
-      queryClient.invalidateQueries({ queryKey: [meta.apiKind] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', meta.apiKind] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),

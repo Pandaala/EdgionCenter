@@ -16,7 +16,7 @@ import ResourceListError from '@/components/resource/ResourceListError'
 const { Search } = Input
 
 const typeColorMap: Record<string, string> = {
-  redis: 'red', elasticsearch: 'gold', etcd: 'blue', webhook: 'green',
+  redis: 'red', elasticsearch: 'gold', etcd: 'blue', webhook: 'green', kafka: 'purple', httpdns: 'cyan',
 }
 
 const LinkSysList = () => {
@@ -51,6 +51,16 @@ const LinkSysList = () => {
     },
   })
 
+  const batchDeleteMutation = useMutation({
+    mutationFn: (resources: Array<{ namespace: string; name: string }>) =>
+      resourceApi.batchDelete('linksys', resources),
+    onSuccess: () => {
+      message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
+      setSelectedRowKeys([])
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'linksys'] })
+    },
+  })
+
   const filtered = linkSystems.filter((r) => {
     const s = searchText.toLowerCase()
     return r.metadata.name.toLowerCase().includes(s) || r.metadata.namespace?.toLowerCase().includes(s)
@@ -68,11 +78,28 @@ const LinkSysList = () => {
     })
   }
 
+  const handleBatchDelete = () => {
+    const selected = linkSystems
+      .filter((r) => selectedRowKeys.includes(`${r.metadata.namespace}/${r.metadata.name}`))
+      .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name }))
+    Modal.confirm({
+      title: t('confirm.batchDeleteTitle'),
+      content: `${t('confirm.batchDeleteMsg', { n: selected.length })} ${t('confirm.deleteIrreversible')}`,
+      okText: t('confirm.okText'),
+      okType: 'danger',
+      cancelText: t('btn.cancel'),
+      onOk: () => batchDeleteMutation.mutate(selected),
+    })
+  }
+
   const getAddressSummary = (r: K8sResource) => {
-    const type = r.spec?.type
-    const config = r.spec?.[type] || {}
-    const addrs = config.addresses || config.endpoints || []
-    return addrs.slice(0, 2).join(', ')
+    const config = r.spec?.config || {}
+    const endpoints = config.endpoints || []
+    if (endpoints.length > 0) return endpoints.slice(0, 2).join(', ')
+    const brokers = config.brokers || []
+    if (brokers.length > 0) return brokers.slice(0, 2).join(', ')
+    if (config.urlTemplate) return config.urlTemplate
+    return config.target?.url || config.target?.name || ''
   }
 
   const columns = [
@@ -130,7 +157,7 @@ const LinkSysList = () => {
         <div style={{ marginBottom: 16 }}>
           <Space>
             <span>{t('status.selected', { n: selectedRowKeys.length })}</span>
-            <Button danger onClick={() => {}}>{t('btn.batchDelete')}</Button>
+            <Button danger onClick={handleBatchDelete}>{t('btn.batchDelete')}</Button>
           </Space>
         </div>
       )}

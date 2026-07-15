@@ -60,7 +60,7 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
       resourceApi.create('edgionconfigdata', namespace, yamlStr),
     onSuccess: () => {
       message.success(t('msg.createOk'))
-      queryClient.invalidateQueries({ queryKey: ['edgionconfigdata'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionconfigdata'] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
@@ -71,7 +71,7 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
       resourceApi.update('edgionconfigdata', namespace, name, yamlStr),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
-      queryClient.invalidateQueries({ queryKey: ['edgionconfigdata'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionconfigdata'] })
       onClose()
     },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),

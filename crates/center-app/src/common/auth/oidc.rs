@@ -77,12 +77,25 @@ impl OidcProvider {
     /// Build the provider from `AdminAuthConfig`. Returns `Err` on HTTP-client
     /// construction failure or an unparseable discovery/issuer URL.
     pub fn from_config(config: &AdminAuthConfig) -> Result<Arc<Self>, String> {
-        let http_client = Client::builder()
+        let mut http_client = Client::builder()
             .pool_max_idle_per_host(4)
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
-            .danger_accept_invalid_certs(!config.ssl_verify)
+            .danger_accept_invalid_certs(!config.ssl_verify);
+        if let Some(ca_file) = config.ca_file.as_deref() {
+            let pem = std::fs::read(ca_file)
+                .map_err(|e| format!("Failed to read OIDC CA file {ca_file}: {e}"))?;
+            let certificates = reqwest::Certificate::from_pem_bundle(&pem)
+                .map_err(|e| format!("Failed to parse OIDC CA file {ca_file}: {e}"))?;
+            if certificates.is_empty() {
+                return Err(format!("OIDC CA file {ca_file} contains no certificates"));
+            }
+            for certificate in certificates {
+                http_client = http_client.add_root_certificate(certificate);
+            }
+        }
+        let http_client = http_client
             .build()
             .map_err(|e| format!("Failed to build OIDC HTTP client: {e}"))?;
 
@@ -532,6 +545,20 @@ cfZ1OqI5Xue6arSxa8eoEA==\n\
             ..AdminAuthConfig::default()
         };
         OidcProvider::from_config(&config).expect("provider")
+    }
+
+    #[test]
+    fn configured_ca_file_must_be_readable() {
+        let config = AdminAuthConfig {
+            discovery: "https://issuer.example/.well-known/openid-configuration".into(),
+            ca_file: Some("/definitely/missing/oidc-ca.pem".into()),
+            ..AdminAuthConfig::default()
+        };
+        let error = match OidcProvider::from_config(&config) {
+            Ok(_) => panic!("missing CA file unexpectedly accepted"),
+            Err(error) => error,
+        };
+        assert!(error.contains("Failed to read OIDC CA file"), "{error}");
     }
 
     #[tokio::test]
