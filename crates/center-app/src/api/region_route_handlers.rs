@@ -32,6 +32,14 @@ use std::collections::HashMap;
 
 use super::ApiState;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CenterRegionRouteAggregatedView {
+    #[serde(flatten)]
+    route: crate::metadata_store::CenterRegionRouteView,
+    online_controller_ids: Vec<String>,
+}
+
 // ============= Failover Request Type =============
 
 /// Strongly-typed body for `/api/v1/center/{cluster,service}-region-routes/failover`.
@@ -44,7 +52,12 @@ use super::ApiState;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FailoverRequest {
     pub namespace: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub plugin_name: Option<String>,
+    #[serde(default)]
+    pub entry_index: Option<usize>,
     pub region_name: String,
     /// Empty string = clear failover.
     pub failover_to: String,
@@ -68,7 +81,21 @@ pub async fn list_region_routes(
             Json(serde_json::json!({ "success": false, "message": error.to_string() })),
         )
     })?;
-    let data = state.metadata_store.list_region_routes();
+    let online_controller_ids = state.online_controller_ids().await.map_err(|error| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "success": false, "message": error.to_string() })),
+        )
+    })?;
+    let data: Vec<_> = state
+        .metadata_store
+        .list_region_routes()
+        .into_iter()
+        .map(|route| CenterRegionRouteAggregatedView {
+            route,
+            online_controller_ids: online_controller_ids.clone(),
+        })
+        .collect();
     Ok(Json(serde_json::json!({ "success": true, "data": data })))
 }
 
@@ -85,25 +112,121 @@ pub async fn region_route_failover(
     State(state): State<ApiState>,
     Json(req): Json<FailoverRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    let online = match state.online_controller_ids().await {
+        Ok(online) if !online.is_empty() => online,
+        Ok(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "success": false, "error": "no online controllers" })),
+            );
+        }
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "success": false, "error": error.to_string() })),
+            );
+        }
+    };
+    let mut failed_before_dispatch = 0;
+    let targets = if let (Some(plugin_name), Some(entry_index)) =
+        (&req.plugin_name, req.entry_index)
+    {
+        let route = state
+            .metadata_store
+            .list_region_routes()
+            .into_iter()
+            .find(|route| {
+                route.namespace == req.namespace
+                    && route.plugin_name == *plugin_name
+                    && route.entry_index == entry_index
+            });
+        let Some(route) = route else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(
+                    serde_json::json!({ "success": false, "error": "RegionRoute entry not found" }),
+                ),
+            );
+        };
+        online
+            .into_iter()
+            .filter_map(|controller_id| {
+                let reference = route
+                    .controllers
+                    .get(&controller_id)
+                    .and_then(|view| view.override_ref.as_ref())
+                    .filter(|reference| reference.permitted);
+                match reference {
+                    Some(reference) => Some((
+                        controller_id,
+                        ControllerFailoverRequest {
+                            namespace: reference.namespace.clone(),
+                            name: reference.name.clone(),
+                            region_name: req.region_name.clone(),
+                            failover_to: req.failover_to.clone(),
+                        },
+                    )),
+                    None => {
+                        failed_before_dispatch += 1;
+                        None
+                    }
+                }
+            })
+            .collect()
+    } else {
+        online
+            .into_iter()
+            .map(|controller_id| {
+                (
+                    controller_id,
+                    ControllerFailoverRequest {
+                        namespace: req.namespace.clone(),
+                        name: req.name.clone(),
+                        region_name: req.region_name.clone(),
+                        failover_to: req.failover_to.clone(),
+                    },
+                )
+            })
+            .collect()
+    };
     let result = fan_out_failover(
         &state,
         "/api/v1/cluster-region-routes/failover".to_string(),
-        &req,
+        targets,
+        failed_before_dispatch,
     )
     .await;
     match result {
-        Ok((modified, failed)) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "success": true,
-                "data": { "modified": modified, "failed": failed },
-            })),
-        ),
+        Ok((modified, failed)) => {
+            let status = if failed == 0 {
+                StatusCode::OK
+            } else if modified == 0 {
+                StatusCode::BAD_GATEWAY
+            } else {
+                StatusCode::MULTI_STATUS
+            };
+            (
+                status,
+                Json(serde_json::json!({
+                    "success": failed == 0,
+                    "data": { "modified": modified, "failed": failed },
+                })),
+            )
+        }
         Err(error) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({ "success": false, "error": error.to_string() })),
         ),
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ControllerFailoverRequest {
+    namespace: String,
+    name: String,
+    region_name: String,
+    failover_to: String,
 }
 
 /// Fan-out a POST request to all online controllers in parallel.
@@ -115,26 +238,14 @@ pub async fn region_route_failover(
 async fn fan_out_failover(
     state: &ApiState,
     path: String,
-    req: &FailoverRequest,
+    targets: Vec<(String, ControllerFailoverRequest)>,
+    failed_before_dispatch: usize,
 ) -> edgion_center_core::CoreResult<(usize, usize)> {
-    let body_bytes = match serde_json::to_vec(req) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!(
-                component = "center",
-                error = %e,
-                "FailoverRequest serialization failed unexpectedly"
-            );
-            unreachable!("FailoverRequest contains only String fields; serialization cannot fail");
-        }
-    };
-    let online = state.online_controller_ids().await?;
-
-    let futs = online.iter().map(|controller_id| {
+    let futs = targets.into_iter().map(|(controller_id, request)| {
         let proxy = state.proxy.clone();
-        let controller_id = controller_id.clone();
         let path = path.clone();
-        let body = body_bytes.clone();
+        let body = serde_json::to_vec(&request)
+            .expect("ControllerFailoverRequest contains only serializable fields");
         async move {
             let mut headers = HashMap::new();
             headers.insert("content-type".to_string(), "application/json".to_string());
@@ -175,7 +286,7 @@ async fn fan_out_failover(
 
     let results = futures::future::join_all(futs).await;
     let modified = results.iter().filter(|&&ok| ok).count();
-    let failed = results.iter().filter(|&&ok| !ok).count();
+    let failed = results.iter().filter(|&&ok| !ok).count() + failed_before_dispatch;
     Ok((modified, failed))
 }
 
@@ -243,10 +354,18 @@ mod tests {
             namespace: "default".into(),
             plugin_name: "rr1".into(),
             alias: Some("primary".into()),
+            entry_index: 0,
             my_region: "east".into(),
             regions: serde_json::json!([]),
+            key_get: serde_json::json!([]),
+            hash_key_get: None,
+            hash_calc: None,
+            route_rules: serde_json::json!([]),
+            route_by_key_conf_match: None,
+            dye_headers: None,
             override_ref: None,
             override_applied: false,
+            service_usages: Vec::new(),
         };
         state
             .metadata_store
@@ -254,6 +373,7 @@ mod tests {
         let Json(v) = list_region_routes(State(state)).await.unwrap();
         assert_eq!(v["success"], true);
         assert_eq!(v["data"].as_array().unwrap().len(), 1);
+        assert_eq!(v["data"][0]["onlineControllerIds"], serde_json::json!([]));
     }
 
     #[test]
@@ -290,25 +410,22 @@ mod tests {
         );
     }
 
-    /// With no online controllers, `region_route_failover` must return
-    /// `{success:true, data:{modified:0, failed:0}}` rather than an error.
+    /// With no online controllers, failover must not claim success because no
+    /// target accepted the requested state change.
     #[tokio::test]
-    async fn region_route_failover_no_online_controllers_returns_modified_zero() {
+    async fn region_route_failover_no_online_controllers_returns_unavailable() {
         let state = test_api_state();
         let req = FailoverRequest {
             namespace: "default".into(),
             name: "rr-override".into(),
+            plugin_name: None,
+            entry_index: None,
             region_name: "east".into(),
             failover_to: "west".into(),
         };
         let (status, Json(v)) = region_route_failover(State(state), Json(req)).await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(v["success"], true, "response must be success:true");
-        assert_eq!(
-            v["data"]["modified"], 0,
-            "no online controllers => modified:0"
-        );
-        assert_eq!(v["data"]["failed"], 0, "no online controllers => failed:0");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(v["success"], false);
     }
 
     #[test]

@@ -130,6 +130,8 @@ export default function RoleManagementPage() {
       okText: t('confirm.okText'),
       okType: 'danger',
       cancelText: t('btn.cancel'),
+      okButtonProps: { 'data-testid': 'role-confirm' },
+      cancelButtonProps: { 'data-testid': 'role-cancel' },
       onOk: () => deleteMutation.mutate(record.id),
     })
   }
@@ -148,10 +150,10 @@ export default function RoleManagementPage() {
       key: 'actions',
       render: (_: unknown, record: RoleDto) => (
         <Space size={4}>
-          <Button size="small" onClick={() => selectRole(record)}>
+          <Button data-testid="role-edit" size="small" onClick={() => selectRole(record)}>
             {t('roles.action.editPermissions')}
           </Button>
-          <Button danger size="small" onClick={() => handleDelete(record)}>
+          <Button data-testid="role-delete" danger size="small" onClick={() => handleDelete(record)}>
             {t('btn.delete')}
           </Button>
         </Space>
@@ -166,10 +168,10 @@ export default function RoleManagementPage() {
         subtitle={t('roles.subtitle')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+            <Button data-testid="roles-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
             </Button>
-            <Button type="primary" onClick={() => setCreateOpen(true)}>
+            <Button data-testid="role-create" type="primary" onClick={() => setCreateOpen(true)}>
               {t('btn.create')}
             </Button>
           </>
@@ -198,6 +200,7 @@ export default function RoleManagementPage() {
           }
           extra={
             <Button
+              data-testid="role-permissions-save"
               type="primary"
               disabled={!selectedRole}
               loading={saveMutation.isPending}
@@ -233,6 +236,8 @@ export default function RoleManagementPage() {
       </div>
 
       <Modal
+        okButtonProps={{ 'data-testid': 'role-confirm' }}
+        cancelButtonProps={{ 'data-testid': 'role-cancel' }}
         title={t('roles.modal.create')}
         open={createOpen}
         onOk={handleCreate}

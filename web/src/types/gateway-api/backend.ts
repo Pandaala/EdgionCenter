@@ -56,6 +56,11 @@ export interface BackendRef {
   
   /** 权重（可选，0-1000000，默认 1，用于流量分配） */
   weight?: number;
+
+  /** Filters executed only when forwarding to this backend. */
+  filters?: import('./httproute').HTTPRouteFilter[];
+
+  [key: string]: unknown;
 }
 
 /**
@@ -112,4 +117,3 @@ export interface HTTPHeader {
   /** Header 值（必填） */
   value: string;
 }
-

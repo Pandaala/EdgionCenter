@@ -46,7 +46,7 @@ export default function ResourceListError({ error, onRetry }: Props) {
       title={title}
       subTitle={text}
       extra={
-        <Button type="primary" onClick={onRetry}>
+        <Button data-testid="resource-list-retry" type="primary" onClick={onRetry}>
           {t('msg.retry')}
         </Button>
       }

@@ -124,13 +124,13 @@ const Dashboard = () => {
 
   // Secondary resource count tiles (preserving the original grid of ops resource counts)
   const secondaryResources = [
-    { label: 'GatewayClass',       value: gcQuery.data      ?? 0, path: '/infrastructure/gatewayclasses', icon: <ClusterOutlined />  },
-    { label: 'EdgionPlugins',       value: pluginQuery.data   ?? 0, path: '/plugins',                       icon: <AppstoreOutlined /> },
-    { label: 'StreamPlugins',       value: streamQuery.data   ?? 0, path: '/plugins/stream',                icon: <AppstoreOutlined /> },
-    { label: 'EdgionConfigData',     value: metaQuery.data     ?? 0, path: '/plugins/metadata',              icon: <AppstoreOutlined /> },
-    { label: 'GatewayConfig',       value: gcfgQuery.data     ?? 0, path: '/system/config',                 icon: <SettingOutlined />  },
-    { label: 'LinkSys',             value: linksysQuery.data  ?? 0, path: '/system/linksys',                icon: <SettingOutlined />  },
-    { label: 'ReferenceGrant',      value: rgQuery.data       ?? 0, path: '',                               icon: <SettingOutlined />  },
+    { kind: 'gatewayclass', label: 'GatewayClass', value: gcQuery.data ?? 0, path: '/infrastructure/gatewayclasses', icon: <ClusterOutlined /> },
+    { kind: 'edgionplugins', label: 'EdgionPlugins', value: pluginQuery.data ?? 0, path: '/plugins', icon: <AppstoreOutlined /> },
+    { kind: 'edgionstreamplugins', label: 'StreamPlugins', value: streamQuery.data ?? 0, path: '/plugins/stream', icon: <AppstoreOutlined /> },
+    { kind: 'edgionconfigdata', label: 'EdgionConfigData', value: metaQuery.data ?? 0, path: '/plugins/metadata', icon: <AppstoreOutlined /> },
+    { kind: 'edgiongatewayconfig', label: 'GatewayConfig', value: gcfgQuery.data ?? 0, path: '/system/config', icon: <SettingOutlined /> },
+    { kind: 'linksys', label: 'LinkSys', value: linksysQuery.data ?? 0, path: '/system/linksys', icon: <SettingOutlined /> },
+    { kind: 'referencegrant', label: 'ReferenceGrant', value: rgQuery.data ?? 0, path: '', icon: <SettingOutlined /> },
   ]
 
   return (
@@ -141,7 +141,7 @@ const Dashboard = () => {
         actions={
           <>
             <StatusDot tone={isHealthy ? 'success' : 'danger'} />
-            <Button icon={<ReloadOutlined />} onClick={handleRefreshAll}>
+            <Button data-testid="dashboard-refresh" icon={<ReloadOutlined />} onClick={handleRefreshAll}>
               {t('dash.refreshAll')}
             </Button>
           </>
@@ -265,6 +265,7 @@ const Dashboard = () => {
         {secondaryResources.map((item) => (
           <div
             key={item.label}
+            data-testid={`count-${item.kind}`}
             onClick={() => item.path ? goTo(item.path) : undefined}
             style={{
               background: 'var(--ec-color-bg-subtle)',

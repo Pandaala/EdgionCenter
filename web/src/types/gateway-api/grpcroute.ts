@@ -3,7 +3,7 @@
  * apiVersion: gateway.networking.k8s.io/v1
  */
 
-import type { ParentReference, BackendRef } from './backend'
+import type { ParentReference } from './backend'
 import type { K8sObjectMeta, Hostname, Duration } from './common'
 
 export type GRPCMethodMatchType = 'Exact' | 'RegularExpression'
@@ -27,17 +27,29 @@ export interface GRPCRouteMatch {
 }
 
 export interface GRPCRouteFilter {
-  type: string
-  requestHeaderModifier?: any
-  responseHeaderModifier?: any
-  requestMirror?: any
-  extensionRef?: any
+  type: 'RequestHeaderModifier' | 'ResponseHeaderModifier' | 'ExtensionRef'
+  requestHeaderModifier?: import('./httproute').HTTPRequestHeaderFilter
+  responseHeaderModifier?: import('./httproute').HTTPRequestHeaderFilter
+  extensionRef?: import('./backend').LocalObjectReference
+  [key: string]: unknown
+}
+
+export interface GRPCBackendRef {
+  group?: string
+  kind?: string
+  namespace?: string
+  name: string
+  port?: number
+  weight?: number
+  filters?: GRPCRouteFilter[]
+  [key: string]: unknown
 }
 
 export interface GRPCRouteRetry {
   attempts?: number
   backoff?: Duration
   codes?: number[]
+  [key: string]: unknown
 }
 
 export interface GRPCSessionPersistence {
@@ -46,6 +58,8 @@ export interface GRPCSessionPersistence {
   idleTimeout?: Duration
   type?: 'Cookie' | 'Header'
   cookieConfig?: { lifetimeType?: 'Permanent' | 'Session' }
+  strict?: boolean
+  [key: string]: unknown
 }
 
 export interface GRPCRouteTimeouts {
@@ -57,16 +71,18 @@ export interface GRPCRouteRule {
   name?: string
   matches?: GRPCRouteMatch[]
   filters?: GRPCRouteFilter[]
-  backendRefs?: BackendRef[]
+  backendRefs?: GRPCBackendRef[]
   timeouts?: GRPCRouteTimeouts
   retry?: GRPCRouteRetry
   sessionPersistence?: GRPCSessionPersistence
+  [key: string]: unknown
 }
 
 export interface GRPCRouteSpec {
   parentRefs?: ParentReference[]
   hostnames?: Hostname[]
   rules?: GRPCRouteRule[]
+  [key: string]: unknown
 }
 
 export interface GRPCRoute {

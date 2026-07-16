@@ -1,89 +1,72 @@
 ---
 name: dashboard-testing
-description: Edgion Center testing guide — starting the backend, loading data, development verification workflow
+description: Current EdgionCenter dashboard checks, standalone/Kubernetes runtime setup, and browser evidence rules
 ---
 
-# Testing Guide
+# Dashboard Testing Guide
 
-## Starting the Backend Test Environment
+## Static baseline
 
-Frontend development requires the backend API to return real data. Use Edgion's integration test infrastructure to start it.
-
-### Option 1: One-command Startup (Recommended)
+Run from `EdgionCenter/web`:
 
 ```bash
-# in the edgion project directory
-cd /Users/caohao/ws2/edgion
-
-# start Controller + Gateway and load all test data
-./examples/test/scripts/utils/start_all_with_conf.sh
-
-# or load data manually after startup
-./examples/test/scripts/utils/start_all_with_conf.sh --no-load
-./examples/test/scripts/utils/load_conf.sh all          # load all
-./examples/test/scripts/utils/load_conf.sh http          # load HTTPRoute only
+npm ci
+npx tsc --noEmit
+npm run lint
+npm test -- --run
+npx vite build
 ```
 
-### Option 2: Manual Startup
+Attribute failures to the current change, the environment, or a recorded
+pre-existing baseline. Do not use one successful command as evidence for another
+gate.
+
+## Backend modes
+
+Build from the EdgionCenter repository root:
 
 ```bash
-# Run from the EdgionCenter repo root
-
-# 1. Build
 cargo build -p edgion-center-standalone
-
-# 2. Start Center backend (Center Admin API on :12201)
-cargo run -p edgion-center-standalone -- --config-file config/edgion-center.yaml
+cargo build -p edgion-center-kubernetes
 ```
 
-## Test Ports
+- Standalone mode retains SQL/local management and runs the Admin API on 12201.
+- Kubernetes mode uses native resources and capability-driven management.
+- Controller Admin/probe/federation ports are 12101/12100/12151.
+- Center Admin/probe/federation ports are 12201/12200/12251.
+- The Vite development server runs on 5173 and proxies `/api` to Center 12201.
 
-| Service | Port | Purpose |
-|------|------|------|
-| Center Admin API | 12201 | Frontend API backend (Vite proxy target) |
-| Controller gRPC | 12151 | Gateway config sync |
-| Gateway HTTP | 10080 | Data-plane HTTP proxy |
-| Gateway HTTPS | 10443 | Data-plane HTTPS proxy |
-| Gateway Admin | 12001 | Gateway management API |
-| Frontend Dev Server | 5173 | Vite dev server |
+Use repository-local config and deployment artifacts; never use a hard-coded
+developer home path. For Kubernetes tests, use a task-specific namespace and
+list it before any cleanup.
 
-## Verification Workflow
+## Resource editor verification
 
-1. **Start backend**: `start_all_with_conf.sh`
-2. **Load data**: `load_conf.sh all`
-3. **Start frontend**: `cd edgion-dashboard && npm run dev`
-4. **Browser check**: http://localhost:5173
-5. **Verify API**: http://localhost:12201/api/v1/namespaced/httproute (direct API test)
+Every editor must prove:
 
-## Test Data Directory
+- Current operator fields survive YAML-to-form-to-YAML.
+- Unknown operator fields survive a narrow form edit.
+- Multiple rules, references, plugins, certificates, and endpoints survive.
+- Status, generated metadata, parsed/resolved fields, denial markers, and
+  redacted values are absent from mutation payloads.
+- Accepted alternate API versions are limited to versions the current
+  Controller explicitly converts.
 
-```
-edgion/examples/test/conf/
-├── base/                  # GatewayClass, Gateway, EdgionGatewayConfig, TLS secrets
-├── HTTPRoute/             # HTTPRoute test cases
-├── GRPCRoute/             # GRPCRoute test cases
-├── TCPRoute/              # TCPRoute test cases
-├── UDPRoute/              # UDPRoute test cases
-├── TLSRoute/              # TLSRoute test cases
-├── EdgionPlugins/         # plugin test cases
-├── EdgionTls/             # TLS config test cases
-├── Status/                # status update tests
-└── LinkSys/               # external integration tests
-```
+## Browser E2E
 
-## Verification Checklist
+Prefer repeatable Playwright cases with stable `data-testid` selectors. For each
+page exercise navigation, Controller switching, filters, pagination, refresh,
+create/view/edit/delete, batch actions, Form/YAML switching, status details,
+permission denial, topology links, and resource-specific operations.
 
-After completing a new page:
-- [ ] List page loads correctly and displays test data
-- [ ] Search/filter works correctly
-- [ ] Create new resource (Form mode)
-- [ ] Create new resource (YAML mode)
-- [ ] View resource details
-- [ ] Edit resource (Form mode)
-- [ ] Edit resource (YAML mode)
-- [ ] Delete a single resource
-- [ ] Batch delete resources
-- [ ] Refresh button works
-- [ ] Sidebar navigation highlight is correct
-- [ ] No TypeScript compilation errors
-- [ ] No console errors
+Verify actual API, Controller, or Kubernetes state after mutations; a toast is
+not an oracle. Poll conditions using generation/observedGeneration with a bounded
+deadline instead of fixed sleeps. Retain failure screenshots and traces.
+
+## Environment safety
+
+- Treat all pre-existing namespaces and cluster-scoped resources as user-owned.
+- Give task fixtures a unique label and name prefix.
+- Namespace deletion does not clean GatewayClass or EdgionGatewayConfig; list
+  and delete exact labeled cluster-scoped fixtures separately.
+- Keep the final validated environment until the user authorizes cleanup.

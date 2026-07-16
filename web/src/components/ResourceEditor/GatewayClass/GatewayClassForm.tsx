@@ -3,7 +3,7 @@
  */
 
 import React from 'react'
-import { Form, Input, Card, Space } from 'antd'
+import { Form, Input, Card, Space, Switch, Tag } from 'antd'
 import type { GatewayClass } from '@/utils/gatewayclass'
 import { useT } from '@/i18n'
 
@@ -58,6 +58,25 @@ const GatewayClassForm: React.FC<GatewayClassFormProps> = ({ data, onChange, rea
             />
           </Form.Item>
         </Card>
+
+        <Card title={t('section.parametersRef')} size="small">
+          <Form.Item label={t('field.parametersRefEnabled')} style={{ marginBottom: 8 }}>
+            <Switch
+              checked={!!data.spec.parametersRef}
+              disabled={readOnly}
+              onChange={(checked) => updateSpec({ parametersRef: checked ? { group: 'edgion.io', kind: 'EdgionGatewayConfig', name: '' } : undefined })}
+            />
+          </Form.Item>
+          {data.spec.parametersRef && <Space wrap>
+            <Form.Item label={t('field.group')} style={{ marginBottom: 0 }}><Input value={data.spec.parametersRef.group} disabled={readOnly} onChange={(event) => updateSpec({ parametersRef: { ...data.spec.parametersRef!, group: event.target.value } })} /></Form.Item>
+            <Form.Item label={t('field.kind')} style={{ marginBottom: 0 }}><Input value={data.spec.parametersRef.kind} disabled={readOnly} onChange={(event) => updateSpec({ parametersRef: { ...data.spec.parametersRef!, kind: event.target.value } })} /></Form.Item>
+            <Form.Item label={t('field.name')} required style={{ marginBottom: 0 }}><Input value={data.spec.parametersRef.name} disabled={readOnly} onChange={(event) => updateSpec({ parametersRef: { ...data.spec.parametersRef!, name: event.target.value } })} /></Form.Item>
+          </Space>}
+        </Card>
+
+        {Array.isArray(data.status?.supportedFeatures) && <Card title={t('section.supportedFeatures')} size="small">
+          <Space wrap>{data.status.supportedFeatures.map((feature: any, index: number) => <Tag key={`${String(feature?.name || feature)}-${index}`}>{String(feature?.name || feature)}</Tag>)}</Space>
+        </Card>}
       </Space>
     </Form>
   )

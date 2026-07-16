@@ -8,11 +8,13 @@ import type { K8sObjectMeta } from './common'
 
 export interface TCPRouteRule {
   backendRefs?: BackendRef[]
+  [key: string]: unknown
 }
 
 export interface TCPRouteSpec {
   parentRefs?: ParentReference[]
   rules: TCPRouteRule[]
+  [key: string]: unknown
 }
 
 export interface TCPRoute {

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+  "required": ["schemaVersion", "runId", "context", "createdAt", "objects"],
+  "properties": {
+    "schemaVersion": {"const": 1}, "runId": {"type": "string", "minLength": 1}, "context": {"type": "string", "minLength": 1},
+    "createdAt": {"type": "string", "format": "date-time"}, "retained": {"type": "boolean"},
+    "objects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/object"}}
+  }, "additionalProperties": false,
+  "$defs": {"object": {
+    "type": "object", "required": ["apiVersion", "kind", "resource", "scope", "name", "runLabel", "uid", "phase"],
+    "properties": {
+      "apiVersion": {"type": "string"}, "kind": {"type": "string"}, "resource": {"type": "string"},
+      "scope": {"enum": ["Namespaced", "Cluster"]}, "namespace": {"type": "string", "minLength": 1},
+      "name": {"type": "string", "minLength": 1}, "runLabel": {"type": "string", "minLength": 1},
+      "uid": {"type": "string", "minLength": 1}, "phase": {"enum": ["runtime", "seed", "auth"]}
+    },
+    "allOf": [
+      {"if": {"properties": {"scope": {"const": "Namespaced"}}}, "then": {"required": ["namespace"]}},
+      {"if": {"properties": {"scope": {"const": "Cluster"}}}, "then": {"not": {"required": ["namespace"]}}}
+    ], "additionalProperties": false
+  }}
+}

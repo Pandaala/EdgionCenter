@@ -7,6 +7,11 @@ use edgion_center_core::{
 use k8s_openapi::api::authorization::v1::{
     NonResourceAttributes, ResourceAttributes, SubjectAccessReview, SubjectAccessReviewSpec,
 };
+
+// Kubernetes' default `system:discovery` role grants every authenticated
+// principal GET access to `/api/*`. Never authorize Center HTTP routes under
+// that namespace; project them into a dedicated virtual RBAC namespace first.
+const CENTER_AUTHZ_PATH_PREFIX: &str = "/edgion-center-authz";
 use kube::{api::PostParams, Api, Client};
 
 use crate::controller_resource_name;
@@ -32,9 +37,9 @@ impl SarReviews for KubernetesSarReviews {
 
 /// Native Kubernetes authorization through SubjectAccessReview.
 ///
-/// Each business request produces exactly one SAR. `/auth/me` discovery is
-/// bounded to the two controller-history permissions that Kubernetes mode
-/// actually exposes; it never fans out over the complete catalog.
+/// Each business request produces exactly one SAR. `/auth/me` discovery checks
+/// only the permission candidates supplied by the application, using explicit
+/// virtual non-resource URLs so UI capabilities match reviewed RBAC grants.
 #[derive(Clone)]
 pub struct KubernetesSarAuthorizer {
     reviews: Arc<dyn SarReviews>,
@@ -123,9 +128,15 @@ impl KubernetesSarAuthorizer {
                 None,
             )
         } else {
-            let path = action.request_path.clone().ok_or_else(|| {
+            let request_path = action.request_path.as_deref().ok_or_else(|| {
                 CoreError::Adapter("non-resource authorization requires a request path".to_string())
             })?;
+            if !request_path.starts_with('/') {
+                return Err(CoreError::Adapter(
+                    "non-resource authorization requires an absolute request path".to_string(),
+                ));
+            }
+            let path = format!("{CENTER_AUTHZ_PATH_PREFIX}{request_path}");
             let verb = action.request_verb.clone().ok_or_else(|| {
                 CoreError::Adapter("non-resource authorization requires a request verb".to_string())
             })?;
@@ -180,39 +191,22 @@ impl Authorizer for KubernetesSarAuthorizer {
         principal: &Principal,
         candidates: &[String],
     ) -> CoreResult<Option<Vec<String>>> {
-        let discoverable = [
-            (
-                "controllers:read",
-                ActionOperation::List,
-                "/api/v1/center/admin/controllers",
-                "get",
-            ),
-            (
-                "controllers:write",
-                ActionOperation::Delete,
-                "/api/v1/center/admin/controllers",
-                "delete",
-            ),
-        ];
-        let mut granted = Vec::with_capacity(discoverable.len());
-        for (permission, operation, path, verb) in discoverable {
-            if !candidates.iter().any(|candidate| candidate == permission) {
-                continue;
-            }
+        let mut granted = Vec::with_capacity(candidates.len());
+        for permission in candidates {
             let decision = self
                 .authorize(
                     principal,
                     &Action {
-                        permission: permission.to_string(),
+                        permission: "<permission-discovery>".to_string(),
                         controller_id: None,
-                        operation: Some(operation),
-                        request_path: Some(path.to_string()),
-                        request_verb: Some(verb.to_string()),
+                        operation: Some(ActionOperation::Get),
+                        request_path: Some(format!("/permissions/{permission}")),
+                        request_verb: Some("get".to_string()),
                     },
                 )
                 .await?;
             if decision.allowed {
-                granted.push(permission.to_string());
+                granted.push(permission.clone());
             }
         }
         Ok(Some(granted))
@@ -330,6 +324,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn controller_history_collection_maps_to_list_resource_sar() {
+        let (reviews, authorizer) = fake(SubjectAccessReviewStatus {
+            allowed: true,
+            ..SubjectAccessReviewStatus::default()
+        });
+        let decision = authorizer
+            .authorize(
+                &principal(),
+                &Action {
+                    permission: "controllers:read".to_string(),
+                    controller_id: None,
+                    operation: Some(ActionOperation::List),
+                    request_path: Some("/api/v1/center/admin/controllers".to_string()),
+                    request_verb: Some("get".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(decision.allowed);
+        let attributes = reviews
+            .requests
+            .lock()
+            .unwrap()
+            .pop()
+            .unwrap()
+            .spec
+            .resource_attributes
+            .unwrap();
+        assert_eq!(attributes.verb.as_deref(), Some("list"));
+        assert!(attributes.name.is_none());
+        assert_eq!(attributes.resource.as_deref(), Some("edgioncontrollers"));
+    }
+
+    #[tokio::test]
     async fn non_controller_action_uses_exact_non_resource_path_and_verb() {
         let (reviews, authorizer) = fake(SubjectAccessReviewStatus {
             allowed: false,
@@ -363,7 +391,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             attributes.path.as_deref(),
-            Some("/api/v1/center/cluster-region-routes/sync")
+            Some("/edgion-center-authz/api/v1/center/cluster-region-routes/sync")
         );
         assert_eq!(attributes.verb.as_deref(), Some("post"));
     }
@@ -393,7 +421,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permission_discovery_is_bounded_to_kubernetes_ui_capabilities() {
+    async fn permission_discovery_checks_each_requested_capability_in_the_virtual_namespace() {
         let (reviews, authorizer) = fake(SubjectAccessReviewStatus {
             allowed: true,
             ..SubjectAccessReviewStatus::default()
@@ -415,27 +443,37 @@ mod tests {
             granted,
             vec![
                 "controllers:read".to_string(),
-                "controllers:write".to_string()
+                "controllers:write".to_string(),
+                "users:manage".to_string(),
+                "audit:read".to_string(),
             ]
         );
 
         let requests = reviews.requests.lock().unwrap();
-        assert_eq!(requests.len(), 2, "discovery must stay bounded");
         assert_eq!(
-            requests[0]
-                .spec
-                .resource_attributes
-                .as_ref()
-                .and_then(|attributes| attributes.verb.as_deref()),
-            Some("list")
+            requests.len(),
+            4,
+            "discovery must stay bounded to candidates"
         );
+        let paths = requests
+            .iter()
+            .map(|request| {
+                request
+                    .spec
+                    .non_resource_attributes
+                    .as_ref()
+                    .and_then(|attributes| attributes.path.clone())
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
-            requests[1]
-                .spec
-                .resource_attributes
-                .as_ref()
-                .and_then(|attributes| attributes.verb.as_deref()),
-            Some("delete")
+            paths,
+            vec![
+                "/edgion-center-authz/permissions/controllers:read",
+                "/edgion-center-authz/permissions/controllers:write",
+                "/edgion-center-authz/permissions/users:manage",
+                "/edgion-center-authz/permissions/audit:read",
+            ]
         );
     }
 

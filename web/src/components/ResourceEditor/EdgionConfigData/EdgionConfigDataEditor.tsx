@@ -2,15 +2,20 @@
  * EdgionConfigData editor modal
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useEffect, useState } from 'react'
 import { Modal, Button, Tabs, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
 import EdgionConfigDataForm from './EdgionConfigDataForm'
+import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { EdgionConfigDataResource } from '@/utils/edgionConfigData'
-import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/edgionConfigData'
+import { createEmpty, normalize, toMutationYaml, toYaml, fromYaml } from '@/utils/edgionConfigData'
 import { useT } from '@/i18n'
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
+import ResourceConditions from '@/components/resource/ResourceConditions'
+import { useEditorTabTransition } from '../useEditorTabTransition'
 
 interface EdgionConfigDataEditorProps {
   visible: boolean
@@ -26,14 +31,25 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
   onClose,
 }) => {
   const t = useT()
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
+  const mutationTarget = useControllerMutationTarget()
   const [formData, setFormData] = useState<EdgionConfigDataResource>(() => createEmpty())
   const [yamlContent, setYamlContent] = useState('')
+  const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
+    formData,
+    yamlContent,
+    serialize: toYaml,
+    parse: fromYaml,
+    setFormData,
+    setYamlContent,
+    onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
+  })
+  const [formValid, setFormValid] = useState(true)
   const queryClient = useQueryClient()
 
   useEffect(() => {
     if (!visible) return
-    setActiveTab('form')
+    resetEditorTab()
+    setFormValid(true)
     if (mode === 'create') {
       const empty = createEmpty()
       setFormData(empty)
@@ -43,21 +59,11 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
       setFormData(normalized)
       setYamlContent(toYaml(normalized))
     }
-  }, [visible, mode, resource])
-
-  const handleTabChange = (key: string) => {
-    try {
-      if (key === 'yaml') setYamlContent(toYaml(formData))
-      else setFormData(fromYaml(yamlContent))
-      setActiveTab(key as 'form' | 'yaml')
-    } catch (e: any) {
-      message.error(t('msg.tabSwitchFailed', { err: e.message }))
-    }
-  }
+  }, [visible, mode, resource, resetEditorTab])
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, yamlStr }: { namespace: string; yamlStr: string }) =>
-      resourceApi.create('edgionconfigdata', namespace, yamlStr),
+      resourceApi.create(mutationTarget, 'edgionconfigdata', namespace, yamlStr),
     onSuccess: () => {
       message.success(t('msg.createOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionconfigdata'] })
@@ -68,7 +74,7 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
 
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, yamlStr }: { namespace: string; name: string; yamlStr: string }) =>
-      resourceApi.update('edgionconfigdata', namespace, name, yamlStr),
+      resourceApi.update(mutationTarget, 'edgionconfigdata', namespace, name, yamlStr),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionconfigdata'] })
@@ -79,10 +85,11 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
 
   const handleSubmit = () => {
     try {
-      const isFormTab = activeTab === 'form'
-      const name = isFormTab ? formData.metadata?.name : fromYaml(yamlContent).metadata?.name
-      const namespace = isFormTab ? formData.metadata?.namespace : fromYaml(yamlContent).metadata?.namespace
-      const yamlStr = isFormTab ? toYaml(formData) : yamlContent
+      const candidate = editableTab === 'form' ? formData : fromYaml(yamlContent)
+      const mutationMode = mode === 'create' ? 'create' : 'update'
+      const name = candidate.metadata?.name
+      const namespace = candidate.metadata?.namespace
+      const yamlStr = toMutationYaml(candidate, mutationMode)
       if (!name || !namespace) {
         message.error(t('msg.metaRequired'))
         return
@@ -122,10 +129,10 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
         isReadOnly
           ? [<Button key="close" onClick={onClose}>{t('btn.close')}</Button>]
           : [
-              <Button key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
-              <Button key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
+              <Button {...editorCancelButtonProps} key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
+              <PermissionAwareButton {...editorSubmitButtonProps} key="submit" type="primary" resourceKind="edgionconfigdata" resourceVerb={mode === 'create' ? 'create' : 'update'} onClick={handleSubmit} loading={isPending} disabled={editableTab === 'form' && !formValid}>
                 {mode === 'create' ? t('btn.create') : t('btn.save')}
-              </Button>,
+              </PermissionAwareButton>,
             ]
       }
     >
@@ -135,19 +142,20 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
         items={[
           {
             key: 'form',
-            label: t('tab.form'),
+            label: editorFormTab(t('tab.form')),
             children: (
               <EdgionConfigDataForm
                 data={formData}
                 onChange={setFormData}
                 readOnly={isReadOnly}
                 isCreate={mode === 'create'}
+                onValidityChange={setFormValid}
               />
             ),
           },
           {
             key: 'yaml',
-            label: t('tab.yaml'),
+            label: editorYamlTab(t('tab.yaml')),
             children: (
               <YamlEditor
                 value={yamlContent}
@@ -157,6 +165,11 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
               />
             ),
           },
+          ...(mode !== 'create' ? [{
+            key: 'conditions',
+            label: t('tab.conditions'),
+            children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} />,
+          }] : []),
         ]}
       />
     </Modal>

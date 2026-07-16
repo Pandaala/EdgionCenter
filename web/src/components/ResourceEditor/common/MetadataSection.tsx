@@ -134,6 +134,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
         {Object.entries(value.annotations || {}).map(([annotationKey, annotationValue]) => (
           <Space key={`annotation-${annotationKey}`} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
             <Input
+              data-testid="metadata-annotation-key"
               defaultValue={annotationKey}
               onBlur={(e) => {
                 const newKey = e.target.value.trim();
@@ -152,6 +153,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
             />
             <Text>:</Text>
             <Input
+              data-testid="metadata-annotation-value"
               value={annotationValue as string}
               onChange={(e) => {
                 const newAnnotations = { ...(value.annotations || {}) };
@@ -178,6 +180,7 @@ const MetadataSection: React.FC<MetadataSectionProps> = ({
         ))}
         {!disabled && (
           <Button
+            data-testid="metadata-annotation-add"
             type="dashed"
             onClick={() => {
               const timestamp = Date.now();

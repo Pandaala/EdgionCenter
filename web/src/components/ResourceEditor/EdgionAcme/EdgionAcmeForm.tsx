@@ -1,11 +1,9 @@
-/**
- * EdgionAcme 表单
- */
-
-import React from 'react'
-import { Form, Input, InputNumber, Select, Switch, Card, Space } from 'antd'
+import React, { useEffect, useState } from 'react'
+import * as yaml from 'js-yaml'
+import { Form, Input, InputNumber, Select, Switch, Card, Space, Divider, message } from 'antd'
 import MetadataSection from '../common/MetadataSection'
-import type { EdgionAcme } from '@/types/edgion-acme'
+import type { Dns01Challenge, EdgionAcme, Http01Challenge } from '@/types/edgion-acme'
+import { replaceChallengeType } from '@/utils/edgionacme'
 import { useT } from '@/i18n'
 
 interface EdgionAcmeFormProps {
@@ -13,11 +11,50 @@ interface EdgionAcmeFormProps {
   onChange: (data: EdgionAcme) => void
   readOnly?: boolean
   isCreate?: boolean
+  onValidityChange?: (valid: boolean) => void
 }
 
-const KEY_TYPE_OPTIONS = ['RSA2048', 'RSA4096', 'EC256', 'EC384']
+const KEY_TYPE_OPTIONS = ['ecdsa-p256', 'ecdsa-p384'] as const
 
-const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnly = false, isCreate = true }) => {
+interface ParentRefsEditorProps {
+  value: NonNullable<EdgionAcme['spec']['autoEdgionTls']>['parentRefs']
+  onChange: (value: NonNullable<EdgionAcme['spec']['autoEdgionTls']>['parentRefs']) => void
+  readOnly: boolean
+  onValidityChange: (valid: boolean) => void
+}
+
+const ParentRefsEditor: React.FC<ParentRefsEditorProps> = ({ value, onChange, readOnly, onValidityChange }) => {
+  const [draft, setDraft] = useState(() => yaml.dump(value ?? [], { lineWidth: -1, noRefs: true }))
+  useEffect(() => setDraft(yaml.dump(value ?? [], { lineWidth: -1, noRefs: true })), [value])
+
+  const commit = (nextDraft = draft, report = true) => {
+    try {
+      const parsed = yaml.load(nextDraft)
+      if (!Array.isArray(parsed)) throw new Error('Parent references must be a YAML array')
+      onChange(parsed as NonNullable<ParentRefsEditorProps['value']>)
+      onValidityChange(true)
+    } catch (error) {
+      onValidityChange(false)
+      if (report) message.error(error instanceof Error ? error.message : 'Invalid parent references YAML')
+    }
+  }
+
+  return (
+    <Input.TextArea
+      value={draft}
+      onChange={(event) => {
+        setDraft(event.target.value)
+        commit(event.target.value, false)
+      }}
+      onBlur={() => commit()}
+      rows={6}
+      disabled={readOnly}
+      style={{ fontFamily: 'monospace' }}
+    />
+  )
+}
+
+const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnly = false, isCreate = true, onValidityChange = () => undefined }) => {
   const t = useT()
 
   const spec = data.spec || {}
@@ -25,20 +62,11 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
   const storage = spec.storage || { secretName: '' }
   const renewal = spec.renewal
   const autoTls = spec.autoEdgionTls
-  const http01 = challenge.http01 || {}
-  const dns01 = challenge.dns01 || {}
-
   const updateSpec = (partial: Partial<typeof data.spec>) =>
     onChange({ ...data, spec: { ...data.spec, ...partial } })
 
-  const updateChallenge = (partial: Partial<typeof challenge>) =>
-    updateSpec({ challenge: { ...challenge, ...partial } })
-
-  const updateHttp01 = (partial: Partial<typeof http01>) =>
-    updateChallenge({ http01: { ...http01, ...partial } })
-
-  const updateDns01 = (partial: Partial<typeof dns01>) =>
-    updateChallenge({ dns01: { ...dns01, ...partial } })
+  const updateChallenge = (partial: Record<string, unknown>) =>
+    updateSpec({ challenge: { ...challenge, ...partial } as typeof challenge })
 
   const updateStorage = (partial: Partial<typeof storage>) =>
     updateSpec({ storage: { ...storage, ...partial } })
@@ -54,7 +82,7 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <MetadataSection
           value={data.metadata}
-          onChange={(metadata) => onChange({ ...data, metadata })}
+          onChange={(metadata) => onChange({ ...data, metadata: { ...data.metadata, ...metadata } })}
           disabled={readOnly}
           isCreate={isCreate}
         />
@@ -91,6 +119,31 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
             />
           </Form.Item>
 
+          <Form.Item label={t('field.privateKeySecretName')} required style={{ marginBottom: 8 }}>
+            <Input
+              value={spec.privateKeySecretRef?.name ?? ''}
+              onChange={(event) => updateSpec({
+                privateKeySecretRef: { ...spec.privateKeySecretRef, name: event.target.value },
+              })}
+              disabled={readOnly}
+              placeholder="acme-account"
+            />
+          </Form.Item>
+          <Form.Item label={t('field.privateKeySecretNamespace')} style={{ marginBottom: 8 }}>
+            <Input
+              value={spec.privateKeySecretRef?.namespace ?? ''}
+              onChange={(event) => updateSpec({
+                privateKeySecretRef: {
+                  ...spec.privateKeySecretRef,
+                  name: spec.privateKeySecretRef?.name ?? '',
+                  namespace: event.target.value || undefined,
+                },
+              })}
+              disabled={readOnly}
+              placeholder="default"
+            />
+          </Form.Item>
+
           <Form.Item label={t('field.keyType')} style={{ marginBottom: 0 }}>
             <Select
               value={spec.keyType}
@@ -112,7 +165,7 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
           <Form.Item label={t('field.challengeType')} required style={{ marginBottom: 8 }}>
             <Select
               value={challenge.type || 'http-01'}
-              onChange={(val) => updateChallenge({ type: val, http01: val === 'http-01' ? (http01 || {}) : undefined, dns01: val === 'dns-01' ? (dns01 || {}) : undefined })}
+              onChange={(val) => updateSpec({ challenge: replaceChallengeType(challenge, val) })}
               disabled={readOnly}
               style={{ width: 160 }}
             >
@@ -121,12 +174,14 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
             </Select>
           </Form.Item>
 
-          {challenge.type === 'http-01' && (
+          {challenge.type === 'http-01' && (() => {
+            const http01 = challenge as Http01Challenge
+            return (
             <>
               <Form.Item label={t('field.gwRefName')} style={{ marginBottom: 8 }}>
                 <Input
                   value={http01.gatewayRef?.name || ''}
-                  onChange={(e) => updateHttp01({ gatewayRef: { ...http01.gatewayRef, name: e.target.value } })}
+                  onChange={(e) => updateChallenge({ gatewayRef: { ...http01.gatewayRef, name: e.target.value } })}
                   placeholder="my-gateway"
                   disabled={readOnly}
                 />
@@ -134,21 +189,24 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
               <Form.Item label={t('field.gwRefNs')} style={{ marginBottom: 0 }}>
                 <Input
                   value={http01.gatewayRef?.namespace || ''}
-                  onChange={(e) => updateHttp01({ gatewayRef: { ...http01.gatewayRef, name: http01.gatewayRef?.name || '', namespace: e.target.value || undefined } })}
+                  onChange={(e) => updateChallenge({ gatewayRef: { ...http01.gatewayRef, name: http01.gatewayRef?.name || '', namespace: e.target.value || undefined } })}
                   placeholder="default"
                   disabled={readOnly}
                   style={{ width: 300 }}
                 />
               </Form.Item>
             </>
-          )}
+            )
+          })()}
 
-          {challenge.type === 'dns-01' && (
+          {challenge.type === 'dns-01' && (() => {
+            const dns01 = challenge as Dns01Challenge
+            return (
             <>
               <Form.Item label={t('field.dnsProvider')} style={{ marginBottom: 8 }}>
                 <Input
                   value={dns01.provider || ''}
-                  onChange={(e) => updateDns01({ provider: e.target.value || undefined })}
+                  onChange={(e) => updateChallenge({ provider: e.target.value })}
                   placeholder="cloudflare"
                   disabled={readOnly}
                 />
@@ -156,7 +214,7 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
               <Form.Item label={t('field.credRefName')} style={{ marginBottom: 8 }}>
                 <Input
                   value={dns01.credentialRef?.name || ''}
-                  onChange={(e) => updateDns01({ credentialRef: { ...dns01.credentialRef, name: e.target.value } })}
+                  onChange={(e) => updateChallenge({ credentialRef: { ...dns01.credentialRef, name: e.target.value } })}
                   placeholder="cloudflare-api-token"
                   disabled={readOnly}
                 />
@@ -164,7 +222,7 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
               <Form.Item label={t('field.credRefNs')} style={{ marginBottom: 8 }}>
                 <Input
                   value={dns01.credentialRef?.namespace || ''}
-                  onChange={(e) => updateDns01({ credentialRef: { ...dns01.credentialRef, name: dns01.credentialRef?.name || '', namespace: e.target.value || undefined } })}
+                  onChange={(e) => updateChallenge({ credentialRef: { ...dns01.credentialRef, name: dns01.credentialRef?.name || '', namespace: e.target.value || undefined } })}
                   placeholder="default"
                   disabled={readOnly}
                   style={{ width: 300 }}
@@ -173,7 +231,7 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
               <Form.Item label={t('field.propagationTimeout')} style={{ marginBottom: 8 }}>
                 <InputNumber
                   value={dns01.propagationTimeout}
-                  onChange={(val) => updateDns01({ propagationTimeout: val ?? undefined })}
+                  onChange={(val) => updateChallenge({ propagationTimeout: val ?? undefined })}
                   placeholder="120"
                   disabled={readOnly}
                   min={0}
@@ -183,11 +241,62 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
               <Form.Item label={t('field.propagationInterval')} style={{ marginBottom: 0 }}>
                 <InputNumber
                   value={dns01.propagationCheckInterval}
-                  onChange={(val) => updateDns01({ propagationCheckInterval: val ?? undefined })}
+                  onChange={(val) => updateChallenge({ propagationCheckInterval: val ?? undefined })}
                   placeholder="15"
                   disabled={readOnly}
                   min={0}
                   style={{ width: 160 }}
+                />
+              </Form.Item>
+            </>
+            )
+          })()}
+        </Card>
+
+        <Card title={t('section.externalAccountBinding')} size="small">
+          <Form.Item label={t('field.eabEnabled')} style={{ marginBottom: 8 }}>
+            <Switch
+              checked={spec.externalAccountBinding !== undefined}
+              onChange={(enabled) => updateSpec({
+                externalAccountBinding: enabled
+                  ? (spec.externalAccountBinding ?? { keyId: '', keySecretRef: { name: '' } })
+                  : undefined,
+              })}
+              disabled={readOnly}
+            />
+          </Form.Item>
+          {spec.externalAccountBinding && (
+            <>
+              <Form.Item label={t('field.eabKeyId')} required style={{ marginBottom: 8 }}>
+                <Input
+                  value={spec.externalAccountBinding.keyId}
+                  onChange={(event) => updateSpec({ externalAccountBinding: {
+                    ...spec.externalAccountBinding!, keyId: event.target.value,
+                  } })}
+                  disabled={readOnly}
+                />
+              </Form.Item>
+              <Form.Item label={t('field.eabSecretName')} required style={{ marginBottom: 8 }}>
+                <Input
+                  value={spec.externalAccountBinding.keySecretRef.name}
+                  onChange={(event) => updateSpec({ externalAccountBinding: {
+                    ...spec.externalAccountBinding!,
+                    keySecretRef: { ...spec.externalAccountBinding!.keySecretRef, name: event.target.value },
+                  } })}
+                  disabled={readOnly}
+                />
+              </Form.Item>
+              <Form.Item label={t('field.eabSecretNamespace')} style={{ marginBottom: 0 }}>
+                <Input
+                  value={spec.externalAccountBinding.keySecretRef.namespace ?? ''}
+                  onChange={(event) => updateSpec({ externalAccountBinding: {
+                    ...spec.externalAccountBinding!,
+                    keySecretRef: {
+                      ...spec.externalAccountBinding!.keySecretRef,
+                      namespace: event.target.value || undefined,
+                    },
+                  } })}
+                  disabled={readOnly}
                 />
               </Form.Item>
             </>
@@ -264,6 +373,15 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
               placeholder=""
               disabled={readOnly}
               style={{ width: 300 }}
+            />
+          </Form.Item>
+          <Divider style={{ margin: '12px 0' }} />
+          <Form.Item label={t('field.autoTlsParentRefs')} style={{ marginBottom: 0 }}>
+            <ParentRefsEditor
+              value={autoTls?.parentRefs}
+              onChange={(parentRefs) => updateAutoTls({ parentRefs })}
+              readOnly={readOnly}
+              onValidityChange={onValidityChange}
             />
           </Form.Item>
         </Card>

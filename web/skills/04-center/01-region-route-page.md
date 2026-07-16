@@ -1,113 +1,84 @@
 ---
 name: center-region-route-page
-description: Center federation RegionRoute page design: Global PM page + Service PM page, data fetching strategy, Failover operation, conflict detection.
+description: Center RegionRoute Region and Service multi-cluster management views.
 ---
 
-# Center RegionRoute Page Design
+# Center RegionRoute Pages
 
-## Related Files
+RegionRoute is an HTTP request plugin embedded in `EdgionPlugins`. Its complete routing logic and
+safe default region table are git-owned. An optional `overrideRef` points to a
+`RegionRouteOverride` `EdgionConfigData` that is the only Center-writable failover surface.
 
-| File | Description |
-|------|------|
-| `src/pages/Center/ClusterRegionRoutePage.tsx` | Cluster PM page |
-| `src/pages/Center/RegionRoutePage.tsx` | Service PM page (includes Failover) |
-| `src/api/center.ts` | Center API layer |
-| `src/components/Layout/CenterLayout.tsx` | Sidebar navigation |
+Preserve the historical two-dimensional Center management design without restoring the removed
+`ClusterRegionRoute` or `ServiceRegionRoute` persistence models. Both views are projections of the
+current effective RegionRoute contract.
 
-## Page Structure
+## Navigation
 
-The RegionRoute sidebar entry has two sub-menus:
-
-```
+```text
 RegionRoute
-├── Cluster  → /region-routes/cluster   (ClusterRegionRoutePage)
-└── Service  → /region-routes/service  (RegionRoutePage)
+├── Region   → /region-routes/region
+└── Service  → /region-routes/service
 ```
 
-## Backend API
+`/region-routes` redirects to the Region page. The former `/cluster`, `/topology`, and `/services` URLs remain
+redirect aliases. A selected Controller keeps the compact
+`/region-routes` route because the split is a Center fleet projection.
 
-### Center Aggregation Endpoints
+## Effective contract
 
-| Method | Path | Returns |
-|------|------|------|
-| GET | `center/cluster-region-pms` | `{ namespace, name, controllers[] }[]` |
-| GET | `center/service-region-pms` | `{ namespace, name, controllers[] }[]` |
-| POST | `center/cluster-region-pms/failover` | `{ namespace, name, regionName, failoverTo }` → `{ modified, failed }` |
-| POST | `center/service-region-pms/failover` | Same as above |
+Center polls each Controller's `GET /api/v1/region-routes/effective` endpoint and aggregates by
+`(namespace, pluginName, entryIndex)`. `entryIndex` is the stable position in `requestPlugins` and
+prevents missing or duplicate aliases from overwriting another entry. Each Controller entry includes:
 
-### Controller Endpoints (via `proxy/{ctrlId}/api/v1/...`)
+- `myRegion`, `regions`, `keyGet`, `hashKeyGet`, `hashCalc`, `routeRules`, and
+  `routeByKeyConfMatch`, and `dyeHeaders`;
+- structured `overrideRef { namespace, name, permitted }` and `overrideApplied`; `regions` is the
+  effective whole-replacement overlay when a permitted, enabled `RegionRouteOverride` resolves;
+- `serviceUsages`, derived by the Controller from HTTPRoute/GRPCRoute ExtensionRefs targeting the
+  containing EdgionPlugins resource.
 
-| Path | Returns |
-|------|------|
-| `cluster-region-pms` | Full topology: `{ namespace, name, myRegion, regions[], keyGet[], hashCalc, routeRules[] }` |
-| `service-region-pms` | `{ namespace, name, clusterRef: {ns, name}, regions: [{name, failoverTo?}], refPlugins[] }` |
+The contract is additive and defaults new collections to empty so a rolling upgrade can accept an
+older Controller without dropping its effective RegionRoute row.
+Each aggregated row also carries `onlineControllerIds`, resolved by the Center backend under the
+same `region-routes:read` permission. The Service page must show unknown coverage when an older
+backend omits this membership instead of treating only reporting Controllers as the complete fleet.
 
-## Cluster PM Page
+## Region page
 
-**Data source**: `center/cluster-region-pms` (main table) + proxy to controller's `cluster-region-pms` (details)
+The Region page shows one row per aggregated RegionRoute plugin entry. Expanded rows show the
+complete routing configuration for every Controller. Consistency checks compare shared routing
+logic, effective regions, and override state. They report missing online Controllers as a
+`presence` conflict. `myRegion` and `serviceUsages` are intentionally local deployment state and
+are not cross-cluster consistency conflicts.
 
-**Columns**: Namespace | Name | Regions
+Failover writes only `RegionRouteOverride.regions[].failoverTo`. Center resolves each online
+Controller's own structured reference, including cross-namespace targets, rather than copying an
+arbitrary Controller's reference across the fleet. Zero-target, partial, and all-failed writes are
+reported as failures. The action is disabled when the plugin has no permitted `overrideRef`; the
+Center must never rewrite the git-owned base plugin.
 
-**Expanded row**: Fetches ClusterRegionRoute details from each controller proxy; displays the region topology table, conflict detection, routeRules, and hashCalc.
+## Service page
 
-**RegionsCell**: Fetches a region preview from the first controller (lightweight, one proxy request per row).
+The Service page groups each logical usage across Controllers instead of rendering duplicate rows.
+It shows Controller coverage, backend and effective-region consistency, and per-Controller expanded
+details. A usage records its Route kind, namespace/name, zero-based rule index, and Service backends
+from that rule. Rule-level ExtensionRefs
+apply to all Service backends in the rule; backend-level ExtensionRefs apply only to that backend.
+Delegated HTTPRoute/GRPCRoute trees use Controller-produced `resolvedRules`, so inherited parent
+ExtensionRefs are attributed to the child Service backends that actually receive traffic.
 
-## Service PM Page
+ExtensionRefs are namespace-local. Cross-namespace or non-`edgion.io/EdgionPlugins` references are
+not attributed to a RegionRoute plugin. Failover is not Service-local in the current schema: it is
+stored in the shared RegionRoute override and affects all consumers. Service rows therefore link to
+the Region management action and must not imply an isolated per-Service write.
 
-**Data source**: `center/service-region-pms` (main table) + proxy to controller's `service-region-pms` + `cluster-region-pms` (details)
+## Validation
 
-**Columns**: Service PM Name | Namespace | Controllers | Regions | Failover
-
-**Data fetching optimization**:
-- The main table's RegionsCell uses `FirstControllerCtx` (React Context) to fetch all service PM + cluster PM from one controller once, shared across all rows. Only 2 proxy requests per full page load.
-- Expanded rows fetch data from all controllers on demand for conflict detection.
-
-```
-RegionRoutePage
-├── FirstControllerCtx.Provider       ← fetched once, shared via context
-│   ├── Table
-│   │   ├── RegionsCell               ← looks up from context, no extra requests
-│   │   └── RowActions → FailoverPanel  ← gets canonicalRegions + clusterRef from context
-│   └── ExpandedDetail                ← fetches from all controller proxies on demand
-```
-
-## Failover Operation
-
-Uses Center's fan-out endpoint instead of proxying individual PUT requests to each controller:
-
-```typescript
-centerApi.clusterPmFailover(namespace, name, regionName, failoverTo)
-// POST center/cluster-region-pms/failover → automatically fans out to all controllers
-// returns { modified: N, failed: N }
-```
-
-**Flow**:
-1. FailoverPanel displays canonicalRegions (fetched from context)
-2. User modifies the failoverTo dropdown
-3. Click Apply → POST only for changed regions
-4. On success, invalidate React Query cache → auto-refresh + close Popover
-
-## Conflict Detection
-
-Compares the regions field of ClusterRegionRoute across controllers:
-
-```typescript
-interface RegionConflict {
-  regionName: string
-  field: 'hashRange' | 'backendEndpoint' | 'failoverTo'
-  items: Array<{ controllerId: string; value: string }>
-}
-```
-
-A conflict is detected when the same region has inconsistent hashRange/endpoint/failoverTo values across different controllers.
-Conflicts are displayed as a Warning Alert in the ExpandedDetail expanded row.
-
-## Key Types
-
-```typescript
-// center.ts
-interface RegionPmSummary { namespace: string; name: string; controllers: string[] }
-interface ClusterRegionPmDetail { namespace: string; name: string; myRegion: string; regions: RegionDef[]; keyGet; hashCalc; routeRules; routeByKeyConfMatch }
-interface ServiceRegionPmDetail { namespace: string; name: string; clusterRef: { namespace: string; name: string }; regions: Array<{ name: string; failoverTo?: string }>; refPlugins: string[] }
-interface RegionDef { name: string; hashRange: [number, number]; backendEndpoint: string; tls: boolean; failoverTo?: string }
-```
+- Controller unit tests cover rule-level, backend-level, delegated usage discovery, structured
+  references, and effective overlay application.
+- Center runtime tests cover additive deserialization and multi-Controller aggregation.
+- Frontend tests cover distinct navigation and both views.
+- Kubernetes E2E must contain two Controllers and an HTTPRoute that references the RegionRoute
+  fixture, assert both Controllers appear in Region and Service, execute a failover across
+  both Controllers, verify labels are preserved, and restore the original overlay state.

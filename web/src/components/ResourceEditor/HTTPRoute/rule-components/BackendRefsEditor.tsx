@@ -8,12 +8,16 @@ import { Form, Input, InputNumber, Button, Space, Card } from 'antd';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import { DEFAULT_VALUES, PORT_MIN, PORT_MAX, WEIGHT_MIN, WEIGHT_MAX } from '@/constants/gateway-api';
 import type { BackendRef } from '@/types/gateway-api';
+import type { HTTPRouteFilter } from '@/types/gateway-api/httproute';
+import RouteFiltersEditor from './RouteFiltersEditor';
+import { useT } from '@/i18n';
 
 interface BackendRefsEditorProps {
   value?: BackendRef[];
   onChange?: (value: BackendRef[]) => void;
   disabled?: boolean;
   namespace?: string;
+  protocol?: 'http' | 'grpc';
 }
 
 const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
@@ -21,7 +25,9 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
   onChange,
   disabled = false,
   namespace = DEFAULT_VALUES.defaultNamespace,
+  protocol = 'http',
 }) => {
+  const t = useT();
   const handleBackendChange = (index: number, updatedBackend: BackendRef) => {
     const newBackends = [...value];
     newBackends[index] = updatedBackend;
@@ -84,6 +90,18 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
                 disabled={disabled}
               />
             </Form.Item>
+
+            <Card size="small" title={t('routeFilter.backendFilters')}>
+              <RouteFiltersEditor
+                value={backend.filters}
+                onChange={(filters) => handleBackendChange(index, {
+                  ...backend,
+                  filters: filters as HTTPRouteFilter[],
+                })}
+                disabled={disabled}
+                protocol={protocol}
+              />
+            </Card>
 
             {/* 端口号 */}
             <Form.Item
@@ -183,4 +201,3 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
 };
 
 export default BackendRefsEditor;
-

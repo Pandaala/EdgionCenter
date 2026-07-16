@@ -1,121 +1,115 @@
-/**
- * 插件阶段概览
- * 展示 EdgionPlugins 的四个执行阶段及各阶段中的插件列表
- */
-
-import React from 'react'
-import { Card, Collapse, Tag, Space, Badge, Typography, Empty } from 'antd'
+import { Button, Card, Collapse, Form, Input, Select, Space, Switch, Tag } from 'antd'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import type { EdgionPluginsSpec, PluginEntry } from '@/types/edgion-plugins'
 import { useT } from '@/i18n'
+import StructuredConfigEditor from '../StructuredConfigEditor'
+import {
+  HTTP_PLUGIN_CATALOG,
+  PLUGIN_DEFINITION_BY_TYPE,
+  defaultConfigForPlugin,
+  pluginTypesForStage,
+  type PluginStage,
+} from '../pluginCatalog'
 
-const { Text } = Typography
+const STAGES: Array<{ key: PluginStage; label: string }> = [
+  { key: 'requestPlugins', label: 'RequestFilter' },
+  { key: 'upstreamResponseFilterPlugins', label: 'UpstreamResponseFilter' },
+  { key: 'upstreamResponseBodyFilterPlugins', label: 'UpstreamResponseBodyFilter' },
+  { key: 'upstreamResponsePlugins', label: 'UpstreamResponse' },
+]
 
-interface PluginStagesSectionProps {
-  value?: EdgionPluginsSpec
-}
-
-const PluginStagesSection: React.FC<PluginStagesSectionProps> = ({ value = {} }) => {
+export default function PluginStagesSection({ value, onChange, readOnly }: {
+  value: EdgionPluginsSpec
+  onChange: (value: EdgionPluginsSpec) => void
+  readOnly: boolean
+}) {
   const t = useT()
-
-  interface StageConfig {
-    key: keyof EdgionPluginsSpec
-    labelKey: string
-    description: string
-  }
-
-  const STAGES: StageConfig[] = [
-    {
-      key: 'requestPlugins',
-      labelKey: 'plugins.requestStage',
-      description: 'Async execution — handles inbound requests (auth, rate-limit, rewrite, etc.)',
-    },
-    {
-      key: 'upstreamResponseFilterPlugins',
-      labelKey: 'plugins.responseFilter',
-      description: 'Sync execution — processes upstream response headers',
-    },
-    {
-      key: 'upstreamResponseBodyFilterPlugins',
-      labelKey: 'plugins.responseBody',
-      description: 'Sync execution — processes response body (bandwidth limit, etc.)',
-    },
-    {
-      key: 'upstreamResponsePlugins',
-      labelKey: 'plugins.upstreamResponse',
-      description: 'Async execution — runs after upstream response completes',
-    },
-  ]
-
-  const renderPluginList = (plugins: PluginEntry[] | undefined) => {
-    if (!plugins?.length) {
-      return (
-        <Empty
-          description={t('plugins.noPlugins')}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          style={{ margin: '8px 0' }}
-        />
-      )
-    }
-    return (
-      <Space direction="vertical" style={{ width: '100%' }}>
-        {plugins.map((plugin, index) => (
-          <div
-            key={index}
-            style={{
-              padding: '8px 12px',
-              background: 'var(--ec-color-bg-subtle)',
-              borderRadius: 4,
-              border: '1px solid var(--ec-color-border)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <Space>
-              <Tag color="blue">{plugin.type}</Tag>
-              {plugin.enable === false && <Tag color="orange">Disabled</Tag>}
-              {plugin.conditions && <Tag color="purple">Conditional</Tag>}
-            </Space>
-          </div>
-        ))}
-      </Space>
-    )
-  }
-
-  const collapseItems = STAGES.map(({ key, labelKey, description }) => {
-    const plugins = value[key] as PluginEntry[] | undefined
-    const count = plugins?.length ?? 0
+  const updateEntries = (stage: PluginStage, entries: PluginEntry[]) => onChange({ ...value, [stage]: entries })
+  const panels = STAGES.map(({ key: stage, label }) => {
+    const entries = value[stage] ?? []
+    const availableTypes = pluginTypesForStage(stage)
     return {
-      key,
-      label: (
-        <Space>
-          <Text>{t(labelKey)}</Text>
-          <Badge
-            count={count}
-            showZero
-            style={{ backgroundColor: count > 0 ? '#1677ff' : '#d9d9d9' }}
-          />
-        </Space>
-      ),
+      key: stage,
+      label: <Space><span>{label}</span><Tag>{entries.length}</Tag></Space>,
       children: (
-        <>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
-            {description}
-          </Text>
-          {renderPluginList(plugins)}
-        </>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {entries.map((entry, index) => {
+            const definition = PLUGIN_DEFINITION_BY_TYPE.get(entry.type)
+            return (
+              <Card
+                key={index}
+                size="small"
+                title={`${index + 1}. ${entry.type}`}
+                extra={!readOnly && <Button data-testid="edgionplugins-entry-remove" danger icon={<DeleteOutlined />} onClick={() => updateEntries(stage, entries.filter((_, current) => current !== index))}>{t('btn.delete')}</Button>}
+              >
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space wrap align="start">
+                    <Form.Item label={t('field.pluginType')} required>
+                      <Select
+                        value={entry.type}
+                        disabled={readOnly}
+                        showSearch
+                        style={{ width: 260 }}
+                        options={availableTypes.map((type) => ({ value: type, label: type }))}
+                        onChange={(type) => {
+                          const next = [...entries]
+                          next[index] = { ...entry, type, config: defaultConfigForPlugin(type) }
+                          updateEntries(stage, next)
+                        }}
+                      />
+                    </Form.Item>
+                    <Form.Item label={t('field.enabled')}>
+                      <Switch checked={entry.enable !== false} disabled={readOnly} onChange={(enable) => {
+                        const next = [...entries]; next[index] = { ...entry, enable }; updateEntries(stage, next)
+                      }} />
+                    </Form.Item>
+                    <Form.Item label={t('plugins.alias')} tooltip={t('plugins.aliasHelp')}>
+                      <Input value={entry.alias} disabled={readOnly} maxLength={32} onChange={(event) => {
+                        const next = [...entries]; next[index] = { ...entry, alias: event.target.value || undefined }; updateEntries(stage, next)
+                      }} />
+                    </Form.Item>
+                  </Space>
+                  <Card title={t('plugins.conditions')} size="small">
+                    <StructuredConfigEditor
+                      fields={[{ name: 'skip', kind: 'array', defaultValue: [] }, { name: 'run', kind: 'array', defaultValue: [] }]}
+                      value={(entry.conditions ?? {}) as Record<string, unknown>}
+                      readOnly={readOnly}
+                      onChange={(conditions) => {
+                        const next = [...entries]
+                        next[index] = { ...entry, conditions }
+                        updateEntries(stage, next)
+                      }}
+                    />
+                  </Card>
+                  <Card title={t('plugins.config')} size="small">
+                    {definition ? (
+                      <StructuredConfigEditor
+                        fields={definition.fields}
+                        value={entry.config ?? {}}
+                        readOnly={readOnly}
+                        onChange={(config) => {
+                          const next = [...entries]; next[index] = { ...entry, config }; updateEntries(stage, next)
+                        }}
+                      />
+                    ) : <Tag color="red">{t('plugins.unknownType')}</Tag>}
+                  </Card>
+                </Space>
+              </Card>
+            )
+          })}
+          {!readOnly && availableTypes.length > 0 && (
+            <Button data-testid="edgionplugins-entry-add" type="dashed" block icon={<PlusOutlined />} onClick={() => {
+              const type = availableTypes[0]
+              updateEntries(stage, [...entries, { enable: true, type, config: defaultConfigForPlugin(type) }])
+            }}>{t('plugins.addToStage')}</Button>
+          )}
+        </Space>
       ),
     }
   })
-
   return (
-    <Card title="Plugin Configuration" size="small">
-      <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-        This is a read-only overview. To edit plugin details, switch to YAML mode.
-      </Text>
-      <Collapse items={collapseItems} />
+    <Card title={t('plugins.configuration')} size="small" extra={<Tag color="blue">{HTTP_PLUGIN_CATALOG.length}</Tag>}>
+      <Collapse items={panels} defaultActiveKey={['requestPlugins']} />
     </Card>
   )
 }
-
-export default PluginStagesSection

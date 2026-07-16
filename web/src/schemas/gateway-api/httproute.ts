@@ -87,7 +87,7 @@ export const httpRequestRedirectFilterSchema = z.object({
   hostname: hostnameSchema.optional(),
   path: httpPathModifierSchema.optional(),
   port: portSchema.optional(),
-  statusCode: z.union([z.literal(301), z.literal(302)]).optional(),
+  statusCode: z.union([z.literal(301), z.literal(302), z.literal(303), z.literal(307), z.literal(308)]).optional(),
 });
 
 /**
@@ -109,7 +109,7 @@ export const httpRequestMirrorFilterSchema = z.object({
  * HTTPRouteFilter Schema
  */
 export const httpRouteFilterSchema = z.object({
-  type: z.enum(['RequestHeaderModifier', 'ResponseHeaderModifier', 'RequestRedirect', 'URLRewrite', 'RequestMirror', 'ExtensionRef']),
+  type: z.enum(['RequestHeaderModifier', 'ResponseHeaderModifier', 'RequestRedirect', 'URLRewrite', 'RequestMirror', 'ExtensionRef', 'CORS', 'ExternalAuth']),
   requestHeaderModifier: httpRequestHeaderFilterSchema.optional(),
   responseHeaderModifier: httpRequestHeaderFilterSchema.optional(),
   requestRedirect: httpRequestRedirectFilterSchema.optional(),
@@ -138,11 +138,25 @@ export const httpRouteTimeoutsSchema = z.object({
  * HTTPRouteRule Schema
  */
 export const httpRouteRuleSchema = z.object({
+  name: z.string().optional(),
   matches: z.array(httpRouteMatchSchema).optional(),
   filters: z.array(httpRouteFilterSchema).optional(),
   backendRefs: z.array(backendRefSchema).optional(),
   timeouts: httpRouteTimeoutsSchema.optional(),
-});
+  retry: z.object({
+    attempts: z.number().int().optional(),
+    backoff: z.string().optional(),
+    codes: z.array(z.number().int().min(100).max(599)).optional(),
+  }).passthrough().optional(),
+  sessionPersistence: z.object({
+    sessionName: z.string().optional(),
+    absoluteTimeout: z.string().optional(),
+    idleTimeout: z.string().optional(),
+    type: z.enum(['Cookie', 'Header']).optional(),
+    cookieConfig: z.object({ lifetimeType: z.enum(['Permanent', 'Session']).optional() }).passthrough().optional(),
+    strict: z.boolean().optional(),
+  }).passthrough().optional(),
+}).passthrough();
 
 // ============================================
 // HTTPRoute Spec Schema
@@ -154,7 +168,8 @@ export const httpRouteRuleSchema = z.object({
 export const httpRouteSpecSchema = z.object({
   parentRefs: z
     .array(parentReferenceSchema)
-    .min(1, VALIDATION_MESSAGES.minItems(1).zh),
+    .min(1, VALIDATION_MESSAGES.minItems(1).zh)
+    .optional(),
   hostnames: z.array(hostnameSchema).optional(),
   rules: z.array(httpRouteRuleSchema).optional(),
 });
@@ -178,4 +193,3 @@ export const httpRouteSchema = z.object({
  * HTTPRoute 类型（从 Schema 推导）
  */
 export type HTTPRouteSchemaType = z.infer<typeof httpRouteSchema>;
-

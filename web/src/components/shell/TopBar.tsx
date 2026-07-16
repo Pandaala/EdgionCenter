@@ -48,6 +48,7 @@ export const TopBar = ({ collapsed, onToggleCollapse }: TopBarProps) => {
       }}
     >
       <Button
+        data-testid="nav-toggle"
         type="text"
         icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
         onClick={onToggleCollapse}
@@ -98,21 +99,22 @@ export const TopBar = ({ collapsed, onToggleCollapse }: TopBarProps) => {
         </Button>
         <ThemeToggle />
         <Button
+          data-testid="language-toggle"
           type="text"
           icon={<GlobalOutlined />}
           onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
         >
           {lang === 'en' ? '中文' : 'EN'}
         </Button>
-        <Button type="text" icon={<ReloadOutlined />} onClick={() => window.location.reload()} />
+        <Button data-testid="page-reload" type="text" icon={<ReloadOutlined />} onClick={() => window.location.reload()} />
         <Dropdown
           menu={{
             items: [
-              { key: 'logout', icon: <LogoutOutlined />, label: t('login.logout'), onClick: handleLogout },
+              { key: 'logout', icon: <LogoutOutlined />, label: <span data-testid="logout">{t('login.logout')}</span>, onClick: handleLogout },
             ],
           }}
         >
-          <Button type="text" icon={<LogoutOutlined />} />
+          <Button data-testid="user-menu" type="text" icon={<LogoutOutlined />} />
         </Dropdown>
       </Space>
     </header>

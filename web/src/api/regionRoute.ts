@@ -13,15 +13,43 @@ export interface RegionDef {
   failoverTo?: string
 }
 
+export interface RegionRouteBackendService {
+  namespace: string
+  name: string
+  port?: number
+}
+
+export interface RegionRouteServiceUsage {
+  routeKind: 'HTTPRoute' | 'GRPCRoute' | string
+  routeNamespace: string
+  routeName: string
+  ruleIndex: number
+  backendServices: RegionRouteBackendService[]
+}
+
+export interface RegionRouteOverrideRef {
+  namespace: string
+  name: string
+  permitted: boolean
+}
+
 /** Per-controller effective region route view. */
 export interface EffectiveRegionRoute {
   namespace: string
   pluginName: string
   alias: string | null
+  entryIndex: number
   myRegion: string
   regions: RegionDef[]
-  overrideRef: string | null
+  keyGet: unknown[]
+  hashKeyGet?: unknown[]
+  hashCalc?: { algorithm?: string; modulo?: number; [key: string]: unknown }
+  routeRules: Array<{ type?: string; [key: string]: unknown }>
+  routeByKeyConfMatch?: Record<string, unknown>
+  dyeHeaders?: Record<string, unknown>
+  overrideRef: RegionRouteOverrideRef | null
   overrideApplied: boolean
+  serviceUsages: RegionRouteServiceUsage[]
 }
 
 /** Center aggregated region route — one row per (namespace, pluginName, alias) tuple. */
@@ -29,7 +57,10 @@ export interface CenterRegionRoute {
   namespace: string
   pluginName: string
   alias: string | null
+  entryIndex: number
   controllers: Record<string, EffectiveRegionRoute>
+  /** Online fleet membership, emitted under the same region-routes:read permission. */
+  onlineControllerIds?: string[]
 }
 
 export interface ConsistencyResult {
@@ -71,12 +102,17 @@ export const regionRouteApi = {
 
   regionRouteFailover: async (
     namespace: string, name: string, regionName: string, failoverTo: string,
+    route?: { pluginName: string; entryIndex: number },
   ): Promise<{ success: boolean; data?: { modified: number; failed: number } }> => {
     const center = prefix() === 'center/'
     const url = center ? 'center/region-routes/failover' : 'cluster-region-routes/failover'
     const { data } = await apiClient.post(url, {
       namespace, name, regionName, failoverTo,
+      ...(center && route ? { pluginName: route.pluginName, entryIndex: route.entryIndex } : {}),
     })
+    if (!data.success || (data.data?.failed ?? 0) > 0 || (data.data?.modified ?? 0) === 0) {
+      throw new Error(`Failover was not applied to every target (${data.data?.modified ?? 0} modified, ${data.data?.failed ?? 0} failed)`)
+    }
     return data
   },
 

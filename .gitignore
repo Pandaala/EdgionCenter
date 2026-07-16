@@ -5,3 +5,4 @@
 # index.html here when building --features embed-dashboard without a real build.
 /web/dist
 /web/node_modules
+/web/test-results

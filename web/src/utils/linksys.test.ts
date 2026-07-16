@@ -7,6 +7,9 @@ import {
   validateLinkSys,
   withWebhookMethod,
   withWebhookUrl,
+  withWebhookServiceTarget,
+  LINKSYS_RUST_FIELD_MATRIX,
+  toMutationYaml,
 } from './linksys'
 
 describe('LinkSys YAML utilities', () => {
@@ -87,6 +90,14 @@ spec:
     })
   })
 
+  it('makes URL and Service targets strictly mutually exclusive in helpers and validation', () => {
+    const base:any={target:{name:'svc',namespace:'prod',port:8080},request:{},timeoutMs:5000}
+    expect(withWebhookUrl(base,'https://hook.example.com').target).toEqual({url:'https://hook.example.com',blockPrivate:undefined})
+    expect(withWebhookServiceTarget({ ...base, target:{url:'https://hook.example.com',blockPrivate:true} },{name:'svc',port:8080}).target).toMatchObject({url:undefined,blockPrivate:undefined,name:'svc',port:8080})
+    const invalid=fromYaml('apiVersion: edgion.io/v1\nkind: LinkSys\nmetadata: {name: hook, namespace: prod}\nspec: {type: webhook, config: {target: {url: https://hook.example.com, group: x}, request: {}, timeoutMs: 5000}}\n')
+    expect(()=>validateLinkSys(invalid)).toThrow('exactly one URL or Service')
+  })
+
   it('keeps the default YAML accepted shape', () => {
     expect(fromYaml(DEFAULT_YAML).spec.config).toMatchObject({
       endpoints: ['redis://127.0.0.1:6379'],
@@ -130,5 +141,41 @@ spec:
       auth: { secretRef: { name: '' } },
     }
     expect(() => validateLinkSys(empty)).toThrow('requires a Secret name')
+  })
+
+  it('locks the Rust-derived field matrix and round-trips deep webhook configuration', () => {
+    expect(LINKSYS_RUST_FIELD_MATRIX.webhook).toContain('healthCheck')
+    expect(LINKSYS_RUST_FIELD_MATRIX.etcd).toContain('maxCallRecvSize')
+    const resource = fromYaml(`apiVersion: edgion.io/v1
+kind: LinkSys
+metadata: {name: resolver, namespace: prod}
+spec:
+  type: webhook
+  config:
+    target: {url: https://resolver.example.com, blockPrivate: true}
+    tls: {enabled: true, verify: true, validation: {wellKnownCACertificates: System}}
+    timeoutMs: 3000
+    timeoutMsTemplate: "\${ctx:timeout}"
+    retry: {maxRetries: 2, retryDelayMs: 100, retryOnStatus: [503], backoffPolicy: exponential, maxDelayMs: 1000}
+    rateLimit: {rate: 100, windowSec: 1}
+    healthCheck: {active: {path: /healthz, intervalSec: 10, timeoutMs: 2000, healthyThreshold: 1, unhealthyThreshold: 3}, passive: {unhealthyThreshold: 3, failureStatusCodes: [500], countTimeout: true, backoff: {initialSec: 5, multiplier: 2, maxSec: 60}}}
+    maxResponseBytes: 4096
+    success: {statusCodes: [200], body: [{pointer: /code, equals: 0}]}
+    allowDegradation: false
+    statusOnError: 503
+    allowDegradationTemplate: "\${ctx:degrade}"
+    request:
+      path: {template: /lookup, allowOverride: false}
+      method: {template: POST}
+      args: {origin: [{name: tenant, presence: required}], custom: []}
+      headers: {forwardAll: false, origin: [], custom: [{name: Authorization, template: "Bearer \${secretRef:prod/token:value}"}]}
+      cookies: {origin: [], custom: []}
+      body: {type: json, template: '{"id":"\${ctx:id}"}'}
+`)
+    const output = toMutationYaml(resource, 'update')
+    expect(output).toContain('healthCheck:')
+    expect(output).toContain('retryOnStatus:')
+    expect(output).toContain('allowDegradationTemplate:')
+    expect(output).not.toContain('resolvedSecrets:')
   })
 })

@@ -11,6 +11,7 @@ import {
 } from '@/api/globalConnectionIpRestriction'
 import DetailModal from './DetailModal'
 import PageHeader from '@/components/PageHeader'
+import { useCan } from '@/utils/permissions'
 
 const { Text } = Typography
 
@@ -23,6 +24,7 @@ interface FlatRow {
 
 export default function GlobalConnectionIpRestrictionList() {
   const queryClient = useQueryClient()
+  const canWrite = useCan('ip-restrictions:write')
   const [detailTarget, setDetailTarget] = useState<FlatRow | null>(null)
   // Declarative state for active-profile switch confirmation.
   const [profileTarget, setProfileTarget] = useState<{ row: FlatRow; profile: string } | null>(null)
@@ -132,6 +134,7 @@ export default function GlobalConnectionIpRestrictionList() {
   }) => (
     <div style={{ padding: 8 }} onKeyDown={(e) => e.stopPropagation()}>
       <Input
+        data-testid="gcir-search"
         autoFocus
         placeholder={placeholder}
         value={selectedKeys[0] as string | undefined}
@@ -148,7 +151,7 @@ export default function GlobalConnectionIpRestrictionList() {
 
   const columns = useMemo(() => [
     {
-      title: 'Controller',
+      title: <span data-testid="gcir-controller">Controller</span>,
       dataIndex: 'controllerId',
       key: 'controllerId',
       filters: controllerOptions,
@@ -156,7 +159,7 @@ export default function GlobalConnectionIpRestrictionList() {
       render: (v: string) => <Tag color="blue">{v}</Tag>,
     },
     {
-      title: 'Namespace',
+      title: <span data-testid="gcir-namespace">Namespace</span>,
       dataIndex: 'namespace',
       key: 'namespace',
       filters: namespaceOptions,
@@ -191,10 +194,12 @@ export default function GlobalConnectionIpRestrictionList() {
         const options = Object.keys(row.entry.profiles).map((k) => ({ label: k, value: k }))
         return (
           <Select
+            data-testid="gcir-profile-select"
             value={row.entry.activeProfile}
             options={options}
             style={{ minWidth: 160 }}
             loading={patchActiveProfileMutation.isPending}
+            disabled={!canWrite || row.entry.activeProfileRef?.permitted !== true}
             // Open a declarative confirmation Modal instead of mutating immediately.
             onChange={(profile) => {
               if (profile === row.entry.activeProfile) return
@@ -231,6 +236,7 @@ export default function GlobalConnectionIpRestrictionList() {
       render: (_: unknown, row: FlatRow) => (
         <Space>
           <Button
+            data-testid="gcir-row-open"
             size="small"
             icon={<EyeOutlined />}
             onClick={() => setDetailTarget(row)}
@@ -240,14 +246,14 @@ export default function GlobalConnectionIpRestrictionList() {
         </Space>
       ),
     },
-  ], [patchActiveProfileMutation, controllerOptions, namespaceOptions])
+  ], [canWrite, patchActiveProfileMutation, controllerOptions, namespaceOptions])
 
   return (
     <div>
       <PageHeader
         title="GlobalConnectionIpRestriction"
         actions={
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>Refresh</Button>
+          <Button data-testid="gcir-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>Refresh</Button>
         }
       />
       {isLoading ? (
@@ -275,7 +281,8 @@ export default function GlobalConnectionIpRestrictionList() {
         open={!!profileTarget}
         title={profileTarget ? `Switch active profile of '${profileTarget.row.namespace}/${profileTarget.row.pluginName}' on ${profileTarget.row.controllerId}?` : ''}
         okText="Confirm"
-        okButtonProps={{ loading: patchActiveProfileMutation.isPending }}
+        okButtonProps={{ loading: patchActiveProfileMutation.isPending, 'data-testid': 'gcir-profile-confirm' } as React.ComponentProps<typeof Button>}
+        cancelButtonProps={{ 'data-testid': 'gcir-profile-cancel' } as React.ComponentProps<typeof Button>}
         onOk={() => {
           if (!profileTarget) return
           patchActiveProfileMutation.mutate(

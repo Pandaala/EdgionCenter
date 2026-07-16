@@ -1,9 +1,10 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
 import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { resourceApi } from '@/api/resources'
+import { batchDeleteFailureKeys, resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import SecretEditor from '@/components/ResourceEditor/Secret/SecretEditor'
 import { useT } from '@/i18n'
@@ -16,6 +17,7 @@ const { Search } = Input
 
 const SecretList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [editorVisible, setEditorVisible] = useState(false)
@@ -38,8 +40,8 @@ const SecretList = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('secret', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'secret', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'secret'] })
@@ -47,12 +49,20 @@ const SecretList = () => {
   })
 
   const batchDeleteMutation = useMutation({
-    mutationFn: (resources: Array<{ namespace: string; name: string }>) =>
-      resourceApi.batchDelete('secret', resources),
+    mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
+      resourceApi.batchDelete(mutationTarget, 'secret', resources),
     onSuccess: () => {
       message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'secret'] })
+    },
+    onError: (error: unknown) => {
+      const failedKeys = batchDeleteFailureKeys(error)
+      if (failedKeys) {
+        setSelectedRowKeys(failedKeys)
+        void queryClient.invalidateQueries()
+      }
+      message.error(error instanceof Error ? error.message : String(error))
     },
   })
 
@@ -65,18 +75,18 @@ const SecretList = () => {
     setEditorMode(mode); setSelectedResource(resource || null); setEditorVisible(true)
   }
 
-  const handleDelete = (namespace: string, name: string) => {
+  const handleDelete = (namespace: string, name: string, resourceVersion: string) => {
     Modal.confirm({
       title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name: `Secret ${name}` }),
       okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
-      onOk: () => deleteMutation.mutate({ namespace, name }),
+      onOk: () => deleteMutation.mutate({ namespace, name, resourceVersion }),
     })
   }
 
   const handleBatchDelete = () => {
     const selected = filtered
       .filter((r) => selectedRowKeys.includes(`${r.metadata.namespace}/${r.metadata.name}`))
-      .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name }))
+      .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name, resourceVersion: r.metadata.resourceVersion! }))
     Modal.confirm({
       title: t('confirm.batchDeleteTitle'), content: `${t('confirm.batchDeleteMsg', { n: selected.length })} ${t('confirm.deleteIrreversible')}`,
       okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
@@ -115,7 +125,7 @@ const SecretList = () => {
           <Button size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
           <Button size="small" danger icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name)}>{t('btn.delete')}</Button>
+            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}>{t('btn.delete')}</Button>
         </Space>
       ),
     },

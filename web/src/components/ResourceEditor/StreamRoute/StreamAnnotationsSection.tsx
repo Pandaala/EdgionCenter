@@ -8,6 +8,7 @@ import { Card, Form, Input, Select } from 'antd'
 import { useT } from '@/i18n'
 
 interface StreamAnnotationsSectionProps {
+  kind: 'TCPRoute' | 'UDPRoute' | 'TLSRoute'
   annotations: Record<string, string>
   onChange: (annotations: Record<string, string>) => void
   disabled?: boolean
@@ -16,9 +17,13 @@ interface StreamAnnotationsSectionProps {
 const STREAM_PLUGINS_KEY = 'edgion.io/edgion-stream-plugins'
 const PROXY_PROTOCOL_KEY = 'edgion.io/proxy-protocol'
 const MAX_RETRIES_KEY = 'edgion.io/max-connect-retries'
+const KEEPALIVE_TIME_KEY = 'edgion.io/tcp-keepalive-time'
+const KEEPALIVE_INTERVAL_KEY = 'edgion.io/tcp-keepalive-interval'
+const KEEPALIVE_PROBES_KEY = 'edgion.io/tcp-keepalive-probes'
 
 const StreamAnnotationsSection: React.FC<StreamAnnotationsSectionProps> = ({
   annotations,
+  kind,
   onChange,
   disabled = false,
 }) => {
@@ -50,7 +55,7 @@ const StreamAnnotationsSection: React.FC<StreamAnnotationsSectionProps> = ({
         />
       </Form.Item>
 
-      <Form.Item
+      {kind === 'TLSRoute' && <Form.Item
         label={t('field.proxyProtocol')}
         style={{ marginBottom: 12 }}
       >
@@ -62,12 +67,11 @@ const StreamAnnotationsSection: React.FC<StreamAnnotationsSectionProps> = ({
           allowClear
           style={{ width: 160 }}
         >
-          <Select.Option value="1">{t('stream.version1')}</Select.Option>
-          <Select.Option value="2">{t('stream.version2')}</Select.Option>
+          <Select.Option value="v2">v2</Select.Option>
         </Select>
-      </Form.Item>
+      </Form.Item>}
 
-      <Form.Item
+      {kind === 'TLSRoute' && <Form.Item
         label={t('field.maxConnRetries')}
         style={{ marginBottom: 0 }}
       >
@@ -78,10 +82,23 @@ const StreamAnnotationsSection: React.FC<StreamAnnotationsSectionProps> = ({
           disabled={disabled}
           style={{ width: 160 }}
           type="number"
-          min={0}
+          min={1}
+          max={5}
           allowClear
         />
-      </Form.Item>
+      </Form.Item>}
+
+      {kind !== 'UDPRoute' && <>
+        <Form.Item label={t('field.tcpKeepaliveTime')} style={{ marginBottom: 12 }}>
+          <Input value={annotations[KEEPALIVE_TIME_KEY] || ''} onChange={(e) => update(KEEPALIVE_TIME_KEY, e.target.value)} disabled={disabled} type="number" min={1} max={7200} allowClear />
+        </Form.Item>
+        <Form.Item label={t('field.tcpKeepaliveInterval')} style={{ marginBottom: 12 }}>
+          <Input value={annotations[KEEPALIVE_INTERVAL_KEY] || ''} onChange={(e) => update(KEEPALIVE_INTERVAL_KEY, e.target.value)} disabled={disabled} type="number" min={1} max={75} allowClear />
+        </Form.Item>
+        <Form.Item label={t('field.tcpKeepaliveProbes')} style={{ marginBottom: 0 }}>
+          <Input value={annotations[KEEPALIVE_PROBES_KEY] || ''} onChange={(e) => update(KEEPALIVE_PROBES_KEY, e.target.value)} disabled={disabled} type="number" min={1} max={20} allowClear />
+        </Form.Item>
+      </>}
     </Card>
   )
 }

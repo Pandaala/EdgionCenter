@@ -1,5 +1,5 @@
 import * as yaml from 'js-yaml'
-import { dumpYaml } from './yaml-utils'
+import { mutationDocumentToYaml } from './resource-document'
 
 export interface ReferenceGrantFrom {
   group: string
@@ -44,37 +44,24 @@ export function createEmpty(): ReferenceGrant {
 }
 
 export function normalize(raw: any): ReferenceGrant {
-  const from: ReferenceGrantFrom[] = (raw.spec?.from || []).map((f: any) => ({
-    group: f.group ?? 'gateway.networking.k8s.io',
-    kind: f.kind || '',
-    namespace: f.namespace || '',
-  }))
-  const to: ReferenceGrantTo[] = (raw.spec?.to || []).map((t: any) => ({
-    group: t.group ?? '',
-    kind: t.kind || '',
-    name: t.name,
-  }))
+  const spec = { ...raw.spec }
+  if (Array.isArray(raw.spec?.from)) spec.from = raw.spec.from.map((entry: any) => ({ ...entry }))
+  if (Array.isArray(raw.spec?.to)) spec.to = raw.spec.to.map((entry: any) => ({ ...entry }))
   return {
+    ...raw,
     apiVersion: raw.apiVersion || 'gateway.networking.k8s.io/v1',
     kind: 'ReferenceGrant',
     metadata: {
+      ...raw.metadata,
       name: raw.metadata?.name || '',
       namespace: raw.metadata?.namespace || 'default',
-      labels: raw.metadata?.labels,
-      annotations: raw.metadata?.annotations,
-      resourceVersion: raw.metadata?.resourceVersion,
-      creationTimestamp: raw.metadata?.creationTimestamp,
     },
-    spec: {
-      from: from.length > 0 ? from : [{ group: 'gateway.networking.k8s.io', kind: 'Gateway', namespace: '' }],
-      to: to.length > 0 ? to : [{ group: '', kind: 'Secret' }],
-    },
-    status: raw.status,
+    spec: spec as ReferenceGrant['spec'],
   }
 }
 
-export function toYaml(rg: ReferenceGrant): string {
-  return dumpYaml(rg)
+export function toYaml(rg: ReferenceGrant, mode: 'create' | 'update' = 'update'): string {
+  return mutationDocumentToYaml(rg, 'referencegrant', mode)
 }
 
 export function fromYaml(yamlStr: string): ReferenceGrant {

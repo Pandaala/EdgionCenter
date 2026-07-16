@@ -131,7 +131,7 @@ export default function AuditLogPage() {
         title={t('audit.title')}
         subtitle={t('audit.subtitle')}
         actions={
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+          <Button data-testid="audit-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>
             {t('btn.refresh')}
           </Button>
         }
@@ -139,6 +139,7 @@ export default function AuditLogPage() {
 
       <Space wrap style={{ marginBottom: 16 }}>
         <Input
+          data-testid="audit-actor-filter"
           placeholder={t('audit.filter.actor')}
           allowClear
           style={{ width: 180 }}
@@ -147,6 +148,7 @@ export default function AuditLogPage() {
           onPressEnter={applyFilters}
         />
         <Input
+          data-testid="audit-controller-filter"
           placeholder={t('audit.filter.controller')}
           allowClear
           style={{ width: 200 }}
@@ -155,6 +157,7 @@ export default function AuditLogPage() {
           onPressEnter={applyFilters}
         />
         <Input
+          data-testid="audit-since-filter"
           type="datetime-local"
           aria-label={t('audit.filter.since')}
           style={{ width: 220 }}
@@ -162,16 +165,17 @@ export default function AuditLogPage() {
           onChange={(e) => setDraft({ ...draft, since: e.target.value })}
         />
         <Input
+          data-testid="audit-until-filter"
           type="datetime-local"
           aria-label={t('audit.filter.until')}
           style={{ width: 220 }}
           value={draft.until}
           onChange={(e) => setDraft({ ...draft, until: e.target.value })}
         />
-        <Button type="primary" onClick={applyFilters}>
+        <Button data-testid="audit-apply" type="primary" onClick={applyFilters}>
           {t('audit.filter.apply')}
         </Button>
-        <Button onClick={resetFilters}>{t('audit.filter.reset')}</Button>
+        <Button data-testid="audit-reset" onClick={resetFilters}>{t('audit.filter.reset')}</Button>
       </Space>
 
       <Table
@@ -184,11 +188,11 @@ export default function AuditLogPage() {
       />
 
       <Space style={{ marginTop: 16, justifyContent: 'flex-end', width: '100%' }}>
-        <Button disabled={page === 0 || isFetching} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+        <Button data-testid="audit-prev" disabled={page === 0 || isFetching} onClick={() => setPage((p) => Math.max(0, p - 1))}>
           {t('audit.page.prev')}
         </Button>
         <Text>{t('audit.page.current', { n: page + 1 })}</Text>
-        <Button disabled={rows.length < PAGE_SIZE || isFetching} onClick={() => setPage((p) => p + 1)}>
+        <Button data-testid="audit-next" disabled={rows.length < PAGE_SIZE || isFetching} onClick={() => setPage((p) => p + 1)}>
           {t('audit.page.next')}
         </Button>
       </Space>

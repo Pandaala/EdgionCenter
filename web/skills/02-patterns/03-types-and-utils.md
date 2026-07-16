@@ -46,13 +46,17 @@ export interface ResourceType {
 - Reuse `K8sMetadata` and `K8sResource` (from `src/api/types.ts`)
 - Use string literal types or `string` for apiVersion and kind
 
-## Utility Function Pattern
+## Lossless Resource Adapter Pattern
 
 File location: `src/utils/{resource}.ts`
 
 Reference:
 - `src/utils/httproute.ts` (190 lines)
 - `src/utils/edgionplugins.ts` (129 lines)
+
+Resource adapters must distinguish the API view from the operator document sent
+on mutation. Do not project a backend response onto the fields currently rendered
+by the form.
 
 ### Required Functions
 
@@ -80,50 +84,55 @@ export function createEmptyResource(): ResourceType {
 /**
  * Normalize data returned from the backend (fill in missing fields, unify format)
  */
-export function normalizeResource(raw: any): ResourceType {
-  return {
-    apiVersion: raw.apiVersion || 'gateway.networking.k8s.io/v1',
-    kind: raw.kind || 'ResourceName',
-    metadata: {
-      name: raw.metadata?.name || '',
-      namespace: raw.metadata?.namespace || 'default',
-      labels: raw.metadata?.labels,
-      annotations: raw.metadata?.annotations,
-    },
-    spec: {
-      // recursively normalize spec fields
-    },
-  }
+export function parseResource(raw: unknown): ResourceType {
+  // Validate identity and required shape, but retain every operator-owned field.
+  return validateWithoutProjection(raw)
+}
+
+export function toEditableDocument(view: ResourceType): ResourceType {
+  // Strip status, server-owned metadata, and documented runtime/internal paths.
+  return projectOperatorFields(view)
+}
+
+export function toMutationDocument(editable: ResourceType, mode: 'create' | 'update') {
+  // Update may retain resourceVersion for optimistic concurrency. Never retain
+  // parsed/resolved/redacted values or other server-owned fields.
+  return buildMutationEnvelope(editable, mode)
 }
 
 /**
  * Object → YAML string
  */
 export function resourceToYaml(resource: ResourceType): string {
-  // clean empty fields before serialization
-  const clean = removeEmpty(resource)
-  return yaml.dump(clean, { lineWidth: -1, noRefs: true })
+  return yaml.dump(resource, { lineWidth: -1, noRefs: true })
 }
 
 /**
  * YAML string → object
  */
 export function yamlToResource(yamlStr: string): ResourceType {
-  const raw = yaml.load(yamlStr) as any
-  return normalizeResource(raw)
+  return parseResource(yaml.load(yamlStr))
 }
 ```
 
-### Helper Functions
+### Data channels
 
-- `removeEmpty(obj)` — recursively remove null, undefined, empty arrays, and empty objects
-- Count / statistics functions (as needed, e.g., `countPluginsByStage` for EdgionPlugins)
+- **Operator-owned**: editable metadata and non-internal spec fields.
+- **Server-owned**: status, uid, generation, managedFields, creationTimestamp.
+- **Runtime/internal**: `schemars(skip)`, parsed, compiled, resolved, denial,
+  and redacted paths.
+
+Adapters preserve unknown operator spec fields for forward compatibility while
+explicitly stripping known internal paths.
 
 ### Key Points
 
-1. **createEmpty** returns a complete structure with default values for all required fields
-2. **normalize** handles edge cases from backend data (missing fields, null values)
-3. **toYaml** cleans empty fields first to avoid outputting `field: null` or `field: []`
-4. **fromYaml** uses `yaml.load` + normalize as a double guarantee
-5. `lineWidth: -1` prevents YAML long-line wrapping
-6. `noRefs: true` prevents YAML anchor references
+1. **createEmpty** supplies defaults only for a newly created resource.
+2. Parsing an existing resource must not inject defaults or collapse arrays.
+3. Structured form changes use narrow immutable patches and preserve siblings.
+4. Generic `removeEmpty` is forbidden on an existing operator document. Empty
+   and absent are equivalent only when the authoritative contract says so.
+5. Every adapter needs current, unknown-field, multi-entry, and internal-strip
+   preservation fixtures.
+6. `lineWidth: -1` prevents YAML long-line wrapping.
+7. `noRefs: true` prevents YAML anchor references.

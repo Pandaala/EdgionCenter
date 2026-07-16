@@ -1,9 +1,10 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
+import { Table, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { resourceApi } from '@/api/resources'
+import { batchDeleteFailureKeys, resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import EdgionStreamPluginsEditor from '@/components/ResourceEditor/EdgionStreamPlugins/EdgionStreamPluginsEditor'
 import PageHeader from '@/components/PageHeader'
@@ -12,11 +13,16 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 
 const { Search } = Input
 
 const EdgionStreamPluginsList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [editorVisible, setEditorVisible] = useState(false)
@@ -39,8 +45,8 @@ const EdgionStreamPluginsList = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('edgionstreamplugins', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'edgionstreamplugins', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionstreamplugins'] })
@@ -48,12 +54,20 @@ const EdgionStreamPluginsList = () => {
   })
 
   const batchDeleteMutation = useMutation({
-    mutationFn: (resources: Array<{ namespace: string; name: string }>) =>
-      resourceApi.batchDelete('edgionstreamplugins', resources),
+    mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
+      resourceApi.batchDelete(mutationTarget, 'edgionstreamplugins', resources),
     onSuccess: () => {
       message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionstreamplugins'] })
+    },
+    onError: (error: unknown) => {
+      const failedKeys = batchDeleteFailureKeys(error)
+      if (failedKeys) {
+        setSelectedRowKeys(failedKeys)
+        void queryClient.invalidateQueries()
+      }
+      message.error(error instanceof Error ? error.message : String(error))
     },
   })
 
@@ -66,19 +80,21 @@ const EdgionStreamPluginsList = () => {
     setEditorMode(mode); setSelectedResource(resource || null); setEditorVisible(true)
   }
 
-  const handleDelete = (namespace: string, name: string) => {
+  const handleDelete = (namespace: string, name: string, resourceVersion: string) => {
     Modal.confirm({
+      ...resourceDeleteConfirmProps,
       title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name }),
       okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
-      onOk: () => deleteMutation.mutate({ namespace, name }),
+      onOk: () => deleteMutation.mutate({ namespace, name, resourceVersion }),
     })
   }
 
   const handleBatchDelete = () => {
     const selected = filtered
       .filter((r) => selectedRowKeys.includes(`${r.metadata.namespace}/${r.metadata.name}`))
-      .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name }))
+      .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name, resourceVersion: r.metadata.resourceVersion! }))
     Modal.confirm({
+      ...resourceBatchDeleteConfirmProps,
       title: t('confirm.batchDeleteTitle'), content: `${t('confirm.batchDeleteMsg', { n: selected.length })} ${t('confirm.deleteIrreversible')}`,
       okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
       onOk: () => batchDeleteMutation.mutate(selected),
@@ -96,6 +112,9 @@ const EdgionStreamPluginsList = () => {
       items: streamPlugins,
     }),
     {
+      title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact />,
+    },
+    {
       title: t('col.plugins'), key: 'plugins',
       render: (_: any, r: K8sResource) => (
         <Space wrap>
@@ -109,10 +128,10 @@ const EdgionStreamPluginsList = () => {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
-          <Button size="small" danger icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name)}>{t('btn.delete')}</Button>
+          <PermissionAwareButton resourceKind="edgionstreamplugins" resourceVerb="get" size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgionstreamplugins" resourceVerb="update" size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgionstreamplugins" resourceVerb="delete" size="small" danger icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}>{t('btn.delete')}</PermissionAwareButton>
         </Space>
       ),
     },
@@ -127,13 +146,13 @@ const EdgionStreamPluginsList = () => {
         subtitle={t('page.subtitle.streamPlugins')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <PermissionAwareButton resourceKind="edgionstreamplugins" resourceVerb="list" icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</PermissionAwareButton>
+            <PermissionAwareButton resourceKind="edgionstreamplugins" resourceVerb="create" type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</PermissionAwareButton>
           </>
         }
       />
       <div style={{ marginBottom: 16 }}>
-        <Search placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
+        <Search data-testid={resourceActionTestId('edgionstreamplugins', 'search')} placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
           style={{ width: 240 }} allowClear />
       </div>
 
@@ -145,7 +164,7 @@ const EdgionStreamPluginsList = () => {
         <div style={{ marginBottom: 16 }}>
           <Space>
             <span>{t('status.selected', { n: selectedRowKeys.length })}</span>
-            <Button danger onClick={handleBatchDelete}>{t('btn.batchDelete')}</Button>
+            <PermissionAwareButton data-testid={resourceActionTestId('edgionstreamplugins', 'batch-delete')} resourceKind="edgionstreamplugins" resourceVerb="delete" danger onClick={handleBatchDelete}>{t('btn.batchDelete')}</PermissionAwareButton>
           </Space>
         </div>
       )}

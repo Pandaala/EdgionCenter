@@ -2,15 +2,26 @@
  * Gateway 编辑器 Modal
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useEffect, useState } from 'react'
 import { Modal, Button, Tabs, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
 import GatewayForm from './GatewayForm'
+import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { Gateway } from '@/types/gateway-api/gateway'
-import { createEmptyGateway, normalizeGateway, gatewayToYaml, yamlToGateway } from '@/utils/gateway'
+import {
+  createEmptyGateway,
+  normalizeGateway,
+  gatewayToMutationYaml,
+  gatewayToYaml,
+  yamlToGateway,
+  validateGateway,
+} from '@/utils/gateway'
 import { useT } from '@/i18n'
+import GatewayStatusDetails from './GatewayStatusDetails'
+import { useEditorTabTransition } from '../useEditorTabTransition'
 
 interface GatewayEditorProps {
   visible: boolean
@@ -21,14 +32,18 @@ interface GatewayEditorProps {
 
 const GatewayEditor: React.FC<GatewayEditorProps> = ({ visible, mode, resource, onClose }) => {
   const t = useT()
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
+  const mutationTarget = useControllerMutationTarget()
   const [formData, setFormData] = useState<Gateway>(() => createEmptyGateway())
   const [yamlContent, setYamlContent] = useState('')
   const queryClient = useQueryClient()
+  const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
+    formData, yamlContent, serialize: gatewayToYaml, parse: yamlToGateway, setFormData, setYamlContent,
+    onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
+  })
 
   useEffect(() => {
     if (!visible) return
-    setActiveTab('form')
+    resetEditorTab()
     if (mode === 'create') {
       const empty = createEmptyGateway()
       setFormData(empty)
@@ -38,34 +53,26 @@ const GatewayEditor: React.FC<GatewayEditorProps> = ({ visible, mode, resource, 
       setFormData(normalized)
       setYamlContent(gatewayToYaml(normalized))
     }
-  }, [visible, mode, resource])
-
-  const handleTabChange = (key: string) => {
-    try {
-      if (key === 'yaml') setYamlContent(gatewayToYaml(formData))
-      else setFormData(yamlToGateway(yamlContent))
-      setActiveTab(key as 'form' | 'yaml')
-    } catch (e: any) { message.error(t('msg.tabSwitchFailed', { err: e.message })) }
-  }
+  }, [visible, mode, resource, resetEditorTab])
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, yamlStr }: { namespace: string; yamlStr: string }) =>
-      resourceApi.create('gateway', namespace, yamlStr),
+      resourceApi.create(mutationTarget, 'gateway', namespace, yamlStr),
     onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'gateway'] }); onClose() },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, yamlStr }: { namespace: string; name: string; yamlStr: string }) =>
-      resourceApi.update('gateway', namespace, name, yamlStr),
+      resourceApi.update(mutationTarget, 'gateway', namespace, name, yamlStr),
     onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'gateway'] }); onClose() },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),
   })
 
   const handleSubmit = () => {
     try {
-      const yamlStr = activeTab === 'yaml' ? yamlContent : gatewayToYaml(formData)
-      const parsed = yamlToGateway(yamlStr)
+      const sourceYaml = editableTab === 'yaml' ? yamlContent : gatewayToYaml(formData)
+      const parsed = yamlToGateway(sourceYaml)
       const name = parsed.metadata?.name
       const namespace = parsed.metadata?.namespace
       if (!name || !namespace) {
@@ -78,6 +85,12 @@ const GatewayEditor: React.FC<GatewayEditorProps> = ({ visible, mode, resource, 
           return
         }
       }
+      const validationErrors = validateGateway(parsed)
+      if (validationErrors.length > 0) {
+        message.error(t('msg.submitFailed', { err: validationErrors.join('; ') }))
+        return
+      }
+      const yamlStr = gatewayToMutationYaml(parsed, mode === 'create' ? 'create' : 'update')
       if (mode === 'create') createMutation.mutate({ namespace, yamlStr })
       else updateMutation.mutate({ namespace, name, yamlStr })
     } catch (e: any) {
@@ -105,8 +118,8 @@ const GatewayEditor: React.FC<GatewayEditorProps> = ({ visible, mode, resource, 
         isReadOnly
           ? [<Button key="close" onClick={onClose}>{t('btn.close')}</Button>]
           : [
-              <Button key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
-              <Button key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
+              <Button {...editorCancelButtonProps} key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
+              <Button {...editorSubmitButtonProps} key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
                 {mode === 'create' ? t('btn.create') : t('btn.save')}
               </Button>,
             ]
@@ -114,13 +127,17 @@ const GatewayEditor: React.FC<GatewayEditorProps> = ({ visible, mode, resource, 
     >
       <Tabs activeKey={activeTab} onChange={handleTabChange} items={[
         {
-          key: 'form', label: t('tab.form'),
+          key: 'form', label: editorFormTab(t('tab.form')),
           children: <GatewayForm data={formData} onChange={setFormData} readOnly={isReadOnly} isCreate={mode === 'create'} />,
         },
         {
-          key: 'yaml', label: t('tab.yaml'),
+          key: 'yaml', label: editorYamlTab(t('tab.yaml')),
           children: <YamlEditor value={yamlContent} onChange={setYamlContent} readOnly={isReadOnly} height="500px" />,
         },
+        ...(mode !== 'create' ? [{
+          key: 'conditions', label: t('tab.conditions'),
+          children: <GatewayStatusDetails status={formData.status} />,
+        }] : []),
       ]} />
     </Modal>
   )

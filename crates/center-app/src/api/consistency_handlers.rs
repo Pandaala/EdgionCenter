@@ -79,46 +79,90 @@ pub async fn region_routes_consistency(
         .map(|view| {
             // Build a human-readable name from plugin + optional alias.
             let name = match &view.alias {
-                Some(alias) => format!("{}/{}", view.plugin_name, alias),
-                None => view.plugin_name.clone(),
+                Some(alias) => format!("{}/{} (#{})", view.plugin_name, alias, view.entry_index),
+                None => format!("{} (#{})", view.plugin_name, view.entry_index),
             };
 
-            // Collect the regions values only for online controllers.
-            let online_regions: Vec<&serde_json::Value> = view
+            let online_views: Vec<_> = view
                 .controllers
                 .iter()
                 .filter(|(ctrl_id, _)| online.contains(*ctrl_id))
-                .map(|(_, eff)| &eff.regions)
+                .map(|(_, eff)| eff)
                 .collect();
 
-            if online_regions.len() <= 1 {
-                // Zero or one online controller — divergence is impossible.
-                return ConsistencyResult {
-                    namespace: view.namespace,
-                    name,
-                    consistent: true,
-                    controller_count: online_regions.len(),
-                    conflicts: Vec::new(),
-                };
+            let mut conflicts = Vec::new();
+            if online_views.len() != online.len() {
+                conflicts.push("presence".to_string());
             }
-
-            // Compare serialized JSON; identical Value serializations mean agreement.
-            let distinct: HashSet<String> = online_regions
-                .iter()
-                .map(|v| serde_json::to_string(v).unwrap_or_default())
-                .collect();
-            let consistent = distinct.len() <= 1;
-            let conflicts = if consistent {
-                Vec::new()
-            } else {
-                vec!["regions".to_string()]
+            let mut differs = |field: &str, values: Vec<String>| {
+                if values.into_iter().collect::<HashSet<_>>().len() > 1 {
+                    conflicts.push(field.to_string());
+                }
             };
+            differs(
+                "regions",
+                online_views.iter().map(|v| v.regions.to_string()).collect(),
+            );
+            differs(
+                "keyGet",
+                online_views.iter().map(|v| v.key_get.to_string()).collect(),
+            );
+            differs(
+                "hashKeyGet",
+                online_views
+                    .iter()
+                    .map(|v| format!("{:?}", v.hash_key_get))
+                    .collect(),
+            );
+            differs(
+                "hashCalc",
+                online_views
+                    .iter()
+                    .map(|v| format!("{:?}", v.hash_calc))
+                    .collect(),
+            );
+            differs(
+                "routeRules",
+                online_views
+                    .iter()
+                    .map(|v| v.route_rules.to_string())
+                    .collect(),
+            );
+            differs(
+                "routeByKeyConfMatch",
+                online_views
+                    .iter()
+                    .map(|v| format!("{:?}", v.route_by_key_conf_match))
+                    .collect(),
+            );
+            differs(
+                "dyeHeaders",
+                online_views
+                    .iter()
+                    .map(|v| format!("{:?}", v.dye_headers))
+                    .collect(),
+            );
+            differs(
+                "overrideRef",
+                online_views
+                    .iter()
+                    .map(|v| format!("{:?}", v.override_ref))
+                    .collect(),
+            );
+            differs(
+                "overrideApplied",
+                online_views
+                    .iter()
+                    .map(|v| v.override_applied.to_string())
+                    .collect(),
+            );
+            let consistent = conflicts.is_empty();
 
             ConsistencyResult {
                 namespace: view.namespace,
                 name,
                 consistent,
-                controller_count: online_regions.len(),
+                controller_count: online_views.len(),
                 conflicts,
             }
         })
@@ -198,10 +242,18 @@ mod tests {
             namespace: "default".into(),
             plugin_name: "rr1".into(),
             alias: None,
+            entry_index: 0,
             my_region: "east".into(),
             regions,
+            key_get: serde_json::json!([]),
+            hash_key_get: None,
+            hash_calc: None,
+            route_rules: serde_json::json!([]),
+            route_by_key_conf_match: None,
+            dye_headers: None,
             override_ref: None,
             override_applied: false,
+            service_usages: Vec::new(),
         }
     }
 
@@ -296,5 +348,64 @@ mod tests {
             data[0].conflicts.is_empty(),
             "no conflicts when single online controller"
         );
+    }
+
+    #[tokio::test]
+    async fn region_consistency_flags_missing_online_controller() {
+        let state = test_api_state();
+        state
+            .aggregator
+            .set_controller_info("ctrl-a", make_register_info("ctrl-a"));
+        state
+            .aggregator
+            .set_controller_info("ctrl-b", make_register_info("ctrl-b"));
+        state
+            .metadata_store
+            .replace_region_routes("ctrl-a", vec![make_region_route(serde_json::json!([]))]);
+
+        let Json(resp) = match region_routes_consistency(State(state)).await {
+            Ok(response) => response,
+            Err(_) => panic!("consistency response should succeed"),
+        };
+        let row = &resp.data.expect("data")[0];
+        assert!(!row.consistent);
+        assert!(row.conflicts.contains(&"presence".to_string()));
+    }
+
+    #[tokio::test]
+    async fn region_consistency_allows_local_region_and_usage_differences() {
+        let state = test_api_state();
+        state
+            .aggregator
+            .set_controller_info("ctrl-a", make_register_info("ctrl-a"));
+        state
+            .aggregator
+            .set_controller_info("ctrl-b", make_register_info("ctrl-b"));
+        let mut east = make_region_route(serde_json::json!([]));
+        east.my_region = "east".into();
+        east.service_usages
+            .push(crate::metadata_store::RegionRouteServiceUsage {
+                route_kind: "HTTPRoute".into(),
+                route_namespace: "east".into(),
+                route_name: "api".into(),
+                rule_index: 0,
+                backend_services: Vec::new(),
+            });
+        let mut west = make_region_route(serde_json::json!([]));
+        west.my_region = "west".into();
+        state
+            .metadata_store
+            .replace_region_routes("ctrl-a", vec![east]);
+        state
+            .metadata_store
+            .replace_region_routes("ctrl-b", vec![west]);
+
+        let Json(resp) = match region_routes_consistency(State(state)).await {
+            Ok(response) => response,
+            Err(_) => panic!("consistency response should succeed"),
+        };
+        let row = &resp.data.expect("data")[0];
+        assert!(row.consistent);
+        assert!(row.conflicts.is_empty());
     }
 }

@@ -37,14 +37,35 @@
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
 
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{OriginalUri, Path, State},
+    http::{HeaderMap, HeaderName, StatusCode, Uri},
     response::IntoResponse,
     routing::{any, delete, get, patch, post},
     Json, Router,
 };
 use serde::Serialize;
 use std::sync::Arc;
+
+/// Headers that are safe and necessary for the Controller's in-process Admin
+/// router. Center authentication credentials and proxy/hop-by-hop metadata must
+/// never cross the federation trust boundary.
+const PROXY_REQUEST_HEADER_ALLOWLIST: &[&str] =
+    &["accept", "content-type", "if-match", "user-agent"];
+
+/// Response metadata that may be reflected from a Controller onto the Center
+/// origin. In particular, `set-cookie` is intentionally absent: a Controller
+/// must never be able to create, replace, or clear a Center browser session.
+const PROXY_RESPONSE_HEADER_ALLOWLIST: &[&str] = &[
+    "cache-control",
+    "content-language",
+    "content-length",
+    "content-type",
+    "etag",
+    "last-modified",
+    "location",
+    "retry-after",
+    "x-request-id",
+];
 
 mod audit;
 mod consistency_handlers;
@@ -612,29 +633,18 @@ async fn metadata_store_status(State(state): State<ApiState>) -> impl IntoRespon
 async fn proxy_handler(
     State(state): State<ApiState>,
     Path((controller_id_raw, rest)): Path<(String, String)>,
+    OriginalUri(original_uri): OriginalUri,
     method: axum::http::Method,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
     // Frontend uses "~" instead of "/" in controller_id to avoid browser URL decoding issues
     let controller_id = controller_id_raw.replace('~', "/");
 
-    // Convert headers to HashMap<String, String>, skipping non-UTF-8 values
-    let headers_map: std::collections::HashMap<String, String> = headers
-        .iter()
-        .filter_map(|(k, v)| {
-            v.to_str()
-                .ok()
-                .map(|val| (k.as_str().to_string(), val.to_string()))
-        })
-        .collect();
+    let headers_map = proxy_request_headers(&headers);
 
     // Ensure path starts with / for forwarding
-    let path = if rest.starts_with('/') {
-        rest
-    } else {
-        format!("/{}", rest)
-    };
+    let path = proxy_forward_path(rest, &original_uri);
 
     match state
         .proxy
@@ -653,8 +663,8 @@ async fn proxy_handler(
 
             let mut builder = axum::http::Response::builder().status(status);
 
-            for (key, value) in &resp.headers {
-                builder = builder.header(key.as_str(), value.as_str());
+            for (key, value) in proxy_response_headers(&resp.headers) {
+                builder = builder.header(key, value);
             }
 
             builder
@@ -690,6 +700,54 @@ async fn proxy_handler(
     }
 }
 
+fn header_is_allowed(name: &HeaderName, allowlist: &[&str]) -> bool {
+    allowlist
+        .iter()
+        .any(|allowed| name.as_str().eq_ignore_ascii_case(allowed))
+}
+
+fn proxy_forward_path(rest: String, original_uri: &Uri) -> String {
+    let mut path = if rest.starts_with('/') {
+        rest
+    } else {
+        format!("/{rest}")
+    };
+    if let Some(query) = original_uri.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+    path
+}
+
+fn proxy_request_headers(headers: &HeaderMap) -> std::collections::HashMap<String, String> {
+    headers
+        .iter()
+        .filter(|(name, _)| header_is_allowed(name, PROXY_REQUEST_HEADER_ALLOWLIST))
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+fn proxy_response_headers(
+    headers: &std::collections::HashMap<String, String>,
+) -> Vec<(HeaderName, axum::http::HeaderValue)> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = HeaderName::try_from(name.as_str()).ok()?;
+            if !header_is_allowed(&name, PROXY_RESPONSE_HEADER_ALLOWLIST) {
+                return None;
+            }
+            let value = axum::http::HeaderValue::try_from(value.as_str()).ok()?;
+            Some((name, value))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,6 +756,98 @@ mod tests {
         ControllerRegistration, CoreResult, EvictionResult, OfflineOutcome, OwnershipFence,
         SessionId,
     };
+
+    #[test]
+    fn proxy_request_headers_drop_credentials_and_hop_by_hop_metadata() {
+        let headers = HeaderMap::from_iter([
+            (
+                axum::http::header::ACCEPT,
+                "application/json".parse().unwrap(),
+            ),
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/yaml".parse().unwrap(),
+            ),
+            (axum::http::header::IF_MATCH, "\"42\"".parse().unwrap()),
+            (
+                axum::http::header::AUTHORIZATION,
+                "Bearer center-secret".parse().unwrap(),
+            ),
+            (
+                axum::http::header::COOKIE,
+                "edgion_token=center-secret".parse().unwrap(),
+            ),
+            (
+                axum::http::header::PROXY_AUTHORIZATION,
+                "Basic secret".parse().unwrap(),
+            ),
+            (
+                axum::http::header::CONNECTION,
+                "keep-alive".parse().unwrap(),
+            ),
+            (
+                HeaderName::from_static("x-forwarded-for"),
+                "127.0.0.1".parse().unwrap(),
+            ),
+        ]);
+
+        let forwarded = proxy_request_headers(&headers);
+        assert_eq!(
+            forwarded.get("accept").map(String::as_str),
+            Some("application/json")
+        );
+        assert_eq!(
+            forwarded.get("content-type").map(String::as_str),
+            Some("application/yaml")
+        );
+        assert_eq!(
+            forwarded.get("if-match").map(String::as_str),
+            Some("\"42\"")
+        );
+        for forbidden in [
+            "authorization",
+            "cookie",
+            "proxy-authorization",
+            "connection",
+            "x-forwarded-for",
+        ] {
+            assert!(!forwarded.contains_key(forbidden), "forwarded {forbidden}");
+        }
+    }
+
+    #[test]
+    fn proxy_response_headers_never_reflect_cookies_or_hop_by_hop_metadata() {
+        let source = std::collections::HashMap::from([
+            ("content-type".to_string(), "application/json".to_string()),
+            ("etag".to_string(), "\"revision-1\"".to_string()),
+            (
+                "set-cookie".to_string(),
+                "edgion_token=attacker".to_string(),
+            ),
+            ("connection".to_string(), "keep-alive".to_string()),
+            ("transfer-encoding".to_string(), "chunked".to_string()),
+        ]);
+
+        let forwarded = proxy_response_headers(&source)
+            .into_iter()
+            .map(|(name, _)| name.to_string())
+            .collect::<std::collections::HashSet<_>>();
+        assert!(forwarded.contains("content-type"));
+        assert!(forwarded.contains("etag"));
+        assert!(!forwarded.contains("set-cookie"));
+        assert!(!forwarded.contains("connection"));
+        assert!(!forwarded.contains("transfer-encoding"));
+    }
+
+    #[test]
+    fn proxy_query_is_preserved_verbatim() {
+        let uri: Uri =
+            "/api/v1/proxy/east~controller/api/v1/namespaced/httproute?limit=20&continue=a%2Fb"
+                .parse()
+                .unwrap();
+        let path = proxy_forward_path("api/v1/namespaced/httproute".to_string(), &uri);
+        assert_eq!(path, "/api/v1/namespaced/httproute?limit=20&continue=a%2Fb");
+    }
 
     struct GlobalDirectory(Vec<ControllerRecord>);
 

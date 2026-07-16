@@ -1,8 +1,9 @@
 import * as yaml from 'js-yaml'
 
 /**
- * Recursively removes empty values (null, undefined, empty strings, empty objects, empty arrays)
- * from an object tree. Used to produce clean YAML output.
+ * Legacy create-template cleanup only. Never use for an existing resource or
+ * an update payload: empty strings, arrays, and objects may be meaningful
+ * operator state. Kept temporarily for callers that have not migrated yet.
  */
 export function removeEmpty(obj: any): any {
   if (Array.isArray(obj)) {
@@ -21,5 +22,5 @@ export function removeEmpty(obj: any): any {
 }
 
 export function dumpYaml(obj: any): string {
-  return yaml.dump(removeEmpty(obj), { lineWidth: -1, noRefs: true })
+  return yaml.dump(obj, { lineWidth: -1, noRefs: true })
 }

@@ -27,6 +27,8 @@ vi.mock('@/hooks/useResourceList', () => ({
     isFetchingNextPage: false,
   }),
 }))
+vi.mock('@/hooks/useControllerAccess',()=>({useControllerAccess:()=>({canResource:()=>true})}))
+vi.mock('@/components/resource/PermissionAwareButton',()=>({default:(props:any)=><button onClick={props.onClick}>{props.children}</button>}))
 
 vi.mock('@/components/ResourceEditor/LinkSys/LinkSysEditor', () => ({
   default: () => null,
@@ -67,7 +69,7 @@ describe('LinkSysList', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Batch Delete' }))
 
     await waitFor(() => {
-      expect(batchDelete).toHaveBeenCalledWith('linksys', [
+      expect(batchDelete).toHaveBeenCalledWith({ controllerId: 'cluster/ctrl' }, 'linksys', [
         { namespace: 'default', name: 'redis-a' },
         { namespace: 'default', name: 'redis-b' },
       ])

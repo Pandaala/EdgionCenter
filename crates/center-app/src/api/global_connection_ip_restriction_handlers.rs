@@ -173,24 +173,15 @@ pub async fn global_ip_restrictions_consistency(
                 .map(|(_, gir)| gir.active_profile.clone())
                 .collect();
 
-            if online_profiles.len() <= 1 {
-                // Zero or one online controller — divergence is impossible.
-                return ConsistencyResult {
-                    namespace: e.namespace,
-                    name: e.plugin_name,
-                    consistent: true,
-                    controller_count: online_profiles.len(),
-                    conflicts: Vec::new(),
-                };
+            let mut conflicts = Vec::new();
+            if online_profiles.len() != online.len() {
+                conflicts.push("presence".to_string());
             }
-
             let distinct: HashSet<&str> = online_profiles.iter().map(String::as_str).collect();
-            let consistent = distinct.len() <= 1;
-            let conflicts = if consistent {
-                Vec::new()
-            } else {
-                vec!["activeProfile".to_string()]
-            };
+            if distinct.len() > 1 {
+                conflicts.push("activeProfile".to_string());
+            }
+            let consistent = conflicts.is_empty();
 
             ConsistencyResult {
                 namespace: e.namespace,
@@ -252,50 +243,6 @@ async fn resolve_targets(
     }
 }
 
-/// Fan-out a HTTP op to N controllers in parallel, collecting per-controller outcomes.
-///
-/// Note: `proxy.forward` returns `Result<HttpProxyResponse, (StatusCode, String)>`.
-/// `HttpProxyResponse.status_code` is `u32` (from proto uint32).
-async fn fan_out_http(
-    state: &ApiState,
-    controllers: Vec<String>,
-    method: &str,
-    path: String,
-    body: Vec<u8>,
-) -> Vec<ControllerOpResult> {
-    let futs = controllers.into_iter().map(|cid| {
-        let proxy = state.proxy.clone();
-        let method = method.to_string();
-        let path = path.clone();
-        let body = body.clone();
-        async move {
-            let mut headers = HashMap::new();
-            headers.insert("content-type".to_string(), "application/json".to_string());
-            match proxy.forward(&cid, method, path, headers, body).await {
-                Ok(r) if r.status_code >= 200 && r.status_code < 300 => ControllerOpResult {
-                    controller_id: cid,
-                    detail: Some(format!("status {}", r.status_code)),
-                    error: None,
-                    status_code: Some(r.status_code as u16),
-                },
-                Ok(r) => ControllerOpResult {
-                    controller_id: cid,
-                    detail: None,
-                    error: Some(format!("HTTP {}", r.status_code)),
-                    status_code: Some(r.status_code as u16),
-                },
-                Err((status, msg)) => ControllerOpResult {
-                    controller_id: cid,
-                    detail: None,
-                    error: Some(msg),
-                    status_code: Some(status.as_u16()),
-                },
-            }
-        }
-    });
-    futures::future::join_all(futs).await
-}
-
 fn partition(
     results: Vec<ControllerOpResult>,
 ) -> (Vec<ControllerOpResult>, Vec<ControllerOpResult>) {
@@ -315,28 +262,120 @@ fn fanout_status(success: &[ControllerOpResult], failed: &[ControllerOpResult]) 
     }
 }
 
-/// Build the PUT path and JSON body for a Selector EdgionConfigData update.
+fn selector_path(ns: &str, name: &str) -> String {
+    format!("/api/v1/namespaced/edgionconfigdata/{}/{}", ns, name)
+}
+
+/// Change only the active profile in a previously fetched Selector document.
 ///
-/// Returns `(path, json_body)` where:
-/// - `path` is `/api/v1/namespaced/edgionconfigdata/{ns}/{name}`
-/// - `json_body` is a full EdgionConfigData document with `spec.enable:true` and
-///   `spec.data = {"type":"Selector","config":{"active":<active_profile>}}`
-fn build_selector_put(ns: &str, name: &str, active_profile: &str) -> (String, String) {
-    let path = format!("/api/v1/namespaced/edgionconfigdata/{}/{}", ns, name);
-    let doc = serde_json::json!({
-        "apiVersion": "edgion.io/v1",
-        "kind": "EdgionConfigData",
-        "metadata": { "name": name, "namespace": ns },
-        "spec": {
-            "enable": true,
-            "data": {
-                "type": "Selector",
-                "config": { "active": active_profile }
+/// The Controller update API performs whole-resource replacement. Starting from
+/// the live document preserves labels, annotations, visibility, resourceVersion,
+/// and fields introduced by newer Edgion versions.
+fn update_selector_document(body: &[u8], active_profile: &str) -> Result<Vec<u8>, String> {
+    let mut document: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|error| format!("invalid Selector response: {error}"))?;
+    let data = document
+        .pointer_mut("/spec/data")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| "Selector response is missing spec.data".to_string())?;
+    if data.get("type").and_then(serde_json::Value::as_str) != Some("Selector") {
+        return Err("referenced EdgionConfigData is not a Selector".to_string());
+    }
+    let config = data
+        .get_mut("config")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| "Selector response is missing spec.data.config".to_string())?;
+    config.insert(
+        "active".to_string(),
+        serde_json::Value::String(active_profile.to_string()),
+    );
+    serde_json::to_vec(&document).map_err(|error| format!("failed to serialize Selector: {error}"))
+}
+
+async fn fan_out_selector_update(
+    state: &ApiState,
+    controllers: Vec<(String, String)>,
+    active_profile: String,
+) -> Vec<ControllerOpResult> {
+    let futs = controllers.into_iter().map(|(controller_id, path)| {
+        let proxy = state.proxy.clone();
+        let active_profile = active_profile.clone();
+        async move {
+            let current = match proxy
+                .forward(
+                    &controller_id,
+                    "GET".to_string(),
+                    path.clone(),
+                    HashMap::new(),
+                    Vec::new(),
+                )
+                .await
+            {
+                Ok(response) if (200..300).contains(&response.status_code) => response,
+                Ok(response) => {
+                    return ControllerOpResult {
+                        controller_id,
+                        detail: None,
+                        error: Some(format!("read failed with status {}", response.status_code)),
+                        status_code: Some(response.status_code as u16),
+                    };
+                }
+                Err((status, error)) => {
+                    return ControllerOpResult {
+                        controller_id,
+                        detail: None,
+                        error: Some(format!("read failed: {error}")),
+                        status_code: Some(status.as_u16()),
+                    };
+                }
+            };
+            let body = match update_selector_document(&current.body, &active_profile) {
+                Ok(body) => body,
+                Err(error) => {
+                    return ControllerOpResult {
+                        controller_id,
+                        detail: None,
+                        error: Some(error),
+                        status_code: None,
+                    };
+                }
+            };
+            let mut headers = HashMap::new();
+            headers.insert("content-type".to_string(), "application/json".to_string());
+            if let Ok(document) = serde_json::from_slice::<serde_json::Value>(&current.body) {
+                if let Some(resource_version) = document
+                    .pointer("/metadata/resourceVersion")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    headers.insert("if-match".to_string(), format!("\"{resource_version}\""));
+                }
+            }
+            match proxy
+                .forward(&controller_id, "PUT".to_string(), path, headers, body)
+                .await
+            {
+                Ok(response) if (200..300).contains(&response.status_code) => ControllerOpResult {
+                    controller_id,
+                    detail: Some(format!("status {}", response.status_code)),
+                    error: None,
+                    status_code: Some(response.status_code as u16),
+                },
+                Ok(response) => ControllerOpResult {
+                    controller_id,
+                    detail: None,
+                    error: Some(format!("status {}", response.status_code)),
+                    status_code: Some(response.status_code as u16),
+                },
+                Err((status, error)) => ControllerOpResult {
+                    controller_id,
+                    detail: None,
+                    error: Some(error),
+                    status_code: Some(status.as_u16()),
+                },
             }
         }
     });
-    let json = serde_json::to_string(&doc).expect("serde_json serialize");
-    (path, json)
+    futures::future::join_all(futs).await
 }
 
 // =====================================================================
@@ -369,21 +408,27 @@ pub async fn patch_active_profile(
     }
     // Resolve which Selector EdgionConfigData to patch by reading the effective GIR view.
     // The active_profile_ref field names the Selector in the same namespace as the GIR plugin.
-    let selector_name = {
+    let selector_refs = {
         let gir_row = state
             .metadata_store
             .list_gir_effective()
             .into_iter()
             .find(|v| v.namespace == ns && v.plugin_name == name);
-        let selector_ref = gir_row.and_then(|row| {
-            // All controllers share the same base spec; take the first non-None ref.
-            row.controllers
-                .into_values()
-                .find_map(|v| v.active_profile_ref)
-        });
-        match selector_ref {
-            Some(s) => s,
-            None => {
+        let refs: HashMap<String, crate::metadata_store::EffectiveConfigDataRef> = gir_row
+            .map(|row| {
+                row.controllers
+                    .into_iter()
+                    .filter_map(|(controller_id, view)| {
+                        view.active_profile_ref
+                            .filter(|reference| reference.permitted)
+                            .map(|reference| (controller_id, reference))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        match refs.is_empty() {
+            false => refs,
+            true => {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(ApiResponse::err_body(
@@ -403,9 +448,39 @@ pub async fn patch_active_profile(
             );
         }
     };
-    let (path, body_str) = build_selector_put(&ns, &selector_name, &req.active_profile);
-    let body = body_str.into_bytes();
-    let results = fan_out_http(&state, targets, "PUT", path, body).await;
+    if targets.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::err_body(
+                "no online controllers matched the request".to_string(),
+            )),
+        );
+    }
+    let mut selector_targets = Vec::new();
+    let mut results = Vec::new();
+    for controller_id in targets {
+        if let Some(reference) = selector_refs.get(&controller_id) {
+            let selector_namespace = if reference.namespace.is_empty() {
+                &ns
+            } else {
+                &reference.namespace
+            };
+            selector_targets.push((
+                controller_id,
+                selector_path(selector_namespace, &reference.name),
+            ));
+        } else {
+            results.push(ControllerOpResult {
+                controller_id,
+                detail: None,
+                error: Some(
+                    "controller has no active-profile selector in its effective view".to_string(),
+                ),
+                status_code: None,
+            });
+        }
+    }
+    results.extend(fan_out_selector_update(&state, selector_targets, req.active_profile).await);
     let (success, failed) = partition(results);
     fed_metrics::record_fanout(
         fed_metrics::labels::fanout_op::PATCH_PROFILE,
@@ -591,6 +666,30 @@ mod tests {
         assert!(data[0].conflicts.contains(&"activeProfile".to_string()));
     }
 
+    #[tokio::test]
+    async fn global_ip_consistency_flags_missing_online_controller() {
+        let state = test_api_state();
+        state
+            .aggregator
+            .set_controller_info("ctrl-a", make_register_info("ctrl-a"));
+        state
+            .aggregator
+            .set_controller_info("ctrl-b", make_register_info("ctrl-b"));
+        state
+            .metadata_store
+            .replace_gir("ctrl-a", vec![make_gir_view("gir1", "strict")]);
+
+        let Json(resp) = match global_ip_restrictions_consistency(State(state)).await {
+            Ok(response) => response,
+            Err(_) => panic!("membership lookup should succeed"),
+        };
+        let data = resp.data.expect("data must be present");
+        assert_eq!(data.len(), 1);
+        assert!(!data[0].consistent);
+        assert_eq!(data[0].controller_count, 1);
+        assert!(data[0].conflicts.contains(&"presence".to_string()));
+    }
+
     /// Offline ctrl-b must be excluded; only ctrl-a (online) is considered,
     /// so there can be no conflict.
     #[tokio::test]
@@ -626,31 +725,80 @@ mod tests {
         );
     }
 
-    /// `build_selector_put` must produce the correct path and a JSON body that
-    /// describes a Selector EdgionConfigData with the given active profile.
+    /// Selector updates must preserve the complete live resource and change only
+    /// the active profile, because the downstream API performs full replacement.
     #[test]
-    fn build_selector_put_path_and_body() {
-        let (path, json) = build_selector_put("prod-ns", "my-selector", "strict");
+    fn update_selector_document_preserves_metadata_and_unknown_fields() {
+        let path = selector_path("prod-ns", "my-selector");
         assert_eq!(
             path,
             "/api/v1/namespaced/edgionconfigdata/prod-ns/my-selector"
         );
-        let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let original = serde_json::json!({
+            "apiVersion": "edgion.io/v1",
+            "kind": "EdgionConfigData",
+            "metadata": {
+                "name": "my-selector",
+                "namespace": "prod-ns",
+                "resourceVersion": "42",
+                "labels": { "owner": "gitops" },
+                "annotations": { "future": "preserve" }
+            },
+            "spec": {
+                "enable": false,
+                "visibility": "Namespace",
+                "futureSpec": true,
+                "data": {
+                    "type": "Selector",
+                    "config": { "active": "open", "futureConfig": 7 }
+                }
+            }
+        });
+        let body = serde_json::to_vec(&original).expect("serialize fixture");
+        let updated = update_selector_document(&body, "strict").expect("update Selector");
+        let v: serde_json::Value = serde_json::from_slice(&updated).expect("valid JSON");
         assert_eq!(
-            v.pointer("/kind").and_then(|x| x.as_str()),
-            Some("EdgionConfigData"),
-            "/kind must be EdgionConfigData"
+            v.pointer("/spec/data/config/active"),
+            Some(&serde_json::json!("strict"))
         );
+        let mut expected = original;
+        expected["spec"]["data"]["config"]["active"] = serde_json::json!("strict");
+        assert_eq!(v, expected);
+    }
+
+    #[test]
+    fn update_selector_document_rejects_non_selector_data() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "spec": { "data": { "type": "Yaml", "config": {} } }
+        }))
+        .expect("serialize fixture");
         assert_eq!(
-            v.pointer("/spec/data/type").and_then(|x| x.as_str()),
-            Some("Selector"),
-            "/spec/data/type must be Selector"
+            update_selector_document(&body, "strict").unwrap_err(),
+            "referenced EdgionConfigData is not a Selector"
         );
-        assert_eq!(
-            v.pointer("/spec/data/config/active")
-                .and_then(|x| x.as_str()),
-            Some("strict"),
-            "/spec/data/config/active must match the requested profile"
-        );
+    }
+
+    #[tokio::test]
+    async fn patch_active_profile_rejects_zero_online_targets() {
+        let state = test_api_state();
+        let mut view = make_gir_view("gir1", "strict");
+        view.active_profile_ref = Some(crate::metadata_store::EffectiveConfigDataRef {
+            namespace: "default".to_string(),
+            name: "selector".to_string(),
+            permitted: true,
+        });
+        state.metadata_store.replace_gir("ctrl-a", vec![view]);
+
+        let (status, response) = patch_active_profile(
+            State(state),
+            Path(("default".to_string(), "gir1".to_string())),
+            Json(PatchActiveProfileRequest {
+                active_profile: "open".to_string(),
+                controllers: vec!["all".to_string()],
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(!response.success);
     }
 }

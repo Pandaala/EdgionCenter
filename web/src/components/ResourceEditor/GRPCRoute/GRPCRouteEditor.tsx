@@ -2,17 +2,25 @@
  * GRPCRoute 编辑器 Modal
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useEffect, useState } from 'react'
 import { Modal, Button, Tabs, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 import GRPCRouteForm from './GRPCRouteForm'
+import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { GRPCRoute } from '@/types/gateway-api/grpcroute'
 import {
-  createEmptyGRPCRoute, normalizeGRPCRoute, grpcRouteToYaml, yamlToGRPCRoute,
+  createEmptyGRPCRoute,
+  normalizeGRPCRoute,
+  grpcRouteToMutationYaml,
+  grpcRouteToYaml,
+  yamlToGRPCRoute,
 } from '@/utils/grpcroute'
 import { useT } from '@/i18n'
+import { useEditorTabTransition } from '../useEditorTabTransition'
 
 interface GRPCRouteEditorProps {
   visible: boolean
@@ -25,14 +33,18 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
   visible, mode, resource, onClose,
 }) => {
   const t = useT()
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
+  const mutationTarget = useControllerMutationTarget()
   const [formData, setFormData] = useState<GRPCRoute>(() => createEmptyGRPCRoute())
   const [yamlContent, setYamlContent] = useState('')
   const queryClient = useQueryClient()
+  const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
+    formData, yamlContent, serialize: grpcRouteToYaml, parse: yamlToGRPCRoute, setFormData, setYamlContent,
+    onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
+  })
 
   useEffect(() => {
     if (!visible) return
-    setActiveTab('form')
+    resetEditorTab()
     if (mode === 'create') {
       const empty = createEmptyGRPCRoute()
       setFormData(empty)
@@ -42,24 +54,11 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
       setFormData(normalized)
       setYamlContent(grpcRouteToYaml(normalized))
     }
-  }, [visible, mode, resource])
-
-  const handleTabChange = (key: string) => {
-    try {
-      if (key === 'yaml') {
-        setYamlContent(grpcRouteToYaml(formData))
-      } else {
-        setFormData(yamlToGRPCRoute(yamlContent))
-      }
-      setActiveTab(key as 'form' | 'yaml')
-    } catch (e: any) {
-      message.error(t('msg.tabSwitchFailed', { err: e.message }))
-    }
-  }
+  }, [visible, mode, resource, resetEditorTab])
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, yamlStr }: { namespace: string; yamlStr: string }) =>
-      resourceApi.create('grpcroute', namespace, yamlStr),
+      resourceApi.create(mutationTarget, 'grpcroute', namespace, yamlStr),
     onSuccess: () => {
       message.success(t('msg.createOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'grpcroute'] })
@@ -70,7 +69,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
 
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, yamlStr }: { namespace: string; name: string; yamlStr: string }) =>
-      resourceApi.update('grpcroute', namespace, name, yamlStr),
+      resourceApi.update(mutationTarget, 'grpcroute', namespace, name, yamlStr),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'grpcroute'] })
@@ -81,8 +80,8 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
 
   const handleSubmit = () => {
     try {
-      const yamlStr = activeTab === 'yaml' ? yamlContent : grpcRouteToYaml(formData)
-      const parsed = yamlToGRPCRoute(yamlStr)
+      const sourceYaml = editableTab === 'yaml' ? yamlContent : grpcRouteToYaml(formData)
+      const parsed = yamlToGRPCRoute(sourceYaml)
       const name = parsed.metadata?.name
       const namespace = parsed.metadata?.namespace
       if (!name || !namespace) {
@@ -95,6 +94,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
           return
         }
       }
+      const yamlStr = grpcRouteToMutationYaml(parsed, mode === 'create' ? 'create' : 'update')
       if (mode === 'create') createMutation.mutate({ namespace, yamlStr })
       else updateMutation.mutate({ namespace, name, yamlStr })
     } catch (e: any) {
@@ -124,8 +124,8 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
         isReadOnly
           ? [<Button key="close" onClick={onClose}>{t('btn.close')}</Button>]
           : [
-              <Button key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
-              <Button key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
+              <Button {...editorCancelButtonProps} key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
+              <Button {...editorSubmitButtonProps} key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
                 {mode === 'create' ? t('btn.create') : t('btn.save')}
               </Button>,
             ]
@@ -137,7 +137,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
         items={[
           {
             key: 'form',
-            label: t('tab.form'),
+            label: editorFormTab(t('tab.form')),
             children: (
               <GRPCRouteForm
                 data={formData}
@@ -149,7 +149,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
           },
           {
             key: 'yaml',
-            label: t('tab.yaml'),
+            label: editorYamlTab(t('tab.yaml')),
             children: (
               <YamlEditor
                 value={yamlContent}
@@ -159,6 +159,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
               />
             ),
           },
+          ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} /> }] : []),
         ]}
       />
     </Modal>

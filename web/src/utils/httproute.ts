@@ -5,6 +5,7 @@
 import * as yaml from 'js-yaml';
 import type { HTTPRoute } from '@/types/gateway-api';
 import { DEFAULT_VALUES } from '@/constants/gateway-api';
+import { buildMutationDocument } from './resource-document';
 
 /**
  * 默认的 HTTPRoute YAML 模板
@@ -79,63 +80,12 @@ export function createEmptyHTTPRoute(): HTTPRoute {
 /**
  * 规范化 HTTPRoute 对象（填充默认值）
  */
-export function normalizeHTTPRoute(route: Partial<HTTPRoute>): HTTPRoute {
-  return {
-    apiVersion: route.apiVersion || DEFAULT_VALUES.apiVersion,
-    kind: route.kind || DEFAULT_VALUES.httpRouteKind,
-    metadata: {
-      name: route.metadata?.name || '',
-      namespace: route.metadata?.namespace || DEFAULT_VALUES.defaultNamespace,
-      labels: route.metadata?.labels || {},
-      annotations: route.metadata?.annotations || {},
-      creationTimestamp: route.metadata?.creationTimestamp,
-      resourceVersion: route.metadata?.resourceVersion,
-      uid: route.metadata?.uid,
-    },
-    spec: {
-      parentRefs: (route.spec?.parentRefs || []).map((ref) => ({
-        group: ref.group || DEFAULT_VALUES.parentRef.group,
-        kind: ref.kind || DEFAULT_VALUES.parentRef.kind,
-        namespace: ref.namespace || route.metadata?.namespace || DEFAULT_VALUES.defaultNamespace,
-        name: ref.name,
-        sectionName: ref.sectionName,
-        port: ref.port,
-      })),
-      hostnames: route.spec?.hostnames || [],
-      rules: (route.spec?.rules || []).map((rule) => ({
-        matches: rule.matches?.map((match) => ({
-          path: match.path
-            ? {
-                type: match.path.type || DEFAULT_VALUES.pathMatch.type,
-                value: match.path.value || DEFAULT_VALUES.pathMatch.value,
-              }
-            : undefined,
-          headers: match.headers?.map((h) => ({
-            type: h.type || DEFAULT_VALUES.matchType.type,
-            name: h.name,
-            value: h.value,
-          })),
-          queryParams: match.queryParams?.map((q) => ({
-            type: q.type || DEFAULT_VALUES.matchType.type,
-            name: q.name,
-            value: q.value,
-          })),
-          method: match.method,
-        })),
-        filters: rule.filters,
-        backendRefs: rule.backendRefs?.map((ref) => ({
-          group: ref.group || DEFAULT_VALUES.backendRef.group,
-          kind: ref.kind || DEFAULT_VALUES.backendRef.kind,
-          namespace: ref.namespace || route.metadata?.namespace || DEFAULT_VALUES.defaultNamespace,
-          name: ref.name,
-          port: ref.port,
-          weight: ref.weight ?? DEFAULT_VALUES.backendRef.weight,
-        })),
-        timeouts: rule.timeouts,
-      })),
-    },
-    status: route.status,
-  };
+export function normalizeHTTPRoute(raw: unknown): HTTPRoute {
+  if (!raw || typeof raw !== 'object') throw new Error('HTTPRoute must be an object');
+  const route = raw as HTTPRoute;
+  if (route.kind !== 'HTTPRoute') throw new Error('Expected HTTPRoute kind');
+  if (!route.metadata || !route.spec) throw new Error('HTTPRoute metadata and spec are required');
+  return structuredClone(route);
 }
 
 /**
@@ -154,7 +104,69 @@ export function httpRouteToYAML(route: HTTPRoute): string {
  * YAML 字符串转 HTTPRoute
  */
 export function yamlToHTTPRoute(yamlString: string): HTTPRoute {
-  return yaml.load(yamlString) as HTTPRoute;
+  return normalizeHTTPRoute(yaml.load(yamlString));
+}
+
+export function toHTTPRouteMutationDocument(
+  route: HTTPRoute,
+  mode: 'create' | 'update',
+): Record<string, unknown> {
+  validateHTTPRouteForMutation(route);
+  return buildMutationDocument(route, { resourceKind: 'httproute', mode });
+}
+
+const isHTTPDelegationRef = (ref: any) =>
+  ref?.group === 'gateway.networking.k8s.io' && ref?.kind === 'HTTPRoute';
+
+export function validateHTTPRouteForMutation(route: HTTPRoute): void {
+  for (const [ruleIndex, rule] of (route.spec.rules || []).entries()) {
+    const validateFilters = (filters: any[], location: string) => {
+      for (const filter of filters) {
+        const path = filter.requestRedirect?.path || filter.urlRewrite?.path
+        if (path?.replaceFullPath !== undefined && path?.replacePrefixMatch !== undefined) {
+          throw new Error(`${location} path modifier cannot set both replaceFullPath and replacePrefixMatch`)
+        }
+        if (filter.type === 'ExternalAuth') {
+          const target = filter.externalAuth?.target || {}
+          const hasService = ['name', 'namespace', 'port', 'kind', 'group'].some((key) => target[key] !== undefined && target[key] !== '')
+          if (target.url && hasService) throw new Error(`${location} ExternalAuth target cannot combine url and Service fields`)
+          if (!target.url && !target.name) throw new Error(`${location} ExternalAuth target requires url or name`)
+        }
+      }
+    }
+    validateFilters(rule.filters || [], `rules[${ruleIndex}].filters`)
+    const ruleTypes = new Set((rule.filters || []).map((filter) => filter.type));
+    if (ruleTypes.has('RequestRedirect') && ruleTypes.has('URLRewrite')) {
+      throw new Error(`rules[${ruleIndex}] cannot combine RequestRedirect and URLRewrite`);
+    }
+    for (const [backendIndex, backend] of (rule.backendRefs || []).entries()) {
+      validateFilters(backend.filters || [], `rules[${ruleIndex}].backendRefs[${backendIndex}].filters`)
+      const backendTypes = new Set((backend.filters || []).map((filter) => filter.type));
+      if (backendTypes.has('RequestRedirect') && backendTypes.has('URLRewrite')) {
+        throw new Error(`rules[${ruleIndex}].backendRefs[${backendIndex}] cannot combine RequestRedirect and URLRewrite`);
+      }
+      if ((ruleTypes.has('RequestRedirect') && backendTypes.has('URLRewrite')) ||
+          (ruleTypes.has('URLRewrite') && backendTypes.has('RequestRedirect'))) {
+        throw new Error(`rules[${ruleIndex}] cannot combine RequestRedirect and URLRewrite across rule and backend filters`);
+      }
+    }
+    if ((rule.backendRefs || []).some(isHTTPDelegationRef)) {
+      if (rule.backendRefs?.length !== 1) throw new Error(`rules[${ruleIndex}] delegation requires exactly one backendRef`);
+      const ref = rule.backendRefs[0];
+      if (ref.port !== undefined) throw new Error(`rules[${ruleIndex}] delegation backendRef must not set port`);
+      if (ref.filters !== undefined) throw new Error(`rules[${ruleIndex}] delegation backendRef must not set filters`);
+      for (const match of rule.matches || []) {
+        if (match.path?.type && match.path.type !== 'PathPrefix') {
+          throw new Error(`rules[${ruleIndex}] delegation matches must use PathPrefix`);
+        }
+      }
+    }
+    for (const code of rule.retry?.codes || []) {
+      if (!Number.isInteger(code) || code < 100 || code > 599) {
+        throw new Error(`rules[${ruleIndex}].retry.codes must contain HTTP status codes from 100 through 599`);
+      }
+    }
+  }
 }
 
 /**
@@ -187,4 +199,3 @@ export function getHTTPRouteSummary(route: HTTPRoute): {
     rulesCount: route.spec.rules?.length || 0,
   };
 }
-

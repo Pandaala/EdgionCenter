@@ -25,6 +25,7 @@ const YamlEditor = ({
   language = 'yaml',
 }: YamlEditorProps) => {
   const { resolvedMode } = useTheme()
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const [error, setError] = useState<string>('')
 
@@ -53,22 +54,22 @@ const YamlEditor = ({
   const handleEditorChange = (value: string | undefined) => {
     const content = value || ''
     
-    // 验证 YAML/JSON
+    // Validate YAML/JSON.
     const validation = validateYaml(content)
     setError(validation.error || '')
     
-    // 回调验证结果
+    // Report validation state.
     if (onValidate) {
       onValidate(validation.isValid, validation.error)
     }
     
-    // 回调内容变化
+    // Report content changes.
     if (onChange) {
       onChange(content)
     }
   }
 
-  // 当外部 value 改变时，验证它
+  // Revalidate when the controlled value changes.
   useEffect(() => {
     if (value !== undefined) {
       const validation = validateYaml(value)
@@ -80,8 +81,19 @@ const YamlEditor = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
 
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const replace = (event: Event) => {
+      const content = (event as CustomEvent<unknown>).detail
+      if (typeof content === 'string') editorRef.current?.setValue(content)
+    }
+    container.addEventListener('edgion:replace-yaml', replace)
+    return () => container.removeEventListener('edgion:replace-yaml', replace)
+  }, [])
+
   return (
-    <div style={{ border: '1px solid var(--ec-color-border)', borderRadius: 'var(--ec-radius-sm)', overflow: 'hidden' }}>
+    <div ref={containerRef} data-testid="yaml-editor" data-yaml-value={value} style={{ border: '1px solid var(--ec-color-border)', borderRadius: 'var(--ec-radius-sm)', overflow: 'hidden' }}>
       {error && (
         <Alert
           message="Syntax Error"
@@ -121,4 +133,3 @@ const YamlEditor = ({
 }
 
 export default YamlEditor
-

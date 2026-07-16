@@ -69,6 +69,7 @@ export const controllerMenu: MenuSection[] = [
         children: [
           { kind: 'item', key: 'svc-list',     labelKey: 'infra.service',       path: '/services/list',          icon: <DatabaseOutlined /> },
           { kind: 'item', key: 'svc-epslices', labelKey: 'infra.endpointslice', path: '/services/endpointslices',icon: <DatabaseOutlined /> },
+          { kind: 'item', key: 'svc-backend-traffic', labelKey: 'services.backendTrafficPolicy', path: '/services/backend-traffic-policies', icon: <DatabaseOutlined /> },
         ],
       },
       {
@@ -77,6 +78,7 @@ export const controllerMenu: MenuSection[] = [
         children: [
           { kind: 'item', key: 'sec-tls',        labelKey: 'security.tls',        path: '/security/tls',        icon: <SafetyOutlined /> },
           { kind: 'item', key: 'sec-backendtls', labelKey: 'security.backendtls', path: '/security/backendtls', icon: <SafetyOutlined /> },
+          { kind: 'item', key: 'sec-dependencies', labelKey: 'security.dependencies', path: '/security/dependencies', icon: <LockOutlined /> },
         ],
       },
       {
@@ -122,9 +124,18 @@ export const centerMenu: MenuSection[] = [
     children: [
       { kind: 'item', key: 'center-controllers', labelKey: 'center.nav.controllers',
         path: '/', icon: <ClusterOutlined /> },
-      { kind: 'item', key: 'center-rr', labelKey: 'center.nav.regionRoutes', path: '/region-routes', icon: <ShareAltOutlined /> },
+      {
+        kind: 'group',
+        labelKey: 'center.nav.regionRoutes',
+        children: [
+          { kind: 'item', key: 'center-rr-region', labelKey: 'center.nav.regionDimension', path: '/region-routes/region', icon: <ShareAltOutlined />, requiredPermission: 'region-routes:read' },
+          { kind: 'item', key: 'center-rr-service', labelKey: 'center.nav.serviceDimension', path: '/region-routes/service', icon: <DatabaseOutlined />, requiredPermission: 'region-routes:read' },
+        ],
+      },
       { kind: 'item', key: 'center-gipr', labelKey: 'center.nav.globalIpRestrictions',
-        path: '/global-connection-ip-restrictions', icon: <SafetyOutlined /> },
+        path: '/global-connection-ip-restrictions', icon: <SafetyOutlined />, requiredPermission: 'ip-restrictions:read' },
+      { kind: 'item', key: 'center-federation-diagnostics', labelKey: 'center.nav.federationDiagnostics',
+        path: '/federation-diagnostics', icon: <ApartmentOutlined />, requiredPermission: 'server:read' },
       { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',
         path: '/admin', icon: <SettingOutlined />, requiredPermission: 'controllers:read', requiredCapability: 'controllerHistory' },
       { kind: 'item', key: 'center-audit', labelKey: 'center.nav.audit',

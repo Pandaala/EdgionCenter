@@ -14,7 +14,7 @@ export default function TopologyPage() {
   const [selectedNode, setSelectedNode] = useState<any | null>(null)
   const [drawerVisible, setDrawerVisible] = useState(false)
 
-  const { nodes, edges, namespaces, plugins, gateways, isLoading, isError, refetch } = useTopologyData(namespaceFilter)
+  const { nodes, edges, namespaces, isLoading, isError, partialErrors, refetch } = useTopologyData(namespaceFilter)
 
   const handleNodeClick = useCallback((nodeData: Record<string, any>) => {
     setSelectedNode(nodeData)
@@ -29,6 +29,7 @@ export default function TopologyPage() {
         actions={
           <>
             <Select
+              data-testid="topology-namespace-filter"
               allowClear
               placeholder={t('topology.allNamespaces')}
               style={{ width: 200 }}
@@ -37,10 +38,20 @@ export default function TopologyPage() {
               options={namespaces.map((ns) => ({ label: ns, value: ns }))}
             />
             <TopologyLegend />
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
+            <Button data-testid="topology-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
           </>
         }
       />
+
+      {partialErrors.length > 0 && !isError && (
+        <Alert
+          type="warning"
+          showIcon
+          closable
+          message={`Partial topology: ${partialErrors.join(', ')} could not be loaded`}
+          style={{ marginBottom: 8 }}
+        />
+      )}
 
       {/* Canvas */}
       <div style={{ flex: 1, border: '1px solid var(--ec-color-border)', borderRadius: 8, overflow: 'auto', background: 'var(--ec-color-bg-subtle)' }}>
@@ -55,7 +66,7 @@ export default function TopologyPage() {
             <Empty description={t('topology.noData')} />
           </div>
         ) : (
-          <TopologyCanvas nodes={nodes} edges={edges} plugins={plugins} gateways={gateways} onNodeClick={handleNodeClick} />
+          <TopologyCanvas nodes={nodes} edges={edges} onNodeClick={handleNodeClick} />
         )}
       </div>
 

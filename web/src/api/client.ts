@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios'
 import { message } from 'antd'
-import { clearLoggedIn } from '../utils/auth'
+import { clearLoggedIn, saveLoginReturnPath } from '../utils/auth'
 import { getActiveControllerId } from '../utils/proxy'
 
 // Create axios instance
@@ -12,12 +12,26 @@ export const apiClient = axios.create({
   },
 })
 
+export function shouldApplyControllerProxy(url?: string): boolean {
+  // Resource clients use Controller-relative rooted paths such as
+  // /namespaced and /cluster. Only a complete /api/... URL already names an
+  // explicit Center/proxy target.
+  return !url?.startsWith('/api/')
+}
+
 // Proxy interceptor — rewrite baseURL when a controller is active (Center proxy mode)
 // controller_id contains "/" (e.g. "cluster-east/ctrl-01") which browsers decode
 // even when percent-encoded. Use "~" as separator in URL, Center converts back.
 apiClient.interceptors.request.use((config) => {
+  // Axios still combines a rooted request URL with the instance baseURL. An
+  // explicit Center/proxy path must therefore reset the Controller API base
+  // before honoring _skipControllerProxy.
+  if (!shouldApplyControllerProxy(config.url)) {
+    config.baseURL = '/'
+  }
+  if ((config as any)._skipControllerProxy) return config
   const controllerId = getActiveControllerId()
-  if (controllerId) {
+  if (controllerId && shouldApplyControllerProxy(config.url)) {
     const safeId = controllerId.replace(/\//g, '~')
     config.baseURL = `/api/v1/proxy/${safeId}/api/v1`
   }
@@ -31,6 +45,24 @@ apiClient.interceptors.request.use(
 )
 
 // Response interceptor
+export function isCreateRequest(method?: string, url?: string): boolean {
+  if (method?.toUpperCase() !== 'POST' || !url) return false
+  const path = url.split('?', 1)[0].replace(/^\/+/, '')
+  return /^namespaced\/[^/]+\/[^/]+\/?$/.test(path)
+    || /^cluster\/[^/]+\/?$/.test(path)
+    || /^center\/admin\/(?:users|roles)\/?$/.test(path)
+}
+
+export function conflictErrorMessage(method?: string, url?: string): string {
+  if (isCreateRequest(method, url)) {
+    return '资源已存在，无法创建重复资源 / Resource already exists'
+  }
+  if (method?.toUpperCase() === 'PUT' || method?.toUpperCase() === 'DELETE') {
+    return '资源已发生变化，请刷新后重试 / Resource changed; refresh and retry'
+  }
+  return '请求状态冲突，请刷新状态后重试 / Request conflict; refresh state and retry'
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError<{ error?: string }>) => {
@@ -41,13 +73,14 @@ apiClient.interceptors.response.use(
     if (status === 401) {
       clearLoggedIn()
       if (window.location.pathname !== '/login') {
+        saveLoginReturnPath(`${window.location.pathname}${window.location.search}${window.location.hash}`)
         window.location.href = '/login'
       }
       return Promise.reject(error)
     }
 
     if (status === 409) {
-      errorMsg = '资源已存在，无法创建重复资源 / Resource already exists'
+      errorMsg = conflictErrorMessage(error.config?.method, error.config?.url)
     } else if (status === 404) {
       errorMsg = '资源未找到 / Resource not found'
     } else if (status === 400) {

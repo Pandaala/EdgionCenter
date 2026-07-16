@@ -62,6 +62,53 @@ export type ResourceKind =
   | 'referencegrant'
   | 'edgionacme'
   | 'backendtlspolicy'
+  | 'edgionbackendtrafficpolicy'
+  | 'configmap'
 
 export type ResourceScope = 'namespaced' | 'cluster'
 
+export const CONTROLLER_ACCESS_RESOURCE_VERBS = [
+  'get',
+  'list',
+  'list-keys',
+  'watch',
+  'create',
+  'update',
+  'delete',
+] as const
+
+export type ControllerAccessResourceVerb = typeof CONTROLLER_ACCESS_RESOURCE_VERBS[number]
+
+export const CONTROLLER_ACCESS_OPERATIONS = [
+  'regionRoute.list',
+  'regionRoute.failover',
+  'acme.trigger',
+  'confSync.rotate',
+  'reload',
+  'serverInfo',
+  'diagnostics',
+  'wipeAll',
+  'debug',
+] as const
+
+export type ControllerAccessOperation = typeof CONTROLLER_ACCESS_OPERATIONS[number]
+
+export interface ControllerResourceAccess {
+  /** Controller ResourceKind::as_str(), for example `HTTPRoute`. */
+  kind: string
+  scope: ResourceScope
+  verbs: ControllerAccessResourceVerb[]
+}
+
+export interface ControllerOperationAccess {
+  name: ControllerAccessOperation
+  allowed: boolean
+}
+
+/** Authenticated GET /api/v1/access self-introspection document. */
+export interface ControllerAccessDocument {
+  schemaVersion: 1
+  revision: `sha256:${string}`
+  resources: ControllerResourceAccess[]
+  operations: ControllerOperationAccess[]
+}

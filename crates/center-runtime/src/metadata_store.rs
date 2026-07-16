@@ -38,12 +38,103 @@ pub struct EffectiveRegionRouteView {
     pub plugin_name: String,
     #[serde(default)]
     pub alias: Option<String>,
+    #[serde(default)]
+    pub entry_index: usize,
     pub my_region: String,
     pub regions: serde_json::Value,
+    #[serde(default = "empty_json_array")]
+    pub key_get: serde_json::Value,
     #[serde(default)]
-    pub override_ref: Option<String>,
+    pub hash_key_get: Option<serde_json::Value>,
+    #[serde(default)]
+    pub hash_calc: Option<serde_json::Value>,
+    #[serde(default = "empty_json_array")]
+    pub route_rules: serde_json::Value,
+    #[serde(default)]
+    pub route_by_key_conf_match: Option<serde_json::Value>,
+    #[serde(default)]
+    pub dye_headers: Option<serde_json::Value>,
+    #[serde(default)]
+    pub override_ref: Option<EffectiveConfigDataRef>,
     #[serde(default)]
     pub override_applied: bool,
+    #[serde(default)]
+    pub service_usages: Vec<RegionRouteServiceUsage>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveConfigDataRef {
+    pub namespace: String,
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub permitted: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl<'de> serde::Deserialize<'de> for EffectiveConfigDataRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum WireRef {
+            Structured {
+                namespace: String,
+                name: String,
+                #[serde(default = "default_true")]
+                permitted: bool,
+            },
+            Legacy(String),
+        }
+        match <WireRef as serde::Deserialize>::deserialize(deserializer)? {
+            WireRef::Structured {
+                namespace,
+                name,
+                permitted,
+            } => Ok(Self {
+                namespace,
+                name,
+                permitted,
+            }),
+            WireRef::Legacy(value) => {
+                let (namespace, name) = value.split_once('/').unwrap_or(("", value.as_str()));
+                Ok(Self {
+                    namespace: namespace.to_string(),
+                    name: name.to_string(),
+                    permitted: true,
+                })
+            }
+        }
+    }
+}
+
+fn empty_json_array() -> serde_json::Value {
+    serde_json::Value::Array(Vec::new())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionRouteServiceUsage {
+    pub route_kind: String,
+    pub route_namespace: String,
+    pub route_name: String,
+    pub rule_index: usize,
+    #[serde(default)]
+    pub backend_services: Vec<RegionRouteBackendService>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionRouteBackendService {
+    pub namespace: String,
+    pub name: String,
+    #[serde(default)]
+    pub port: Option<u16>,
 }
 
 /// Aggregated region route across controllers (one row per (ns, plugin, alias)).
@@ -53,6 +144,7 @@ pub struct CenterRegionRouteView {
     pub namespace: String,
     pub plugin_name: String,
     pub alias: Option<String>,
+    pub entry_index: usize,
     pub controllers: HashMap<String, EffectiveRegionRouteView>,
 }
 
@@ -69,7 +161,7 @@ pub struct EffectiveGirView {
     /// Passthrough blob — keeps the full ProfileRules tree without pulling the type here.
     pub profiles: serde_json::Value,
     #[serde(default)]
-    pub active_profile_ref: Option<String>,
+    pub active_profile_ref: Option<EffectiveConfigDataRef>,
     #[serde(default)]
     pub selector_applied: bool,
 }
@@ -98,7 +190,7 @@ pub struct CenterGirView {
 /// ClusterRegionRouteEntry and ServiceRegionRouteEntry were deleted upstream.
 /// Restore from git history when RegionRoute is re-implemented on EdgionConfigData.
 pub struct CenterMetaDataStore {
-    // route_key ("ns/plugin/alias") → { controller_id → EffectiveRegionRouteView }
+    // route_key ("ns/plugin/entry-index") → { controller_id → EffectiveRegionRouteView }
     // Populated by the background poller (poll module); not fed by the conf_sync path.
     region_routes: RwLock<HashMap<String, HashMap<String, EffectiveRegionRouteView>>>,
     // gir_key ("ns/pluginName") → { controller_id → EffectiveGirView }
@@ -193,6 +285,7 @@ impl CenterMetaDataStore {
                     namespace: any.namespace.clone(),
                     plugin_name: any.plugin_name.clone(),
                     alias: any.alias.clone(),
+                    entry_index: any.entry_index,
                     controllers: inner.clone(),
                 })
             })
@@ -425,15 +518,11 @@ impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
     }
 }
 
-/// Build the canonical storage key for a region route: "namespace/plugin_name/alias".
-/// When alias is None the trailing segment is an empty string ("ns/plugin/").
+/// Build the canonical storage key for a region route: "namespace/plugin_name/entry_index".
+/// The index is stable within the ordered requestPlugins list and prevents duplicate or
+/// absent aliases from silently overwriting another RegionRoute entry.
 fn region_route_key(r: &EffectiveRegionRouteView) -> String {
-    format!(
-        "{}/{}/{}",
-        r.namespace,
-        r.plugin_name,
-        r.alias.as_deref().unwrap_or("")
-    )
+    format!("{}/{}/{}", r.namespace, r.plugin_name, r.entry_index)
 }
 
 /// Build the canonical storage key for a GIR entry: "namespace/plugin_name".
@@ -485,16 +574,60 @@ mod tests {
             namespace: "default".into(),
             plugin_name: "ep1".into(),
             alias: Some("rr1".into()),
+            entry_index: 0,
             my_region: "east".into(),
             regions: serde_json::json!([]),
+            key_get: serde_json::json!([]),
+            hash_key_get: None,
+            hash_calc: None,
+            route_rules: serde_json::json!([]),
+            route_by_key_conf_match: None,
+            dye_headers: None,
             override_ref: None,
             override_applied: false,
+            service_usages: Vec::new(),
         };
         store.replace_region_routes("ctrl-a", vec![r.clone()]);
         store.replace_region_routes("ctrl-b", vec![r.clone()]);
         let list = store.list_region_routes();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].controllers.len(), 2);
+    }
+
+    #[test]
+    fn region_route_entry_index_prevents_duplicate_alias_overwrite() {
+        let store = CenterMetaDataStore::new();
+        let base = EffectiveRegionRouteView {
+            namespace: "default".into(),
+            plugin_name: "ep1".into(),
+            alias: None,
+            entry_index: 0,
+            my_region: "east".into(),
+            regions: serde_json::json!([]),
+            key_get: serde_json::json!([]),
+            hash_key_get: None,
+            hash_calc: None,
+            route_rules: serde_json::json!([]),
+            route_by_key_conf_match: None,
+            dye_headers: None,
+            override_ref: None,
+            override_applied: false,
+            service_usages: Vec::new(),
+        };
+        let mut second = base.clone();
+        second.entry_index = 1;
+        store.replace_region_routes("ctrl-a", vec![base, second]);
+        assert_eq!(store.list_region_routes().len(), 2);
+    }
+
+    #[test]
+    fn effective_config_data_ref_accepts_legacy_and_structured_wire_shapes() {
+        let legacy: EffectiveConfigDataRef = serde_json::from_str("\"ops/overlay\"").unwrap();
+        assert_eq!(legacy.namespace, "ops");
+        assert_eq!(legacy.name, "overlay");
+        let structured: EffectiveConfigDataRef =
+            serde_json::from_str(r#"{"namespace":"ops","name":"overlay"}"#).unwrap();
+        assert_eq!(structured, legacy);
     }
 
     #[test]

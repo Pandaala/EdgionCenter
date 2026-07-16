@@ -4,7 +4,7 @@
 
 import * as yaml from 'js-yaml'
 import type { TLSRoute } from '@/types/gateway-api/tlsroute'
-import { removeEmpty } from './yaml-utils'
+import { mutationDocumentToYaml } from './resource-document'
 
 export const DEFAULT_TLSROUTE_YAML = `apiVersion: gateway.networking.k8s.io/v1
 kind: TLSRoute
@@ -39,33 +39,22 @@ export function createEmptyTLSRoute(): TLSRoute {
   }
 }
 
-export function normalizeTLSRoute(raw: any): TLSRoute {
-  return {
-    apiVersion: raw.apiVersion || 'gateway.networking.k8s.io/v1',
-    kind: 'TLSRoute',
-    metadata: {
-      name: raw.metadata?.name || '',
-      namespace: raw.metadata?.namespace || 'default',
-      labels: raw.metadata?.labels,
-      annotations: raw.metadata?.annotations,
-      resourceVersion: raw.metadata?.resourceVersion,
-      creationTimestamp: raw.metadata?.creationTimestamp,
-    },
-    spec: {
-      parentRefs: raw.spec?.parentRefs || [],
-      hostnames: raw.spec?.hostnames || [],
-      rules: (raw.spec?.rules || []).map((rule: any) => ({
-        backendRefs: rule.backendRefs || [],
-      })),
-    },
-    status: raw.status,
+export function normalizeTLSRoute(raw: unknown): TLSRoute {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('TLSRoute document must be an object')
   }
+  const document = raw as Record<string, unknown>
+  if (document.kind !== 'TLSRoute') throw new Error('Expected a TLSRoute document')
+  return structuredClone(document) as unknown as TLSRoute
 }
 
 
 export function tlsRouteToYaml(route: TLSRoute): string {
-  const clean = removeEmpty(route)
-  return yaml.dump(clean, { lineWidth: -1, noRefs: true })
+  return yaml.dump(route, { lineWidth: -1, noRefs: true })
+}
+
+export function tlsRouteToMutationYaml(route: TLSRoute, mode: 'create' | 'update'): string {
+  return mutationDocumentToYaml(route, 'tlsroute', mode)
 }
 
 export function yamlToTLSRoute(yamlStr: string): TLSRoute {

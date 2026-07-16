@@ -26,7 +26,8 @@ export interface EdgionTlsSpec {
   secretRef: ObjectRef
   clientAuth?: ClientAuth
   minTlsVersion?: string
-  cipherSuites?: string[]
+  ciphers?: string[]
+  [key: string]: unknown
 }
 
 export interface EdgionTls {
@@ -35,4 +36,5 @@ export interface EdgionTls {
   metadata: K8sObjectMeta
   spec: EdgionTlsSpec
   status?: any
+  [key: string]: unknown
 }

@@ -3,7 +3,7 @@
  */
 
 import * as yaml from 'js-yaml'
-import { removeEmpty } from './yaml-utils'
+import { mutationDocumentToYaml } from './resource-document'
 
 export interface SecretResource {
   apiVersion: string
@@ -18,6 +18,9 @@ export interface SecretResource {
   }
   type?: string
   data?: Record<string, string>
+  stringData?: Record<string, string>
+  immutable?: boolean
+  [key: string]: unknown
 }
 
 export function createEmpty(): SecretResource {
@@ -26,31 +29,61 @@ export function createEmpty(): SecretResource {
     kind: 'Secret',
     metadata: { name: '', namespace: 'default' },
     type: 'Opaque',
-    data: {},
+    stringData: {},
   }
 }
 
 export function normalize(raw: any): SecretResource {
   return {
+    ...raw,
     apiVersion: raw.apiVersion || 'v1',
     kind: 'Secret',
     metadata: {
+      ...raw.metadata,
       name: raw.metadata?.name || '',
       namespace: raw.metadata?.namespace || 'default',
-      labels: raw.metadata?.labels,
-      annotations: raw.metadata?.annotations,
-      resourceVersion: raw.metadata?.resourceVersion,
-      creationTimestamp: raw.metadata?.creationTimestamp,
     },
     type: raw.type || 'Opaque',
-    data: raw.data || {},
+    data: raw.data,
   }
 }
 
+export function assertNoRedactionSentinel(secret: SecretResource): void {
+  for (const field of ['data', 'stringData'] as const) {
+    const values = secret[field]
+    if (values && Object.values(values).some((value) => /redacted/i.test(value))) {
+      throw new Error(`Secret ${field} contains a redacted value; replace it before saving`)
+    }
+  }
+}
 
-export function toYaml(secret: SecretResource): string {
-  const clean = removeEmpty(secret)
-  return yaml.dump(clean, { lineWidth: -1, noRefs: true })
+export function createWriteOnlyReplacement(resource: Pick<SecretResource, 'metadata'>): SecretResource {
+  return {
+    apiVersion: 'v1',
+    kind: 'Secret',
+    metadata: {
+      name: resource.metadata.name,
+      namespace: resource.metadata.namespace || 'default',
+      labels: resource.metadata.labels,
+      annotations: resource.metadata.annotations,
+      resourceVersion: resource.metadata.resourceVersion,
+    },
+    type: 'Opaque',
+    stringData: {},
+  }
+}
+
+export function validateSecretWrite(secret: SecretResource): void {
+  assertNoRedactionSentinel(secret)
+  const values = [...Object.values(secret.data ?? {}), ...Object.values(secret.stringData ?? {})]
+  if (values.length === 0 || values.every((value) => value.length === 0)) {
+    throw new Error('Enter at least one new Secret value before saving')
+  }
+}
+
+export function toYaml(secret: SecretResource, mode: 'create' | 'update' = 'update'): string {
+  assertNoRedactionSentinel(secret)
+  return mutationDocumentToYaml(secret, 'secret', mode)
 }
 
 export function fromYaml(yamlStr: string): SecretResource {

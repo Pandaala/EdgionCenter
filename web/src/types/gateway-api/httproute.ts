@@ -114,6 +114,8 @@ export type HTTPRouteFilterType =
   | 'RequestRedirect'
   | 'URLRewrite'
   | 'RequestMirror'
+  | 'CORS'
+  | 'ExternalAuth'
   | 'ExtensionRef';
 
 /**
@@ -165,8 +167,8 @@ export interface HTTPRequestRedirectFilter {
   /** 端口号（1-65535） */
   port?: number;
   
-  /** 状态码（301 或 302，默认 302） */
-  statusCode?: 301 | 302;
+  /** Gateway API redirect status codes supported by Edgion. */
+  statusCode?: 301 | 302 | 303 | 307 | 308;
 }
 
 /**
@@ -186,6 +188,45 @@ export interface HTTPURLRewriteFilter {
 export interface HTTPRequestMirrorFilter {
   /** 后端服务引用（必填） */
   backendRef: BackendObjectReference;
+
+  fraction?: { numerator: number; denominator?: number };
+  percentage?: number;
+  connectTimeoutMs?: number;
+  writeTimeoutMs?: number;
+  maxBufferedChunks?: number;
+  mirrorLog?: boolean;
+  maxConcurrent?: number;
+  channelFullTimeoutMs?: number;
+  [key: string]: unknown;
+}
+
+export interface HTTPCORSFilter {
+  allowOrigins?: string[];
+  allowCredentials?: boolean;
+  allowMethods?: string[];
+  allowHeaders?: string[];
+  exposeHeaders?: string[];
+  maxAge?: number;
+  [key: string]: unknown;
+}
+
+export interface HTTPExternalAuthFilter {
+  target?: BackendObjectReference;
+  timeoutMs?: number;
+  timeoutMsTemplate?: string;
+  maxResponseBytes?: number;
+  allowDegradation?: boolean;
+  allowDegradationTemplate?: string;
+  statusOnError?: number;
+  request?: Record<string, unknown>;
+  decision?: {
+    upstreamHeaders?: string[];
+    clientHeaders?: string[];
+    hideCredentials?: boolean;
+    authFailureDelayMs?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 /**
@@ -209,9 +250,16 @@ export interface HTTPRouteFilter {
   
   /** 请求镜像 */
   requestMirror?: HTTPRequestMirrorFilter;
+
+  cors?: HTTPCORSFilter;
+
+  externalAuth?: HTTPExternalAuthFilter;
   
   /** 扩展引用 */
   extensionRef?: LocalObjectReference;
+
+  /** Preserve current and future Gateway API/Edgion filter fields. */
+  [key: string]: unknown;
 }
 
 // ============================================
@@ -229,6 +277,23 @@ export interface HTTPRouteTimeouts {
   backendRequest?: Duration;
 }
 
+export interface HTTPRouteRetry {
+  attempts?: number;
+  backoff?: Duration;
+  codes?: number[];
+  [key: string]: unknown;
+}
+
+export interface SessionPersistence {
+  sessionName?: string;
+  absoluteTimeout?: Duration;
+  idleTimeout?: Duration;
+  type?: 'Cookie' | 'Header';
+  cookieConfig?: { lifetimeType?: 'Permanent' | 'Session'; [key: string]: unknown };
+  strict?: boolean;
+  [key: string]: unknown;
+}
+
 // ============================================
 // HTTPRoute Rule - 路由规则
 // ============================================
@@ -237,6 +302,7 @@ export interface HTTPRouteTimeouts {
  * HTTPRouteRule - HTTP 路由规则
  */
 export interface HTTPRouteRule {
+  name?: string;
   /** 匹配条件列表 */
   matches?: HTTPRouteMatch[];
   
@@ -248,6 +314,12 @@ export interface HTTPRouteRule {
   
   /** 超时配置 */
   timeouts?: HTTPRouteTimeouts;
+
+  retry?: HTTPRouteRetry;
+
+  sessionPersistence?: SessionPersistence;
+
+  [key: string]: unknown;
 }
 
 // ============================================
@@ -266,6 +338,8 @@ export interface HTTPRouteSpec {
   
   /** 路由规则列表（可选） */
   rules?: HTTPRouteRule[];
+
+  [key: string]: unknown;
 }
 
 // ============================================
@@ -302,4 +376,3 @@ export interface HTTPRoute extends K8sResource<HTTPRouteSpec> {
   spec: HTTPRouteSpec;
   status?: HTTPRouteStatus;
 }
-

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Button, Result, Spin } from 'antd'
 import { AppShell } from './components/shell/AppShell'
 import ControllerProxy from './components/Layout/ControllerProxy'
@@ -13,11 +13,13 @@ import Dashboard from './pages/Dashboard'
 import UserDashboard from './pages/Dashboard/UserDashboard'
 import CenterDashboard from './pages/Center/CenterDashboard'
 import CenterAdminPage from './pages/Center/CenterAdminPage'
+import FederationDiagnosticsPage from './pages/Center/FederationDiagnosticsPage'
 import AuditLogPage from './pages/Audit/AuditLogPage'
 import UserManagementPage from './pages/Users/UserManagementPage'
 import RoleManagementPage from './pages/Roles/RoleManagementPage'
 // RegionRoute
 import RegionRouteList from './pages/RegionRoute/RegionRouteList'
+import RegionRouteServiceUsagePage from './pages/RegionRoute/RegionRouteServiceUsagePage'
 // Routes
 import HTTPRouteList from './pages/Routes/HTTPRouteList'
 import GRPCRouteList from './pages/Routes/GRPCRouteList'
@@ -29,10 +31,12 @@ import GatewayList from './pages/Infrastructure/GatewayList'
 import GatewayClassList from './pages/Infrastructure/GatewayClassList'
 import ServiceList from './pages/Infrastructure/ServiceList'
 import EndpointSliceList from './pages/Infrastructure/EndpointSliceList'
+import EdgionBackendTrafficPolicyList from './pages/Services/EdgionBackendTrafficPolicyList'
 import ReferenceGrantList from './pages/Infrastructure/ReferenceGrantList'
 // Security
 import EdgionTlsList from './pages/Security/EdgionTlsList'
 import BackendTLSPolicyList from './pages/Security/BackendTLSPolicyList'
+import RestrictedDependenciesPage from './pages/Security/RestrictedDependenciesPage'
 // Plugins
 import EdgionPluginsList from './pages/Plugins/EdgionPluginsList'
 import EdgionStreamPluginsList from './pages/Plugins/EdgionStreamPluginsList'
@@ -47,8 +51,9 @@ import GlobalConnectionIpRestrictionDetail from './pages/GlobalConnectionIpRestr
 import './App.css'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
   if (!isLoggedIn()) {
-    return <Navigate to="/login" replace />
+    return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}${location.hash}` }} />
   }
   // Fetch /auth/me once so menus and direct routes share one permission set.
   return <PermissionProvider>{children}</PermissionProvider>
@@ -119,14 +124,20 @@ function App() {
         <Route path="/login" element={<LoginPage passwordLogin={capabilities?.passwordLogin === true} />} />
         <Route path="/" element={<RequireAuth><AppShell mode="center" /></RequireAuth>}>
           <Route index element={<CenterDashboard />} />
-          <Route path="region-routes" element={<RegionRouteList />} />
+          <Route path="region-routes" element={<Navigate to="/region-routes/region" replace />} />
+          <Route path="region-routes/region" element={<RequirePermission permission="region-routes:read"><RegionRouteList /></RequirePermission>} />
+          <Route path="region-routes/service" element={<RequirePermission permission="region-routes:read"><RegionRouteServiceUsagePage /></RequirePermission>} />
+          <Route path="region-routes/topology" element={<Navigate to="/region-routes/region" replace />} />
+          <Route path="region-routes/cluster" element={<Navigate to="/region-routes/region" replace />} />
+          <Route path="region-routes/services" element={<Navigate to="/region-routes/service" replace />} />
+          <Route path="federation-diagnostics" element={<RequirePermission permission="server:read"><FederationDiagnosticsPage /></RequirePermission>} />
           <Route
             path="global-connection-ip-restrictions"
-            element={<GlobalConnectionIpRestrictionList />}
+            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionList /></RequirePermission>}
           />
           <Route
             path="global-connection-ip-restrictions/:namespace/:name/:controllerId"
-            element={<GlobalConnectionIpRestrictionDetail />}
+            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionDetail /></RequirePermission>}
           />
           {capabilities?.controllerHistory && <Route path="admin" element={<RequirePermission permission="controllers:read"><CenterAdminPage /></RequirePermission>} />}
           {capabilities?.auditQuery && <Route path="audit" element={<RequirePermission permission="audit:read"><AuditLogPage /></RequirePermission>} />}
@@ -147,8 +158,10 @@ function App() {
           <Route path="infrastructure/referencegrants" element={<ReferenceGrantList />} />
           <Route path="services/list" element={<ServiceList />} />
           <Route path="services/endpointslices" element={<EndpointSliceList />} />
+          <Route path="services/backend-traffic-policies" element={<EdgionBackendTrafficPolicyList />} />
           <Route path="security/tls" element={<EdgionTlsList />} />
           <Route path="security/backendtls" element={<BackendTLSPolicyList />} />
+          <Route path="security/dependencies" element={<RestrictedDependenciesPage />} />
           <Route path="plugins" element={<EdgionPluginsList />} />
           <Route path="plugins/stream" element={<EdgionStreamPluginsList />} />
           <Route path="plugins/metadata" element={<EdgionConfigDataList />} />
@@ -178,8 +191,10 @@ function App() {
         <Route path="infrastructure/referencegrants" element={<ReferenceGrantList />} />
         <Route path="services/list" element={<ServiceList />} />
         <Route path="services/endpointslices" element={<EndpointSliceList />} />
+        <Route path="services/backend-traffic-policies" element={<EdgionBackendTrafficPolicyList />} />
         <Route path="security/tls" element={<EdgionTlsList />} />
         <Route path="security/backendtls" element={<BackendTLSPolicyList />} />
+        <Route path="security/dependencies" element={<RestrictedDependenciesPage />} />
         <Route path="plugins" element={<EdgionPluginsList />} />
         <Route path="plugins/stream" element={<EdgionStreamPluginsList />} />
         <Route path="plugins/metadata" element={<EdgionConfigDataList />} />

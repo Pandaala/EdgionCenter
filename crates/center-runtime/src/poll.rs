@@ -307,12 +307,22 @@ mod tests {
     #[test]
     fn tolerant_parse_drops_bad_keeps_good() {
         let body = br#"{"success":true,"data":[
-            {"namespace":"default","pluginName":"ep1","myRegion":"east","regions":[]},
+            {"namespace":"default","pluginName":"ep1","myRegion":"east","regions":[],
+             "keyGet":[{"type":"header","name":"X-Tenant"}],
+             "hashCalc":{"algorithm":"crc32","modulo":1000},
+             "routeRules":[{"type":"RouteByHashRange"}],
+             "serviceUsages":[{"routeKind":"HTTPRoute","routeNamespace":"default","routeName":"api","ruleIndex":0,"backendServices":[{"namespace":"default","name":"api","port":8080}]}]},
             {"garbage":true}
         ]}"#;
         let parsed = parse_region_effective(body);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].plugin_name, "ep1");
+        assert_eq!(parsed[0].key_get[0]["name"], "X-Tenant");
+        assert_eq!(parsed[0].route_rules[0]["type"], "RouteByHashRange");
+        assert_eq!(
+            parsed[0].service_usages[0].backend_services[0].port,
+            Some(8080)
+        );
     }
 
     #[test]

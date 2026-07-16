@@ -1,0 +1,130 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata: {name: "__PREFIX__-class", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {controllerName: edgion.io/gateway-controller, parametersRef: {group: edgion.io, kind: EdgionGatewayConfig, name: "__PREFIX__-config"}}
+---
+apiVersion: edgion.io/v1alpha1
+kind: EdgionGatewayConfig
+metadata: {name: "__PREFIX__-config", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {enableReferenceGrantValidation: true}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: "__PREFIX__-gateway", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec:
+  gatewayClassName: "__PREFIX__-class"
+  listeners:
+    - {name: http, protocol: HTTP, port: 8080}
+    - {name: grpc, protocol: HTTP, port: 8081}
+    - {name: tcp, protocol: TCP, port: 9000}
+    - {name: udp, protocol: UDP, port: 9001}
+    - {name: tls, protocol: TLS, port: 8443, tls: {mode: Passthrough}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: "__PREFIX__-http", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec:
+  parentRefs: [{name: "__PREFIX__-gateway", sectionName: http}]
+  rules:
+    - filters: [{type: ExtensionRef, extensionRef: {group: edgion.io, kind: EdgionPlugins, name: "__PREFIX__-region-route"}}]
+      backendRefs: [{name: "__PREFIX__-service", port: 8080}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata: {name: "__PREFIX__-grpc", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {parentRefs: [{name: "__PREFIX__-gateway", sectionName: grpc}], rules: [{backendRefs: [{name: "__PREFIX__-service", port: 8080}]}]}
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata: {name: "__PREFIX__-tcp", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {parentRefs: [{name: "__PREFIX__-gateway", sectionName: tcp}], rules: [{backendRefs: [{name: "__PREFIX__-service", port: 8080}]}]}
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: UDPRoute
+metadata: {name: "__PREFIX__-udp", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {parentRefs: [{name: "__PREFIX__-gateway", sectionName: udp}], rules: [{backendRefs: [{name: "__PREFIX__-service", port: 8080}]}]}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata: {name: "__PREFIX__-tls-route", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {parentRefs: [{name: "__PREFIX__-gateway", sectionName: tls}], hostnames: ["e2e.example.test"], rules: [{backendRefs: [{name: "__PREFIX__-service", port: 8443}]}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: "__PREFIX__-service", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {selector: {app: "__PREFIX__-backend"}, ports: [{name: http, port: 8080, targetPort: 8080}, {name: tls, port: 8443, targetPort: 8443}]}
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata: {name: "__PREFIX__-endpoints", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__", kubernetes.io/service-name: "__PREFIX__-service"}}
+addressType: IPv4
+ports: [{name: http, protocol: TCP, port: 8080}]
+endpoints: [{addresses: ["192.0.2.10"], conditions: {ready: true}}]
+---
+apiVersion: edgion.io/v1
+kind: EdgionTls
+metadata: {name: "__PREFIX__-tls", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {hosts: ["e2e.example.test"], secretRef: {name: "__PREFIX__-secret"}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata: {name: "__PREFIX__-grant", namespace: "__NS_B__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {from: [{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: "__NS_A__"}], to: [{group: "", kind: Service, name: "__PREFIX__-cross-service"}]}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata: {name: "__PREFIX__-backend-tls", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {targetRefs: [{group: "", kind: Service, name: "__PREFIX__-service"}], validation: {wellKnownCACertificates: System, hostname: e2e.example.test}}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata: {name: "__PREFIX__-plugins", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {requestPlugins: [{type: TraceContext, config: {trustInbound: true}}]}
+---
+apiVersion: edgion.io/v1
+kind: EdgionStreamPlugins
+metadata: {name: "__PREFIX__-stream", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {plugins: [{type: IpRestriction, config: {deny: [{name: denied, cidrs: ["198.51.100.0/24"]}]}}]}
+---
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata: {name: "__PREFIX__-data", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {enable: true, visibility: Namespace, data: {type: IpList, config: {items: [{name: allowed, cidrs: ["192.0.2.0/24"]}]}}}
+---
+apiVersion: edgion.io/v1
+kind: EdgionAcme
+metadata: {name: "__PREFIX__-acme", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {server: "https://127.0.0.1:1/directory", email: e2e@example.test, privateKeySecretRef: {name: "__PREFIX__-acme-account"}, domains: [e2e.example.test], challenge: {type: http-01, gatewayRef: {name: "__PREFIX__-gateway"}}, storage: {secretName: "__PREFIX__-secret"}, autoEdgionTls: {enabled: false}}
+status: {phase: Ready, certificateNotAfter: "2099-01-01T00:00:00Z", secretName: "__PREFIX__-secret"}
+---
+apiVersion: edgion.io/v1
+kind: LinkSys
+metadata: {name: "__PREFIX__-redis", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {type: redis, config: {endpoints: ["redis://127.0.0.1:6379"]}}
+---
+apiVersion: edgion.io/v1
+kind: EdgionBackendTrafficPolicy
+metadata: {name: "__PREFIX__-traffic", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {targetRefs: [{group: "", kind: Service, name: "__PREFIX__-service"}], loadBalancer: {type: RoundRobin}}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: "__PREFIX__-secret", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+type: kubernetes.io/tls
+stringData:
+  tls.crt: |-
+    __FIXTURE_TLS_CERT__
+  tls.key: |-
+    __FIXTURE_TLS_KEY__
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: "__PREFIX__-configmap", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+data: {fixture: accepted}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: "__PREFIX__-acme-account", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+type: Opaque
+stringData:
+  accountCredentials: '{"id":"id","key_pkcs8":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJVWC_QzOTCS5vtsJp2IG-UDc8cdDfeoKtxSZxaznM-mhRANCAAQenCPoGgPFTdPJ7VLLKt56RxPlYT1wNXnHc54PEyBg3LxKaH0-sJkX0mL8LyPEdsfL_Oz4TxHkWLJGrXVtNhfH","urls":{"newNonce":"new-nonce","newAccount":"new-acct","newOrder":"new-order","revokeCert":"revoke-cert"}}'

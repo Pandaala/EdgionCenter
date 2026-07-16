@@ -192,7 +192,10 @@ fn action_for_request(
     path: &str,
 ) -> Result<Action, ()> {
     let operation = if method == axum::http::Method::GET {
-        if path == "/api/v1/controllers" || path == "/api/v1/clusters" {
+        if path == "/api/v1/controllers"
+            || path == "/api/v1/clusters"
+            || path == "/api/v1/center/admin/controllers"
+        {
             ActionOperation::List
         } else {
             ActionOperation::Get
@@ -623,6 +626,15 @@ mod tests {
 
     #[test]
     fn controller_action_decodes_canonical_id_and_rejects_invalid_utf8() {
+        let collection = action_for_request(
+            "controllers:read",
+            &axum::http::Method::GET,
+            "/api/v1/center/admin/controllers",
+        )
+        .unwrap();
+        assert_eq!(collection.operation, Some(ActionOperation::List));
+        assert!(collection.controller_id.is_none());
+
         let action = action_for_request(
             "controllers:write",
             &axum::http::Method::DELETE,

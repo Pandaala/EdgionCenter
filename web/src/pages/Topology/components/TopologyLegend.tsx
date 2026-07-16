@@ -33,7 +33,7 @@ export default function TopologyLegend() {
       trigger="click"
       placement="bottomRight"
     >
-      <Button icon={<InfoCircleOutlined />}>{t('topology.legend')}</Button>
+      <Button data-testid="topology-legend" icon={<InfoCircleOutlined />}>{t('topology.legend')}</Button>
     </Popover>
   )
 }

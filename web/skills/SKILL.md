@@ -30,7 +30,8 @@ description: Root navigation for the EdgionCenter web dashboard knowledge base. 
 | **API layer** | [01-architecture/02-api-layer.md](01-architecture/02-api-layer.md) |
 | **Resource page guides** | [03-resources/SKILL.md](03-resources/SKILL.md) |
 | **Center federation UI** — RegionRoute page, conflict detection, failover | [04-center/01-region-route-page.md](04-center/01-region-route-page.md) |
-| **Testing** | [04-testing/SKILL.md](04-testing/SKILL.md) |
+| **Fleet observability** — topology, Conditions, multi-Controller consistency | [04-center/02-fleet-observability.md](04-center/02-fleet-observability.md) |
+| **Testing** | [05-testing/SKILL.md](05-testing/SKILL.md) |
 
 ## Directory overview
 
@@ -39,8 +40,8 @@ description: Root navigation for the EdgionCenter web dashboard knowledge base. 
 | 01 | [architecture/](01-architecture/SKILL.md) | Frontend structure, data flow, state, API layer, routing |
 | 02 | [patterns/](02-patterns/SKILL.md) | Dev patterns: list page, editor modal, types & utils, i18n |
 | 03 | [resources/](03-resources/SKILL.md) | Per-resource page notes (Schema is upstream) |
-| 04 | [testing/](04-testing/SKILL.md) | Backend bring-up, test data, dev verification |
 | 04 | [center/](04-center/01-region-route-page.md) | Center federation: RegionRoute page, conflict detection, failover/sync controls |
+| 05 | [testing/](05-testing/SKILL.md) | Backend bring-up, test data, dev verification |
 
 ## External dependency — resource Schema (Edgion)
 

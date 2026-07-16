@@ -1,0 +1,8 @@
+server: {grpc_addr: "127.0.0.1:12251", http_addr: "127.0.0.1:12201", probe_addr: "127.0.0.1:12200", metrics_addr: "127.0.0.1:12290"}
+sync: {command_timeout_secs: 10, ping_interval_secs: 2}
+database: {enabled: true, backend: sqlite, sqlite_path: "__ARTIFACT_DIR__/center.db"}
+authz: {mode: allow_all}
+local_auth: {enabled: true, username: "__E2E_USERNAME__", password: "__E2E_PASSWORD__", jwt_secret: "__JWT_SECRET__", jwt_expiry_hours: 4, cookie_secure: false}
+audit: {enabled: true, log_reads: true, retention_days: 0}
+grpc_security: {active: fed, certs: [{name: fed, cert: "__TLS_DIR__/server.crt", key: "__TLS_DIR__/server.key", ca: "__TLS_DIR__/ca.crt"}]}
+peer_identity: {trust_domain: edgion.io}

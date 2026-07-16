@@ -39,6 +39,8 @@ export default function CenterAdminPage() {
       okText: t('confirm.okText'),
       okType: 'danger',
       cancelText: t('btn.cancel'),
+      okButtonProps: { 'data-testid': 'admin-delete-confirm' },
+      cancelButtonProps: { 'data-testid': 'admin-delete-cancel' },
       onOk: () => deleteMutation.mutate(record.controllerId),
     })
   }
@@ -89,6 +91,7 @@ export default function CenterAdminPage() {
       render: (_: unknown, record: AdminControllerDto) => (
         canDelete ? (
           <Button
+            data-testid="admin-controller-delete"
             danger
             size="small"
             onClick={() => handleDelete(record)}
@@ -107,7 +110,7 @@ export default function CenterAdminPage() {
         title={t('center.admin.title')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+            <Button data-testid="admin-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
             </Button>
           </>

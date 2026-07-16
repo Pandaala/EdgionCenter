@@ -1,3 +1,4 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
 import { Table, Button, Space, Input, Tag, Modal, message, Badge } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
@@ -13,6 +14,9 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import ResourceConditions from '@/components/resource/ResourceConditions'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
 const { Search } = Input
 
@@ -23,6 +27,7 @@ const phaseColorMap: Record<string, string> = {
 
 const EdgionAcmeList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [editorVisible, setEditorVisible] = useState(false)
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | 'view'>('create')
@@ -44,8 +49,8 @@ const EdgionAcmeList = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('edgionacme', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'edgionacme', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionacme'] })
@@ -92,26 +97,28 @@ const EdgionAcmeList = () => {
         <Tag color="purple">{r.spec?.challenge?.type || '-'}</Tag>
       ),
     },
-    { title: t('col.status'), key: 'phase',
+    { title: 'Lifecycle', key: 'phase',
       render: (_: any, r: K8sResource) => {
         const phase = r.status?.phase
         if (!phase) return '-'
         return <Badge status={phaseColorMap[phase] as any || 'default'} text={phase} />
       },
     },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
     {
       title: t('col.actions'), key: 'actions', width: 200,
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
-          <Button size="small" icon={<ThunderboltOutlined />} onClick={() => handleTrigger(record)}>{t('btn.trigger')}</Button>
-          <Button size="small" danger icon={<DeleteOutlined />}
+          <Button data-testid={resourceActionTestId('edgionacme', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
+          <Button data-testid={resourceActionTestId('edgionacme', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
+          <Button data-testid="acme-trigger" size="small" icon={<ThunderboltOutlined />} onClick={() => handleTrigger(record)}>{t('btn.trigger')}</Button>
+          <Button data-testid={resourceActionTestId('edgionacme', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
             onClick={() => Modal.confirm({
+              ...resourceDeleteConfirmProps,
               title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name: record.metadata.name }),
               okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
               onOk: () => deleteMutation.mutate({
-                namespace: record.metadata.namespace!, name: record.metadata.name,
+                namespace: record.metadata.namespace!, name: record.metadata.name, resourceVersion: record.metadata.resourceVersion!,
               }),
             })}>{t('btn.delete')}</Button>
         </Space>
@@ -128,10 +135,10 @@ const EdgionAcmeList = () => {
         subtitle={t('page.subtitle.acme')}
         actions={
           <>
-            <Search placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
+            <Search data-testid={resourceActionTestId('edgionacme', 'search')} placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
               style={{ width: 240 }} allowClear />
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <Button data-testid={resourceActionTestId('edgionacme', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
+            <Button data-testid={resourceActionTestId('edgionacme', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
           </>
         }
       />

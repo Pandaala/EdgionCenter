@@ -118,6 +118,8 @@ export default function UserManagementPage() {
       okText: t('confirm.okText'),
       okType: 'danger',
       cancelText: t('btn.cancel'),
+      okButtonProps: { 'data-testid': 'user-confirm' },
+      cancelButtonProps: { 'data-testid': 'user-cancel' },
       onOk: () => deleteMutation.mutate(record.id),
     })
   }
@@ -170,21 +172,21 @@ export default function UserManagementPage() {
       render: (_: unknown, record: UserDto) => (
         <Space wrap size={4}>
           {record.status === 'active' ? (
-            <Button size="small" onClick={() => statusMutation.mutate({ id: record.id, status: 'disabled' })}>
+            <Button data-testid="user-disable" size="small" onClick={() => statusMutation.mutate({ id: record.id, status: 'disabled' })}>
               {t('users.action.disable')}
             </Button>
           ) : (
-            <Button size="small" onClick={() => statusMutation.mutate({ id: record.id, status: 'active' })}>
+            <Button data-testid="user-enable" size="small" onClick={() => statusMutation.mutate({ id: record.id, status: 'active' })}>
               {t('users.action.enable')}
             </Button>
           )}
-          <Button size="small" onClick={() => setPwTarget(record)}>
+          <Button data-testid="user-reset-password" size="small" onClick={() => setPwTarget(record)}>
             {t('users.action.resetPassword')}
           </Button>
-          <Button size="small" onClick={() => openRolesModal(record)}>
+          <Button data-testid="user-edit-roles" size="small" onClick={() => openRolesModal(record)}>
             {t('users.action.editRoles')}
           </Button>
-          <Button danger size="small" onClick={() => handleDelete(record)}>
+          <Button data-testid="user-delete" danger size="small" onClick={() => handleDelete(record)}>
             {t('btn.delete')}
           </Button>
         </Space>
@@ -199,10 +201,10 @@ export default function UserManagementPage() {
         subtitle={t('users.subtitle')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+            <Button data-testid="users-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
             </Button>
-            <Button type="primary" onClick={() => setCreateOpen(true)}>
+            <Button data-testid="user-create" type="primary" onClick={() => setCreateOpen(true)}>
               {t('btn.create')}
             </Button>
           </>
@@ -218,6 +220,8 @@ export default function UserManagementPage() {
       />
 
       <Modal
+        okButtonProps={{ 'data-testid': 'user-confirm' }}
+        cancelButtonProps={{ 'data-testid': 'user-cancel' }}
         title={t('users.modal.create')}
         open={createOpen}
         onOk={handleCreate}
@@ -244,6 +248,8 @@ export default function UserManagementPage() {
       </Modal>
 
       <Modal
+        okButtonProps={{ 'data-testid': 'user-confirm' }}
+        cancelButtonProps={{ 'data-testid': 'user-cancel' }}
         title={t('users.modal.resetPassword')}
         open={pwTarget !== null}
         onOk={handleResetPassword}
@@ -261,6 +267,8 @@ export default function UserManagementPage() {
       </Modal>
 
       <Modal
+        okButtonProps={{ 'data-testid': 'user-confirm' }}
+        cancelButtonProps={{ 'data-testid': 'user-cancel' }}
         title={t('users.modal.editRoles')}
         open={rolesTarget !== null}
         onOk={handleSaveRoles}
