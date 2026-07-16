@@ -3,7 +3,7 @@
  */
 
 import React from 'react'
-import { Form, Input, Card, Space, Button } from 'antd'
+import { Form, Input, Card, Space, Button, Select, Switch } from 'antd'
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import MetadataSection from '../common/MetadataSection'
 import type { BackendTLSPolicy, BackendTLSPolicyTargetRef, BackendTLSPolicyCACertRef } from '@/utils/backendtlspolicy'
@@ -70,6 +70,7 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
               extra={
                 !readOnly && (data.spec?.targetRefs || []).length > 1 ? (
                   <Button
+                    data-testid="backendtlspolicy-target-remove"
                     type="text"
                     danger
                     icon={<MinusCircleOutlined />}
@@ -104,10 +105,13 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
                   style={{ width: 200 }}
                 />
               </Form.Item>
+              <Form.Item label="Section name" style={{ marginBottom: 0 }}>
+                <Input value={ref.sectionName} onChange={(e) => updateTargetRef(index, { sectionName: e.target.value || undefined })} disabled={readOnly} placeholder="Optional port/listener section" />
+              </Form.Item>
             </Card>
           ))}
           {!readOnly && (
-            <Button type="dashed" icon={<PlusOutlined />} onClick={addTargetRef} block>
+            <Button data-testid="backendtlspolicy-target-add" type="dashed" icon={<PlusOutlined />} onClick={addTargetRef} block>
               {t('btn.addTargetRef')}
             </Button>
           )}
@@ -123,6 +127,11 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
               placeholder="backend.internal"
               disabled={readOnly}
             />
+          </Form.Item>
+
+          <Form.Item label="Use system CA bundle">
+            <Switch checked={data.spec.validation.wellKnownCACertificates === 'System'} disabled={readOnly}
+              onChange={(checked) => onChange({ ...data, spec: { ...data.spec, validation: { ...data.spec.validation, wellKnownCACertificates: checked ? 'System' : undefined, caCertificateRefs: checked ? [] : data.spec.validation.caCertificateRefs } } })} />
           </Form.Item>
 
           <Form.Item label={t('field.caRefs')} style={{ marginBottom: 0 }}>
@@ -160,12 +169,12 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
                   />
                 </Form.Item>
                 <Form.Item label={t('field.kind')} style={{ marginBottom: 0 }}>
-                  <Input
+                  <Select
                     value={ref.kind}
-                    onChange={(e) => updateCaRef(index, { kind: e.target.value })}
-                    placeholder="Secret"
+                    onChange={(kind) => updateCaRef(index, { kind })}
                     disabled={readOnly}
                     style={{ width: 200 }}
+                    options={['Secret', 'ConfigMap'].map((value) => ({ value }))}
                   />
                 </Form.Item>
               </Card>
@@ -175,6 +184,17 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
                 {t('btn.addCaRef')}
               </Button>
             )}
+          </Form.Item>
+          <Card title="Subject alternative names" size="small" style={{ marginTop: 12 }}>
+            {(data.spec.validation.subjectAltNames || []).map((san, index) => <Space key={index} style={{ display: 'flex', marginBottom: 8 }}>
+              <Select value={san.type} disabled={readOnly} style={{ width: 130 }} options={['Hostname','URI'].map(value => ({ value }))} onChange={(type) => { const next=[...(data.spec.validation.subjectAltNames||[])]; next[index]={ type, ...(type==='Hostname'?{hostname:''}:{uri:''}) } as any; onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:next}}}) }} />
+              <Input disabled={readOnly} value={san.type === 'Hostname' ? san.hostname : san.uri} placeholder={san.type === 'Hostname' ? 'api.internal' : 'spiffe://cluster/service'} onChange={(e) => { const next=[...(data.spec.validation.subjectAltNames||[])]; next[index]=san.type==='Hostname'?{type:'Hostname',hostname:e.target.value}:{type:'URI',uri:e.target.value}; onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:next}}}) }} />
+              {!readOnly && <Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:(data.spec.validation.subjectAltNames||[]).filter((_,i)=>i!==index)}}})} />}
+            </Space>)}
+            {!readOnly && <Button type="dashed" icon={<PlusOutlined />} onClick={() => onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:[...(data.spec.validation.subjectAltNames||[]),{type:'Hostname',hostname:''}]}}})}>Add SAN</Button>}
+          </Card>
+          <Form.Item label="Client certificate Secret name" extra="Same namespace only. Enter a bare Secret name, never namespace/name." style={{ marginTop: 12 }}>
+            <Input disabled={readOnly} value={data.spec.options?.['edgion.io/client-certificate-ref'] || ''} onChange={(e) => onChange({...data,spec:{...data.spec,options:{...data.spec.options,'edgion.io/client-certificate-ref':e.target.value}}})} />
           </Form.Item>
         </Card>
       </Space>

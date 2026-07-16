@@ -5,6 +5,7 @@
 import * as yaml from 'js-yaml'
 import type { EdgionTls } from '@/types/edgion-tls'
 import { dumpYaml } from './yaml-utils'
+import { buildMutationDocument } from './resource-document'
 
 export const DEFAULT_EDGIONTLS_YAML = `apiVersion: edgion.io/v1
 kind: EdgionTls
@@ -27,28 +28,12 @@ export function createEmptyEdgionTls(): EdgionTls {
   }
 }
 
-export function normalizeEdgionTls(raw: any): EdgionTls {
-  return {
-    apiVersion: raw.apiVersion || 'edgion.io/v1',
-    kind: 'EdgionTls',
-    metadata: {
-      name: raw.metadata?.name || '',
-      namespace: raw.metadata?.namespace || 'default',
-      labels: raw.metadata?.labels,
-      annotations: raw.metadata?.annotations,
-      resourceVersion: raw.metadata?.resourceVersion,
-      creationTimestamp: raw.metadata?.creationTimestamp,
-    },
-    spec: {
-      parentRefs: raw.spec?.parentRefs,
-      hosts: raw.spec?.hosts || [],
-      secretRef: raw.spec?.secretRef || { name: '' },
-      clientAuth: raw.spec?.clientAuth,
-      minTlsVersion: raw.spec?.minTlsVersion,
-      cipherSuites: raw.spec?.cipherSuites,
-    },
-    status: raw.status,
-  }
+export function normalizeEdgionTls(raw: unknown): EdgionTls {
+  if (!raw || typeof raw !== 'object') throw new Error('EdgionTls must be an object')
+  const resource = raw as EdgionTls
+  if (resource.kind !== 'EdgionTls') throw new Error('Expected EdgionTls kind')
+  if (!resource.metadata || !resource.spec) throw new Error('EdgionTls metadata and spec are required')
+  return structuredClone(resource)
 }
 
 export function edgionTlsToYaml(tls: EdgionTls): string {
@@ -56,5 +41,12 @@ export function edgionTlsToYaml(tls: EdgionTls): string {
 }
 
 export function yamlToEdgionTls(yamlStr: string): EdgionTls {
-  return normalizeEdgionTls(yaml.load(yamlStr) as any)
+  return normalizeEdgionTls(yaml.load(yamlStr))
+}
+
+export function toMutationDocument(
+  resource: EdgionTls,
+  mode: 'create' | 'update',
+): Record<string, unknown> {
+  return buildMutationDocument(resource, { resourceKind: 'edgiontls', mode })
 }

@@ -31,7 +31,11 @@ const EdgionPluginsForm: React.FC<EdgionPluginsFormProps> = ({
         isCreate={isCreate}
       />
       <div style={{ marginTop: 16 }}>
-        <PluginStagesSection value={value.spec} />
+        <PluginStagesSection
+          value={value.spec}
+          onChange={(spec) => onChange({ ...value, spec })}
+          readOnly={disabled}
+        />
       </div>
     </Form>
   )

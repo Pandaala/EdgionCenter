@@ -1,59 +1,30 @@
 ---
 name: center-features
-description: How to run and configure EdgionCenter — config schema, ports, deployment, auth bootstrap, Admin API endpoints.
+description: Binary selection, ports, configuration, authentication, and deployment.
 ---
 
-# 02 Features
+# Features and operations
 
-Operator-facing reference for EdgionCenter. Authoritative config example:
-[`config/edgion-center.yaml`](../../config/edgion-center.yaml).
+Choose the composition by ownership model, not size:
 
-## Ports
+| Mode | Use when | State/authz/audit |
+|---|---|---|
+| Standalone | Center owns application data independently of Kubernetes | SQLite/MySQL, optional DB RBAC, SQL audit queries |
+| Kubernetes | Kubernetes API is the control-plane source of truth | CRDs/Leases, SAR, structured stdout audit |
 
-| Port | Listener | Serves |
-|------|----------|--------|
-| `12251` | `server.grpc_addr` | Federation gRPC (Controller → Center) |
-| `12201` | `server.http_addr` | Admin HTTP API |
-| `12200` | `server.probe_addr` | `/health`, `/ready` only |
-| `12290` | `server.metrics_addr` | Prometheus metrics |
+There is no legacy `edgion-center` compatibility binary. Run
+`edgion-center-standalone -c config/edgion-center.yaml` or deploy
+`edgion-center-kubernetes` with `cicd/deploy/center-kubernetes`.
 
-## Sync configuration (`sync:`)
+| Port | Purpose |
+|---|---|
+| `12251` | Controller-to-Center FederationSync, strict mTLS |
+| `12201` | Admin HTTP API/dashboard |
+| `12200` | `/health` and `/ready` |
+| `12290` | Prometheus metrics |
+| `12252` | Kubernetes replica forwarding, dedicated mTLS only |
 
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `list_interval_secs` | 300 | ListRequest cadence per controller |
-| `list_timeout_secs` | 30 | ListResponse wait timeout |
-| `command_timeout_secs` | 30 | CommandResponse wait timeout |
-| `ping_interval_secs` | 30 | Heartbeat ping interval |
-
-## Authentication
-
-Mandatory. Configure a `local_auth` or `auth` (OIDC discovery) provider; omitting both leaves
-business routes returning 503 until configured. `/health`, `/ready`, `/metrics`,
-`/api/v1/auth/status` remain reachable. See
-[01-architecture/06-center/SKILL.md](../01-architecture/06-center/SKILL.md) §Authentication.
-
-## Access control (three orthogonal axes)
-
-Three independent, freely-combinable axes: **authentication** (OIDC `auth:`, single admin
-`local_auth:`, DB users `db_auth.enabled` — any subset), **authorization** (`authz.mode`:
-`allow_all` default or `rbac`), and **storage** (`database.backend`: sqlite/mysql). Covers the
-`authz:` / `auth:` / `local_auth:` / `db_auth:` / `database:` / `audit:` config, the
-permission catalog, RBAC enforcement, unified login, admin bootstrap, and known limitations.
-See [access-control.md](access-control.md).
-
-## Admin API
-
-TODO: enumerate Admin API endpoints. Handlers live in `src/api/`
-(`consistency_handlers.rs`, `region_route_handlers.rs`,
-`global_connection_ip_restriction_handlers.rs`, `web.rs`).
-
-## Deployment
-
-TODO: document deployment shapes. See `cicd/deploy/`, `cicd/docker/`, and the build
-script `cicd/build-image.sh`, plus the `embed-dashboard` feature in `Cargo.toml`.
-
-## External dependency — Edgion features
-
-Resource feature Schema (Route/Plugin/TLS/Backend/…) is defined upstream and not duplicated:
-https://github.com/Pandaala/Edgion/tree/main/skills/02-features/03-resources
+Standalone configuration is documented inline in `config/edgion-center.yaml`; detailed
+access-control behavior is in [access-control.md](access-control.md). Kubernetes config and
+secret requirements are in `cicd/deploy/center-kubernetes/README.md`. Build mode-specific
+images with `cicd/build-image.sh --mode standalone|kubernetes`.

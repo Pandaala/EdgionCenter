@@ -1,22 +1,25 @@
 import { useState, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
-import { Spin } from 'antd'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Button, Result, Spin } from 'antd'
 import { AppShell } from './components/shell/AppShell'
 import ControllerProxy from './components/Layout/ControllerProxy'
 import { isLoggedIn } from './utils/auth'
-import { PermissionProvider } from './utils/permissions'
+import { PermissionGate, PermissionProvider } from './utils/permissions'
 import { setAppMode } from './utils/proxy'
-import { systemApi } from './api/client'
+import { resolveServerDiscovery } from './utils/discovery'
+import { systemApi, type CenterCapabilities } from './api/client'
 import LoginPage from './pages/Login/LoginPage'
 import Dashboard from './pages/Dashboard'
 import UserDashboard from './pages/Dashboard/UserDashboard'
 import CenterDashboard from './pages/Center/CenterDashboard'
 import CenterAdminPage from './pages/Center/CenterAdminPage'
+import FederationDiagnosticsPage from './pages/Center/FederationDiagnosticsPage'
 import AuditLogPage from './pages/Audit/AuditLogPage'
 import UserManagementPage from './pages/Users/UserManagementPage'
 import RoleManagementPage from './pages/Roles/RoleManagementPage'
 // RegionRoute
 import RegionRouteList from './pages/RegionRoute/RegionRouteList'
+import RegionRouteServiceUsagePage from './pages/RegionRoute/RegionRouteServiceUsagePage'
 // Routes
 import HTTPRouteList from './pages/Routes/HTTPRouteList'
 import GRPCRouteList from './pages/Routes/GRPCRouteList'
@@ -28,10 +31,12 @@ import GatewayList from './pages/Infrastructure/GatewayList'
 import GatewayClassList from './pages/Infrastructure/GatewayClassList'
 import ServiceList from './pages/Infrastructure/ServiceList'
 import EndpointSliceList from './pages/Infrastructure/EndpointSliceList'
+import EdgionBackendTrafficPolicyList from './pages/Services/EdgionBackendTrafficPolicyList'
 import ReferenceGrantList from './pages/Infrastructure/ReferenceGrantList'
 // Security
 import EdgionTlsList from './pages/Security/EdgionTlsList'
 import BackendTLSPolicyList from './pages/Security/BackendTLSPolicyList'
+import RestrictedDependenciesPage from './pages/Security/RestrictedDependenciesPage'
 // Plugins
 import EdgionPluginsList from './pages/Plugins/EdgionPluginsList'
 import EdgionStreamPluginsList from './pages/Plugins/EdgionStreamPluginsList'
@@ -46,30 +51,44 @@ import GlobalConnectionIpRestrictionDetail from './pages/GlobalConnectionIpRestr
 import './App.css'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
   if (!isLoggedIn()) {
-    return <Navigate to="/login" replace />
+    return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}${location.hash}` }} />
   }
-  // Fetch /auth/me once for the authenticated subtree so useCan() is available.
-  // (Menu/route gating on permissions is a later task.)
+  // Fetch /auth/me once so menus and direct routes share one permission set.
   return <PermissionProvider>{children}</PermissionProvider>
+}
+
+function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
+  return (
+    <PermissionGate
+      permission={permission}
+      pending={<Spin size="large" />}
+      denied={<Navigate to="/" replace />}
+    >
+      {children}
+    </PermissionGate>
+  )
 }
 
 function App() {
   const [mode, setMode] = useState<'controller' | 'center' | null>(null)
+  const [capabilities, setCapabilities] = useState<CenterCapabilities | null>(null)
   const [loading, setLoading] = useState(true)
+  const [discoveryFailed, setDiscoveryFailed] = useState(false)
 
   useEffect(() => {
     // server-info is unauthenticated — always call it to detect mode
     systemApi
       .serverInfo()
       .then((res) => {
-        const m = res.data?.mode === 'center' ? 'center' : 'controller'
-        setMode(m)
-        setAppMode(m)
+        const discovery = resolveServerDiscovery(res)
+        setMode(discovery.mode)
+        setCapabilities(discovery.capabilities)
+        setAppMode(discovery.mode)
       })
       .catch(() => {
-        setMode('controller')
-        setAppMode('controller')
+        setDiscoveryFailed(true)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -88,25 +107,42 @@ function App() {
     )
   }
 
+  if (discoveryFailed || mode == null) {
+    return (
+      <Result
+        status="warning"
+        title="Unable to discover server capabilities"
+        subTitle="The dashboard will not guess an authentication mode. Check the service and retry."
+        extra={<Button type="primary" onClick={() => window.location.reload()}>Retry</Button>}
+      />
+    )
+  }
+
   if (mode === 'center') {
     return (
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<LoginPage passwordLogin={capabilities?.passwordLogin === true} />} />
         <Route path="/" element={<RequireAuth><AppShell mode="center" /></RequireAuth>}>
           <Route index element={<CenterDashboard />} />
-          <Route path="region-routes" element={<RegionRouteList />} />
+          <Route path="region-routes" element={<Navigate to="/region-routes/region" replace />} />
+          <Route path="region-routes/region" element={<RequirePermission permission="region-routes:read"><RegionRouteList /></RequirePermission>} />
+          <Route path="region-routes/service" element={<RequirePermission permission="region-routes:read"><RegionRouteServiceUsagePage /></RequirePermission>} />
+          <Route path="region-routes/topology" element={<Navigate to="/region-routes/region" replace />} />
+          <Route path="region-routes/cluster" element={<Navigate to="/region-routes/region" replace />} />
+          <Route path="region-routes/services" element={<Navigate to="/region-routes/service" replace />} />
+          <Route path="federation-diagnostics" element={<RequirePermission permission="server:read"><FederationDiagnosticsPage /></RequirePermission>} />
           <Route
             path="global-connection-ip-restrictions"
-            element={<GlobalConnectionIpRestrictionList />}
+            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionList /></RequirePermission>}
           />
           <Route
             path="global-connection-ip-restrictions/:namespace/:name/:controllerId"
-            element={<GlobalConnectionIpRestrictionDetail />}
+            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionDetail /></RequirePermission>}
           />
-          <Route path="admin" element={<CenterAdminPage />} />
-          <Route path="audit" element={<AuditLogPage />} />
-          <Route path="users" element={<UserManagementPage />} />
-          <Route path="roles" element={<RoleManagementPage />} />
+          {capabilities?.controllerHistory && <Route path="admin" element={<RequirePermission permission="controllers:read"><CenterAdminPage /></RequirePermission>} />}
+          {capabilities?.auditQuery && <Route path="audit" element={<RequirePermission permission="audit:read"><AuditLogPage /></RequirePermission>} />}
+          {capabilities?.userAdmin && <Route path="users" element={<RequirePermission permission="users:manage"><UserManagementPage /></RequirePermission>} />}
+          {capabilities?.roleAdmin && <Route path="roles" element={<RequirePermission permission="roles:manage"><RoleManagementPage /></RequirePermission>} />}
         </Route>
         <Route path="/controller/:controllerId" element={<RequireAuth><ControllerProxy /></RequireAuth>}>
           <Route index element={<Dashboard />} />
@@ -122,8 +158,10 @@ function App() {
           <Route path="infrastructure/referencegrants" element={<ReferenceGrantList />} />
           <Route path="services/list" element={<ServiceList />} />
           <Route path="services/endpointslices" element={<EndpointSliceList />} />
+          <Route path="services/backend-traffic-policies" element={<EdgionBackendTrafficPolicyList />} />
           <Route path="security/tls" element={<EdgionTlsList />} />
           <Route path="security/backendtls" element={<BackendTLSPolicyList />} />
+          <Route path="security/dependencies" element={<RestrictedDependenciesPage />} />
           <Route path="plugins" element={<EdgionPluginsList />} />
           <Route path="plugins/stream" element={<EdgionStreamPluginsList />} />
           <Route path="plugins/metadata" element={<EdgionConfigDataList />} />
@@ -153,8 +191,10 @@ function App() {
         <Route path="infrastructure/referencegrants" element={<ReferenceGrantList />} />
         <Route path="services/list" element={<ServiceList />} />
         <Route path="services/endpointslices" element={<EndpointSliceList />} />
+        <Route path="services/backend-traffic-policies" element={<EdgionBackendTrafficPolicyList />} />
         <Route path="security/tls" element={<EdgionTlsList />} />
         <Route path="security/backendtls" element={<BackendTLSPolicyList />} />
+        <Route path="security/dependencies" element={<RestrictedDependenciesPage />} />
         <Route path="plugins" element={<EdgionPluginsList />} />
         <Route path="plugins/stream" element={<EdgionStreamPluginsList />} />
         <Route path="plugins/metadata" element={<EdgionConfigDataList />} />

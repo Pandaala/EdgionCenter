@@ -1,0 +1,23 @@
+{
+  "GatewayClass": "gatewayclasses.gateway.networking.k8s.io",
+  "EdgionGatewayConfig": "edgiongatewayclassconfigs.edgion.io",
+  "Gateway": "gateways.gateway.networking.k8s.io",
+  "HTTPRoute": "httproutes.gateway.networking.k8s.io",
+  "GRPCRoute": "grpcroutes.gateway.networking.k8s.io",
+  "TCPRoute": "tcproutes.gateway.networking.k8s.io",
+  "UDPRoute": "udproutes.gateway.networking.k8s.io",
+  "TLSRoute": "tlsroutes.gateway.networking.k8s.io",
+  "Service": "services",
+  "EndpointSlice": "endpointslices.discovery.k8s.io",
+  "EdgionTls": "edgiontls.edgion.io",
+  "ReferenceGrant": "referencegrants.gateway.networking.k8s.io",
+  "BackendTLSPolicy": "backendtlspolicies.gateway.networking.k8s.io",
+  "EdgionPlugins": "edgionplugins.edgion.io",
+  "EdgionStreamPlugins": "edgionstreamplugins.edgion.io",
+  "EdgionConfigData": "edgionconfigdata.edgion.io",
+  "EdgionAcme": "edgionacmes.edgion.io",
+  "LinkSys": "linksys.edgion.io",
+  "EdgionBackendTrafficPolicy": "edgionbackendtrafficpolicies.edgion.io",
+  "Secret": "secrets",
+  "ConfigMap": "configmaps"
+}

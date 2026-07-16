@@ -87,8 +87,8 @@ const EdgionTlsForm: React.FC<EdgionTlsFormProps> = ({ data, onChange, readOnly 
           <Form.Item label={t('field.cipherSuites')} style={{ marginBottom: 0 }}>
             <Select
               mode="tags"
-              value={data.spec?.cipherSuites || []}
-              onChange={(v) => updateSpec({ cipherSuites: v })}
+              value={data.spec?.ciphers || []}
+              onChange={(v) => updateSpec({ ciphers: v })}
               disabled={readOnly}
               placeholder={t('ph.cipherSuites')}
               style={{ width: '100%' }}

@@ -21,7 +21,7 @@ export interface EffectiveGirView {
   enable: boolean
   activeProfile: string
   profiles: Record<string, ProfileRules>
-  activeProfileRef?: string
+  activeProfileRef?: { namespace: string; name: string; permitted: boolean }
   selectorApplied: boolean
 }
 

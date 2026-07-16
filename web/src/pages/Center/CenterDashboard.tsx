@@ -24,6 +24,8 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { centerApi, type ControllerSummary } from '@/api/center'
 import { useT } from '@/i18n'
+import { invalidateControllerAccess } from '@/hooks/useControllerAccess'
+import ControllerObservabilityPanel from './ControllerObservabilityPanel'
 
 function formatLastSync(t: (key: string, params?: Record<string, string | number>) => string, secsAgo: number | null | undefined): string {
   if (secsAgo === null || secsAgo === undefined) return '—'
@@ -50,6 +52,8 @@ const ControllerCard = ({
     Modal.confirm({
       title: t('center.reload'),
       content: t('center.reloadConfirm', { name: controller.controller_id }),
+      okButtonProps: { 'data-testid': 'controller-card-reload-confirm' },
+      cancelButtonProps: { 'data-testid': 'controller-card-reload-cancel' },
       onOk: () => onReload(controller.controller_id),
     })
   }
@@ -69,6 +73,7 @@ const ControllerCard = ({
       extra={
         <Space size="small">
           <Button
+            data-testid="controller-card-reload"
             size="small"
             icon={<SyncOutlined />}
             onClick={handleReload}
@@ -76,6 +81,7 @@ const ControllerCard = ({
             {t('center.reload')}
           </Button>
           <Button
+            data-testid="controller-card-enter"
             size="small"
             type="primary"
             icon={<ArrowRightOutlined />}
@@ -152,6 +158,7 @@ export default function CenterDashboard() {
   const handleReload = async (id: string) => {
     try {
       await centerApi.reloadController(id)
+      await invalidateControllerAccess(queryClient, id)
       message.success(t('center.reloadOk'))
     } catch {
       // error handled by apiClient interceptor
@@ -164,9 +171,11 @@ export default function CenterDashboard() {
 
   return (
     <div>
+      <ControllerObservabilityPanel controllers={controllers} />
       {/* Title omitted — left sidebar already identifies this view as Center. */}
       <Space style={{ marginBottom: 16 }} wrap>
         <Input.Search
+          data-testid="controller-search"
           placeholder={t('center.searchPlaceholder')}
           allowClear
           style={{ width: 260 }}
@@ -176,6 +185,7 @@ export default function CenterDashboard() {
           }}
         />
         <Select
+          data-testid="controller-cluster-filter"
           style={{ width: 200 }}
           placeholder={t('center.filterCluster')}
           allowClear
@@ -186,7 +196,7 @@ export default function CenterDashboard() {
             ...clusters.map((c) => ({ value: c, label: c })),
           ]}
         />
-        <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
+        <Button data-testid="controllers-refresh" icon={<ReloadOutlined />} onClick={handleRefresh}>
           {t('btn.refresh')}
         </Button>
       </Space>

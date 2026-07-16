@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "variants": [
+    {"id":"default","expectedHttpByMode":{"standalone":[200],"kubernetes":[200]}},
+    {"id":"read-only","expectedHttpByMode":{"standalone":[200],"kubernetes":[200]}},
+    {"id":"write","expectedHttpByMode":{"standalone":[200,202,204],"kubernetes":[200,202,204]}},
+    {"id":"missing-proxy-access","expectedHttpByMode":{"standalone":[404],"kubernetes":[403]}},
+    {"id":"hot-reload","expectedHttpByMode":{"standalone":[200,202,204],"kubernetes":[200,202,204]}},
+    {"id":"old-controller-404","expectedHttpByMode":{"standalone":[404],"kubernetes":[403]}}
+  ]
+}

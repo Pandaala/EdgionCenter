@@ -1,0 +1,330 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: "__NS_B__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: "__NS_DENIED__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: "__PREFIX__-center-service-account", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: "__PREFIX__-controller-a-service-account", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: "__PREFIX__-controller-b-service-account", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: "__PREFIX__-center-cluster-role", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+rules:
+  - {apiGroups: [authorization.k8s.io], resources: [subjectaccessreviews], verbs: [create]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: "__PREFIX__-center-runtime-role", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+rules:
+  - {apiGroups: [center.edgion.io], resources: [edgioncontrollers], verbs: [get, list, create, update]}
+  - {apiGroups: [center.edgion.io], resources: [edgioncontrollers/status], verbs: [get, update]}
+  - {apiGroups: [coordination.k8s.io], resources: [leases], verbs: [get, create, update]}
+  - {apiGroups: [""], resources: [pods], verbs: [get]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-center-runtime-role-binding", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: "__PREFIX__-center-runtime-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-center-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: "__PREFIX__-center-cluster-role-binding", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-center-cluster-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-center-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: "__PREFIX__-controller-cluster-role", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+rules:
+  - {apiGroups: [gateway.networking.k8s.io], resources: [gatewayclasses, gatewayclasses/status], verbs: [get, list, watch, create, update, patch, delete]}
+  - {apiGroups: [edgion.io], resources: [edgiongatewayclassconfigs, edgiongatewayclassconfigs/status], verbs: [get, list, watch, create, update, patch, delete]}
+  - {apiGroups: [""], resources: [namespaces], verbs: [get, list, watch]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: "__PREFIX__-controller-a-role-binding", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-cluster-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-a-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: "__PREFIX__-controller-b-role-binding", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-cluster-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-b-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: "__PREFIX__-controller-namespaced-role", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+rules:
+  - {apiGroups: [gateway.networking.k8s.io], resources: [gateways, httproutes, grpcroutes, tcproutes, udproutes, tlsroutes, backendtlspolicies, referencegrants, gateways/status, httproutes/status, grpcroutes/status, tcproutes/status, udproutes/status, tlsroutes/status, backendtlspolicies/status], verbs: [get, list, watch, create, update, patch, delete]}
+  - {apiGroups: [""], resources: [services, endpoints, secrets, configmaps], verbs: [get, list, watch, create, update, patch, delete]}
+  - {apiGroups: [discovery.k8s.io], resources: [endpointslices], verbs: [get, list, watch, create, update, patch, delete]}
+  - {apiGroups: [edgion.io], resources: [edgiontls, edgionstreamplugins, edgionplugins, edgionconfigdata, linksys, edgionacmes, edgionbackendtrafficpolicies, edgiontls/status, edgionstreamplugins/status, edgionplugins/status, edgionacmes/status, linksys/status, edgionconfigdata/status, edgionbackendtrafficpolicies/status], verbs: [get, list, watch, create, update, patch, delete]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-a-a", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-namespaced-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-a-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-a-b", namespace: "__NS_B__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-namespaced-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-a-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-a-denied", namespace: "__NS_DENIED__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-namespaced-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-a-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-b-a", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-namespaced-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-b-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-b-b", namespace: "__NS_B__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-namespaced-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-b-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-b-denied", namespace: "__NS_DENIED__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-controller-namespaced-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-b-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: "__PREFIX__-controller-a-system-role", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+rules:
+  - {apiGroups: [coordination.k8s.io], resources: [leases], resourceNames: ["__PREFIX__-controller-a"], verbs: [get, update, patch, delete]}
+  - {apiGroups: [coordination.k8s.io], resources: [leases], verbs: [create]}
+  - {apiGroups: [""], resources: [pods], verbs: [get, patch]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: "__PREFIX__-controller-b-system-role", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+rules:
+  - {apiGroups: [coordination.k8s.io], resources: [leases], resourceNames: ["__PREFIX__-controller-b"], verbs: [get, update, patch, delete]}
+  - {apiGroups: [coordination.k8s.io], resources: [leases], verbs: [create]}
+  - {apiGroups: [""], resources: [pods], verbs: [get, patch]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-a-system", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: "__PREFIX__-controller-a-system-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-a-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "__PREFIX__-controller-b-system", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: "__PREFIX__-controller-b-system-role"}
+subjects: [{kind: ServiceAccount, name: "__PREFIX__-controller-b-service-account", namespace: "__PREFIX__-system"}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: "__PREFIX__-e2e-user-role", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+rules:
+  - {apiGroups: [center.edgion.io], resources: [edgioncontrollers], resourceNames: ["__CONTROLLER_RESOURCE_A__", "__CONTROLLER_RESOURCE_B__"], verbs: [get, update, delete]}
+  - {apiGroups: [center.edgion.io], resources: [edgioncontrollers], verbs: [list]}
+  - {nonResourceURLs: ["/edgion-center-authz/api/v1/server-info"], verbs: [get]}
+  - {nonResourceURLs: ["/edgion-center-authz/api/v1/proxy/__E2E_CONTROLLER_PATH_A__/*", "/edgion-center-authz/api/v1/proxy/__E2E_CONTROLLER_PATH_B__/*"], verbs: [get, post, put, patch, delete]}
+  - {nonResourceURLs: ["/edgion-center-authz/api/v1/center/region-routes", "/edgion-center-authz/api/v1/center/region-routes/*", "/edgion-center-authz/api/v1/center/cluster-region-routes", "/edgion-center-authz/api/v1/center/cluster-region-routes/*", "/edgion-center-authz/api/v1/center/service-region-routes", "/edgion-center-authz/api/v1/center/service-region-routes/*", "/edgion-center-authz/api/v1/center/global-connection-ip-restrictions", "/edgion-center-authz/api/v1/center/global-connection-ip-restrictions/*", "/edgion-center-authz/api/v1/center/admin/watch-status", "/edgion-center-authz/api/v1/center/admin/metadata-store"], verbs: [get, post, put, patch, delete]}
+  - {nonResourceURLs: ["/edgion-center-authz/permissions/controllers:read", "/edgion-center-authz/permissions/controllers:write", "/edgion-center-authz/permissions/region-routes:read", "/edgion-center-authz/permissions/region-routes:write", "/edgion-center-authz/permissions/ip-restrictions:read", "/edgion-center-authz/permissions/ip-restrictions:write", "/edgion-center-authz/permissions/server:read", "/edgion-center-authz/permissions/proxy:access"], verbs: [get]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: "__PREFIX__-e2e-user-role-binding", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "__PREFIX__-e2e-user-role"}
+subjects: [{kind: User, name: "__OIDC_SAR_USER__"}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: "__PREFIX__-runtime-config", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+data:
+  center.yaml: |
+    server: {grpc_addr: "0.0.0.0:12251", http_addr: "0.0.0.0:12201", probe_addr: "0.0.0.0:12200", metrics_addr: "0.0.0.0:12290"}
+    auth: {enabled: true, discovery: "https://__PREFIX__-dex.__PREFIX__-system.svc.cluster.local:5556/dex/.well-known/openid-configuration", audiences: [edgion-e2e], ca_file: /tls/oidc/ca.crt}
+    grpc_security: {active: fed, certs: [{name: fed, cert: /tls/federation/server.crt, key: /tls/federation/server.key, ca: /tls/federation/ca.crt}]}
+    trust_domain: edgion.io
+    internal_forwarding:
+      bind_addr: "0.0.0.0:12252"
+      port: 12252
+      server_name: "__PREFIX__-center-internal.__PREFIX__-system.svc"
+      expected_peer_spiffe_id: "spiffe://edgion.io/ns/__PREFIX__-system/sa/__PREFIX__-center-service-account"
+      tls: {cert: /tls/internal/tls.crt, key: /tls/internal/tls.key, ca: /tls/internal/ca.crt}
+  controller-a.yaml: |
+    work_dir: /tmp/edgion
+    server: {grpc_listen: "0.0.0.0:12151", admin_listen: "0.0.0.0:12101", probe_listen: "0.0.0.0:12100"}
+    conf_center:
+      type: kubernetes
+      gateway_class: "__PREFIX__-class"
+      controller_name: edgion.io/gateway-controller
+      watch_namespaces: ["__NS_A__", "__NS_B__", "__NS_DENIED__"]
+      leader_election: {lease_name: "__PREFIX__-controller-a", lease_namespace: "__PREFIX__-system"}
+    center:
+      address: "https://__PREFIX__-center.__PREFIX__-system.svc:12251"
+      name: "__E2E_CONTROLLER_A__"
+      cluster: e2e-a
+      rbac: {allow: [{verbs: ["*"], kinds: ["*"]}]}
+      security: {active: fed, certs: [{name: fed, cert: /tls/controller.crt, key: /tls/controller.key, ca: /tls/ca.crt}]}
+    logging: {log_level: info, console: true}
+    conf_sync_security: {tls: {skip_tls: true}}
+  controller-b.yaml: |
+    work_dir: /tmp/edgion
+    server: {grpc_listen: "0.0.0.0:12151", admin_listen: "0.0.0.0:12101", probe_listen: "0.0.0.0:12100"}
+    conf_center:
+      type: kubernetes
+      gateway_class: "__PREFIX__-class"
+      controller_name: edgion.io/gateway-controller
+      watch_namespaces: ["__NS_A__", "__NS_B__", "__NS_DENIED__"]
+      leader_election: {lease_name: "__PREFIX__-controller-b", lease_namespace: "__PREFIX__-system"}
+    center:
+      address: "https://__PREFIX__-center.__PREFIX__-system.svc:12251"
+      name: "__E2E_CONTROLLER_B__"
+      cluster: e2e-b
+      rbac: {allow: [{verbs: ["*"], kinds: ["*"]}]}
+      security: {active: fed, certs: [{name: fed, cert: /tls/controller.crt, key: /tls/controller.key, ca: /tls/ca.crt}]}
+    logging: {log_level: info, console: true}
+    conf_sync_security: {tls: {skip_tls: true}}
+  dex.yaml: |
+    issuer: https://__PREFIX__-dex.__PREFIX__-system.svc.cluster.local:5556/dex
+    storage: {type: memory}
+    web: {https: 0.0.0.0:5556, tlsCert: /tls/tls.crt, tlsKey: /tls/tls.key}
+    staticClients: [{id: edgion-e2e, name: Edgion E2E, secretEnv: CLIENT_SECRET, redirectURIs: [http://127.0.0.1:14180/oauth2/callback]}]
+    enablePasswordDB: true
+    staticPasswords: [{email: "__E2E_USERNAME__", hash: "__E2E_PASSWORD_HASH__", username: "__E2E_USERNAME__", userID: "__PREFIX__-user"}]
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: "__PREFIX__-dex-credentials", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+type: Opaque
+stringData: {client-secret: "__OAUTH_CLIENT_SECRET__"}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: "__PREFIX__-oauth-credentials", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+type: Opaque
+stringData: {client-secret: "__OAUTH_CLIENT_SECRET__", cookie-secret: "__COOKIE_SECRET__"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: "__PREFIX__-center", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: "__PREFIX__-center"}}
+  template:
+    metadata: {labels: {app: "__PREFIX__-center", edgion.io/e2e-run: "__RUN_ID__"}}
+    spec:
+      serviceAccountName: "__PREFIX__-center-service-account"
+      containers:
+        - name: center
+          image: "edgion-center-kubernetes:__RUN_ID__"
+          args: [--config-file, /config/center.yaml]
+          env:
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+          ports: [{containerPort: 12200}, {containerPort: 12201}, {containerPort: 12251}, {containerPort: 12252}]
+          readinessProbe: {httpGet: {path: /ready, port: 12200}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health, port: 12200}, periodSeconds: 10}
+          volumeMounts: [{name: config, mountPath: /config}, {name: federation-tls, mountPath: /tls/federation, readOnly: true}, {name: internal-tls, mountPath: /tls/internal, readOnly: true}, {name: oidc-ca, mountPath: /tls/oidc, readOnly: true}]
+      volumes: [{name: config, configMap: {name: "__PREFIX__-runtime-config"}}, {name: federation-tls, secret: {secretName: "__PREFIX__-center-federation-tls"}}, {name: internal-tls, secret: {secretName: "__PREFIX__-center-internal-tls"}}, {name: oidc-ca, secret: {secretName: "__PREFIX__-center-oidc-ca"}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: "__PREFIX__-center", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {selector: {app: "__PREFIX__-center"}, ports: [{name: http, port: 12201}, {name: grpc, port: 12251}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: "__PREFIX__-center-internal", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {clusterIP: None, selector: {app: "__PREFIX__-center"}, ports: [{name: internal, port: 12252}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: "__PREFIX__-controller-a", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec:
+  replicas: 1
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 0, maxUnavailable: 1}}
+  selector: {matchLabels: {app: "__PREFIX__-controller-a"}}
+  template:
+    metadata: {labels: {app: "__PREFIX__-controller-a", edgion.io/e2e-run: "__RUN_ID__"}}
+    spec:
+      serviceAccountName: "__PREFIX__-controller-a-service-account"
+      containers: [{name: controller, image: "pandaala/edgion-controller:__RUN_ID__", command: [/usr/local/bin/edgion-controller], args: [--config-file, /config/controller-a.yaml], env: [{name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}, {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}], readinessProbe: {httpGet: {path: /ready, port: 12100}, periodSeconds: 2, failureThreshold: 30}, livenessProbe: {httpGet: {path: /health, port: 12100}, periodSeconds: 10}, volumeMounts: [{name: config, mountPath: /config}, {name: tls, mountPath: /tls, readOnly: true}]}]
+      volumes: [{name: config, configMap: {name: "__PREFIX__-runtime-config"}}, {name: tls, secret: {secretName: "__PREFIX__-controller-a-federation-tls"}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: "__PREFIX__-controller-b", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec:
+  replicas: 1
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 0, maxUnavailable: 1}}
+  selector: {matchLabels: {app: "__PREFIX__-controller-b"}}
+  template:
+    metadata: {labels: {app: "__PREFIX__-controller-b", edgion.io/e2e-run: "__RUN_ID__"}}
+    spec:
+      serviceAccountName: "__PREFIX__-controller-b-service-account"
+      containers: [{name: controller, image: "pandaala/edgion-controller:__RUN_ID__", command: [/usr/local/bin/edgion-controller], args: [--config-file, /config/controller-b.yaml], env: [{name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}, {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}], readinessProbe: {httpGet: {path: /ready, port: 12100}, periodSeconds: 2, failureThreshold: 30}, livenessProbe: {httpGet: {path: /health, port: 12100}, periodSeconds: 10}, volumeMounts: [{name: config, mountPath: /config}, {name: tls, mountPath: /tls, readOnly: true}]}]
+      volumes: [{name: config, configMap: {name: "__PREFIX__-runtime-config"}}, {name: tls, secret: {secretName: "__PREFIX__-controller-b-federation-tls"}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: "__PREFIX__-dex", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {replicas: 1, selector: {matchLabels: {app: "__PREFIX__-dex"}}, template: {metadata: {labels: {app: "__PREFIX__-dex", edgion.io/e2e-run: "__RUN_ID__"}}, spec: {containers: [{name: dex, image: ghcr.io/dexidp/dex:v2.41.1, args: [dex, serve, /config/dex.yaml], env: [{name: CLIENT_SECRET, valueFrom: {secretKeyRef: {name: "__PREFIX__-dex-credentials", key: client-secret}}}], readinessProbe: {httpGet: {scheme: HTTPS, path: /dex/.well-known/openid-configuration, port: 5556}, periodSeconds: 2, failureThreshold: 30}, volumeMounts: [{name: config, mountPath: /config}, {name: tls, mountPath: /tls, readOnly: true}]}], volumes: [{name: config, configMap: {name: "__PREFIX__-runtime-config"}}, {name: tls, secret: {secretName: "__PREFIX__-dex-tls"}}]}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: "__PREFIX__-dex", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {selector: {app: "__PREFIX__-dex"}, ports: [{port: 5556}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: "__PREFIX__-oauth2-proxy", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec:
+    replicas: 1
+    selector: {matchLabels: {app: "__PREFIX__-oauth2-proxy"}}
+    template:
+      metadata: {labels: {app: "__PREFIX__-oauth2-proxy", edgion.io/e2e-run: "__RUN_ID__"}}
+      spec:
+        containers:
+          - name: oauth2-proxy
+            image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+            args: [--provider=oidc, "--oidc-issuer-url=https://__PREFIX__-dex.__PREFIX__-system.svc.cluster.local:5556/dex", --provider-ca-file=/tls/ca.crt, --client-id=edgion-e2e, --redirect-url=http://127.0.0.1:14180/oauth2/callback, --upstream=http://__PREFIX__-center:12201, --http-address=0.0.0.0:4180, --email-domain=*, --scope=openid profile email groups, --code-challenge-method=S256, --skip-provider-button=true, --pass-authorization-header=true, --pass-access-token=false, --cookie-secure=false]
+            env:
+              - {name: OAUTH2_PROXY_CLIENT_SECRET, valueFrom: {secretKeyRef: {name: "__PREFIX__-oauth-credentials", key: client-secret}}}
+              - {name: OAUTH2_PROXY_COOKIE_SECRET, valueFrom: {secretKeyRef: {name: "__PREFIX__-oauth-credentials", key: cookie-secret}}}
+            volumeMounts: [{name: tls, mountPath: /tls, readOnly: true}]
+            readinessProbe: {httpGet: {path: /ping, port: 4180}, periodSeconds: 2, failureThreshold: 30}
+        volumes: [{name: tls, secret: {secretName: "__PREFIX__-oauth-oidc-ca"}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: "__PREFIX__-oauth2-proxy", namespace: "__PREFIX__-system", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec: {selector: {app: "__PREFIX__-oauth2-proxy"}, ports: [{port: 80, targetPort: 4180}]}

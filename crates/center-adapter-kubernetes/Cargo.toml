@@ -1,0 +1,26 @@
+[package]
+name = "edgion-center-adapter-kubernetes"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Kubernetes persistence, authorization, and coordination adapters for Edgion Center"
+
+[dependencies]
+async-trait.workspace = true
+chrono = "0.4"
+edgion-center-core = { path = "../center-core" }
+hex = "0.4"
+k8s-openapi.workspace = true
+kube.workspace = true
+schemars = "1.0"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+anyhow = "1.0"
+http = "1"
+tokio = { version = "1.49", features = ["macros", "rt-multi-thread"] }
+tower-test = "0.4"

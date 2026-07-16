@@ -2,15 +2,20 @@
  * EdgionTls 编辑器 Modal
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useEffect, useState } from 'react'
 import { Modal, Button, Tabs, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 import EdgionTlsForm from './EdgionTlsForm'
+import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { EdgionTls } from '@/types/edgion-tls'
-import { createEmptyEdgionTls, normalizeEdgionTls, edgionTlsToYaml, yamlToEdgionTls } from '@/utils/edgiontls'
+import { createEmptyEdgionTls, normalizeEdgionTls, edgionTlsToYaml, yamlToEdgionTls, toMutationDocument } from '@/utils/edgiontls'
+import { dumpYaml } from '@/utils/yaml-utils'
 import { useT } from '@/i18n'
+import { useEditorTabTransition } from '../useEditorTabTransition'
 
 interface EdgionTlsEditorProps {
   visible: boolean
@@ -21,14 +26,18 @@ interface EdgionTlsEditorProps {
 
 const EdgionTlsEditor: React.FC<EdgionTlsEditorProps> = ({ visible, mode, resource, onClose }) => {
   const t = useT()
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
+  const mutationTarget = useControllerMutationTarget()
   const [formData, setFormData] = useState<EdgionTls>(() => createEmptyEdgionTls())
   const [yamlContent, setYamlContent] = useState('')
   const queryClient = useQueryClient()
+  const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
+    formData, yamlContent, serialize: edgionTlsToYaml, parse: yamlToEdgionTls, setFormData, setYamlContent,
+    onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
+  })
 
   useEffect(() => {
     if (!visible) return
-    setActiveTab('form')
+    resetEditorTab()
     if (mode === 'create') {
       const empty = createEmptyEdgionTls()
       setFormData(empty)
@@ -38,34 +47,26 @@ const EdgionTlsEditor: React.FC<EdgionTlsEditorProps> = ({ visible, mode, resour
       setFormData(normalized)
       setYamlContent(edgionTlsToYaml(normalized))
     }
-  }, [visible, mode, resource])
-
-  const handleTabChange = (key: string) => {
-    try {
-      if (key === 'yaml') setYamlContent(edgionTlsToYaml(formData))
-      else setFormData(yamlToEdgionTls(yamlContent))
-      setActiveTab(key as 'form' | 'yaml')
-    } catch (e: any) { message.error(t('msg.tabSwitchFailed', { err: e.message })) }
-  }
+  }, [visible, mode, resource, resetEditorTab])
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, yamlStr }: { namespace: string; yamlStr: string }) =>
-      resourceApi.create('edgiontls', namespace, yamlStr),
-    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['edgiontls'] }); onClose() },
+      resourceApi.create(mutationTarget, 'edgiontls', namespace, yamlStr),
+    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgiontls'] }); onClose() },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, yamlStr }: { namespace: string; name: string; yamlStr: string }) =>
-      resourceApi.update('edgiontls', namespace, name, yamlStr),
-    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['edgiontls'] }); onClose() },
+      resourceApi.update(mutationTarget, 'edgiontls', namespace, name, yamlStr),
+    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgiontls'] }); onClose() },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),
   })
 
   const handleSubmit = () => {
     try {
-      const yamlStr = activeTab === 'yaml' ? yamlContent : edgionTlsToYaml(formData)
-      const parsed = yamlToEdgionTls(yamlStr)
+      const parsed = editableTab === 'yaml' ? yamlToEdgionTls(yamlContent) : formData
+      const yamlStr = dumpYaml(toMutationDocument(parsed, mode === 'create' ? 'create' : 'update'))
       const name = parsed.metadata?.name
       const namespace = parsed.metadata?.namespace
       if (!name || !namespace) {
@@ -105,18 +106,19 @@ const EdgionTlsEditor: React.FC<EdgionTlsEditorProps> = ({ visible, mode, resour
         isReadOnly
           ? [<Button key="close" onClick={onClose}>{t('btn.close')}</Button>]
           : [
-              <Button key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
-              <Button key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
+              <Button {...editorCancelButtonProps} key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
+              <Button {...editorSubmitButtonProps} key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
                 {mode === 'create' ? t('btn.create') : t('btn.save')}
               </Button>,
             ]
       }
     >
       <Tabs activeKey={activeTab} onChange={handleTabChange} items={[
-        { key: 'form', label: t('tab.form'),
+        { key: 'form', label: editorFormTab(t('tab.form')),
           children: <EdgionTlsForm data={formData} onChange={setFormData} readOnly={isReadOnly} isCreate={mode === 'create'} /> },
-        { key: 'yaml', label: t('tab.yaml'),
+        { key: 'yaml', label: editorYamlTab(t('tab.yaml')),
           children: <YamlEditor value={yamlContent} onChange={setYamlContent} readOnly={isReadOnly} height="500px" /> },
+        ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} /> }] : []),
       ]} />
     </Modal>
   )

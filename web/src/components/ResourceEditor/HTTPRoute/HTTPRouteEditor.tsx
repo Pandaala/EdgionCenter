@@ -3,11 +3,14 @@
  * 支持表单模式和 YAML 模式切换，带双向同步
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useState, useEffect } from 'react';
 import { Modal, Tabs, Button, Space, message } from 'antd';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import HTTPRouteForm from './HTTPRouteForm';
+import { editorCancelButtonProps, editorConditionsTab, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds';
 import YamlEditor from '@/components/YamlEditor';
+import ResourceConditions from '@/components/resource/ResourceConditions';
 import { resourceApi } from '@/api/resources';
 import { httpRouteSchema } from '@/schemas/gateway-api';
 import {
@@ -16,9 +19,12 @@ import {
   httpRouteToYAML,
   yamlToHTTPRoute,
   DEFAULT_HTTPROUTE_YAML,
+  toHTTPRouteMutationDocument,
 } from '@/utils/httproute';
+import { dumpYaml } from '@/utils/yaml-utils';
 import type { HTTPRoute } from '@/types/gateway-api';
 import { useT } from '@/i18n';
+import { useEditorTabTransition } from '../useEditorTabTransition';
 
 
 interface HTTPRouteEditorProps {
@@ -34,11 +40,45 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
   resource,
   onClose,
 }) => {
-  const t = useT();
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form');
+  const t = useT()
+  const mutationTarget = useControllerMutationTarget();
   const [formData, setFormData] = useState<HTTPRoute | null>(null);
   const [yamlContent, setYamlContent] = useState<string>('');
   const queryClient = useQueryClient();
+  const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
+    formData,
+    yamlContent,
+    serialize: (value) => {
+      if (!value) throw new Error(t('msg.formEmpty'))
+      return httpRouteToYAML(value)
+    },
+    parse: (source) => {
+      const parsed = yamlToHTTPRoute(source)
+      httpRouteSchema.parse(parsed)
+      return parsed
+    },
+    setFormData,
+    setYamlContent,
+    onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
+  })
+  const processedResource = useQuery({
+    queryKey: [
+      'processed-resource',
+      mutationTarget.controllerId ?? 'direct',
+      'httproute',
+      resource?.metadata.namespace,
+      resource?.metadata.name,
+    ],
+    queryFn: () => resourceApi.getProcessed<HTTPRoute>(
+      mutationTarget,
+      'httproute',
+      resource?.metadata.namespace,
+      resource!.metadata.name,
+    ),
+    enabled: visible && initialMode !== 'create' && Boolean(resource?.metadata.name),
+    retry: 2,
+    refetchInterval: visible && initialMode !== 'create' ? 2_000 : false,
+  });
 
   // 是否只读（查看模式）
   const isReadOnly = initialMode === 'view';
@@ -57,45 +97,28 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
         setFormData(emptyRoute);
         setYamlContent(DEFAULT_HTTPROUTE_YAML);
       }
-      setActiveTab('form');
+      resetEditorTab();
     }
-  }, [visible, initialMode, resource]);
+  }, [visible, initialMode, resource, resetEditorTab]);
 
   // 表单 → YAML 同步
   const handleFormChange = (newFormData: HTTPRoute) => {
     setFormData(newFormData);
     try {
-      const normalized = normalizeHTTPRoute(newFormData);
-      const yaml = httpRouteToYAML(normalized);
+      const yaml = httpRouteToYAML(newFormData);
       setYamlContent(yaml);
     } catch (e: any) {
       console.error('Form to YAML conversion error:', e);
     }
   };
 
-  // YAML → 表单同步
-  const handleYamlChange = (newYaml: string) => {
-    setYamlContent(newYaml);
-    try {
-      const parsed = yamlToHTTPRoute(newYaml);
-      // Zod 验证（静默）
-      const validated = httpRouteSchema.safeParse(parsed);
-      if (validated.success) {
-        setFormData(validated.data as any);
-      }
-    } catch (e: any) {
-      console.error('YAML parse error:', e);
-      // YAML 格式错误，不更新表单
-    }
-  };
-
   // 创建 Mutation
   const createMutation = useMutation({
     mutationFn: ({ namespace, content }: { namespace: string; name: string; content: string }) =>
-      resourceApi.create('httproute', namespace, content),
+      resourceApi.create(mutationTarget, 'httproute', namespace, content),
     onSuccess: () => {
       message.success(t('msg.createOk'));
-      queryClient.invalidateQueries({ queryKey: ['httproutes'] });
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'httproute'] });
       onClose();
     },
     onError: (error: any) => {
@@ -106,10 +129,10 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
   // 更新 Mutation
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, content }: { namespace: string; name: string; content: string }) =>
-      resourceApi.update('httproute', namespace, name, content),
+      resourceApi.update(mutationTarget, 'httproute', namespace, name, content),
     onSuccess: () => {
       message.success(t('msg.updateOk'));
-      queryClient.invalidateQueries({ queryKey: ['httproutes'] });
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'httproute'] });
       onClose();
     },
     onError: (error: any) => {
@@ -123,7 +146,7 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
       let contentToSubmit: string;
       let parsedResource: HTTPRoute;
 
-      if (activeTab === 'form') {
+      if (editableTab === 'form') {
         // 表单模式：验证表单数据
         if (!formData) {
           message.error(t('msg.formEmpty'));
@@ -131,14 +154,14 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
         }
 
         // Zod 验证
-        const validated = httpRouteSchema.parse(formData) as any;
-        parsedResource = validated;
-        contentToSubmit = httpRouteToYAML(validated);
+        httpRouteSchema.parse(formData);
+        parsedResource = formData;
+        contentToSubmit = dumpYaml(toHTTPRouteMutationDocument(formData, initialMode === 'create' ? 'create' : 'update'));
       } else {
         // YAML 模式：解析并验证 YAML
         parsedResource = yamlToHTTPRoute(yamlContent);
-        const validated = httpRouteSchema.parse(parsedResource) as any;
-        contentToSubmit = httpRouteToYAML(validated);
+        httpRouteSchema.parse(parsedResource);
+        contentToSubmit = dumpYaml(toHTTPRouteMutationDocument(parsedResource, initialMode === 'create' ? 'create' : 'update'));
       }
 
       const name = parsedResource.metadata?.name;
@@ -178,11 +201,12 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
 
   const footer = (
     <Space>
-      <Button onClick={onClose}>
+      <Button {...editorCancelButtonProps} onClick={onClose}>
         {initialMode === 'view' ? t('btn.close') : t('btn.cancel')}
       </Button>
       {initialMode !== 'view' && (
         <Button
+          {...editorSubmitButtonProps}
           type="primary"
           onClick={handleSubmit}
           loading={createMutation.isPending || updateMutation.isPending}
@@ -203,10 +227,10 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
       destroyOnClose
       style={{ top: 20 }}
     >
-      <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as 'form' | 'yaml')} items={[
+      <Tabs activeKey={activeTab} onChange={handleTabChange} items={[
         {
           key: 'form',
-          label: t('tab.form'),
+          label: editorFormTab(t('tab.form')),
           children: formData && (
             <HTTPRouteForm
               value={formData}
@@ -218,16 +242,21 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
         },
         {
           key: 'yaml',
-          label: t('tab.yaml'),
+          label: editorYamlTab(t('tab.yaml')),
           children: (
             <YamlEditor
               value={yamlContent}
-              onChange={handleYamlChange}
+              onChange={setYamlContent}
               readOnly={isReadOnly}
               height="65vh"
             />
           ),
         },
+        ...(initialMode !== 'create' ? [{
+          key: 'conditions',
+          label: editorConditionsTab(t('tab.conditions')),
+          children: <ResourceConditions status={processedResource.data?.status ?? formData?.status} emptyText={t('status.noConditions')} />,
+        }] : []),
       ]} />
     </Modal>
   );

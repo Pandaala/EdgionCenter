@@ -1,0 +1,31 @@
+[package]
+name = "edgion-center-adapter-sql"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "SQLite/MySQL persistence adapter for Edgion Center"
+
+[features]
+test-support = []
+
+[dependencies]
+edgion-center-core = { path = "../center-core" }
+anyhow = "1.0"
+async-trait.workspace = true
+bcrypt = "0.18"
+metrics = "0.24"
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "sqlite",
+    "mysql",
+    "macros",
+    "migrate",
+] }
+tokio = { version = "1.49", features = ["sync", "rt"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.49", features = ["macros", "rt-multi-thread"] }

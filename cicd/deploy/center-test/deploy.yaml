@@ -12,7 +12,7 @@ metadata:
   namespace: edgion-test
 data:
   edgion-controller.yaml: |
-    work_dir: /edgion
+    work_dir: /tmp/edgion
 
     server:
       grpc_listen: 0.0.0.0:12151
@@ -23,12 +23,23 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-01
       cluster: cluster-east
       env: [testing]
       tag: [team-a]
       ping_interval_secs: 5
+      rbac:
+        allow:
+          - verbs: ["*"]
+            kinds: ["*"]
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-1.crt
+            key: /edgion/tls/controller-1.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -46,7 +57,7 @@ metadata:
   namespace: edgion-test
 data:
   edgion-controller.yaml: |
-    work_dir: /edgion
+    work_dir: /tmp/edgion
 
     server:
       grpc_listen: 0.0.0.0:12151
@@ -57,12 +68,23 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-02
       cluster: cluster-west
       env: [testing]
       tag: [team-b]
       ping_interval_secs: 5
+      rbac:
+        allow:
+          - verbs: ["*"]
+            kinds: ["*"]
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-2.crt
+            key: /edgion/tls/controller-2.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -87,10 +109,38 @@ data:
       metrics_addr: 0.0.0.0:12290
 
     sync:
-      list_interval_secs: 30
-      list_timeout_secs: 10
       command_timeout_secs: 30
       ping_interval_secs: 5
+
+    database:
+      enabled: true
+      backend: sqlite
+      sqlite_path: /edgion/data/center.db
+
+    authz:
+      mode: rbac
+
+    db_auth:
+      enabled: true
+      jwt_secret: integration_test_jwt_secret_do_not_reuse_production_abc
+      jwt_expiry_hours: 24
+      cookie_secure: false
+
+    audit:
+      enabled: true
+      log_reads: true
+      retention_days: 0
+
+    grpc_security:
+      active: fed
+      certs:
+        - name: fed
+          cert: /edgion/tls/server.crt
+          key: /edgion/tls/server.key
+          ca: /edgion/tls/ca.crt
+
+    peer_identity:
+      trust_domain: edgion.io
 
     local_auth:
       enabled: true
@@ -101,7 +151,21 @@ data:
       password: test_password_123
       jwt_secret: integration_test_jwt_secret_do_not_reuse_production_abc
       jwt_expiry_hours: 24
+      cookie_secure: false
       skip_paths: [/health, /ready, /api/v1/server-info]
+
+---
+# === Center persistent test data ===
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: center-data
+  namespace: edgion-test
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
 
 ---
 # === Center Service (Controllers connect here via DNS name "center") ===
@@ -137,12 +201,18 @@ metadata:
   labels:
     app: edgion-center
 spec:
+  securityContext:
+    fsGroup: 1000
   containers:
     - name: center
-      image: edgion-all:local
+      image: edgion-center-standalone:local
       imagePullPolicy: Never
-      command: ["edgion-center"]
       args: ["-c", "/edgion/config/edgion-center.yaml"]
+      env:
+        - name: EDGION_ADMIN_USERNAME
+          value: admin
+        - name: EDGION_ADMIN_PASSWORD
+          value: test_password_123
       ports:
         - containerPort: 12251
           name: grpc
@@ -156,10 +226,21 @@ spec:
         - name: config
           mountPath: /edgion/config/edgion-center.yaml
           subPath: edgion-center.yaml
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
+        - name: data
+          mountPath: /edgion/data
   volumes:
     - name: config
       configMap:
         name: center-config
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
+    - name: data
+      persistentVolumeClaim:
+        claimName: center-data
 
 ---
 # === Controller 1 Pod ===
@@ -176,12 +257,15 @@ spec:
     - name: init-data
       image: edgion-all:local
       imagePullPolicy: Never
-      command: ['sh', '-c', 'mkdir -p /edgion/data/EdgionPlugins /edgion/data/HTTPRoute && cp /init-data/*.yaml /edgion/data/EdgionPlugins/ && cp /init-data-http/*.yaml /edgion/data/HTTPRoute/ 2>/dev/null; echo done']
+      command: ['sh', '-c', 'mkdir -p /edgion/data/edgion-default; for src in /init-data/*.yaml; do name=${src##*/}; name=${name#01_EdgionPlugins_}; cp "$src" "/edgion/data/edgion-default/EdgionPlugins_edgion-default_$name"; done; echo done']
       volumeMounts:
         - name: init-data
           mountPath: /init-data
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   containers:
     - name: controller
       image: edgion-all:local
@@ -199,6 +283,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -208,6 +295,9 @@ spec:
         name: controller-1-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 2 Pod ===
@@ -224,12 +314,15 @@ spec:
     - name: init-data
       image: edgion-all:local
       imagePullPolicy: Never
-      command: ['sh', '-c', 'mkdir -p /edgion/data/EdgionPlugins /edgion/data/HTTPRoute && cp /init-data/*.yaml /edgion/data/EdgionPlugins/ && cp /init-data-http/*.yaml /edgion/data/HTTPRoute/ 2>/dev/null; echo done']
+      command: ['sh', '-c', 'mkdir -p /edgion/data/edgion-default; for src in /init-data/*.yaml; do name=${src##*/}; name=${name#01_EdgionPlugins_}; cp "$src" "/edgion/data/edgion-default/EdgionPlugins_edgion-default_$name"; done; echo done']
       volumeMounts:
         - name: init-data
           mountPath: /init-data
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   containers:
     - name: controller
       image: edgion-all:local
@@ -247,6 +340,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -256,6 +352,9 @@ spec:
         name: controller-2-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 3 Config (cluster-north) ===
@@ -266,7 +365,7 @@ metadata:
   namespace: edgion-test
 data:
   edgion-controller.yaml: |
-    work_dir: /edgion
+    work_dir: /tmp/edgion
 
     server:
       grpc_listen: 0.0.0.0:12151
@@ -277,12 +376,23 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-03
       cluster: cluster-north
       env: [testing]
       tag: [team-c]
       ping_interval_secs: 5
+      rbac:
+        allow:
+          - verbs: ["*"]
+            kinds: ["*"]
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-3.crt
+            key: /edgion/tls/controller-3.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -300,7 +410,7 @@ metadata:
   namespace: edgion-test
 data:
   edgion-controller.yaml: |
-    work_dir: /edgion
+    work_dir: /tmp/edgion
 
     server:
       grpc_listen: 0.0.0.0:12151
@@ -311,12 +421,23 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-04
       cluster: cluster-south
       env: [testing]
       tag: [team-d]
       ping_interval_secs: 5
+      rbac:
+        allow:
+          - verbs: ["*"]
+            kinds: ["*"]
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-4.crt
+            key: /edgion/tls/controller-4.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -334,7 +455,7 @@ metadata:
   namespace: edgion-test
 data:
   edgion-controller.yaml: |
-    work_dir: /edgion
+    work_dir: /tmp/edgion
 
     server:
       grpc_listen: 0.0.0.0:12151
@@ -345,12 +466,23 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-05
       cluster: cluster-dr-east
       env: [testing]
       tag: [team-e]
       ping_interval_secs: 5
+      rbac:
+        allow:
+          - verbs: ["*"]
+            kinds: ["*"]
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-5.crt
+            key: /edgion/tls/controller-5.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -368,7 +500,7 @@ metadata:
   namespace: edgion-test
 data:
   edgion-controller.yaml: |
-    work_dir: /edgion
+    work_dir: /tmp/edgion
 
     server:
       grpc_listen: 0.0.0.0:12151
@@ -379,12 +511,23 @@ data:
       conf_dir: /edgion/data
 
     center:
-      address: http://center:12251
+      address: https://center:12251
       name: ctrl-06
       cluster: cluster-dr-west
       env: [testing]
       tag: [team-f]
       ping_interval_secs: 5
+      rbac:
+        allow:
+          - verbs: ["*"]
+            kinds: ["*"]
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /edgion/tls/controller-6.crt
+            key: /edgion/tls/controller-6.key
+            ca: /edgion/tls/ca.crt
 
     logging:
       log_level: info
@@ -408,7 +551,7 @@ spec:
     - name: init-data
       image: edgion-all:local
       imagePullPolicy: Never
-      command: ['sh', '-c', 'mkdir -p /edgion/data/EdgionPlugins /edgion/data/HTTPRoute && cp /init-data/*.yaml /edgion/data/EdgionPlugins/ && cp /init-data-http/*.yaml /edgion/data/HTTPRoute/ 2>/dev/null; echo done']
+      command: ['sh', '-c', 'mkdir -p /edgion/data/edgion-default; for src in /init-data/*.yaml; do name=${src##*/}; name=${name#01_EdgionPlugins_}; cp "$src" "/edgion/data/edgion-default/EdgionPlugins_edgion-default_$name"; done; echo done']
       volumeMounts:
         - name: init-data
           mountPath: /init-data
@@ -431,6 +574,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -440,6 +586,9 @@ spec:
         name: controller-3-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 4 Pod ===
@@ -456,7 +605,7 @@ spec:
     - name: init-data
       image: edgion-all:local
       imagePullPolicy: Never
-      command: ['sh', '-c', 'mkdir -p /edgion/data/EdgionPlugins /edgion/data/HTTPRoute && cp /init-data/*.yaml /edgion/data/EdgionPlugins/ && cp /init-data-http/*.yaml /edgion/data/HTTPRoute/ 2>/dev/null; echo done']
+      command: ['sh', '-c', 'mkdir -p /edgion/data/edgion-default; for src in /init-data/*.yaml; do name=${src##*/}; name=${name#01_EdgionPlugins_}; cp "$src" "/edgion/data/edgion-default/EdgionPlugins_edgion-default_$name"; done; echo done']
       volumeMounts:
         - name: init-data
           mountPath: /init-data
@@ -479,6 +628,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -488,6 +640,9 @@ spec:
         name: controller-4-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 5 Pod ===
@@ -504,7 +659,7 @@ spec:
     - name: init-data
       image: edgion-all:local
       imagePullPolicy: Never
-      command: ['sh', '-c', 'mkdir -p /edgion/data/EdgionPlugins /edgion/data/HTTPRoute && cp /init-data/*.yaml /edgion/data/EdgionPlugins/ && cp /init-data-http/*.yaml /edgion/data/HTTPRoute/ 2>/dev/null; echo done']
+      command: ['sh', '-c', 'mkdir -p /edgion/data/edgion-default; for src in /init-data/*.yaml; do name=${src##*/}; name=${name#01_EdgionPlugins_}; cp "$src" "/edgion/data/edgion-default/EdgionPlugins_edgion-default_$name"; done; echo done']
       volumeMounts:
         - name: init-data
           mountPath: /init-data
@@ -527,6 +682,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -536,6 +694,9 @@ spec:
         name: controller-5-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 6 Pod ===
@@ -552,7 +713,7 @@ spec:
     - name: init-data
       image: edgion-all:local
       imagePullPolicy: Never
-      command: ['sh', '-c', 'mkdir -p /edgion/data/EdgionPlugins /edgion/data/HTTPRoute && cp /init-data/*.yaml /edgion/data/EdgionPlugins/ && cp /init-data-http/*.yaml /edgion/data/HTTPRoute/ 2>/dev/null; echo done']
+      command: ['sh', '-c', 'mkdir -p /edgion/data/edgion-default; for src in /init-data/*.yaml; do name=${src##*/}; name=${name#01_EdgionPlugins_}; cp "$src" "/edgion/data/edgion-default/EdgionPlugins_edgion-default_$name"; done; echo done']
       volumeMounts:
         - name: init-data
           mountPath: /init-data
@@ -575,6 +736,9 @@ spec:
           subPath: edgion-controller.yaml
         - name: data
           mountPath: /edgion/data
+        - name: federation-tls
+          mountPath: /edgion/tls
+          readOnly: true
   volumes:
     - name: config
       configMap:
@@ -584,6 +748,9 @@ spec:
         name: controller-6-data
     - name: data
       emptyDir: {}
+    - name: federation-tls
+      secret:
+        secretName: center-test-federation-tls
 
 ---
 # === Controller 1 Test Data ===

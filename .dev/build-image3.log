@@ -1,0 +1,151 @@
+
+[0;34m[INFO][0m Edgion Multi-Architecture Docker Image Builder
+[0;34m[INFO][0m Version: dev
+[0;34m[INFO][0m Architectures: arm64
+[0;34m[INFO][0m Registry: docker.io/pandaala
+[0;34m[INFO][0m Push: false
+[0;34m[INFO][0m Mode: Standard
+
+[0;34m[INFO][0m Checking prerequisites...
+[0;32m[SUCCESS][0m Prerequisites check passed
+
+[0;36m═══════════════════════════════════════════════════════════════[0m
+[0;36m  Stage 2: Compiling binaries[0m
+[0;36m═══════════════════════════════════════════════════════════════[0m
+
+[0;34m[INFO][0m Compiling binaries for arm64 (aarch64-unknown-linux-gnu)...
+[0;34m[INFO][0m This may take several minutes on first build...
+[0;34m[INFO][0m Builder image edgion-builder:linux-arm64 already exists
+   Compiling edgion-controller v0.1.0 (/project/edgion-controller)
+    Finished `release` profile [optimized] target(s) in 1m 17s
+[0;32m[SUCCESS][0m Compiled binaries for arm64
+
+[0;36m═══════════════════════════════════════════════════════════════[0m
+[0;36m  Stage 3: Building Docker images[0m
+[0;36m═══════════════════════════════════════════════════════════════[0m
+
+[0;34m[INFO][0m Building gateway image for arm64...
+[0;34m[INFO][0m   Tag: docker.io/pandaala/edgion-gateway:dev_arm64
+#0 building with "edgion-builder" instance using docker-container driver
+
+#1 [internal] load build definition from Dockerfile.runtime
+#1 DONE 0.0s
+
+#1 [internal] load build definition from Dockerfile.runtime
+#1 transferring dockerfile: 3.21kB done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/debian:bookworm-slim
+#2 ...
+
+#3 [auth] library/debian:pull token for registry-1.docker.io
+#3 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/debian:bookworm-slim
+#2 DONE 2.3s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 1.06kB done
+#4 DONE 0.1s
+
+#5 [stage-0 1/7] FROM docker.io/library/debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716
+#5 resolve docker.io/library/debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716
+#5 resolve docker.io/library/debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 0.2s done
+#5 DONE 0.2s
+
+#6 [internal] load build context
+#6 transferring context: 189.60MB 0.9s done
+#6 DONE 1.0s
+
+#7 [stage-0 4/7] WORKDIR /usr/local/edgion
+#7 CACHED
+
+#8 [stage-0 2/7] RUN apt-get update && apt-get install -y     ca-certificates     libssl3     procps     && if [ -n "" ]; then apt-get install -y --no-install-recommends ; fi     && rm -rf /var/lib/apt/lists/*
+#8 CACHED
+
+#9 [stage-0 3/7] RUN groupadd -g 1000 edgion 2>/dev/null || groupadd edgion &&     useradd -r -u 1000 -g edgion edgion 2>/dev/null || useradd -r -g edgion edgion
+#9 CACHED
+
+#10 [stage-0 5/7] RUN chown -R edgion:edgion /usr/local/edgion
+#10 CACHED
+
+#11 [stage-0 6/7] RUN --mount=type=bind,source=target/aarch64-unknown-linux-gnu/release,target=/tmp/binaries     if [ "bin" = "example" ]; then       cp /tmp/binaries/gateway /usr/local/bin/gateway &&       chmod +x /usr/local/bin/gateway;     else       cp /tmp/binaries/edgion-gateway /usr/local/bin/edgion-gateway &&       cp /tmp/binaries/edgion-cli /usr/local/bin/edgion-cli &&       chmod +x /usr/local/bin/edgion-gateway /usr/local/bin/edgion-cli;     fi
+#11 DONE 0.9s
+
+#12 [stage-0 7/7] RUN --mount=type=bind,source=config,target=/tmp/config     mkdir -p ./config &&     cp -r /tmp/config/*.toml ./config/ 2>/dev/null || true &&     chown -R edgion:edgion ./config/
+#12 DONE 0.4s
+
+#13 exporting to oci image format
+#13 exporting layers
+#13 exporting layers 1.8s done
+#13 exporting manifest sha256:594b45deda97c27012be4bdf930a3e7cedda51b73cd9ec31388f992ab63a55d8 0.1s done
+#13 exporting config sha256:a48b25cb7eace49880fa2840d32fe69e1bd938da4e1b9b7ac6d9931eb701aa21 0.1s done
+#13 sending tarball
+#13 sending tarball 2.1s done
+#13 DONE 4.1s
+
+#14 importing to docker
+#14 DONE 0.0s
+[0;32m[SUCCESS][0m Built gateway:dev_arm64
+[0;34m[INFO][0m Building controller image for arm64...
+[0;34m[INFO][0m   Tag: docker.io/pandaala/edgion-controller:dev_arm64
+#0 building with "edgion-builder" instance using docker-container driver
+
+#1 [internal] load build definition from Dockerfile.runtime
+#1 transferring dockerfile: 3.21kB done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/debian:bookworm-slim
+#2 DONE 0.5s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 1.06kB done
+#3 DONE 0.1s
+
+#4 [internal] load build context
+#4 transferring context: 946.22kB 0.2s done
+#4 DONE 0.3s
+
+#5 [stage-0 1/7] FROM docker.io/library/debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716
+#5 resolve docker.io/library/debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 0.1s done
+#5 DONE 0.2s
+
+#6 [stage-0 2/7] RUN apt-get update && apt-get install -y     ca-certificates     libssl3     procps     && if [ -n "" ]; then apt-get install -y --no-install-recommends ; fi     && rm -rf /var/lib/apt/lists/*
+#6 CACHED
+
+#7 [stage-0 3/7] RUN groupadd -g 1000 edgion 2>/dev/null || groupadd edgion &&     useradd -r -u 1000 -g edgion edgion 2>/dev/null || useradd -r -g edgion edgion
+#7 CACHED
+
+#8 [stage-0 4/7] WORKDIR /usr/local/edgion
+#8 CACHED
+
+#9 [stage-0 5/7] RUN chown -R edgion:edgion /usr/local/edgion
+#9 CACHED
+
+#10 [stage-0 6/7] RUN --mount=type=bind,source=target/aarch64-unknown-linux-gnu/release,target=/tmp/binaries     if [ "bin" = "example" ]; then       cp /tmp/binaries/controller /usr/local/bin/controller &&       chmod +x /usr/local/bin/controller;     else       cp /tmp/binaries/edgion-controller /usr/local/bin/edgion-controller &&       cp /tmp/binaries/edgion-cli /usr/local/bin/edgion-cli &&       chmod +x /usr/local/bin/edgion-controller /usr/local/bin/edgion-cli;     fi
+#10 DONE 0.8s
+
+#11 [stage-0 7/7] RUN --mount=type=bind,source=config,target=/tmp/config     mkdir -p ./config &&     cp -r /tmp/config/*.toml ./config/ 2>/dev/null || true &&     chown -R edgion:edgion ./config/
+#11 DONE 0.4s
+
+#12 exporting to oci image format
+#12 exporting layers
+#12 exporting layers 2.0s done
+#12 exporting manifest sha256:d992806c028b66655df52b1cbf14560d23c35a3a0cbd1ea33759644cf7751ade 0.1s done
+#12 exporting config sha256:93f71b61bdd8b44c7ee29653521ae12464adc1bbb74ef21b4a018e1c361c940e 0.1s done
+#12 sending tarball
+#12 sending tarball 1.9s done
+#12 DONE 4.1s
+
+#13 importing to docker
+#13 DONE 0.0s
+[0;32m[SUCCESS][0m Built controller:dev_arm64
+[0;34m[INFO][0m Skipping manifest creation (not pushing)
+[0;34m[INFO][0m Use --push to create and push multi-arch manifests
+
+[0;32m[SUCCESS][0m Build completed successfully!
+
+[0;34m[INFO][0m Built images:
+  docker.io/pandaala/edgion-gateway:dev_arm64 (local)
+  docker.io/pandaala/edgion-controller:dev_arm64 (local)
+

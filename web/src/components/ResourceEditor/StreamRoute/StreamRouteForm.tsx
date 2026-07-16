@@ -5,13 +5,15 @@
  * TLSRoute: parentRefs + hostnames + backendRefs + annotations
  */
 
-import React from 'react'
-import { Form, Space } from 'antd'
+import React, { useEffect, useState } from 'react'
+import { Button, Card, Form, Select, Space } from 'antd'
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import MetadataSection from '../common/MetadataSection'
 import ParentRefsSection from '../common/ParentRefsSection'
 import HostnamesSection from '../common/HostnamesSection'
 import BackendRefsEditor from '../common/BackendRefsEditor'
 import StreamAnnotationsSection from './StreamAnnotationsSection'
+import { useT } from '@/i18n'
 
 export type StreamRouteKind = 'TCPRoute' | 'UDPRoute' | 'TLSRoute'
 
@@ -23,6 +25,20 @@ interface StreamRouteFormProps {
   isCreate?: boolean
 }
 
+export function replaceRuleBackendRefs<T extends { spec?: { rules?: unknown[] } }>(
+  resource: T,
+  ruleIndex: number,
+  backendRefs: unknown[],
+): T {
+  const rules = [...(resource.spec?.rules || [])] as Array<Record<string, unknown>>
+  const currentRule = rules[ruleIndex] || {}
+  rules[ruleIndex] = { ...currentRule, backendRefs }
+  return {
+    ...resource,
+    spec: { ...resource.spec, rules },
+  }
+}
+
 const StreamRouteForm: React.FC<StreamRouteFormProps> = ({
   kind,
   data,
@@ -30,6 +46,14 @@ const StreamRouteForm: React.FC<StreamRouteFormProps> = ({
   readOnly = false,
   isCreate = true,
 }) => {
+  const t = useT()
+  const rules = data.spec?.rules || []
+  const [selectedRule, setSelectedRule] = useState(0)
+
+  useEffect(() => {
+    if (selectedRule >= rules.length) setSelectedRule(Math.max(0, rules.length - 1))
+  }, [rules.length, selectedRule])
+
   const update = (path: string, value: any) => {
     if (path.startsWith('metadata.')) {
       const field = path.slice('metadata.'.length)
@@ -45,15 +69,25 @@ const StreamRouteForm: React.FC<StreamRouteFormProps> = ({
   }
 
   const handleRulesChange = (backendRefs: any[]) => {
-    const rules = data.spec?.rules || [{}]
-    const newRules = [{ ...rules[0], backendRefs }]
-    update('spec', { ...data.spec, rules: newRules })
+    onChange(replaceRuleBackendRefs(data, selectedRule, backendRefs))
   }
 
-  const backendRefs = data.spec?.rules?.[0]?.backendRefs || []
+  const addRule = () => {
+    const nextRules = [...rules, { backendRefs: [{ name: '', port: kind === 'TLSRoute' ? 443 : 80, weight: 1 }] }]
+    onChange({ ...data, spec: { ...data.spec, rules: nextRules } })
+    setSelectedRule(nextRules.length - 1)
+  }
+
+  const removeRule = () => {
+    const nextRules = rules.filter((_: unknown, index: number) => index !== selectedRule)
+    onChange({ ...data, spec: { ...data.spec, rules: nextRules } })
+    setSelectedRule(Math.max(0, selectedRule - 1))
+  }
+
+  const backendRefs = rules[selectedRule]?.backendRefs || []
 
   const showHostnames = kind === 'TLSRoute'
-  const showAnnotations = kind === 'TCPRoute' || kind === 'TLSRoute'
+  const showAnnotations = true
 
   return (
     <Form layout="vertical" size="small">
@@ -67,6 +101,7 @@ const StreamRouteForm: React.FC<StreamRouteFormProps> = ({
 
         {showAnnotations && (
           <StreamAnnotationsSection
+            kind={kind}
             annotations={data.metadata?.annotations || {}}
             onChange={(annotations) =>
               onChange({ ...data, metadata: { ...data.metadata, annotations } })
@@ -90,12 +125,35 @@ const StreamRouteForm: React.FC<StreamRouteFormProps> = ({
           />
         )}
 
-        <BackendRefsEditor
-          value={backendRefs}
-          onChange={handleRulesChange}
-          disabled={readOnly}
-          namespace={data.metadata?.namespace}
-        />
+        <Card title={t('routeRule.rules')} size="small">
+          <Space direction="vertical" style={{ width: '100%' }}>
+          {rules.length > 0 && (
+          <Form.Item label={t('routeRule.selected')} style={{ marginBottom: 0 }}>
+            <Select
+              aria-label={t('routeRule.selected')}
+              value={selectedRule}
+              onChange={setSelectedRule}
+              disabled={readOnly}
+              options={rules.map((_: any, index: number) => ({
+                value: index,
+                label: t('routeRule.number', { n: index + 1 }),
+              }))}
+            />
+          </Form.Item>
+          )}
+
+          {rules.length > 0 && <BackendRefsEditor
+            value={backendRefs}
+            onChange={handleRulesChange}
+            disabled={readOnly}
+            namespace={data.metadata?.namespace}
+          />}
+          {!readOnly && <Space>
+            <Button data-testid="streamroute-rule-add" type="dashed" icon={<PlusOutlined />} onClick={addRule}>{t('btn.addRule')}</Button>
+            {rules.length > 0 && <Button data-testid="streamroute-rule-remove" danger icon={<MinusCircleOutlined />} onClick={removeRule}>{t('routeRule.remove')}</Button>}
+          </Space>}
+          </Space>
+        </Card>
       </Space>
     </Form>
   )

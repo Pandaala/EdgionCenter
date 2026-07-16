@@ -1,10 +1,7 @@
-/**
- * EdgionStreamPlugins 工具函数
- */
-
 import * as yaml from 'js-yaml'
 import type { EdgionStreamPlugins } from '@/types/edgion-stream-plugins'
 import { dumpYaml } from './yaml-utils'
+import { buildMutationDocument } from './resource-document'
 
 export const DEFAULT_YAML = `apiVersion: edgion.io/v1
 kind: EdgionStreamPlugins
@@ -13,12 +10,14 @@ metadata:
   namespace: default
 spec:
   plugins:
-    - type: IpRestriction
+    - enable: true
+      type: IpRestriction
       config:
-        ipSource: remoteAddr
         allow:
-          - "10.0.0.0/8"
-        defaultAction: allow
+          - name: private-networks
+            cidrs:
+              - "10.0.0.0/8"
+        defaultAction: deny
 `
 
 export function createEmpty(): EdgionStreamPlugins {
@@ -28,28 +27,26 @@ export function createEmpty(): EdgionStreamPlugins {
     metadata: { name: '', namespace: 'default' },
     spec: {
       plugins: [{
+        enable: true,
         type: 'IpRestriction',
-        config: { ipSource: 'remoteAddr', allow: [], deny: [], defaultAction: 'allow', message: '' },
+        config: { allow: [{ name: 'private-networks', cidrs: [] }], defaultAction: 'deny' },
       }],
+      tlsRoutePlugins: [],
     },
   }
 }
 
-export function normalize(raw: any): EdgionStreamPlugins {
-  return {
-    apiVersion: raw.apiVersion || 'edgion.io/v1',
-    kind: 'EdgionStreamPlugins',
-    metadata: {
-      name: raw.metadata?.name || '',
-      namespace: raw.metadata?.namespace || 'default',
-      labels: raw.metadata?.labels,
-      annotations: raw.metadata?.annotations,
-      resourceVersion: raw.metadata?.resourceVersion,
-      creationTimestamp: raw.metadata?.creationTimestamp,
-    },
-    spec: { plugins: raw.spec?.plugins || [] },
-    status: raw.status,
-  }
+function clone<T>(value: T): T {
+  return structuredClone(value)
+}
+
+/** Parse an API view without injecting defaults or projecting known fields. */
+export function normalize(raw: unknown): EdgionStreamPlugins {
+  if (!raw || typeof raw !== 'object') throw new Error('EdgionStreamPlugins must be an object')
+  const resource = raw as EdgionStreamPlugins
+  if (resource.kind !== 'EdgionStreamPlugins') throw new Error('Expected EdgionStreamPlugins kind')
+  if (!resource.metadata || !resource.spec) throw new Error('EdgionStreamPlugins metadata and spec are required')
+  return clone(resource)
 }
 
 export function toYaml(sp: EdgionStreamPlugins): string {
@@ -57,5 +54,12 @@ export function toYaml(sp: EdgionStreamPlugins): string {
 }
 
 export function fromYaml(yamlStr: string): EdgionStreamPlugins {
-  return normalize(yaml.load(yamlStr) as any)
+  return normalize(yaml.load(yamlStr))
+}
+
+export function toMutationDocument(
+  resource: EdgionStreamPlugins,
+  mode: 'create' | 'update',
+): Record<string, unknown> {
+  return buildMutationDocument(resource, { resourceKind: 'edgionstreamplugins', mode })
 }

@@ -8,11 +8,13 @@ import type { K8sObjectMeta } from './common'
 
 export interface UDPRouteRule {
   backendRefs?: BackendRef[]
+  [key: string]: unknown
 }
 
 export interface UDPRouteSpec {
   parentRefs?: ParentReference[]
   rules: UDPRouteRule[]
+  [key: string]: unknown
 }
 
 export interface UDPRoute {

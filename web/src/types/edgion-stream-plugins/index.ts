@@ -5,21 +5,47 @@
 
 import type { K8sObjectMeta } from '@/types/gateway-api/common'
 
-export interface IpRestrictionConfig {
-  ipSource?: string
-  allow?: string[]
-  deny?: string[]
+export interface IpGroup {
+  name: string
+  description?: string
+  cidrs: string[]
+  [key: string]: unknown
+}
+
+export interface ConfigDataRef {
+  name: string
+  namespace?: string
+  [key: string]: unknown
+}
+
+/** Stage-1 L4 IpRestriction wire shape. HTTP-only fields are intentionally absent. */
+export interface ConnectionIpRestrictionConfig {
+  allow?: IpGroup[]
+  deny?: IpGroup[]
   defaultAction?: 'allow' | 'deny'
+  allowRefs?: ConfigDataRef[]
+  denyRefs?: ConfigDataRef[]
+  [key: string]: unknown
+}
+
+/** Stage-2 uses the HTTP IpRestriction shape because TLS routing has richer context. */
+export interface TlsRouteIpRestrictionConfig extends ConnectionIpRestrictionConfig {
+  ipSource?: 'clientIp' | 'remoteAddr'
   message?: string
+  status?: number
 }
 
 export interface StreamPlugin {
-  type: string
-  config?: IpRestrictionConfig | Record<string, any>
+  enable?: boolean
+  type: 'IpRestriction' | 'GlobalConnectionIpRestriction' | 'ConnectionRateLimit' | string
+  config?: ConnectionIpRestrictionConfig | Record<string, unknown>
+  [key: string]: unknown
 }
 
 export interface EdgionStreamPluginsSpec {
-  plugins: StreamPlugin[]
+  plugins?: StreamPlugin[]
+  tlsRoutePlugins?: StreamPlugin[]
+  [key: string]: unknown
 }
 
 export interface EdgionStreamPlugins {
@@ -28,4 +54,5 @@ export interface EdgionStreamPlugins {
   metadata: K8sObjectMeta
   spec: EdgionStreamPluginsSpec
   status?: any
+  [key: string]: unknown
 }

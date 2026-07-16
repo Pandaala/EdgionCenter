@@ -3,22 +3,27 @@
  * 支持表单模式（元数据 + 插件概览）和 YAML 模式切换，带双向同步
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useState, useEffect } from 'react'
 import { Modal, Tabs, Button, Space, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import EdgionPluginsForm from './EdgionPluginsForm'
+import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import YamlEditor from '@/components/YamlEditor'
 import { resourceApi } from '@/api/resources'
 import {
   createEmptyEdgionPlugins,
   normalizeEdgionPlugins,
   edgionPluginsToYAML,
+  edgionPluginsToMutationYAML,
   yamlToEdgionPlugins,
-  DEFAULT_EDGION_PLUGINS_YAML,
 } from '@/utils/edgionplugins'
 import type { EdgionPlugins } from '@/types/edgion-plugins'
 import type { K8sResource } from '@/api/types'
 import { useT } from '@/i18n'
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
+import ResourceConditions from '@/components/resource/ResourceConditions'
+import { useEditorTabTransition } from '../useEditorTabTransition'
 
 
 interface EdgionPluginsEditorProps {
@@ -35,10 +40,22 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
   onClose,
 }) => {
   const t = useT()
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
+  const mutationTarget = useControllerMutationTarget()
   const [formData, setFormData] = useState<EdgionPlugins | null>(null)
   const [yamlContent, setYamlContent] = useState<string>('')
   const queryClient = useQueryClient()
+  const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
+    formData,
+    yamlContent,
+    serialize: (value) => {
+      if (!value) throw new Error(t('msg.formEmpty'))
+      return edgionPluginsToYAML(normalizeEdgionPlugins(value))
+    },
+    parse: (source) => normalizeEdgionPlugins(yamlToEdgionPlugins(source)),
+    setFormData,
+    setYamlContent,
+    onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
+  })
 
   const isReadOnly = initialMode === 'view'
 
@@ -52,11 +69,11 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
       } else {
         const empty = createEmptyEdgionPlugins()
         setFormData(empty)
-        setYamlContent(DEFAULT_EDGION_PLUGINS_YAML)
+        setYamlContent(edgionPluginsToYAML(empty))
       }
-      setActiveTab('form')
+      resetEditorTab()
     }
-  }, [visible, initialMode, resource])
+  }, [visible, initialMode, resource, resetEditorTab])
 
   // 表单 → YAML 同步
   const handleFormChange = (newFormData: EdgionPlugins) => {
@@ -69,24 +86,13 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
     }
   }
 
-  // YAML → 表单同步
-  const handleYamlChange = (newYaml: string) => {
-    setYamlContent(newYaml)
-    try {
-      const parsed = yamlToEdgionPlugins(newYaml)
-      setFormData(normalizeEdgionPlugins(parsed))
-    } catch (e) {
-      console.error('YAML parse error:', e)
-    }
-  }
-
   // 创建 Mutation
   const createMutation = useMutation({
     mutationFn: ({ namespace, content }: { namespace: string; name: string; content: string }) =>
-      resourceApi.create('edgionplugins', namespace, content),
+      resourceApi.create(mutationTarget, 'edgionplugins', namespace, content),
     onSuccess: () => {
       message.success(t('msg.createOk'))
-      queryClient.invalidateQueries({ queryKey: ['edgionplugins'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionplugins'] })
       onClose()
     },
     onError: (error: any) => {
@@ -97,10 +103,10 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
   // 更新 Mutation
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, content }: { namespace: string; name: string; content: string }) =>
-      resourceApi.update('edgionplugins', namespace, name, content),
+      resourceApi.update(mutationTarget, 'edgionplugins', namespace, name, content),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
-      queryClient.invalidateQueries({ queryKey: ['edgionplugins'] })
+      queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionplugins'] })
       onClose()
     },
     onError: (error: any) => {
@@ -114,16 +120,16 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
       let parsedResource: EdgionPlugins
       let contentToSubmit: string
 
-      if (activeTab === 'form') {
+      if (editableTab === 'form') {
         if (!formData) {
           message.error(t('msg.formEmpty'))
           return
         }
         parsedResource = normalizeEdgionPlugins(formData)
-        contentToSubmit = edgionPluginsToYAML(parsedResource)
+        contentToSubmit = edgionPluginsToMutationYAML(parsedResource, initialMode === 'create' ? 'create' : 'update')
       } else {
         parsedResource = yamlToEdgionPlugins(yamlContent)
-        contentToSubmit = edgionPluginsToYAML(parsedResource)
+        contentToSubmit = edgionPluginsToMutationYAML(parsedResource, initialMode === 'create' ? 'create' : 'update')
       }
 
       const name = parsedResource.metadata?.name
@@ -157,17 +163,20 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
 
   const footer = (
     <Space>
-      <Button onClick={onClose}>
+      <Button {...editorCancelButtonProps} onClick={onClose}>
         {initialMode === 'view' ? t('btn.close') : t('btn.cancel')}
       </Button>
       {initialMode !== 'view' && (
-        <Button
+        <PermissionAwareButton
+          {...editorSubmitButtonProps}
           type="primary"
+          resourceKind="edgionplugins"
+          resourceVerb={initialMode === 'create' ? 'create' : 'update'}
           onClick={handleSubmit}
           loading={createMutation.isPending || updateMutation.isPending}
         >
           {initialMode === 'create' ? t('btn.create') : t('btn.save')}
-        </Button>
+        </PermissionAwareButton>
       )}
     </Space>
   )
@@ -182,10 +191,10 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
       destroyOnClose
       style={{ top: 20 }}
     >
-      <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as 'form' | 'yaml')} items={[
+      <Tabs activeKey={activeTab} onChange={handleTabChange} items={[
         {
           key: 'form',
-          label: t('tab.form'),
+          label: editorFormTab(t('tab.form')),
           children: formData && (
             <EdgionPluginsForm
               value={formData}
@@ -197,16 +206,21 @@ const EdgionPluginsEditor: React.FC<EdgionPluginsEditorProps> = ({
         },
         {
           key: 'yaml',
-          label: t('tab.yaml'),
+          label: editorYamlTab(t('tab.yaml')),
           children: (
             <YamlEditor
               value={yamlContent}
-              onChange={handleYamlChange}
+              onChange={setYamlContent}
               readOnly={isReadOnly}
               height="65vh"
             />
           ),
         },
+        ...(initialMode !== 'create' ? [{
+          key: 'conditions',
+          label: t('tab.conditions'),
+          children: <ResourceConditions status={formData?.status} emptyText={t('status.noConditions')} />,
+        }] : []),
       ]} />
     </Modal>
   )

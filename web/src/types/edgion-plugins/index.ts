@@ -33,6 +33,8 @@ export interface PluginEntry {
   enable?: boolean
   /** 条件化执行配置 */
   conditions?: PluginConditions
+  /** Optional access-log label; must match [a-zA-Z0-9._-]{1,32}. */
+  alias?: string
   /** 插件类型名称，对应 EdgionPlugin 枚举变体 */
   type: string
   /** 插件配置，具体结构由 type 决定 */
@@ -64,6 +66,7 @@ export interface EdgionPluginsSpec {
   upstreamResponseBodyFilterPlugins?: UpstreamResponseBodyFilterEntry[]
   /** 上游响应阶段插件（异步） */
   upstreamResponsePlugins?: UpstreamResponseEntry[]
+  [key: string]: unknown
 }
 
 /**
@@ -89,6 +92,7 @@ export interface EdgionPlugins {
   metadata: K8sObjectMeta
   spec: EdgionPluginsSpec
   status?: EdgionPluginsStatus
+  [key: string]: unknown
 }
 
 /**
@@ -102,7 +106,6 @@ export const PLUGIN_TYPES = [
   'RequestRedirect',
   'UrlRewrite',
   'RequestMirror',
-  'ExtensionRef',
   // Edgion 自定义插件
   'BasicAuth',
   'Cors',
@@ -115,6 +118,7 @@ export const PLUGIN_TYPES = [
   'KeyAuth',
   'LdapAuth',
   'Mock',
+  'FaultInjection',
   'DebugAccessLogToHeader',
   'ProxyRewrite',
   'RequestRestriction',
@@ -131,6 +135,12 @@ export const PLUGIN_TYPES = [
   'DynamicInternalUpstream',
   'DynamicExternalUpstream',
   'Dsl',
+  'RegionRoute',
+  'TraceContext',
+  'ExtProc',
+  'GlobalAccessControl',
+  'Canary',
+  'Wasm',
 ] as const
 
 export type PluginType = typeof PLUGIN_TYPES[number]
@@ -138,19 +148,20 @@ export type PluginType = typeof PLUGIN_TYPES[number]
 /** 各阶段支持的插件类型（参考 Edgion entry.rs 的注释） */
 export const STAGE_PLUGIN_TYPES = {
   requestPlugins: [
-    'RequestHeaderModifier', 'RequestRedirect', 'ExtensionRef',
+    'RequestHeaderModifier', 'RequestRedirect', 'UrlRewrite', 'RequestMirror',
     'BasicAuth', 'Cors', 'Csrf', 'IpRestriction', 'JwtAuth', 'JweDecrypt',
-    'HmacAuth', 'HeaderCertAuth', 'KeyAuth', 'LdapAuth', 'Mock',
-    'DebugAccessLogToHeader', 'ProxyRewrite', 'RequestRestriction',
+    'HmacAuth', 'HeaderCertAuth', 'KeyAuth', 'LdapAuth', 'Mock', 'FaultInjection',
+    'ProxyRewrite', 'RequestRestriction',
     'RateLimit', 'RateLimitRedis', 'CtxSet', 'RealIp', 'ForwardAuth',
     'OpenidConnect', 'DirectEndpoint', 'AllEndpointStatus',
     'DynamicInternalUpstream', 'DynamicExternalUpstream', 'Dsl',
+    'RegionRoute', 'TraceContext', 'ExtProc', 'GlobalAccessControl', 'Canary', 'Wasm',
   ],
   upstreamResponseFilterPlugins: [
-    'ResponseHeaderModifier', 'ResponseRewrite',
+    'ResponseHeaderModifier', 'DebugAccessLogToHeader', 'ResponseRewrite', 'Dsl', 'Wasm',
   ],
   upstreamResponseBodyFilterPlugins: [
-    'BandwidthLimit',
+    'BandwidthLimit', 'Wasm',
   ],
-  upstreamResponsePlugins: [] as string[],
+  upstreamResponsePlugins: ['ExtProc'],
 } as const

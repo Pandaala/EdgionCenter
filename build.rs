@@ -1,19 +1,6 @@
-//! Build script: regenerate the fed_sync gRPC bindings.
-//!
-//! The fed_sync wire contract is COPIED (not shared source) from the Edgion
-//! repo (`src/core/common/fed_sync/proto/fed_sync.proto`) into `proto/`. Keep
-//! it byte-compatible with the Edgion controllers (the gRPC clients) so the
-//! federation stream stays interoperable; bump deliberately when the contract
-//! changes on both sides.
+//! Shared build-time support for both deployable binaries.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-
-    let proto_dir = "proto";
-    tonic_build::configure()
-        .file_descriptor_set_path(out_dir.join("fed_sync_descriptor.bin"))
-        .compile_protos(&[format!("{proto_dir}/fed_sync.proto")], &[proto_dir])?;
-
     ensure_embed_dashboard_placeholder();
 
     Ok(())
@@ -30,7 +17,15 @@ fn ensure_embed_dashboard_placeholder() {
     if std::env::var_os("CARGO_FEATURE_EMBED_DASHBOARD").is_none() {
         return;
     }
-    let dir = std::path::Path::new("web/dist");
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| ".".into()),
+    );
+    let workspace_root = if manifest_dir.join("web").is_dir() {
+        manifest_dir
+    } else {
+        manifest_dir.join("../..")
+    };
+    let dir = workspace_root.join("web/dist");
     let index = dir.join("index.html");
     if index.exists() {
         return;

@@ -1,0 +1,51 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edgion-center-runtime
+rules:
+  - apiGroups: [center.edgion.io]
+    resources: [edgioncontrollers]
+    verbs: [get, list, create, update]
+  - apiGroups: [center.edgion.io]
+    resources: [edgioncontrollers/status]
+    verbs: [get, update]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, create, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edgion-center-runtime
+subjects:
+  - kind: ServiceAccount
+    name: edgion-center
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: edgion-center-runtime
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-subject-access-review
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-subject-access-review
+subjects:
+  - kind: ServiceAccount
+    name: edgion-center
+    namespace: edgion-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-subject-access-review

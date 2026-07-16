@@ -1,22 +1,10 @@
 #!/usr/bin/env bash
-# Build the edgion-center Docker image (single binary, dashboard embedded),
+# Build one mode-specific Edgion Center image with the dashboard embedded,
 # with optional multi-architecture (linux/amd64 + linux/arm64) support.
 #
-# The image build needs the shared `edgion-resources` crate, which lives in the
-# sibling Edgion repo and is referenced via a Cargo path dependency
-# (`../Edgion/edgion-resources`). To keep that path resolvable inside the image
-# AND keep the build context lean, this script stages a temporary context with
-# the relative layout the Dockerfile expects:
-#
-#   <ctx>/EdgionCenter/                source (no target/node_modules/dist)
-#   <ctx>/Edgion/Cargo.toml            trimmed workspace root (members = resources)
-#   <ctx>/Edgion/edgion-resources/     the shared crate (no target)
-#
-# `edgion-resources` is now an Edgion workspace member: its Cargo.toml inherits
-# `edition`/`version`/deps via `*.workspace = true`, so it cannot be built in
-# isolation. We stage a trimmed copy of the workspace root manifest (only
-# `edgion-resources` as a member) so that inheritance resolves without pulling in
-# the other members (notably the ~56k-line `edgion-tests`).
+# The Cargo workspace is self-contained. To keep the Docker context lean, this
+# script stages only EdgionCenter source files and excludes local build outputs,
+# dashboard dependencies, and Git metadata.
 #
 # Multi-arch is produced with `docker buildx build --platform ...`, which emits a
 # single manifest list covering every requested arch. The non-host arch compiles
@@ -26,15 +14,15 @@
 # building more than one arch requires --push to a registry.
 #
 # Usage:
-#   cicd/build-image.sh                                          # host arch, loaded locally
-#   cicd/build-image.sh --arch amd64,arm64 --push                # multi-arch -> registry
+#   cicd/build-image.sh --mode standalone                        # host arch, loaded locally
+#   cicd/build-image.sh --mode kubernetes --arch amd64,arm64 --push
 #   cicd/build-image.sh --platform linux/amd64,linux/arm64 --push
-#   cicd/build-image.sh -t pandaala/edgion-center:dev -r ../Edgion
+#   cicd/build-image.sh --mode standalone -t pandaala/edgion-center-standalone:dev
 #
 # Options:
-#   -t IMAGE_TAG     Full image tag, overrides the assembled default. Repeatable.
+#   --mode MODE      standalone or kubernetes (default: standalone)
+#   -t IMAGE_TAG     Full image tag, overrides the mode-specific default. Repeatable.
 #   --version VER    Version component of the default tag (overrides the git tag)
-#   -r EDGION_DIR    Path to the Edgion repo (default: ../Edgion)
 #   --arch LIST      Comma-separated arches: amd64,arm64 (mapped to linux/<arch>)
 #   --platform LIST  Comma-separated buildx platforms (e.g. linux/amd64,linux/arm64)
 #   --push           Push the result to the registry (required for >1 platform)
@@ -53,16 +41,16 @@ DEFAULT_VERSION="0.3.2"
 # matching the Edgion repo's convention (docker.io/pandaala/edgion-*).
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-docker.io}"
 IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-pandaala}"
-IMAGE_NAME="${IMAGE_NAME:-edgion-center}"
+IMAGE_NAME="${IMAGE_NAME:-}"
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CENTER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-EDGION_DIR="$(cd "${CENTER_DIR}/.." && pwd)/Edgion"
 
 # Version precedence: --version flag / VERSION env > current git tag > DEFAULT_VERSION.
 # Resolved after arg parsing; empty here means "auto-detect from git tag".
 VERSION="${VERSION:-}"
+MODE="${CENTER_MODE:-standalone}"
 
 IMAGE_TAGS=()
 PLATFORMS=""
@@ -96,29 +84,29 @@ arch_list_to_platforms() {
 
 usage() {
     cat <<EOF
-Build the edgion-center Docker image (single binary, dashboard embedded),
+Build one mode-specific Edgion Center image with the dashboard embedded,
 optionally for multiple architectures (linux/amd64 + linux/arm64).
 
 Usage:
-  cicd/build-image.sh                                          # host arch, loaded locally
-  cicd/build-image.sh --arch amd64,arm64 --push                # multi-arch -> registry
+  cicd/build-image.sh --mode standalone                       # host arch, loaded locally
+  cicd/build-image.sh --mode kubernetes --arch amd64,arm64 --push
   cicd/build-image.sh --platform linux/amd64,linux/arm64 --push
-  cicd/build-image.sh -t pandaala/edgion-center:dev -r ../Edgion
+  cicd/build-image.sh --mode standalone -t pandaala/edgion-center-standalone:dev
 
 Options:
+  --mode MODE      standalone or kubernetes (default: standalone)
   -t IMAGE_TAG     Full image tag, overrides the assembled default. Repeatable.
   --version VER    Version component of the default tag (overrides the git tag)
-  -r EDGION_DIR    Path to the Edgion repo (default: ../Edgion)
   --arch LIST      Comma-separated arches: amd64,arm64 (mapped to linux/<arch>)
   --platform LIST  Comma-separated buildx platforms (e.g. linux/amd64,linux/arm64)
   --push           Push the result to the registry (required for >1 platform)
   --load           Load the result into the local image store (single platform only)
   -h, --help       Show this help
 
-Default tag: ${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:<version>
+Default tag: ${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/edgion-center-<mode>:<version>
   Version resolution: --version / VERSION env > current git tag > DEFAULT_VERSION
   (${DEFAULT_VERSION}). Override the other pieces via env: IMAGE_REGISTRY
-  (docker.io), IMAGE_NAMESPACE (pandaala), IMAGE_NAME (edgion-center).
+  (docker.io), IMAGE_NAMESPACE (pandaala), and IMAGE_NAME.
 
 Note: a multi-platform image cannot be loaded into the local Docker image store
 (--load is single-platform only), so building more than one arch requires --push.
@@ -127,9 +115,9 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --mode) MODE="$2"; shift 2 ;;
         -t) IMAGE_TAGS+=("$2"); shift 2 ;;
         --version) VERSION="$2"; shift 2 ;;
-        -r) EDGION_DIR="$(cd "$2" && pwd)"; shift 2 ;;
         --arch) PLATFORMS="$(arch_list_to_platforms "$2")"; shift 2 ;;
         --platform) PLATFORMS="$(arch_list_to_platforms "$2")"; shift 2 ;;
         --push) PUSH=true; shift ;;
@@ -138,6 +126,24 @@ while [[ $# -gt 0 ]]; do
         *) echo "error: unknown option '$1'" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+case "${MODE}" in
+    standalone)
+        CENTER_PACKAGE="edgion-center-standalone"
+        CENTER_BINARY="edgion-center-standalone"
+        DEFAULT_IMAGE_NAME="edgion-center-standalone"
+        ;;
+    kubernetes)
+        CENTER_PACKAGE="edgion-center-kubernetes"
+        CENTER_BINARY="edgion-center-kubernetes"
+        DEFAULT_IMAGE_NAME="edgion-center-kubernetes"
+        ;;
+    *)
+        echo "error: --mode must be standalone or kubernetes (got '${MODE}')" >&2
+        exit 2
+        ;;
+esac
+IMAGE_NAME="${IMAGE_NAME:-${DEFAULT_IMAGE_NAME}}"
 
 # Resolve version: explicit --version/VERSION wins; otherwise use the current
 # git tag (e.g. v0.3.2); otherwise fall back to DEFAULT_VERSION.
@@ -173,13 +179,6 @@ elif [[ "${LOAD}" == "true" && "${PLATFORM_COUNT}" -gt 1 ]]; then
     exit 2
 fi
 
-RESOURCES_DIR="${EDGION_DIR}/edgion-resources"
-if [[ ! -d "${RESOURCES_DIR}" ]]; then
-    echo "error: edgion-resources not found at ${RESOURCES_DIR}" >&2
-    echo "       pass the Edgion repo path with -r <path>." >&2
-    exit 1
-fi
-
 # Ensure a buildx builder exists (the default 'docker' driver cannot do
 # multi-platform builds nor --push of a manifest list).
 ensure_buildx() {
@@ -198,27 +197,17 @@ CTX="$(mktemp -d)"
 trap 'rm -rf "${CTX}"' EXIT
 
 echo "Staging build context at ${CTX} ..."
-mkdir -p "${CTX}/EdgionCenter" "${CTX}/Edgion"
-# Center source: exclude build artifacts and node deps; the dashboard is rebuilt
-# in the image's web stage.
+# Exclude build artifacts and dashboard dependencies; both are rebuilt in the
+# image stages.
 rsync -a \
     --exclude '/target' \
     --exclude '/web/node_modules' \
     --exclude '/web/dist' \
     --exclude '/.git' \
-    "${CENTER_DIR}/" "${CTX}/EdgionCenter/"
-# Shared crate (exclude its build artifacts).
-rsync -a --exclude '/target' --exclude '/.git' "${RESOURCES_DIR}/" "${CTX}/Edgion/edgion-resources/"
-# Trimmed workspace root: keep [workspace.package] + [workspace.dependencies]
-# (the source of truth for edgion-resources' inherited fields) but list only
-# edgion-resources as a member so the other crate dirs need not be staged.
-sed -E \
-    -e 's/^members = .*/members = ["edgion-resources"]/' \
-    -e 's/^default-members = .*/default-members = ["edgion-resources"]/' \
-    "${EDGION_DIR}/Cargo.toml" > "${CTX}/Edgion/Cargo.toml"
+    "${CENTER_DIR}/" "${CTX}/"
 
 # Assemble the buildx invocation.
-BUILD_CMD=(docker buildx build --builder "${BUILDER_NAME}" --platform "${PLATFORMS}" -f "${CENTER_DIR}/cicd/docker/Dockerfile")
+BUILD_CMD=(docker buildx build --builder "${BUILDER_NAME}" --platform "${PLATFORMS}" -f "${CENTER_DIR}/cicd/docker/Dockerfile" --build-arg "CENTER_PACKAGE=${CENTER_PACKAGE}" --build-arg "CENTER_BINARY=${CENTER_BINARY}")
 for tag in "${IMAGE_TAGS[@]}"; do
     BUILD_CMD+=(-t "${tag}")
 done

@@ -135,7 +135,7 @@ const UserDashboard = () => {
         actions={
           <>
             <StatusDot tone={isHealthy ? 'success' : 'danger'} />
-            <Button icon={<ReloadOutlined />} onClick={handleRefreshAll}>
+            <Button data-testid="user-refresh" icon={<ReloadOutlined />} onClick={handleRefreshAll}>
               {t('dash.refreshAll')}
             </Button>
           </>

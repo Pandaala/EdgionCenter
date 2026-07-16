@@ -1,3 +1,4 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
 import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
@@ -12,11 +13,14 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
 const { Search } = Input
 
 const ReferenceGrantList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [editorVisible, setEditorVisible] = useState(false)
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | 'view'>('create')
@@ -38,8 +42,8 @@ const ReferenceGrantList = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('referencegrant', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'referencegrant', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'referencegrant'] })
@@ -55,11 +59,12 @@ const ReferenceGrantList = () => {
     setEditorMode(mode); setSelectedResource(resource || null); setEditorVisible(true)
   }
 
-  const handleDelete = (namespace: string, name: string) => {
+  const handleDelete = (namespace: string, name: string, resourceVersion: string) => {
     Modal.confirm({
+      ...resourceDeleteConfirmProps,
       title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name }),
       okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
-      onOk: () => deleteMutation.mutate({ namespace, name }),
+      onOk: () => deleteMutation.mutate({ namespace, name, resourceVersion }),
     })
   }
 
@@ -97,10 +102,10 @@ const ReferenceGrantList = () => {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</Button>
-          <Button size="small" danger icon={<DeleteOutlined />}
-            onClick={() => handleDelete(r.metadata.namespace!, r.metadata.name)}>{t('btn.delete')}</Button>
+          <Button data-testid={resourceActionTestId('referencegrant', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</Button>
+          <Button data-testid={resourceActionTestId('referencegrant', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</Button>
+          <Button data-testid={resourceActionTestId('referencegrant', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
+            onClick={() => handleDelete(r.metadata.namespace!, r.metadata.name, r.metadata.resourceVersion!)}>{t('btn.delete')}</Button>
         </Space>
       ),
     },
@@ -115,13 +120,13 @@ const ReferenceGrantList = () => {
         subtitle={t('page.subtitle.referenceGrant')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <Button data-testid={resourceActionTestId('referencegrant', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
+            <Button data-testid={resourceActionTestId('referencegrant', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
           </>
         }
       />
       <div style={{ marginBottom: 16 }}>
-        <Search placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
+        <Search data-testid={resourceActionTestId('referencegrant', 'search')} placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
           style={{ width: 240 }} allowClear />
       </div>
 

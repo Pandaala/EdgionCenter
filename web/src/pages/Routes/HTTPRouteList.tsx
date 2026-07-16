@@ -1,9 +1,10 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
+import { Table, Button, Space, Input, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { resourceApi } from '@/api/resources'
+import { batchDeleteFailureKeys, resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import type { HTTPRoute } from '@/types/gateway-api'
 import HTTPRouteEditor from '@/components/ResourceEditor/HTTPRoute/HTTPRouteEditor'
@@ -13,11 +14,15 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import ResourceConditions from '@/components/resource/ResourceConditions'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
 const { Search } = Input
 
 const HTTPRouteList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [editorVisible, setEditorVisible] = useState(false)
@@ -42,8 +47,8 @@ const HTTPRouteList = () => {
 
   // Delete mutation
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('httproute', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'httproute', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'httproute'] })
@@ -52,12 +57,20 @@ const HTTPRouteList = () => {
 
   // Batch delete mutation
   const batchDeleteMutation = useMutation({
-    mutationFn: (resources: Array<{ namespace: string; name: string }>) =>
-      resourceApi.batchDelete('httproute', resources),
+    mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
+      resourceApi.batchDelete(mutationTarget, 'httproute', resources),
     onSuccess: () => {
       message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'httproute'] })
+    },
+    onError: (error: unknown) => {
+      const failedKeys = batchDeleteFailureKeys(error)
+      if (failedKeys) {
+        setSelectedRowKeys(failedKeys)
+        void queryClient.invalidateQueries()
+      }
+      message.error(error instanceof Error ? error.message : String(error))
     },
   })
 
@@ -70,14 +83,15 @@ const HTTPRouteList = () => {
     )
   })
 
-  const handleDelete = (namespace: string, name: string) => {
+  const handleDelete = (namespace: string, name: string, resourceVersion: string) => {
     Modal.confirm({
+      ...resourceDeleteConfirmProps,
       title: t('confirm.deleteTitle'),
       content: t('confirm.deleteMsg', { name }),
       okText: t('confirm.okText'),
       okType: 'danger',
       cancelText: t('btn.cancel'),
-      onOk: () => deleteMutation.mutate({ namespace, name }),
+      onOk: () => deleteMutation.mutate({ namespace, name, resourceVersion }),
     })
   }
 
@@ -87,9 +101,11 @@ const HTTPRouteList = () => {
       .map((route) => ({
         namespace: route.metadata.namespace!,
         name: route.metadata.name,
+        resourceVersion: route.metadata.resourceVersion!,
       }))
 
     Modal.confirm({
+      ...resourceBatchDeleteConfirmProps,
       title: t('confirm.batchDeleteTitle'),
       content: `${t('confirm.batchDeleteMsg', { n: selectedResources.length })} ${t('confirm.deleteIrreversible')}`,
       okText: t('confirm.okText'),
@@ -135,25 +151,26 @@ const HTTPRouteList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: () => <Tag color="success">Active</Tag>,
+      render: (_: unknown, record: K8sResource) => <ResourceConditions status={record.status} compact />,
     },
     {
       title: t('col.actions'),
       key: 'actions',
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button type="link" icon={<EyeOutlined />} size="small" onClick={() => handleView(record)}>
+          <Button data-testid={resourceActionTestId('httproute', 'row-view')} type="link" icon={<EyeOutlined />} size="small" onClick={() => handleView(record)}>
             {t('btn.view')}
           </Button>
-          <Button type="link" icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)}>
+          <Button data-testid={resourceActionTestId('httproute', 'row-edit')} type="link" icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)}>
             {t('btn.edit')}
           </Button>
           <Button
+            data-testid={resourceActionTestId('httproute', 'row-delete')}
             type="link"
             danger
             icon={<DeleteOutlined />}
             size="small"
-            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name)}
+            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}
           >
             {t('btn.delete')}
           </Button>
@@ -171,10 +188,10 @@ const HTTPRouteList = () => {
         subtitle={t('page.subtitle.httpRoute')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+            <Button data-testid={resourceActionTestId('httproute', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+            <Button data-testid={resourceActionTestId('httproute', 'create')} type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
               {t('btn.create')}
             </Button>
           </>
@@ -182,6 +199,7 @@ const HTTPRouteList = () => {
       />
       <div style={{ marginBottom: 16 }}>
         <Search
+          data-testid={resourceActionTestId('httproute', 'search')}
           placeholder={t('ph.searchNameNs')}
           allowClear
           style={{ width: 300 }}
@@ -198,7 +216,7 @@ const HTTPRouteList = () => {
         <div style={{ marginBottom: 16 }}>
           <Space>
             <span>{t('status.selected', { n: selectedRowKeys.length })}</span>
-            <Button danger onClick={handleBatchDelete}>
+            <Button data-testid={resourceActionTestId('httproute', 'batch-delete')} danger onClick={handleBatchDelete}>
               {t('btn.batchDelete')}
             </Button>
           </Space>
@@ -239,4 +257,3 @@ const HTTPRouteList = () => {
 }
 
 export default HTTPRouteList
-

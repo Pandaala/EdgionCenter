@@ -1,0 +1,259 @@
+# Cluster 2: a second federation member running in file_system mode.
+# No K8s watching (so no RBAC / leader contention with cluster 1); resources come
+# from a mounted conf dir. Federates to Center as cluster "edge-cluster".
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edgion-system-2
+---
+# Controller config (file_system mode + federation to Center).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edgion-controller2-config
+  namespace: edgion-system-2
+data:
+  edgion-controller.yaml: |
+    work_dir: /usr/local/edgion
+
+    server:
+      grpc_listen: 0.0.0.0:12151
+      admin_listen: 0.0.0.0:12101
+      probe_listen: 0.0.0.0:12100
+      metrics_listen: 0.0.0.0:12190
+
+    logging:
+      log_dir: logs
+      log_prefix: edgion-controller2
+      log_level: info
+      json_format: false
+      console: true
+
+    conf_center:
+      type: file_system
+      conf_dir: /usr/local/edgion/conf
+
+    conf_sync:
+      no_sync_kinds: [ReferenceGrant, Secret]
+
+    center:
+      address: "https://192.168.139.3:12251"
+      name: "ctrl-edge"
+      cluster: "edge-cluster"
+      env: ["dev"]
+      enabled: true
+      ping_interval_secs: 10
+      security:
+        active: fed
+        certs:
+          - name: fed
+            cert: /usr/local/edgion/certs/ctrl-edge.crt
+            key: /usr/local/edgion/certs/ctrl-edge.key
+            ca: /usr/local/edgion/certs/ca.crt
+---
+# Resource files loaded by file_system mode (the cluster-2 "data set").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edgion-controller2-conf
+  namespace: edgion-system-2
+data:
+  EdgionConfigData_edge-gcir.yaml: |
+    apiVersion: edgion.io/v1
+    kind: EdgionConfigData
+    metadata:
+      name: edge-gcir
+      namespace: edge-test
+    spec:
+      data:
+        type: Selector
+        config:
+          active: p2
+          description: "edge-cluster selector for GlobalConnectionIpRestriction"
+  EdgionConfigData_edge-app.yaml: |
+    apiVersion: edgion.io/v1
+    kind: EdgionConfigData
+    metadata:
+      name: edge-app
+      namespace: edge-test
+    spec:
+      data:
+        type: Selector
+        config:
+          active: blue
+          description: "edge-cluster app profile selector"
+  EdgionPlugins_edge-restriction.yaml: |
+    apiVersion: edgion.io/v1
+    kind: EdgionPlugins
+    metadata:
+      name: edge-request-restriction
+      namespace: edge-test
+    spec:
+      requestPlugins:
+        - enable: true
+          type: RequestRestriction
+          config:
+            mode: Whitelist
+            ruleGroups:
+              - rules:
+                  - name: "edge-whitelist"
+                    source: Path
+                    regex:
+                      - "^/edge/.*"
+            status: 404
+            message: "Path not allowed (edge)"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgion-controller-2
+  namespace: edgion-system-2
+  labels:
+    app: edgion-controller-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edgion-controller-2
+  template:
+    metadata:
+      labels:
+        app: edgion-controller-2
+    spec:
+      # ConfigMap volumes cannot be nested, and file_system mode may write status
+      # back to conf. So copy config + CRD schemas + conf into writable emptyDirs,
+      # laying CRDs out as config/crd/edgion-crd/ (the structure schema_validator
+      # expects: it looks for the edgion-crd/ subdir).
+      initContainers:
+        - name: seed
+          image: docker.io/pandaala/edgion-controller:dev_arm64
+          command:
+            - /bin/sh
+            - -c
+            - "cp /config-src/edgion-controller.yaml /config/ && mkdir -p /config/crd/edgion-crd && cp /crd-src/* /config/crd/edgion-crd/ && cp /conf-src/* /conf/ && echo seeded:"
+          volumeMounts:
+            - {name: config-src, mountPath: /config-src}
+            - {name: crd-src, mountPath: /crd-src}
+            - {name: conf-src, mountPath: /conf-src}
+            - {name: config, mountPath: /config}
+            - {name: conf, mountPath: /conf}
+      containers:
+        - name: edgion-controller-2
+          image: docker.io/pandaala/edgion-controller:dev_arm64
+          command: ["/usr/local/bin/edgion-controller"]
+          args: ["--config-file", "/usr/local/edgion/config/edgion-controller.yaml"]
+          ports:
+            - {name: grpc, containerPort: 12151}
+            - {name: probe, containerPort: 12100}
+          livenessProbe:
+            httpGet: {path: /health, port: 12100}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /ready, port: 12100}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /usr/local/edgion/config}
+            - {name: conf, mountPath: /usr/local/edgion/conf}
+            - {name: certs, mountPath: /usr/local/edgion/certs, readOnly: true}
+            - {name: logs, mountPath: /usr/local/edgion/logs}
+      volumes:
+        - name: config-src
+          configMap: {name: edgion-controller2-config}
+        - name: crd-src
+          configMap: {name: edgion-crd-schemas}
+        - name: conf-src
+          configMap: {name: edgion-controller2-conf}
+        - name: config
+          emptyDir: {}
+        - name: conf
+          emptyDir: {}
+        - name: certs
+          secret: {secretName: edgion-fed-certs-edge}
+        - name: logs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgion-controller-2
+  namespace: edgion-system-2
+spec:
+  selector:
+    app: edgion-controller-2
+  ports:
+    - {name: grpc, port: 12151, targetPort: 12151}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edgion-gateway2-config
+  namespace: edgion-system-2
+data:
+  edgion-gateway.yaml: |
+    work_dir: /usr/local/edgion
+
+    gateway:
+      server_addr: http://edgion-controller-2.edgion-system-2.svc.cluster.local:12151
+
+    logging:
+      log_dir: logs
+      log_prefix: edgion-gateway2
+      log_level: "info,pingora_proxy=error,pingora_core=error"
+      json_format: false
+      console: true
+
+    access_log:
+      enabled: false
+    ssl_log:
+      enabled: false
+    tcp_log:
+      enabled: false
+    udp_log:
+      enabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgion-gateway-2
+  namespace: edgion-system-2
+  labels:
+    app: edgion-gateway-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edgion-gateway-2
+  template:
+    metadata:
+      labels:
+        app: edgion-gateway-2
+    spec:
+      containers:
+        - name: edgion-gateway-2
+          image: docker.io/pandaala/edgion-gateway:dev_arm64
+          command: ["/usr/local/bin/edgion-gateway"]
+          args: ["--config-file", "/usr/local/edgion/config/edgion-gateway.yaml"]
+          ports:
+            - {name: probe, containerPort: 12000}
+          livenessProbe:
+            httpGet: {path: /health, port: 12000}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /ready, port: 12000}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/edgion/config
+              readOnly: true
+            - name: logs
+              mountPath: /usr/local/edgion/logs
+      volumes:
+        - name: config
+          configMap: {name: edgion-gateway2-config}
+        - name: logs
+          emptyDir: {}

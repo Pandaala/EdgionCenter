@@ -2,15 +2,19 @@
  * EdgionGatewayConfig 编辑器 Modal（集群级资源）
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useEffect, useState } from 'react'
 import { Modal, Button, Tabs, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { clusterResourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
 import EdgionGatewayConfigForm from './EdgionGatewayConfigForm'
+import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { EdgionGatewayConfig } from '@/types/edgion-gateway-config'
-import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/edgiongatewayconfig'
+import { createEmpty, normalize, toMutationYaml, toYaml, fromYaml, validateEdgionGatewayConfig } from '@/utils/edgiongatewayconfig'
 import { useT } from '@/i18n'
+import ResourceConditions from '@/components/resource/ResourceConditions'
+import { useEditorTabTransition } from '../useEditorTabTransition'
 
 interface EdgionGatewayConfigEditorProps {
   visible: boolean
@@ -26,14 +30,18 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
   onClose,
 }) => {
   const t = useT()
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
+  const mutationTarget = useControllerMutationTarget()
   const [formData, setFormData] = useState<EdgionGatewayConfig>(() => createEmpty())
   const [yamlContent, setYamlContent] = useState('')
   const queryClient = useQueryClient()
+  const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
+    formData, yamlContent, serialize: toYaml, parse: fromYaml, setFormData, setYamlContent,
+    onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
+  })
 
   useEffect(() => {
     if (!visible) return
-    setActiveTab('form')
+    resetEditorTab()
     if (mode === 'create') {
       const empty = createEmpty()
       setFormData(empty)
@@ -43,20 +51,10 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
       setFormData(normalized)
       setYamlContent(toYaml(normalized))
     }
-  }, [visible, mode, resource])
-
-  const handleTabChange = (key: string) => {
-    try {
-      if (key === 'yaml') setYamlContent(toYaml(formData))
-      else setFormData(fromYaml(yamlContent))
-      setActiveTab(key as 'form' | 'yaml')
-    } catch (e: any) {
-      message.error(t('msg.tabSwitchFailed', { err: e.message }))
-    }
-  }
+  }, [visible, mode, resource, resetEditorTab])
 
   const createMutation = useMutation({
-    mutationFn: ({ yamlStr }: { yamlStr: string }) => clusterResourceApi.create('edgiongatewayconfig', yamlStr),
+    mutationFn: ({ yamlStr }: { yamlStr: string }) => clusterResourceApi.create(mutationTarget, 'edgiongatewayconfig', yamlStr),
     onSuccess: () => {
       message.success(t('msg.createOk'))
       queryClient.invalidateQueries({ queryKey: ['edgiongatewayconfig'] })
@@ -67,7 +65,7 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
 
   const updateMutation = useMutation({
     mutationFn: ({ name, yamlStr }: { name: string; yamlStr: string }) =>
-      clusterResourceApi.update('edgiongatewayconfig', name, yamlStr),
+      clusterResourceApi.update(mutationTarget, 'edgiongatewayconfig', name, yamlStr),
     onSuccess: () => {
       message.success(t('msg.updateOk'))
       queryClient.invalidateQueries({ queryKey: ['edgiongatewayconfig'] })
@@ -78,9 +76,8 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
 
   const handleSubmit = () => {
     try {
-      const isFormTab = activeTab === 'form'
-      const name = isFormTab ? formData.metadata?.name : fromYaml(yamlContent).metadata?.name
-      const yamlStr = isFormTab ? toYaml(formData) : yamlContent
+      const source = editableTab === 'form' ? formData : fromYaml(yamlContent)
+      const name = source.metadata?.name
       if (!name) {
         message.error(t('msg.metaNameRequired'))
         return
@@ -91,6 +88,12 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
           return
         }
       }
+      const validationErrors = validateEdgionGatewayConfig(source)
+      if (validationErrors.length > 0) {
+        message.error(t('msg.submitFailed', { err: validationErrors.join('; ') }))
+        return
+      }
+      const yamlStr = toMutationYaml(source, mode === 'create' ? 'create' : 'update')
       if (mode === 'create') createMutation.mutate({ yamlStr })
       else updateMutation.mutate({ name, yamlStr })
     } catch (e: any) {
@@ -120,8 +123,8 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
         isReadOnly
           ? [<Button key="close" onClick={onClose}>{t('btn.close')}</Button>]
           : [
-              <Button key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
-              <Button key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
+              <Button {...editorCancelButtonProps} key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
+              <Button {...editorSubmitButtonProps} key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
                 {mode === 'create' ? t('btn.create') : t('btn.save')}
               </Button>,
             ]
@@ -133,7 +136,7 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
         items={[
           {
             key: 'form',
-            label: t('tab.form'),
+            label: editorFormTab(t('tab.form')),
             children: (
               <EdgionGatewayConfigForm
                 data={formData}
@@ -145,7 +148,7 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
           },
           {
             key: 'yaml',
-            label: t('tab.yaml'),
+            label: editorYamlTab(t('tab.yaml')),
             children: (
               <YamlEditor
                 value={yamlContent}
@@ -155,6 +158,11 @@ const EdgionGatewayConfigEditor: React.FC<EdgionGatewayConfigEditorProps> = ({
               />
             ),
           },
+          ...(mode !== 'create' ? [{
+            key: 'conditions',
+            label: t('tab.conditions'),
+            children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} />,
+          }] : []),
         ]}
       />
     </Modal>

@@ -1,0 +1,12 @@
+work_dir: "__ARTIFACT_DIR__/controller-b"
+server: {grpc_listen: "127.0.0.1:13251", admin_listen: "127.0.0.1:13201", probe_listen: "127.0.0.1:13200", metrics_listen: "127.0.0.1:13290"}
+conf_center: {type: file_system, conf_dir: "__ARTIFACT_DIR__/controller-b/conf"}
+center:
+  address: "https://127.0.0.1:12251"
+  name: "__E2E_CONTROLLER_B__"
+  cluster: e2e-b
+  rbac: {allow: [{verbs: ["*"], kinds: ["*"]}]}
+  security: {active: fed, certs: [{name: fed, cert: "__TLS_DIR__/controller-b.crt", key: "__TLS_DIR__/controller-b.key", ca: "__TLS_DIR__/ca.crt"}]}
+logging: {log_level: info, console: true}
+conf_sync: {no_sync_kinds: []}
+conf_sync_security: {tls: {skip_tls: true}}

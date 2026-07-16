@@ -1,3 +1,4 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
 import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
@@ -11,11 +12,15 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 
 const { Search } = Input
 
 const GatewayClassList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [editorVisible, setEditorVisible] = useState(false)
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | 'view'>('create')
@@ -33,7 +38,7 @@ const GatewayClassList = () => {
   } = useResourceList<K8sResource>('gatewayclass', { namespaced: false })
 
   const deleteMutation = useMutation({
-    mutationFn: (name: string) => clusterResourceApi.delete('gatewayclass', name),
+    mutationFn: ({ name, resourceVersion }: { name: string; resourceVersion: string }) => clusterResourceApi.delete(mutationTarget, 'gatewayclass', name, resourceVersion),
     onSuccess: () => { message.success(t('msg.deleteOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'gatewayclass'] }) },
   })
 
@@ -43,11 +48,12 @@ const GatewayClassList = () => {
     setEditorMode(mode); setSelectedResource(resource || null); setEditorVisible(true)
   }
 
-  const handleDelete = (name: string) => {
+  const handleDelete = (name: string, resourceVersion: string) => {
     Modal.confirm({
+      ...resourceDeleteConfirmProps,
       title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name }),
       okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
-      onOk: () => deleteMutation.mutate(name),
+      onOk: () => deleteMutation.mutate({ name, resourceVersion }),
     })
   }
 
@@ -61,13 +67,14 @@ const GatewayClassList = () => {
       render: (_: any, r: K8sResource) => <Tag color="blue">{r.spec?.controllerName || '-'}</Tag> },
     { title: t('col.description'), key: 'desc',
       render: (_: any, r: K8sResource) => r.spec?.description || '-' },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</Button>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(r.metadata.name)}>{t('btn.delete')}</Button>
+          <Button data-testid={resourceActionTestId('gatewayclass', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</Button>
+          <Button data-testid={resourceActionTestId('gatewayclass', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</Button>
+          <Button data-testid={resourceActionTestId('gatewayclass', 'row-delete')} size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(r.metadata.name, r.metadata.resourceVersion!)}>{t('btn.delete')}</Button>
         </Space>
       ),
     },
@@ -82,13 +89,13 @@ const GatewayClassList = () => {
         subtitle={t('page.subtitle.gatewayClass')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <Button data-testid={resourceActionTestId('gatewayclass', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
+            <Button data-testid={resourceActionTestId('gatewayclass', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
           </>
         }
       />
       <div style={{ marginBottom: 16 }}>
-        <Search placeholder={t('ph.searchName')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
+        <Search data-testid={resourceActionTestId('gatewayclass', 'search')} placeholder={t('ph.searchName')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
           style={{ width: 240 }} allowClear />
       </div>
       {searchText && (

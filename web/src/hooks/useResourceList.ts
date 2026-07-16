@@ -20,6 +20,8 @@ interface UseResourceListOptions {
    * cache by controller. Default null.
    */
   scope?: string | null
+  /** Fail-closed authorization gate. No request is issued while false. */
+  enabled?: boolean
 }
 
 function isStalePaginationError(err: unknown): boolean {
@@ -43,7 +45,7 @@ export function useResourceList<T extends K8sResource>(
   kind: ResourceKind,
   options: UseResourceListOptions,
 ) {
-  const { namespaced, namespace, limit = DEFAULT_PAGE_SIZE, scope = null } = options
+  const { namespaced, namespace, limit = DEFAULT_PAGE_SIZE, scope = null, enabled = true } = options
   const t = useT()
   const queryClient = useQueryClient()
   const lastResetRef = useRef<number>(0)
@@ -66,6 +68,7 @@ export function useResourceList<T extends K8sResource>(
       return clusterResourceApi.listAll<T>(kind, { limit, continue: pageParam })
     },
     getNextPageParam: (lastPage) => lastPage.continue_token ?? undefined,
+    enabled,
   })
 
   // Stale-token auto-recovery with 5s dedup window.

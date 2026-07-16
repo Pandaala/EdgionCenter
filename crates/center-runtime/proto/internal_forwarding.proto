@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package internal_forwarding;
+
+service InternalForwarding {
+  rpc ForwardCommand(ForwardCommandRequest) returns (ForwardPayload);
+  rpc ForwardHttp(ForwardHttpRequest) returns (ForwardPayload);
+  rpc EvictLocal(ForwardEvictRequest) returns (ForwardPayload);
+}
+
+message ForwardPayload { bytes payload = 1; }
+
+message OwnershipTarget {
+  string holder = 1;
+  string fencing_token = 2;
+  uint64 fencing_epoch = 3;
+}
+
+message ForwardCommandRequest {
+  string operation_id = 1;
+  string controller_id = 2;
+  OwnershipTarget target = 3;
+  uint32 hop_count = 4;
+  bytes command = 5;
+}
+
+message ForwardHttpRequest {
+  string operation_id = 1;
+  string controller_id = 2;
+  OwnershipTarget target = 3;
+  uint32 hop_count = 4;
+  bytes request = 5;
+}
+
+message ForwardEvictRequest {
+  string operation_id = 1;
+  string controller_id = 2;
+  OwnershipTarget target = 3;
+  uint32 hop_count = 4;
+}

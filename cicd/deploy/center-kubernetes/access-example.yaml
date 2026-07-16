@@ -1,0 +1,48 @@
+# Example OIDC authorization. Replace issuer/group values with the exact
+# length-delimited identities documented by Edgion Center for your issuer.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edgion-center-controller-reader
+rules:
+  - apiGroups: [center.edgion.io]
+    resources: [edgioncontrollers]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edgion-center-controller-reader
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-readers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: edgion-center-controller-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-api-reader
+rules:
+  - nonResourceURLs:
+      - /api/v1/server-info
+      - /api/v1/controllers
+      - /api/v1/clusters
+      - /api/v1/center/*
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-api-reader
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-readers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-api-reader

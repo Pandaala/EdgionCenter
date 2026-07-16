@@ -1,5 +1,6 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message, Badge, Tooltip } from 'antd'
+import { Table, Space, Input, Tag, Modal, message, Badge, Tooltip } from 'antd'
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -9,7 +10,7 @@ import {
 } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { resourceApi } from '@/api/resources'
+import { batchDeleteFailureKeys, resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import EdgionPluginsEditor from '@/components/ResourceEditor/EdgionPlugins/EdgionPluginsEditor'
 import { countPluginsByStage } from '@/utils/edgionplugins'
@@ -19,11 +20,16 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 
 const { Search } = Input
 
 const EdgionPluginsList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [editorVisible, setEditorVisible] = useState(false)
@@ -46,8 +52,8 @@ const EdgionPluginsList = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('edgionplugins', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'edgionplugins', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionplugins'] })
@@ -55,12 +61,20 @@ const EdgionPluginsList = () => {
   })
 
   const batchDeleteMutation = useMutation({
-    mutationFn: (resources: Array<{ namespace: string; name: string }>) =>
-      resourceApi.batchDelete('edgionplugins', resources),
+    mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
+      resourceApi.batchDelete(mutationTarget, 'edgionplugins', resources),
     onSuccess: () => {
       message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionplugins'] })
+    },
+    onError: (error: unknown) => {
+      const failedKeys = batchDeleteFailureKeys(error)
+      if (failedKeys) {
+        setSelectedRowKeys(failedKeys)
+        void queryClient.invalidateQueries()
+      }
+      message.error(error instanceof Error ? error.message : String(error))
     },
   })
 
@@ -72,23 +86,25 @@ const EdgionPluginsList = () => {
     )
   })
 
-  const handleDelete = (namespace: string, name: string) => {
+  const handleDelete = (namespace: string, name: string, resourceVersion: string) => {
     Modal.confirm({
+      ...resourceDeleteConfirmProps,
       title: t('confirm.deleteTitle'),
       content: t('confirm.deleteMsg', { name }),
       okText: t('confirm.okText'),
       okType: 'danger',
       cancelText: t('btn.cancel'),
-      onOk: () => deleteMutation.mutate({ namespace, name }),
+      onOk: () => deleteMutation.mutate({ namespace, name, resourceVersion }),
     })
   }
 
   const handleBatchDelete = () => {
     const selectedResources = filteredList
       .filter((p) => selectedRowKeys.includes(`${p.metadata.namespace}/${p.metadata.name}`))
-      .map((p) => ({ namespace: p.metadata.namespace!, name: p.metadata.name }))
+      .map((p) => ({ namespace: p.metadata.namespace!, name: p.metadata.name, resourceVersion: p.metadata.resourceVersion! }))
 
     Modal.confirm({
+      ...resourceBatchDeleteConfirmProps,
       title: t('confirm.batchDeleteTitle'),
       content: `${t('confirm.batchDeleteMsg', { n: selectedResources.length })} ${t('confirm.deleteIrreversible')}`,
       okText: t('confirm.okText'),
@@ -190,28 +206,29 @@ const EdgionPluginsList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: () => <Tag color="success">Active</Tag>,
+      render: (_: unknown, record: K8sResource) => <ResourceConditions status={record.status} compact />,
     },
     {
       title: t('col.actions'),
       key: 'actions',
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button type="link" icon={<EyeOutlined />} size="small" onClick={() => handleView(record)}>
+          <PermissionAwareButton resourceKind="edgionplugins" resourceVerb="get" type="link" icon={<EyeOutlined />} size="small" onClick={() => handleView(record)}>
             {t('btn.view')}
-          </Button>
-          <Button type="link" icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)}>
+          </PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgionplugins" resourceVerb="update" type="link" icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)}>
             {t('btn.edit')}
-          </Button>
-          <Button
+          </PermissionAwareButton>
+          <PermissionAwareButton
+            resourceKind="edgionplugins" resourceVerb="delete"
             type="link"
             danger
             icon={<DeleteOutlined />}
             size="small"
-            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name)}
+            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}
           >
             {t('btn.delete')}
-          </Button>
+          </PermissionAwareButton>
         </Space>
       ),
     },
@@ -226,17 +243,18 @@ const EdgionPluginsList = () => {
         subtitle={t('page.subtitle.plugins')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+            <PermissionAwareButton resourceKind="edgionplugins" resourceVerb="list" icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+            </PermissionAwareButton>
+            <PermissionAwareButton resourceKind="edgionplugins" resourceVerb="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
               {t('btn.create')}
-            </Button>
+            </PermissionAwareButton>
           </>
         }
       />
       <div style={{ marginBottom: 16 }}>
         <Search
+          data-testid={resourceActionTestId('edgionplugins', 'search')}
           placeholder={t('ph.searchNameNs')}
           allowClear
           style={{ width: 300 }}
@@ -253,9 +271,9 @@ const EdgionPluginsList = () => {
         <div style={{ marginBottom: 16 }}>
           <Space>
             <span>{t('status.selected', { n: selectedRowKeys.length })}</span>
-            <Button danger onClick={handleBatchDelete}>
+            <PermissionAwareButton data-testid={resourceActionTestId('edgionplugins', 'batch-delete')} resourceKind="edgionplugins" resourceVerb="delete" danger onClick={handleBatchDelete}>
               {t('btn.batchDelete')}
-            </Button>
+            </PermissionAwareButton>
           </Space>
         </div>
       )}

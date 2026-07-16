@@ -21,14 +21,23 @@ export interface MeResponse {
 
 export const authApi = {
   login: async (req: LoginRequest): Promise<ApiResponse<LoginResponse>> => {
-    const { data } = await apiClient.post('auth/login', req, { _silent: true } as any)
+    const { data } = await apiClient.post('auth/login', req, {
+      _silent: true,
+      _skipControllerProxy: true,
+    } as any)
     return data
   },
   logout: async (): Promise<void> => {
-    await apiClient.post('auth/logout', null, { _silent: true } as any).catch(() => {})
+    await apiClient.post('auth/logout', null, {
+      _silent: true,
+      _skipControllerProxy: true,
+    } as any).catch(() => {})
   },
   me: async (): Promise<ApiResponse<MeResponse>> => {
-    const { data } = await apiClient.get('auth/me', { _silent: true } as any)
+    const { data } = await apiClient.get('auth/me', {
+      _silent: true,
+      _skipControllerProxy: true,
+    } as any)
     return data
   },
 }

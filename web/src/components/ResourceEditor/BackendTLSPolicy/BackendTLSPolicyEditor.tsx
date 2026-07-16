@@ -2,15 +2,18 @@
  * BackendTLSPolicy 编辑器 Modal
  */
 
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import React, { useEffect, useState } from 'react'
 import { Modal, Button, Tabs, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import YamlEditor from '@/components/YamlEditor'
 import BackendTLSPolicyForm from './BackendTLSPolicyForm'
+import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { BackendTLSPolicy } from '@/utils/backendtlspolicy'
-import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/backendtlspolicy'
+import { createEmpty, normalize, toMutationYaml, toYaml, fromYaml } from '@/utils/backendtlspolicy'
 import { useT } from '@/i18n'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 
 interface BackendTLSPolicyEditorProps {
   visible: boolean
@@ -21,7 +24,8 @@ interface BackendTLSPolicyEditorProps {
 
 const BackendTLSPolicyEditor: React.FC<BackendTLSPolicyEditorProps> = ({ visible, mode, resource, onClose }) => {
   const t = useT()
-  const [activeTab, setActiveTab] = useState<'form' | 'yaml'>('form')
+  const mutationTarget = useControllerMutationTarget()
+  const [activeTab, setActiveTab] = useState<'form' | 'yaml' | 'conditions'>('form')
   const [formData, setFormData] = useState<BackendTLSPolicy>(() => createEmpty())
   const [yamlContent, setYamlContent] = useState('')
   const queryClient = useQueryClient()
@@ -43,31 +47,30 @@ const BackendTLSPolicyEditor: React.FC<BackendTLSPolicyEditorProps> = ({ visible
   const handleTabChange = (key: string) => {
     try {
       if (key === 'yaml') setYamlContent(toYaml(formData))
-      else setFormData(fromYaml(yamlContent))
-      setActiveTab(key as 'form' | 'yaml')
+      else if (activeTab === 'yaml') setFormData(fromYaml(yamlContent))
+      setActiveTab(key as 'form' | 'yaml' | 'conditions')
     } catch (e: any) { message.error(t('msg.tabSwitchFailed', { err: e.message })) }
   }
 
   const createMutation = useMutation({
     mutationFn: ({ namespace, yamlStr }: { namespace: string; yamlStr: string }) =>
-      resourceApi.create('backendtlspolicy', namespace, yamlStr),
-    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['backendtlspolicy'] }); onClose() },
+      resourceApi.create(mutationTarget, 'backendtlspolicy', namespace, yamlStr),
+    onSuccess: () => { message.success(t('msg.createOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'backendtlspolicy'] }); onClose() },
     onError: (e: any) => message.error(t('msg.createFailed', { err: e.message })),
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ namespace, name, yamlStr }: { namespace: string; name: string; yamlStr: string }) =>
-      resourceApi.update('backendtlspolicy', namespace, name, yamlStr),
-    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['backendtlspolicy'] }); onClose() },
+      resourceApi.update(mutationTarget, 'backendtlspolicy', namespace, name, yamlStr),
+    onSuccess: () => { message.success(t('msg.updateOk')); queryClient.invalidateQueries({ queryKey: ['resource-list', 'backendtlspolicy'] }); onClose() },
     onError: (e: any) => message.error(t('msg.updateFailed', { err: e.message })),
   })
 
   const handleSubmit = () => {
     try {
-      const isFormTab = activeTab === 'form'
-      const name = isFormTab ? formData.metadata?.name : fromYaml(yamlContent).metadata?.name
-      const namespace = isFormTab ? formData.metadata?.namespace : fromYaml(yamlContent).metadata?.namespace
-      const yamlStr = isFormTab ? toYaml(formData) : yamlContent
+      const source = activeTab === 'yaml' ? fromYaml(yamlContent) : formData
+      const name = source.metadata?.name
+      const namespace = source.metadata?.namespace
       if (!name || !namespace) {
         message.error(t('msg.metaRequired'))
         return
@@ -78,6 +81,7 @@ const BackendTLSPolicyEditor: React.FC<BackendTLSPolicyEditorProps> = ({ visible
           return
         }
       }
+      const yamlStr = toMutationYaml(source, mode === 'create' ? 'create' : 'update')
       if (mode === 'create') createMutation.mutate({ namespace, yamlStr })
       else updateMutation.mutate({ namespace, name, yamlStr })
     } catch (e: any) {
@@ -105,8 +109,8 @@ const BackendTLSPolicyEditor: React.FC<BackendTLSPolicyEditorProps> = ({ visible
         isReadOnly
           ? [<Button key="close" onClick={onClose}>{t('btn.close')}</Button>]
           : [
-              <Button key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
-              <Button key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
+              <Button {...editorCancelButtonProps} key="cancel" onClick={onClose}>{t('btn.cancel')}</Button>,
+              <Button {...editorSubmitButtonProps} key="submit" type="primary" onClick={handleSubmit} loading={isPending}>
                 {mode === 'create' ? t('btn.create') : t('btn.save')}
               </Button>,
             ]
@@ -114,12 +118,16 @@ const BackendTLSPolicyEditor: React.FC<BackendTLSPolicyEditorProps> = ({ visible
     >
       <Tabs activeKey={activeTab} onChange={handleTabChange} items={[
         {
-          key: 'form', label: t('tab.form'),
+          key: 'form', label: editorFormTab(t('tab.form')),
           children: <BackendTLSPolicyForm data={formData} onChange={setFormData} readOnly={isReadOnly} isCreate={mode === 'create'} />,
         },
         {
-          key: 'yaml', label: t('tab.yaml'),
+          key: 'yaml', label: editorYamlTab(t('tab.yaml')),
           children: <YamlEditor value={yamlContent} onChange={setYamlContent} readOnly={isReadOnly} height="500px" />,
+        },
+        {
+          key: 'conditions', label: 'Conditions', disabled: mode === 'create',
+          children: <ResourceConditions status={resource?.status ?? formData.status} />,
         },
       ]} />
     </Modal>

@@ -26,10 +26,10 @@ const SECRET_TYPES = [
 const SecretForm: React.FC<SecretFormProps> = ({ data, onChange, readOnly = false, isCreate = true }) => {
   const t = useT()
   const secretType = data.type || 'Opaque'
-  const dataMap = data.data || {}
+  const dataMap = data.stringData || {}
 
   const updateData = (newData: Record<string, string>) => {
-    onChange({ ...data, data: newData })
+    onChange({ ...data, data: undefined, stringData: newData })
   }
 
   const handleTypeChange = (val: string) => {
@@ -40,7 +40,7 @@ const SecretForm: React.FC<SecretFormProps> = ({ data, onChange, readOnly = fals
     } else if (val === 'kubernetes.io/basic-auth') {
       newData = { username: dataMap['username'] || '', password: dataMap['password'] || '' }
     }
-    onChange({ ...data, type: val, data: newData })
+    onChange({ ...data, type: val, data: undefined, stringData: newData })
   }
 
   const renderDataSection = () => {
@@ -121,6 +121,7 @@ const SecretForm: React.FC<SecretFormProps> = ({ data, onChange, readOnly = fals
               style={{ width: 160 }}
             />
             <Input.TextArea
+              data-testid="secret-data-value"
               value={v}
               onChange={(e) => updateData({ ...dataMap, [k]: e.target.value })}
               placeholder={t('ph.dataValue')}
@@ -130,6 +131,7 @@ const SecretForm: React.FC<SecretFormProps> = ({ data, onChange, readOnly = fals
             />
             {!readOnly && (
               <Button
+                data-testid="secret-data-remove"
                 type="text"
                 danger
                 icon={<MinusCircleOutlined />}
@@ -144,6 +146,7 @@ const SecretForm: React.FC<SecretFormProps> = ({ data, onChange, readOnly = fals
         ))}
         {!readOnly && (
           <Button
+            data-testid="secret-data-add"
             type="dashed"
             onClick={() => {
               const timestamp = Date.now()

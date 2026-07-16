@@ -1,5 +1,6 @@
 import { Drawer, Typography, Tag, Divider } from 'antd'
 import yaml from 'js-yaml'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 
 const { Text } = Typography
 
@@ -88,6 +89,14 @@ export default function TopologyDetailDrawer({ visible, data, onClose }: Props) 
         <>
           {isGateway && (
             <GatewayListeners resource={data.resource} matchedListener={data._matchedListener} />
+          )}
+
+          {data.resource?.status && (
+            <>
+              <Divider style={{ margin: '12px 0 8px' }}>Conditions</Divider>
+              <ResourceConditions status={data.resource.status} />
+              <Divider style={{ margin: '12px 0 8px' }}>Resource document</Divider>
+            </>
           )}
 
           <pre

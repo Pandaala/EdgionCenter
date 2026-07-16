@@ -1,9 +1,10 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
 import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { resourceApi } from '@/api/resources'
+import { batchDeleteFailureKeys, resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import StreamRouteEditor from '@/components/ResourceEditor/StreamRoute/StreamRouteEditor'
 import PageHeader from '@/components/PageHeader'
@@ -12,11 +13,15 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import ResourceConditions from '@/components/resource/ResourceConditions'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
 const { Search } = Input
 
 const UDPRouteList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [editorVisible, setEditorVisible] = useState(false)
@@ -39,8 +44,8 @@ const UDPRouteList = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('udproute', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'udproute', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'udproute'] })
@@ -48,12 +53,20 @@ const UDPRouteList = () => {
   })
 
   const batchDeleteMutation = useMutation({
-    mutationFn: (resources: Array<{ namespace: string; name: string }>) =>
-      resourceApi.batchDelete('udproute', resources),
+    mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
+      resourceApi.batchDelete(mutationTarget, 'udproute', resources),
     onSuccess: () => {
       message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'udproute'] })
+    },
+    onError: (error: unknown) => {
+      const failedKeys = batchDeleteFailureKeys(error)
+      if (failedKeys) {
+        setSelectedRowKeys(failedKeys)
+        void queryClient.invalidateQueries()
+      }
+      message.error(error instanceof Error ? error.message : String(error))
     },
   })
 
@@ -62,22 +75,24 @@ const UDPRouteList = () => {
     return r.metadata.name.toLowerCase().includes(s) || r.metadata.namespace?.toLowerCase().includes(s)
   })
 
-  const handleDelete = (namespace: string, name: string) => {
+  const handleDelete = (namespace: string, name: string, resourceVersion: string) => {
     Modal.confirm({
+      ...resourceDeleteConfirmProps,
       title: t('confirm.deleteTitle'),
       content: t('confirm.deleteMsg', { name }),
       okText: t('confirm.okText'),
       okType: 'danger',
       cancelText: t('btn.cancel'),
-      onOk: () => deleteMutation.mutate({ namespace, name }),
+      onOk: () => deleteMutation.mutate({ namespace, name, resourceVersion }),
     })
   }
 
   const handleBatchDelete = () => {
     const selected = filtered
       .filter((r) => selectedRowKeys.includes(`${r.metadata.namespace}/${r.metadata.name}`))
-      .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name }))
+      .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name, resourceVersion: r.metadata.resourceVersion! }))
     Modal.confirm({
+      ...resourceBatchDeleteConfirmProps,
       title: t('confirm.batchDeleteTitle'),
       content: `${t('confirm.batchDeleteMsg', { n: selected.length })} ${t('confirm.deleteIrreversible')}`,
       okText: t('confirm.okText'),
@@ -125,16 +140,17 @@ const UDPRouteList = () => {
         </Space>
       ),
     },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
     {
       title: t('col.actions'),
       key: 'actions',
       width: 160,
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
-          <Button size="small" danger icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name)}>{t('btn.delete')}</Button>
+          <Button data-testid={resourceActionTestId('udproute', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
+          <Button data-testid={resourceActionTestId('udproute', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
+          <Button data-testid={resourceActionTestId('udproute', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}>{t('btn.delete')}</Button>
         </Space>
       ),
     },
@@ -149,13 +165,13 @@ const UDPRouteList = () => {
         subtitle={t('page.subtitle.udpRoute')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <Button data-testid={resourceActionTestId('udproute', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
+            <Button data-testid={resourceActionTestId('udproute', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
           </>
         }
       />
       <div style={{ marginBottom: 16 }}>
-        <Search placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
+        <Search data-testid={resourceActionTestId('udproute', 'search')} placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
           style={{ width: 240 }} allowClear />
       </div>
 
@@ -167,7 +183,7 @@ const UDPRouteList = () => {
         <div style={{ marginBottom: 16 }}>
           <Space>
             <span>{t('status.selected', { n: selectedRowKeys.length })}</span>
-            <Button danger onClick={handleBatchDelete}>{t('btn.batchDelete')}</Button>
+            <Button data-testid={resourceActionTestId('udproute', 'batch-delete')} danger onClick={handleBatchDelete}>{t('btn.batchDelete')}</Button>
           </Space>
         </div>
       )}

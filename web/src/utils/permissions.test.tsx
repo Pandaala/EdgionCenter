@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { PermissionProvider, useCan } from './permissions'
+import { PermissionGate, PermissionProvider, useCan } from './permissions'
 
 // Mock the auth API so the provider resolves against canned permissions.
 const meMock = vi.fn()
@@ -51,5 +51,22 @@ describe('useCan', () => {
     )
     await waitFor(() => expect(meMock).toHaveBeenCalled())
     expect(screen.getByTestId('result').textContent).toBe('no')
+  })
+
+  it('uses the same permission decision for direct route content', async () => {
+    meMock.mockResolvedValue({ success: true, data: { username: 'reader', permissions: ['controllers:read'] } })
+    render(
+      <PermissionProvider>
+        <PermissionGate permission="controllers:read" denied={<span>denied-read</span>}>
+          <span>history-route</span>
+        </PermissionGate>
+        <PermissionGate permission="controllers:write" denied={<span>denied-write</span>}>
+          <span>delete-route</span>
+        </PermissionGate>
+      </PermissionProvider>,
+    )
+    expect(await screen.findByText('history-route')).toBeInTheDocument()
+    expect(screen.getByText('denied-write')).toBeInTheDocument()
+    expect(screen.queryByText('delete-route')).not.toBeInTheDocument()
   })
 })

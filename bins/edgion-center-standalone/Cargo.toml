@@ -1,0 +1,64 @@
+[package]
+name = "edgion-center-standalone"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Standalone SQLite/MySQL Edgion Center server"
+build = "../../build.rs"
+
+[[bin]]
+name = "edgion-center-standalone"
+path = "src/main.rs"
+
+[features]
+embed-dashboard = ["edgion-center-app/embed-dashboard"]
+
+[dependencies]
+edgion-center-core = { path = "../../crates/center-core" }
+edgion-center-runtime = { path = "../../crates/center-runtime" }
+edgion-center-app = { path = "../../crates/center-app" }
+edgion-center-adapter-sql = { path = "../../crates/center-adapter-sql" }
+tokio = { version = "1.49", features = ["full"] }
+tokio-util = "0.7"
+tokio-stream = "0.1"
+anyhow = "1.0"
+async-trait.workspace = true
+serde.workspace = true
+serde_json = "1.0"
+serde_yaml = "0.9"
+axum = { version = "0.8.8", features = ["macros", "ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+tower = { version = "0.5", features = ["util"] }
+http = "1.4.0"
+tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
+prost = "0.13"
+rustls = { version = "0.23", features = ["ring"] }
+tokio-rustls = "0.26"
+bcrypt = "0.18"
+jsonwebtoken = "9"
+openidconnect = "4"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "http2", "stream"] }
+sha2 = "0.10"
+rcgen = { version = "0.14.7", features = ["x509-parser"] }
+time = { version = "0.3", features = ["std"] }
+parking_lot = "0.12"
+arc-swap = "1.8"
+uuid = { version = "1.19", features = ["v4"] }
+chrono = "0.4"
+futures = "0.3.31"
+ipnet = "2"
+percent-encoding = "2"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.18"
+metrics-util = { version = "0.20", features = ["debugging"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+
+[dev-dependencies]
+edgion-center-adapter-sql = { path = "../../crates/center-adapter-sql", features = ["test-support"] }
+edgion-center-runtime = { path = "../../crates/center-runtime", features = ["test-support"] }
+wiremock = "0.6"
+tempfile = "3"
+rsa = "0.9"

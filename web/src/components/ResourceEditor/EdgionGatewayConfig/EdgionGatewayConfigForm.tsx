@@ -4,8 +4,9 @@
  */
 
 import React from 'react'
-import { Form, Input, InputNumber, Switch, Card, Space, Select } from 'antd'
-import type { EdgionGatewayConfig } from '@/types/edgion-gateway-config'
+import { Form, Input, InputNumber, Switch, Card, Space, Select, Button } from 'antd'
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import type { EdgionGatewayConfig, IpGroup, ObjectReference, SubjectAltName } from '@/types/edgion-gateway-config'
 import { useT } from '@/i18n'
 
 interface EdgionGatewayConfigFormProps {
@@ -13,6 +14,36 @@ interface EdgionGatewayConfigFormProps {
   onChange: (data: EdgionGatewayConfig) => void
   readOnly?: boolean
   isCreate?: boolean
+}
+
+interface ListProps<T> { value: T[]; onChange: (value: T[]) => void; disabled: boolean; maxItems?: number }
+
+const IpGroupsEditor: React.FC<ListProps<IpGroup>> = ({ value, onChange, disabled }) => {
+  const t = useT()
+  return <Space direction="vertical" style={{ width: '100%' }}>
+    {value.map((group, index) => <Card key={index} size="small" type="inner" title={t('egc.ipGroupTitle', { n: index + 1 })} extra={!disabled && <Button data-testid="edgiongatewayconfig-ip-group-remove" danger type="text" icon={<MinusCircleOutlined />} aria-label={t('btn.deleteIpGroup')} onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />}>
+      <Space wrap>
+        <Form.Item label={t('field.name')} required style={{ marginBottom: 0 }}><Input value={group.name} disabled={disabled} onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} /></Form.Item>
+        <Form.Item label={t('field.descriptionOpt')} style={{ marginBottom: 0 }}><Input value={group.description || ''} disabled={disabled} onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, description: event.target.value || undefined } : item))} /></Form.Item>
+      </Space>
+      <Form.Item label={t('field.cidrs')} required style={{ marginBottom: 0, marginTop: 8 }}><Select mode="tags" value={group.cidrs} tokenSeparators={[',']} disabled={disabled} onChange={(cidrs) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, cidrs } : item))} /></Form.Item>
+    </Card>)}
+    {!disabled && <Button data-testid="edgiongatewayconfig-ip-group-add" type="dashed" block icon={<PlusOutlined />} onClick={() => onChange([...value, { name: '', cidrs: [] }])}>{t('btn.addIpGroup')}</Button>}
+  </Space>
+}
+
+const ObjectRefsEditor: React.FC<ListProps<ObjectReference>> = ({ value, onChange, disabled, maxItems }) => {
+  const t = useT()
+  return <Space direction="vertical" style={{ width: '100%' }}>
+    {value.map((ref, index) => <Space key={index} wrap>
+      <Input aria-label={t('field.name')} value={ref.name} disabled={disabled} placeholder="name" onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} />
+      <Input aria-label={t('field.namespaceOpt')} value={ref.namespace || ''} disabled={disabled} placeholder="namespace" onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, namespace: event.target.value || undefined } : item))} />
+      <Input aria-label={t('field.group')} value={ref.group || ''} disabled={disabled} placeholder="group" onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, group: event.target.value } : item))} />
+      <Input aria-label={t('field.kind')} value={ref.kind || ''} disabled={disabled} placeholder="Secret" onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value || undefined } : item))} />
+      {!disabled && <Button danger type="text" icon={<MinusCircleOutlined />} aria-label={t('btn.deleteReference')} onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />}
+    </Space>)}
+    {!disabled && (maxItems === undefined || value.length < maxItems) && <Button type="dashed" block icon={<PlusOutlined />} onClick={() => onChange([...value, { name: '', group: '', kind: 'Secret' }])}>{t('btn.addReference')}</Button>}
+  </Space>
 }
 
 const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
@@ -56,11 +87,22 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
   const updatePreflight = (partial: Partial<NonNullable<EdgionGatewayConfig['spec']['preflightPolicy']>>) =>
     onChange({ ...data, spec: { ...data.spec, preflightPolicy: { ...data.spec?.preflightPolicy, ...partial } } })
 
+  const updateSpecBlock = <K extends keyof EdgionGatewayConfig['spec']>(key: K, partial: Record<string, unknown>) =>
+    onChange({ ...data, spec: { ...data.spec, [key]: { ...((data.spec[key] || {}) as object), ...partial } } })
+
   const server = data.spec?.server || {}
   const client = data.spec?.httpTimeout?.client || {}
   const backend = data.spec?.httpTimeout?.backend || {}
   const realIp = data.spec?.realIp || {}
   const preflight = data.spec?.preflightPolicy || {}
+  const security = data.spec?.securityProtect || {}
+  const tcpTimeout = data.spec?.tcpTimeout || {}
+  const loadBalancing = data.spec?.loadBalancing || {}
+  const linkSys = data.spec?.linkSys || {}
+  const outboundTls = data.spec?.outboundTls || {}
+  const outboundValidation = outboundTls.validation || {}
+  const dnsResolver = data.spec?.dnsResolver || {}
+  const dnsResolverMode = dnsResolver.linkSysRef ? 'linkSysRef' : dnsResolver.servers ? 'servers' : undefined
 
   return (
     <Form layout="vertical" size="small">
@@ -80,6 +122,8 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
 
         {/* Server Config */}
         <Card title={t('section.serverConfig')} size="small">
+          <Form.Item label={t('field.threads')} style={{ marginBottom: 8 }}><InputNumber value={server.threads} onChange={(v) => updateServer({ threads: v ?? undefined })} min={0} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
+          <Form.Item label={t('field.workStealing')} style={{ marginBottom: 8 }}><Switch checked={server.workStealing ?? true} onChange={(workStealing) => updateServer({ workStealing })} disabled={readOnly} /></Form.Item>
           <Form.Item label={t('field.gracePeriod')} style={{ marginBottom: 8 }}>
             <InputNumber
               value={server.gracePeriodSeconds}
@@ -116,6 +160,8 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               disabled={readOnly}
             />
           </Form.Item>
+          <Form.Item label={t('field.downstreamKeepaliveLimit')} style={{ marginBottom: 8, marginTop: 8 }}><InputNumber value={server.downstreamKeepaliveRequestLimit} onChange={(v) => updateServer({ downstreamKeepaliveRequestLimit: v ?? undefined })} min={0} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
+          <Form.Item label={t('field.errorLog')} style={{ marginBottom: 0 }}><Input value={server.errorLog || ''} onChange={(event) => updateServer({ errorLog: event.target.value || undefined })} disabled={readOnly} /></Form.Item>
         </Card>
 
         {/* HTTP Timeout */}
@@ -188,6 +234,9 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               style={{ width: 160 }}
             />
           </Form.Item>
+          <Form.Item label={t('field.tcpIdleTimeout')} style={{ marginBottom: 8, marginTop: 8 }}><Input value={tcpTimeout.idleTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { idleTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
+          <Form.Item label={t('field.tcpConnectTimeout')} style={{ marginBottom: 8 }}><Input value={tcpTimeout.connectTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { connectTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
+          <Form.Item label={t('field.panicThreshold')} style={{ marginBottom: 0 }}><InputNumber value={loadBalancing.panicThreshold} min={0} max={100} onChange={(value) => updateSpecBlock('loadBalancing', { panicThreshold: value ?? undefined })} disabled={readOnly} /></Form.Item>
         </Card>
 
         {/* Real IP */}
@@ -201,17 +250,7 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               style={{ width: 280 }}
             />
           </Form.Item>
-          <Form.Item label={t('field.trustedIps')} style={{ marginBottom: 8 }}>
-            <Select
-              mode="tags"
-              value={realIp.trustedIps || []}
-              onChange={(v) => updateRealIp({ trustedIps: v.length > 0 ? v : undefined })}
-              placeholder="10.0.0.0/8"
-              disabled={readOnly}
-              style={{ width: '100%' }}
-              tokenSeparators={[',']}
-            />
-          </Form.Item>
+          <Form.Item label={t('field.trustedIps')} style={{ marginBottom: 8 }}><IpGroupsEditor value={realIp.trustedIps || []} onChange={(trustedIps) => updateRealIp({ trustedIps })} disabled={readOnly} /></Form.Item>
           <Form.Item label={t('field.recursive')} style={{ marginBottom: 0 }}>
             <Switch
               checked={!!realIp.recursive}
@@ -219,15 +258,35 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               disabled={readOnly}
             />
           </Form.Item>
+          <Form.Item label={t('field.maxTrustedHops')} style={{ marginBottom: 0, marginTop: 8 }}><InputNumber value={realIp.maxTrustedHops} min={0} onChange={(maxTrustedHops) => updateRealIp({ maxTrustedHops: maxTrustedHops ?? undefined })} disabled={readOnly} /></Form.Item>
+        </Card>
+
+        <Card title={t('section.securityProtect')} size="small">
+          <Form.Item label={t('field.xForwardedForLimit')} style={{ marginBottom: 8 }}><InputNumber value={security.xForwardedForLimit} min={0} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { xForwardedForLimit: value ?? undefined })} /></Form.Item>
+          <Form.Item label={t('field.requireSniHostMatch')} style={{ marginBottom: 8 }}><Switch checked={security.requireSniHostMatch ?? true} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { requireSniHostMatch: value })} /></Form.Item>
+          <Form.Item label={t('field.fallbackSni')} style={{ marginBottom: 8 }}><Input value={security.fallbackSni || ''} disabled={readOnly} onChange={(event) => updateSpecBlock('securityProtect', { fallbackSni: event.target.value || undefined })} /></Form.Item>
+          <Form.Item label={t('field.tlsProxyLogRecord')} style={{ marginBottom: 8 }}><Switch checked={security.tlsProxyLogRecord ?? true} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { tlsProxyLogRecord: value })} /></Form.Item>
+          <Form.Item label={t('field.allowLoopbackUpstream')} style={{ marginBottom: 8 }}><Switch checked={security.allowLoopbackUpstream ?? false} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { allowLoopbackUpstream: value })} /></Form.Item>
+          <Form.Item label={t('field.rejectDuplicateHost')} style={{ marginBottom: 0 }}><Switch checked={security.rejectDuplicateHost ?? true} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { rejectDuplicateHost: value })} /></Form.Item>
+        </Card>
+
+        <Card title={t('section.globalPlugins')} size="small">
+          {(data.spec.globalPluginsRef || []).map((ref, index) => <Space key={index} wrap style={{ marginBottom: 8 }}>
+            <Input aria-label={t('field.name')} value={ref.name} disabled={readOnly} onChange={(event) => onChange({ ...data, spec: { ...data.spec, globalPluginsRef: (data.spec.globalPluginsRef || []).map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) } })} />
+            <Input aria-label={t('field.namespaceOpt')} value={ref.namespace || ''} disabled={readOnly} onChange={(event) => onChange({ ...data, spec: { ...data.spec, globalPluginsRef: (data.spec.globalPluginsRef || []).map((item, itemIndex) => itemIndex === index ? { ...item, namespace: event.target.value || undefined } : item) } })} />
+            {!readOnly && <Button danger type="text" icon={<MinusCircleOutlined />} aria-label={t('btn.deletePluginRef')} onClick={() => onChange({ ...data, spec: { ...data.spec, globalPluginsRef: (data.spec.globalPluginsRef || []).filter((_, itemIndex) => itemIndex !== index) } })} />}
+          </Space>)}
+          {!readOnly && <Button type="dashed" block icon={<PlusOutlined />} onClick={() => onChange({ ...data, spec: { ...data.spec, globalPluginsRef: [...(data.spec.globalPluginsRef || []), { name: '', namespace: 'default' }] } })}>{t('btn.addPluginRef')}</Button>}
         </Card>
 
         {/* Preflight Policy */}
         <Card title={t('section.preflightPolicy')} size="small">
           <Form.Item label={t('field.preflightMode')} style={{ marginBottom: 8 }}>
-            <Input
-              value={preflight.mode || ''}
-              onChange={(e) => updatePreflight({ mode: e.target.value || undefined })}
-              placeholder="cors-standard"
+            <Select
+              value={preflight.mode}
+              onChange={(mode: 'cors-standard' | 'all-options' | undefined) => updatePreflight({ mode })}
+              options={[{ value: 'cors-standard' }, { value: 'all-options' }]}
+              allowClear
               disabled={readOnly}
               style={{ width: 240 }}
             />
@@ -243,6 +302,31 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               style={{ width: 160 }}
             />
           </Form.Item>
+        </Card>
+
+        <Card title={t('section.validation')} size="small">
+          <Form.Item label={t('field.referenceGrantValidation')} style={{ marginBottom: 0 }}><Switch checked={data.spec.enableReferenceGrantValidation ?? false} disabled={readOnly} onChange={(enableReferenceGrantValidation) => onChange({ ...data, spec: { ...data.spec, enableReferenceGrantValidation } })} /></Form.Item>
+        </Card>
+
+        <Card title={t('section.linkSys')} size="small"><Form.Item label={t('field.webhookMaxResponseBytes')} style={{ marginBottom: 0 }}><InputNumber value={linkSys.webhookMaxResponseBytes} min={1} disabled={readOnly} onChange={(value) => updateSpecBlock('linkSys', { webhookMaxResponseBytes: value ?? undefined })} /></Form.Item></Card>
+
+        <Card title={t('section.outboundTls')} size="small">
+          <Form.Item label={t('field.verify')} style={{ marginBottom: 8 }}><Switch checked={outboundTls.verify ?? true} disabled={readOnly} onChange={(verify) => updateSpecBlock('outboundTls', { verify })} /></Form.Item>
+          <Form.Item label={t('field.caRefs')} style={{ marginBottom: 8 }}><ObjectRefsEditor value={outboundValidation.caCertificateRefs || []} disabled={readOnly} onChange={(caCertificateRefs) => updateSpecBlock('outboundTls', { validation: { ...outboundValidation, caCertificateRefs } })} /></Form.Item>
+          <Form.Item label={t('field.wellKnownCa')} style={{ marginBottom: 8 }}><Select allowClear value={outboundValidation.wellKnownCACertificates} options={[{ value: 'System' }]} disabled={readOnly} onChange={(wellKnownCACertificates) => updateSpecBlock('outboundTls', { validation: { ...outboundValidation, wellKnownCACertificates } })} /></Form.Item>
+          <Form.Item label={t('field.validationHostname')} style={{ marginBottom: 8 }}><Input value={outboundValidation.hostname || ''} disabled={readOnly} onChange={(event) => updateSpecBlock('outboundTls', { validation: { ...outboundValidation, hostname: event.target.value || undefined } })} /></Form.Item>
+          <Form.Item label={t('field.subjectAltNames')} style={{ marginBottom: 8 }}>
+            {(outboundValidation.subjectAltNames || []).map((san: SubjectAltName, index: number) => <Space key={index} wrap style={{ marginBottom: 8 }}><Select value={san.type} options={[{ value: 'Hostname' }, { value: 'URI' }]} disabled={readOnly} onChange={(type) => updateSpecBlock('outboundTls', { validation: { ...outboundValidation, subjectAltNames: (outboundValidation.subjectAltNames || []).map((item, itemIndex) => itemIndex === index ? { ...item, type } : item) } })} /><Input value={san.type === 'URI' ? san.uri || '' : san.hostname || ''} disabled={readOnly} onChange={(event) => updateSpecBlock('outboundTls', { validation: { ...outboundValidation, subjectAltNames: (outboundValidation.subjectAltNames || []).map((item, itemIndex) => itemIndex === index ? { ...item, [item.type === 'URI' ? 'uri' : 'hostname']: event.target.value } : item) } })} />{!readOnly && <Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => updateSpecBlock('outboundTls', { validation: { ...outboundValidation, subjectAltNames: (outboundValidation.subjectAltNames || []).filter((_, itemIndex) => itemIndex !== index) } })} />}</Space>)}
+            {!readOnly && <Button type="dashed" block icon={<PlusOutlined />} onClick={() => updateSpecBlock('outboundTls', { validation: { ...outboundValidation, subjectAltNames: [...(outboundValidation.subjectAltNames || []), { type: 'Hostname', hostname: '' }] } })}>{t('btn.addSubjectAltName')}</Button>}
+          </Form.Item>
+          <Form.Item label={t('field.clientCertificateRef')} style={{ marginBottom: 0 }}><ObjectRefsEditor value={outboundTls.clientCertificateRef ? [outboundTls.clientCertificateRef] : []} disabled={readOnly} maxItems={1} onChange={(items) => updateSpecBlock('outboundTls', { clientCertificateRef: items[0] })} /></Form.Item>
+        </Card>
+
+        <Card title={t('section.dnsResolver')} size="small">
+          <Form.Item label={t('field.dnsResolverSource')} style={{ marginBottom: 8 }}><Select allowClear value={dnsResolverMode} disabled={readOnly} options={[{ value: 'servers', label: t('field.dnsServers') }, { value: 'linkSysRef', label: 'LinkSys' }]} onChange={(mode) => updateSpecBlock('dnsResolver', mode === 'servers' ? { linkSysRef: undefined, servers: dnsResolver.servers || [] } : mode === 'linkSysRef' ? { servers: undefined, linkSysRef: dnsResolver.linkSysRef || { namespace: '', name: '' } } : { servers: undefined, linkSysRef: undefined })} /></Form.Item>
+          {dnsResolverMode === 'servers' && <Form.Item label={t('field.dnsServers')} style={{ marginBottom: 8 }}><Select mode="tags" value={dnsResolver.servers || []} disabled={readOnly} tokenSeparators={[',']} onChange={(servers) => updateSpecBlock('dnsResolver', { servers })} /></Form.Item>}
+          <Form.Item label={t('field.cacheTtl')} style={{ marginBottom: 8 }}><Input value={dnsResolver.cacheTtl || ''} disabled={readOnly} onChange={(event) => updateSpecBlock('dnsResolver', { cacheTtl: event.target.value || undefined })} /></Form.Item>
+          {dnsResolverMode === 'linkSysRef' && <Space wrap><Form.Item label={t('field.linkSysNamespace')} style={{ marginBottom: 0 }}><Input value={dnsResolver.linkSysRef?.namespace || ''} disabled={readOnly} onChange={(event) => updateSpecBlock('dnsResolver', { linkSysRef: { ...dnsResolver.linkSysRef, namespace: event.target.value, name: dnsResolver.linkSysRef?.name || '' } })} /></Form.Item><Form.Item label={t('field.linkSysName')} style={{ marginBottom: 0 }}><Input value={dnsResolver.linkSysRef?.name || ''} disabled={readOnly} onChange={(event) => updateSpecBlock('dnsResolver', { linkSysRef: { ...dnsResolver.linkSysRef, namespace: dnsResolver.linkSysRef?.namespace || '', name: event.target.value } })} /></Form.Item></Space>}
         </Card>
       </Space>
     </Form>

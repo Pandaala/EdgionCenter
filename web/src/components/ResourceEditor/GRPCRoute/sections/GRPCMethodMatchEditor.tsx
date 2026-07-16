@@ -113,7 +113,7 @@ const GRPCMethodMatchEditor: React.FC<GRPCMethodMatchEditorProps> = ({
             <Space key={hIdx} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
               <Select
                 value={header.type || 'Exact'}
-                onChange={(v) => updateHeader(matchIndex, hIdx, { ...header, type: v as any })}
+                onChange={(v: GRPCHeaderMatch['type']) => updateHeader(matchIndex, hIdx, { ...header, type: v })}
                 disabled={disabled}
                 style={{ width: 130 }}
               >

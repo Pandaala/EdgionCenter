@@ -1,52 +1,44 @@
 # EdgionCenter — AI Agent Project Guide
 
-## Project Overview
+## Project overview
 
-EdgionCenter is the federation hub (Center) for multi-cluster Edgion. A single
-`edgion-center` binary is the **server** side of `FederationSync`: one or more Controllers
-dial in over a bidirectional gRPC stream, send a `RegisterRequest`, and act as data sources
-for reverse Watches issued by Center. Center aggregates the published PluginMetaData,
-persists a controller registry in SQLite, and exposes an HTTP Admin API plus an optional
-embedded web dashboard.
+EdgionCenter is the multi-cluster federation management center for Edgion. Controllers
+dial its mTLS-only `FederationSync` gRPC service, publish cluster metadata, and answer
+reverse watch, command, and proxy requests. The workspace intentionally provides two
+deployable compositions:
 
-- **Binary:** `edgion-center` (`src/main.rs`); startup in `src/cli/`.
-- **Shared crate:** depends on `edgion-resources` (currently a local `path` dep on the
-  Edgion checkout; a git-rev pin is planned per the Cargo.toml TODO before release).
-- **Ports:** `:12251` Federation gRPC (Controller → Center), `:12201` Admin HTTP API,
-  `:12200` probe (`/health`, `/ready` only), `:12290` Prometheus metrics.
-- **Web dashboard:** `web/` (React + TypeScript + Vite). The `embed-dashboard` feature
-  embeds `web/dist/` into the binary; off by default (dashboard can also be served from a
-  filesystem dir via `web.dir` / `EDGION_WEB_DIR`).
-- **Auth:** mandatory. With neither `[local_auth]` nor `[auth]` configured, business routes
-  fail-close with 503; `/health`, `/ready`, `/metrics`, `/api/v1/auth/status` stay reachable.
-  Center is authentication-only — no `(verb, kind)` RBAC engine (that is Controller-private).
+| Binary | State and platform integration |
+|---|---|
+| `edgion-center-standalone` | SQLite or MySQL persistence, password/OIDC authentication, database RBAC, queryable SQL audit log |
+| `edgion-center-kubernetes` | Database-free CRDs and Leases, OIDC, SubjectAccessReview authorization, structured stdout audit, replica forwarding |
 
-## Knowledge System
+Shared policy and interfaces live in `crates/center-core`; federation and data-plane
+runtime code lives in `crates/center-runtime`; HTTP/auth composition lives in
+`crates/center-app`. Platform code belongs only in the matching adapter and binary.
+Do not add SQL dependencies to the Kubernetes graph or Kubernetes dependencies to the
+standalone graph.
 
-When a task needs project context, start from `skills/SKILL.md` and **load progressively on
-demand** — do not read everything at once.
+- Federation gRPC: `:12251` (strict mTLS and Controller SPIFFE identity)
+- Admin API: `:12201`
+- Probe: `:12200`
+- Metrics: `:12290`
+- Kubernetes replica forwarding: `:12252` (dedicated mTLS identity, never public)
+- Dashboard: `web/`; `embed-dashboard` embeds `web/dist` in either binary
+- Container builds are self-contained and require only this repository as source context
 
-- **Backend / global:** [`skills/SKILL.md`](skills/SKILL.md)
-- **Frontend dashboard:** [`web/skills/SKILL.md`](web/skills/SKILL.md)
+## Knowledge system
 
-### Navigation rules
+Read `skills/SKILL.md`, then load only the relevant subtree. For dashboard work also read
+`web/skills/SKILL.md`. Shared resource schemas, coding rules, and broader integration
+guidance remain canonical in `../Edgion/AGENTS.md` and `../Edgion/skills/SKILL.md`.
 
-1. Progressive loading: `skills/SKILL.md` → category `SKILL.md` → specific files.
-2. Three-layer lookup: architecture → `skills/01-architecture/`; feature/config →
-   `skills/02-features/`; frontend → `web/skills/`.
-3. `docs/` targets humans (specs/plans history); `skills/` targets AI agents and developers.
+## Development rules
 
-## External dependency — Edgion skills
-
-Shared knowledge (resource Schema, coding rules, testing framework, task workflows) lives in
-the Edgion repo and is **referenced, not copied**. Entry:
-https://github.com/Pandaala/Edgion/blob/main/skills/SKILL.md
-
-## Common workflows
-
-- **Understand Center internals:** `skills/01-architecture/SKILL.md` → `06-center/SKILL.md` →
-  the specific module file.
-- **Configure / deploy Center:** `skills/02-features/SKILL.md`.
-- **Add a frontend page:** `web/skills/SKILL.md` → `02-patterns/` → `04-center/`.
-- **Look up a resource Schema:** upstream
-  https://github.com/Pandaala/Edgion/tree/main/skills/02-features/03-resources
+- Preserve the two binary and adapter dependency boundaries.
+- Federation wire-contract or shared-schema compatibility changes require validation in both repositories.
+- Run `cicd/integration/run-matrix.sh` for the hermetic full matrix. Real Kubernetes and
+  MySQL tests are explicit opt-ins documented in `cicd/integration/README.md`.
+- Build images with `cicd/build-image.sh --mode standalone|kubernetes`; do not invoke the
+  Dockerfile directly.
+- Keep code, comments, logs, agent instructions, and skill docs in English.
+- Do not commit or push unless the user explicitly requests it.

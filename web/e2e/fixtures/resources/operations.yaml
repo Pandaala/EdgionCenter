@@ -1,0 +1,72 @@
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: "__PREFIX__-region-route-override"
+  namespace: "__NS_A__"
+  labels: {edgion.io/e2e-run: "__RUN_ID__"}
+spec:
+  enable: true
+  visibility: Namespace
+  data:
+    type: RegionRouteOverride
+    config:
+      regions:
+        - {name: east, hashRange: [0, 499], backendEndpoint: east-v2.example.test:8443, tls: true}
+        - {name: west, hashRange: [500, 999], backendEndpoint: west-v2.example.test:8443, tls: true}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: "__PREFIX__-region-route"
+  namespace: "__NS_A__"
+  labels: {edgion.io/e2e-run: "__RUN_ID__"}
+spec:
+  requestPlugins:
+    - type: RegionRoute
+      alias: federation-e2e
+      config:
+        myRegion: east
+        keyGet: [{type: header, name: X-Account-Id}]
+        hashCalc: {algorithm: crc32, modulo: 1000}
+        routeRules: [{type: RouteByHashRange}]
+        regions:
+          - {name: east, hashRange: [0, 499], backendEndpoint: east.example.test:8443, tls: true}
+          - {name: west, hashRange: [500, 999], backendEndpoint: west.example.test:8443, tls: true}
+        overrideRef: {name: "__PREFIX__-region-route-override"}
+---
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: "__PREFIX__-global-ip-selector"
+  namespace: "__NS_A__"
+  labels: {edgion.io/e2e-run: "__RUN_ID__"}
+spec:
+  enable: true
+  visibility: Namespace
+  data:
+    type: Selector
+    config:
+      active: open
+      description: E2E active-profile selector
+---
+apiVersion: edgion.io/v1
+kind: EdgionStreamPlugins
+metadata:
+  name: "__PREFIX__-global-ip"
+  namespace: "__NS_A__"
+  labels: {edgion.io/e2e-run: "__RUN_ID__"}
+spec:
+  plugins:
+    - type: GlobalConnectionIpRestriction
+      config:
+        enable: true
+        activeProfile: locked
+        profiles:
+          locked:
+            defaultAction: deny
+            allow: [{name: office, cidrs: ["10.0.0.0/8"]}]
+          open:
+            defaultAction: deny
+            allow: [{name: test-networks, cidrs: ["192.0.2.0/24", "198.51.100.0/24"]}]
+        description: Federation E2E global connection policy
+        activeProfileRef: {name: "__PREFIX__-global-ip-selector"}

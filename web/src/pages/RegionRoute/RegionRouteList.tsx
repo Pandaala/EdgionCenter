@@ -11,11 +11,14 @@ import {
   type CenterRegionRoute,
   type EffectiveRegionRoute,
   type RegionDef,
+  type RegionRouteOverrideRef,
   type ConsistencyResult,
 } from '@/api/regionRoute'
 import { getActiveControllerId, getAppMode } from '@/utils/proxy'
+import { useCan } from '@/utils/permissions'
 import { useT } from '@/i18n'
 import PageHeader from '@/components/PageHeader'
+import { useSearchParams } from 'react-router-dom'
 
 const { Text } = Typography
 
@@ -23,10 +26,25 @@ const { Text } = Typography
 // Types
 // ---------------------------------------------------------------------------
 
-type RegionRouteRow = CenterRegionRoute | EffectiveRegionRoute
+export type RegionRouteRow = CenterRegionRoute | EffectiveRegionRoute
 
 function isCenterRow(r: RegionRouteRow): r is CenterRegionRoute {
   return 'controllers' in r
+}
+
+export function regionRouteConsistencyKey(route: RegionRouteRow): string {
+  return `${route.namespace}/${route.pluginName}${route.alias ? `/${route.alias}` : ''} (#${route.entryIndex})`
+}
+
+export function regionRouteRowKey(route: RegionRouteRow): string {
+  return `${route.namespace}/${route.pluginName}/${route.entryIndex}`
+}
+
+export function writableOverrideRef(route: RegionRouteRow): RegionRouteOverrideRef | null {
+  if (isCenterRow(route)) {
+    return Object.values(route.controllers).find((entry) => entry.overrideRef?.permitted)?.overrideRef ?? null
+  }
+  return route.overrideRef?.permitted ? route.overrideRef : null
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +62,34 @@ function RegionsCell({ regions }: { regions: RegionDef[] }) {
           </Tag>
         </Tooltip>
       ))}
+    </Space>
+  )
+}
+
+function RouteConfigSummary({ entry }: { entry: EffectiveRegionRoute }) {
+  const t = useT()
+  const keyGet = Array.isArray(entry.keyGet) ? entry.keyGet : []
+  const routeRules = Array.isArray(entry.routeRules) ? entry.routeRules : []
+  return (
+    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+      <Space wrap>
+        <Text type="secondary">{t('center.regionRoute.routeRules')}:</Text>
+        {routeRules.length ? routeRules.map((rule, index) => (
+          <Tag key={index} color="purple">{rule.type ?? JSON.stringify(rule)}</Tag>
+        )) : <Text type="secondary">—</Text>}
+        <Text type="secondary">{t('center.regionRoute.hashCalc')}:</Text>
+        {entry.hashCalc ? (
+          <>
+            <Tag>{t('center.regionRoute.algorithm')}: {entry.hashCalc.algorithm ?? '—'}</Tag>
+            <Tag>{t('center.regionRoute.modulo')}: {entry.hashCalc.modulo ?? '—'}</Tag>
+          </>
+        ) : <Text type="secondary">—</Text>}
+      </Space>
+      <Space wrap>
+        <Text type="secondary">Key sources:</Text>
+        {keyGet.length ? keyGet.map((source, index) => <Tag key={index}>{JSON.stringify(source)}</Tag>) : <Text type="secondary">—</Text>}
+        {entry.overrideRef && <Tag color="orange">Override: {entry.overrideRef.namespace}/{entry.overrideRef.name}</Tag>}
+      </Space>
     </Space>
   )
 }
@@ -82,12 +128,13 @@ function FailoverPanel({
   regions,
   namespace,
   overrideRef,
+  routeIdentity,
   onDone,
 }: {
   regions: RegionDef[]
   namespace: string
-  /** The EdgionConfigData name (RegionRouteOverride) — sent as `name` to the failover API. */
-  overrideRef: string
+  overrideRef: { namespace: string; name: string }
+  routeIdentity?: { pluginName: string; entryIndex: number }
   onDone?: () => void
 }) {
   const t = useT()
@@ -105,10 +152,11 @@ function FailoverPanel({
       await Promise.all(
         changed.map((region) =>
           regionRouteApi.regionRouteFailover(
-            namespace,
-            overrideRef,
+            routeIdentity ? namespace : overrideRef.namespace,
+            routeIdentity ? '' : overrideRef.name,
             region.name,
             pending[region.name] ?? '',
+            routeIdentity,
           ),
         ),
       )
@@ -136,6 +184,7 @@ function FailoverPanel({
               [{region.hashRange[0]}, {region.hashRange[1]}]
             </Text>
             <Select
+              data-testid={`region-failover-select-${region.name}`}
               size="small"
               value={pending[region.name] ?? ''}
               disabled={applyMutation.isPending}
@@ -149,6 +198,7 @@ function FailoverPanel({
           </Space>
         ))}
         <Button
+          data-testid="region-failover-apply"
           type="primary"
           danger={isDirty}
           disabled={!isDirty}
@@ -175,23 +225,26 @@ function RowActions({
   consistencyResult?: ConsistencyResult
 }) {
   const t = useT()
+  const canWrite = useCan('region-routes:write')
   const [open, setOpen] = useState(false)
 
+  const representative = isCenterRow(row)
+    ? Object.entries(row.controllers).sort(([left], [right]) => left.localeCompare(right))[0]?.[1]
+    : row
   const regions: RegionDef[] = isCenterRow(row)
-    ? (Object.values(row.controllers)[0]?.regions ?? [])
+    ? (representative?.regions ?? [])
     : row.regions
 
   // For a Center aggregated row all controllers share the same git-owned base, so the
   // first controller's overrideRef is representative.  For a single-controller row use
   // the field directly.
-  const overrideRef: string | null = isCenterRow(row)
-    ? (Object.values(row.controllers)[0]?.overrideRef ?? null)
-    : row.overrideRef
+  const overrideRef = writableOverrideRef(row)
 
-  const failoverDisabled = !overrideRef
+  const failoverDisabled = !overrideRef || !canWrite
 
   const failoverButton = (
     <Button
+      data-testid="region-failover"
       size="small"
       type="primary"
       disabled={failoverDisabled}
@@ -222,6 +275,7 @@ function RowActions({
                   regions={regions}
                   namespace={row.namespace}
                   overrideRef={overrideRef}
+                  routeIdentity={isCenterRow(row) ? { pluginName: row.pluginName, entryIndex: row.entryIndex } : undefined}
                   onDone={() => setOpen(false)}
                 />
               )}
@@ -292,11 +346,13 @@ function CenterExpandedDetail({
               </Space>
             ),
             children: (
-              <Table
-                size="small"
-                pagination={false}
-                dataSource={entry.regions.map((r, i) => ({ ...r, key: i }))}
-                columns={[
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <RouteConfigSummary entry={entry} />
+                <Table
+                  size="small"
+                  pagination={false}
+                  dataSource={entry.regions.map((r, i) => ({ ...r, key: i }))}
+                  columns={[
                   {
                     title: t('center.regionRoute.regionName'),
                     dataIndex: 'name',
@@ -325,8 +381,9 @@ function CenterExpandedDetail({
                     render: (v: string | undefined) =>
                       v ? <Tag color="orange">{v}</Tag> : <Text type="secondary">—</Text>,
                   },
-                ]}
-              />
+                  ]}
+                />
+              </Space>
             ),
           }]}
         />
@@ -343,6 +400,7 @@ function ControllerExpandedDetail({ item }: { item: EffectiveRegionRoute }) {
   const t = useT()
   return (
     <Space direction="vertical" style={{ width: '100%', padding: '8px 0' }} size={12}>
+      <RouteConfigSummary entry={item} />
       <Table
         size="small"
         pagination={false}
@@ -390,9 +448,10 @@ export default function RegionRouteList() {
   const t = useT()
   // Center aggregated view: app mode is center AND no specific controller is selected.
   const isCenter = getAppMode() === 'center' && !getActiveControllerId()
-  const [filter, setFilter] = useState('')
+  const [searchParams] = useSearchParams()
+  const [filter, setFilter] = useState(() => searchParams.get('q') ?? '')
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['region-routes'],
     queryFn: () => regionRouteApi.listRegionRoutes(),
     staleTime: 30_000,
@@ -474,16 +533,16 @@ export default function RegionRouteList() {
     const nameCol = {
       title: (
         <>
-          RegionRoute{' '}
+          {t('center.nav.regionRoutes')}{' '}
           <span style={{ fontSize: 11, color: 'var(--ec-color-text-subtle)', fontWeight: 'normal' }}>
-            (Namespace/Plugin)
+            {t('center.regionRoute.namespacePlugin')}
           </span>
         </>
       ),
       key: 'name',
       sorter: (a: RegionRouteRow, b: RegionRouteRow) =>
         `${a.namespace}/${a.pluginName}`.localeCompare(`${b.namespace}/${b.pluginName}`),
-      filterDropdown: searchDropdown('Search namespace/plugin'),
+      filterDropdown: searchDropdown(t('center.regionRoute.searchNamespacePlugin')),
       filterIcon,
       onFilter: (value: boolean | bigint | string | number, r: RegionRouteRow) =>
         `${r.namespace}/${r.pluginName}`.toLowerCase().includes(String(value).toLowerCase()),
@@ -529,9 +588,7 @@ export default function RegionRouteList() {
           row={r}
           consistencyResult={
             isCenter
-              ? consistencyMap.get(
-                  `${r.namespace}/${r.pluginName}${r.alias ? '/' + r.alias : ''}`,
-                )
+              ? consistencyMap.get(regionRouteConsistencyKey(r))
               : undefined
           }
         />
@@ -543,11 +600,11 @@ export default function RegionRouteList() {
     }
 
     const overrideCol = {
-      title: 'Override',
+      title: t('center.regionRoute.override'),
       key: 'overrideApplied',
       render: (_: unknown, r: RegionRouteRow) =>
         !isCenterRow(r) && r.overrideApplied ? (
-          <Tag color="orange">Applied</Tag>
+          <Tag color="orange">{t('center.regionRoute.applied')}</Tag>
         ) : (
           <Text type="secondary">—</Text>
         ),
@@ -559,15 +616,16 @@ export default function RegionRouteList() {
   return (
     <div>
       <PageHeader
-        title="RegionRoute"
+        title={isCenter ? t('center.regionRoute.regionTitle') : t('center.nav.regionRoutes')}
         subtitle={t('page.subtitle.regionRoutes')}
         actions={
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+          <Button data-testid="region-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>
             {t('btn.refresh')}
           </Button>
         }
       />
       <AutoComplete
+        data-testid="region-search"
         placeholder={t('center.regionRoute.pluginName')}
         value={filter}
         onChange={setFilter}
@@ -580,22 +638,27 @@ export default function RegionRouteList() {
           size="large"
           style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}
         />
+      ) : isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message={t('center.regionRoute.fetchDetailError')}
+          description={error instanceof Error ? error.message : String(error)}
+        />
       ) : filteredItems.length === 0 ? (
         <Empty description={t('center.regionRoute.noData')} />
       ) : (
         <Table
           dataSource={filteredItems}
           columns={columns}
-          rowKey={(r) => `${r.namespace}/${r.pluginName}/${r.alias ?? ''}`}
+          rowKey={regionRouteRowKey}
           pagination={{ pageSize: 10, showTotal: (n) => t('table.totalItems', { n }) }}
           expandable={{
             expandedRowRender: (record) =>
               isCenterRow(record) ? (
                 <CenterExpandedDetail
                   item={record}
-                  consistencyResult={consistencyMap.get(
-                    `${record.namespace}/${record.pluginName}${record.alias ? '/' + record.alias : ''}`,
-                  )}
+                  consistencyResult={consistencyMap.get(regionRouteConsistencyKey(record))}
                 />
               ) : (
                 <ControllerExpandedDetail item={record} />

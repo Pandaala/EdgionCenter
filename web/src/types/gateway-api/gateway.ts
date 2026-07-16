@@ -5,7 +5,7 @@
 
 import type { K8sObjectMeta, Hostname } from './common'
 
-export type ListenerProtocol = 'HTTP' | 'HTTPS' | 'TCP' | 'TLS' | 'UDP'
+export type ListenerProtocol = string
 export type TLSMode = 'Terminate' | 'Passthrough'
 export type NamespacesFromType = 'Same' | 'All' | 'Selector'
 
@@ -14,18 +14,60 @@ export interface CertificateRef {
   namespace?: string
   kind?: string
   group?: string
+  [key: string]: unknown
+}
+
+export interface FrontendTLSValidation {
+  mode?: 'AllowValidOnly' | 'AllowInsecureFallback'
+  caCertificateRefs?: CertificateRef[]
+  [key: string]: unknown
+}
+
+export interface GatewayFrontendTLSDefault {
+  validation?: FrontendTLSValidation
+  [key: string]: unknown
+}
+
+export interface GatewayFrontendTLSPerPort {
+  port: number
+  tls?: GatewayFrontendTLSDefault
+  [key: string]: unknown
+}
+
+export interface GatewaySpecTLS {
+  backend?: {
+    clientCertificateRef?: CertificateRef
+    [key: string]: unknown
+  }
+  frontend?: {
+    default?: GatewayFrontendTLSDefault
+    perPort?: GatewayFrontendTLSPerPort[]
+    [key: string]: unknown
+  }
+  [key: string]: unknown
 }
 
 export interface ListenerTLS {
   mode?: TLSMode
   certificateRefs?: CertificateRef[]
-  options?: Record<string, string>
+  options?: Record<string, unknown>
+  frontendValidation?: FrontendTLSValidation
+  [key: string]: unknown
 }
 
 export interface AllowedRoutes {
   namespaces?: {
     from?: NamespacesFromType
-    selector?: { matchLabels?: Record<string, string> }
+    selector?: {
+      matchLabels?: Record<string, string>
+      matchExpressions?: Array<{
+        key: string
+        operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist'
+        values?: string[]
+        [key: string]: unknown
+      }>
+      [key: string]: unknown
+    }
   }
   kinds?: Array<{ group?: string; kind: string }>
 }
@@ -37,17 +79,21 @@ export interface GatewayListener {
   hostname?: Hostname
   tls?: ListenerTLS
   allowedRoutes?: AllowedRoutes
+  [key: string]: unknown
 }
 
 export interface GatewayAddress {
-  type?: 'IPAddress' | 'Hostname'
+  type?: string
   value: string
+  [key: string]: unknown
 }
 
 export interface GatewaySpec {
   gatewayClassName: string
   listeners: GatewayListener[]
   addresses?: GatewayAddress[]
+  tls?: GatewaySpecTLS
+  [key: string]: unknown
 }
 
 export interface Gateway {
@@ -56,4 +102,5 @@ export interface Gateway {
   metadata: K8sObjectMeta
   spec: GatewaySpec
   status?: any
+  [key: string]: unknown
 }

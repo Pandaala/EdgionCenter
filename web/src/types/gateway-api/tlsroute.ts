@@ -8,12 +8,14 @@ import type { K8sObjectMeta, Hostname } from './common'
 
 export interface TLSRouteRule {
   backendRefs?: BackendRef[]
+  [key: string]: unknown
 }
 
 export interface TLSRouteSpec {
   parentRefs?: ParentReference[]
   hostnames?: Hostname[]
   rules: TLSRouteRule[]
+  [key: string]: unknown
 }
 
 export interface TLSRoute {

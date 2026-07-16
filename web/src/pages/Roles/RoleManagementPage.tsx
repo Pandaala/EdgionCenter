@@ -24,14 +24,14 @@ export default function RoleManagementPage() {
     queryFn: rolesApi.list,
     staleTime: 30000,
   })
-  const roles: RoleDto[] = rolesData?.data ?? []
+  const roles: RoleDto[] = useMemo(() => rolesData?.data ?? [], [rolesData?.data])
 
   const { data: catalogData } = useQuery({
     queryKey: ['center-permission-catalog'],
     queryFn: rolesApi.permissionCatalog,
     staleTime: Infinity,
   })
-  const catalog = catalogData?.data ?? []
+  const catalog = useMemo(() => catalogData?.data ?? [], [catalogData?.data])
 
   // Flat catalog order — drives deterministic key ordering when saving.
   const catalogOrder = useMemo(() => catalog.flatMap((g) => g.keys), [catalog])
@@ -40,8 +40,8 @@ export default function RoleManagementPage() {
 
   // Selection lifecycle, driven by the role list (create/delete/refetch):
   //  - no roles  → clear the selection and the editable matrix;
-  //  - nothing selected → auto-select the first role;
-  //  - selected role deleted → clear selection and matrix.
+  //  - nothing selected → atomically select and seed the first role;
+  //  - selected role deleted → select and seed the new first role.
   // It deliberately does NOT re-seed selectedKeys for a still-present selection,
   // so a background refetch of OTHER roles can't clobber unsaved toggles.
   useEffect(() => {
@@ -52,30 +52,18 @@ export default function RoleManagementPage() {
     }
     if (selectedId == null) {
       setSelectedId(roles[0].id)
+      setSelectedKeys(new Set(roles[0].permissionKeys))
       return
     }
     if (!roles.some((r) => r.id === selectedId)) {
-      setSelectedId(null)
-      setSelectedKeys(new Set())
+      setSelectedId(roles[0].id)
+      setSelectedKeys(new Set(roles[0].permissionKeys))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rolesData])
-
-  // Seed the editable matrix from the selected role's saved keys, but only when
-  // the user picks a DIFFERENT role (selectedId changes) — not on every refetch.
-  useEffect(() => {
-    if (selectedId == null) {
-      setSelectedKeys(new Set())
-      return
-    }
-    const role = (rolesData?.data ?? []).find((r) => r.id === selectedId)
-    if (role) setSelectedKeys(new Set(role.permissionKeys))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId])
+  }, [roles, selectedId])
 
   const selectRole = (role: RoleDto) => {
     setSelectedId(role.id)
-    // selectedKeys is seeded by the [selectedId] effect above.
+    setSelectedKeys(new Set(role.permissionKeys))
   }
 
   const toggleKey = (key: string, checked: boolean) => {
@@ -142,6 +130,8 @@ export default function RoleManagementPage() {
       okText: t('confirm.okText'),
       okType: 'danger',
       cancelText: t('btn.cancel'),
+      okButtonProps: { 'data-testid': 'role-confirm' },
+      cancelButtonProps: { 'data-testid': 'role-cancel' },
       onOk: () => deleteMutation.mutate(record.id),
     })
   }
@@ -160,10 +150,10 @@ export default function RoleManagementPage() {
       key: 'actions',
       render: (_: unknown, record: RoleDto) => (
         <Space size={4}>
-          <Button size="small" onClick={() => selectRole(record)}>
+          <Button data-testid="role-edit" size="small" onClick={() => selectRole(record)}>
             {t('roles.action.editPermissions')}
           </Button>
-          <Button danger size="small" onClick={() => handleDelete(record)}>
+          <Button data-testid="role-delete" danger size="small" onClick={() => handleDelete(record)}>
             {t('btn.delete')}
           </Button>
         </Space>
@@ -178,10 +168,10 @@ export default function RoleManagementPage() {
         subtitle={t('roles.subtitle')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+            <Button data-testid="roles-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
             </Button>
-            <Button type="primary" onClick={() => setCreateOpen(true)}>
+            <Button data-testid="role-create" type="primary" onClick={() => setCreateOpen(true)}>
               {t('btn.create')}
             </Button>
           </>
@@ -210,6 +200,7 @@ export default function RoleManagementPage() {
           }
           extra={
             <Button
+              data-testid="role-permissions-save"
               type="primary"
               disabled={!selectedRole}
               loading={saveMutation.isPending}
@@ -245,6 +236,8 @@ export default function RoleManagementPage() {
       </div>
 
       <Modal
+        okButtonProps={{ 'data-testid': 'role-confirm' }}
+        cancelButtonProps={{ 'data-testid': 'role-cancel' }}
         title={t('roles.modal.create')}
         open={createOpen}
         onOk={handleCreate}

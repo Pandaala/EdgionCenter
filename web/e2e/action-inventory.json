@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "global": [
+    "login-username", "login-password", "login-submit", "nav-toggle", "user-menu", "logout",
+    "language-toggle", "page-reload", "resource-list-retry", "controllers-refresh", "controller-search", "controller-cluster-filter", "controller-card-enter", "controller-card-reload", "controller-card-reload-confirm", "controller-card-reload-cancel"
+  ],
+  "auxiliary": [
+    "login-error", "ebtp-list", "ebtp-form", "controller-observability", "topology-canvas", "route-ref-denied", "route-ref-granted", "editor-conditions-tab", "yaml-editor", "admin-delete-confirm",
+    "gateway-address-add", "gateway-address-remove", "httproute-rule-add", "httproute-rule-remove", "grpcroute-rule-add", "grpcroute-rule-remove",
+    "streamroute-rule-add", "streamroute-rule-remove", "backendtlspolicy-target-add", "backendtlspolicy-target-remove",
+    "edgionplugins-entry-add", "edgionplugins-entry-remove", "edgionstreamplugins-entry-add", "edgionstreamplugins-entry-remove",
+    "edgionbackendtrafficpolicy-target-add", "edgionbackendtrafficpolicy-target-remove",
+    "edgiongatewayconfig-ip-group-add", "edgiongatewayconfig-ip-group-remove", "endpointslice-port-add", "endpointslice-port-remove", "secret-data-add", "secret-data-remove", "secret-data-value",
+    "metadata-annotation-add", "metadata-annotation-key", "metadata-annotation-value"
+  ],
+  "auxiliaryActions": [
+    "editor-conditions-tab",
+    "gateway-address-add", "gateway-address-remove", "httproute-rule-add", "httproute-rule-remove", "grpcroute-rule-add", "grpcroute-rule-remove",
+    "streamroute-rule-add", "streamroute-rule-remove", "backendtlspolicy-target-add", "backendtlspolicy-target-remove",
+    "edgionplugins-entry-add", "edgionplugins-entry-remove", "edgionstreamplugins-entry-add", "edgionstreamplugins-entry-remove",
+    "edgionbackendtrafficpolicy-target-add", "edgionbackendtrafficpolicy-target-remove",
+    "edgiongatewayconfig-ip-group-add", "edgiongatewayconfig-ip-group-remove", "endpointslice-port-add", "endpointslice-port-remove", "secret-data-add", "secret-data-remove", "secret-data-value",
+    "metadata-annotation-add", "metadata-annotation-key", "metadata-annotation-value"
+  ],
+  "pages": {
+    "/dashboard": ["dashboard-refresh"],
+    "/user": ["user-refresh"],
+    "/topology": ["topology-refresh", "topology-namespace-filter", "topology-legend", "topology-node"],
+    "/region-routes/region": ["region-refresh", "region-failover", "region-failover-apply"],
+    "/region-routes/service": ["region-service-refresh", "region-service-search", "region-service-table", "region-service-manage-region"],
+    "/federation-diagnostics": ["federation-diagnostics", "federation-diagnostics-refresh", "federation-watch-table", "federation-region-metadata-table", "federation-gir-metadata-table"],
+    "/admin": ["admin-refresh", "admin-controller-delete", "admin-delete-cancel"],
+    "/audit": ["audit-refresh", "audit-actor-filter", "audit-controller-filter", "audit-since-filter", "audit-until-filter", "audit-apply", "audit-reset", "audit-prev", "audit-next"],
+    "/users": ["users-refresh", "user-create", "user-edit-roles", "user-enable", "user-disable", "user-reset-password", "user-delete", "user-confirm", "user-cancel"],
+    "/roles": ["roles-refresh", "role-create", "role-edit", "role-permissions-save", "role-delete", "role-confirm", "role-cancel"],
+    "/global-connection-ip-restrictions": ["gcir-refresh", "gcir-search", "gcir-namespace", "gcir-controller", "gcir-row-open", "gcir-profile-select", "gcir-profile-confirm", "gcir-profile-cancel"]
+  },
+  "resourceActionTemplates": ["{kind}-refresh", "{kind}-row-view"],
+  "searchableActionTemplates": ["{kind}-search"],
+  "namespacedActionTemplates": [],
+  "mutableActionTemplates": ["{kind}-create", "{kind}-row-edit", "{kind}-row-delete", "resource-delete-confirm", "resource-delete-cancel", "editor-form-tab", "editor-yaml-tab", "editor-submit", "editor-cancel"],
+  "batchActionTemplates": ["{kind}-batch-delete", "resource-batch-delete-confirm", "resource-batch-delete-cancel"],
+  "batchKinds": ["gateway", "httproute", "grpcroute", "tcproute", "udproute", "tlsroute", "service", "endpointslice", "edgiontls", "backendtlspolicy", "edgionplugins", "edgionstreamplugins", "linksys", "edgionbackendtrafficpolicy"],
+  "searchExceptions": ["edgiongatewayconfig"],
+  "restrictedDependencyTemplates": ["{kind}-tab", "{kind}-refresh", "{kind}-search", "{kind}-create", "{kind}-row-replace", "editor-form-tab", "editor-yaml-tab", "editor-submit", "editor-cancel"],
+  "resourceSpecific": {
+    "gateway": [],
+    "httproute": [],
+    "grpcroute": [],
+    "backendtlspolicy": [],
+    "edgionbackendtrafficpolicy": [],
+    "edgionacme": ["acme-trigger"],
+    "secret": [],
+    "configmap": []
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+  "required": ["schemaVersion", "runId", "startedAt", "finishedAt", "cases"],
+  "properties": {
+    "schemaVersion": {"const": 1}, "runId": {"type": "string", "minLength": 1},
+    "startedAt": {"type": "string", "format": "date-time"}, "finishedAt": {"type": "string", "format": "date-time"},
+    "cases": {"type": "array", "items": {"$ref": "#/$defs/case"}}
+  }, "additionalProperties": false,
+  "$defs": {"case": {
+    "type": "object",
+    "required": ["id", "mode", "controller", "page", "fixture", "actionTestId", "expectedHttp", "expectedOracle", "status", "durationMs", "artifacts"],
+    "properties": {
+      "id": {"type": "string", "minLength": 1}, "mode": {"enum": ["standalone", "kubernetes"]},
+      "controller": {"enum": ["A", "B"]}, "page": {"type": "string"}, "fixture": {"type": "string"},
+      "actionTestId": {"type": "string"}, "expectedHttp": {"type": "array", "items": {"type": "integer", "minimum": 100, "maximum": 599}},
+      "expectedOracle": {"enum": ["api", "kubernetes", "both", "none"]},
+      "status": {"enum": ["expected", "passed", "failed", "skipped"]}, "durationMs": {"type": "number", "minimum": 0},
+      "artifacts": {"type": "array", "items": {"type": "string"}}, "condition": {"type": ["string", "null"]}
+    }, "additionalProperties": false
+  }}
+}

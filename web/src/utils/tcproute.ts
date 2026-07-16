@@ -4,7 +4,7 @@
 
 import * as yaml from 'js-yaml'
 import type { TCPRoute } from '@/types/gateway-api/tcproute'
-import { removeEmpty } from './yaml-utils'
+import { mutationDocumentToYaml } from './resource-document'
 
 export const DEFAULT_TCPROUTE_YAML = `apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: TCPRoute
@@ -36,32 +36,22 @@ export function createEmptyTCPRoute(): TCPRoute {
   }
 }
 
-export function normalizeTCPRoute(raw: any): TCPRoute {
-  return {
-    apiVersion: raw.apiVersion || 'gateway.networking.k8s.io/v1alpha2',
-    kind: 'TCPRoute',
-    metadata: {
-      name: raw.metadata?.name || '',
-      namespace: raw.metadata?.namespace || 'default',
-      labels: raw.metadata?.labels,
-      annotations: raw.metadata?.annotations,
-      resourceVersion: raw.metadata?.resourceVersion,
-      creationTimestamp: raw.metadata?.creationTimestamp,
-    },
-    spec: {
-      parentRefs: raw.spec?.parentRefs || [],
-      rules: (raw.spec?.rules || []).map((rule: any) => ({
-        backendRefs: rule.backendRefs || [],
-      })),
-    },
-    status: raw.status,
+export function normalizeTCPRoute(raw: unknown): TCPRoute {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('TCPRoute document must be an object')
   }
+  const document = raw as Record<string, unknown>
+  if (document.kind !== 'TCPRoute') throw new Error('Expected a TCPRoute document')
+  return structuredClone(document) as unknown as TCPRoute
 }
 
 
 export function tcpRouteToYaml(route: TCPRoute): string {
-  const clean = removeEmpty(route)
-  return yaml.dump(clean, { lineWidth: -1, noRefs: true })
+  return yaml.dump(route, { lineWidth: -1, noRefs: true })
+}
+
+export function tcpRouteToMutationYaml(route: TCPRoute, mode: 'create' | 'update'): string {
+  return mutationDocumentToYaml(route, 'tcproute', mode)
 }
 
 export function yamlToTCPRoute(yamlStr: string): TCPRoute {

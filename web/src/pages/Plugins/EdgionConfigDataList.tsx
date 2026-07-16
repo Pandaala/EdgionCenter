@@ -1,5 +1,6 @@
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Modal, message } from 'antd'
+import { Table, Space, Input, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -12,11 +13,16 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
+import { resourceActionTestId } from '@/components/resource/testIds'
+import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
+import ResourceConditions from '@/components/resource/ResourceConditions'
 
 const { Search } = Input
 
 const EdgionConfigDataList = () => {
   const t = useT()
+  const mutationTarget = useControllerMutationTarget()
   const [searchText, setSearchText] = useState('')
   const [editorVisible, setEditorVisible] = useState(false)
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | 'view'>('create')
@@ -38,8 +44,8 @@ const EdgionConfigDataList = () => {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ namespace, name }: { namespace: string; name: string }) =>
-      resourceApi.delete('edgionconfigdata', namespace, name),
+    mutationFn: ({ namespace, name, resourceVersion }: { namespace: string; name: string; resourceVersion: string }) =>
+      resourceApi.delete(mutationTarget, 'edgionconfigdata', namespace, name, resourceVersion),
     onSuccess: () => {
       message.success(t('msg.deleteOk'))
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionconfigdata'] })
@@ -65,21 +71,23 @@ const EdgionConfigDataList = () => {
       },
       items: configDataItems,
     }),
-    { title: t('col.description'), key: 'desc', render: (_: any, r: K8sResource) => r.spec?.description || '-' },
+    { title: t('col.type'), key: 'type', render: (_: any, r: K8sResource) => r.spec?.data?.type || '-' },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
-          <Button size="small" danger icon={<DeleteOutlined />}
+          <PermissionAwareButton resourceKind="edgionconfigdata" resourceVerb="get" size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgionconfigdata" resourceVerb="update" size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgionconfigdata" resourceVerb="delete" size="small" danger icon={<DeleteOutlined />}
             onClick={() => Modal.confirm({
+              ...resourceDeleteConfirmProps,
               title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name: record.metadata.name }),
               okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
               onOk: () => deleteMutation.mutate({
-                namespace: record.metadata.namespace!, name: record.metadata.name,
+                namespace: record.metadata.namespace!, name: record.metadata.name, resourceVersion: record.metadata.resourceVersion!,
               }),
-            })}>{t('btn.delete')}</Button>
+            })}>{t('btn.delete')}</PermissionAwareButton>
         </Space>
       ),
     },
@@ -94,13 +102,13 @@ const EdgionConfigDataList = () => {
         subtitle={t('page.subtitle.edgionConfigData')}
         actions={
           <>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <PermissionAwareButton resourceKind="edgionconfigdata" resourceVerb="list" icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</PermissionAwareButton>
+            <PermissionAwareButton resourceKind="edgionconfigdata" resourceVerb="create" type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</PermissionAwareButton>
           </>
         }
       />
       <div style={{ marginBottom: 16 }}>
-        <Search placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
+        <Search data-testid={resourceActionTestId('edgionconfigdata', 'search')} placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
           style={{ width: 240 }} allowClear />
       </div>
 
