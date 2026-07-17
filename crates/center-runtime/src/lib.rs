@@ -5,6 +5,7 @@
 //! Kubernetes adapters.
 
 pub mod aggregator;
+pub mod cloud;
 pub mod commander;
 pub mod eviction;
 pub mod federation;

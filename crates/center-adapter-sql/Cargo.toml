@@ -26,6 +26,8 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 tokio = { version = "1.49", features = ["sync", "rt"] }
 tracing = "0.1"
+uuid = { version = "1.19", features = ["v4"] }
 
 [dev-dependencies]
+edgion-center-core = { path = "../center-core", features = ["test-support"] }
 tokio = { version = "1.49", features = ["macros", "rt-multi-thread"] }

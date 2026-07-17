@@ -1,28 +1,23 @@
 [package]
-name = "edgion-center-adapter-kubernetes"
+name = "edgion-center-adapter-cloudflare"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description = "Kubernetes persistence, authorization, and coordination adapters for Edgion Center"
+publish = false
+description = "Cloudflare infrastructure adapter for Edgion Center"
 
 [dependencies]
 async-trait.workspace = true
-chrono = "0.4"
+base64.workspace = true
 edgion-center-core = { path = "../center-core" }
-hex = "0.4"
-k8s-openapi.workspace = true
-kube.workspace = true
-schemars = "1.0"
+hmac.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10"
-tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }
+sha2.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
-anyhow = "1.0"
 edgion-center-core = { path = "../center-core", features = ["test-support"] }
-http = "1"
-serde_yaml = "0.9"
 tokio = { version = "1.49", features = ["macros", "rt-multi-thread"] }
-tower-test = "0.4"
+wiremock = "0.6"
