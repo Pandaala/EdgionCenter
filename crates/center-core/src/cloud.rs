@@ -5,7 +5,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
-use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +17,9 @@ mod credentials;
 mod dns;
 #[cfg(feature = "test-support")]
 mod dns_provider_conformance;
+mod dns_verification;
 mod operations;
+mod origin;
 mod provider_errors;
 mod status;
 mod zone_lifecycle;
@@ -53,6 +54,15 @@ pub use dns::{
     ObservedDnsZone, ProviderDnsRecordSet, ProviderDnsRecordType, Route53AliasTarget,
     Route53FailoverRole, Route53GeoLocation, Route53HealthCheckId, Route53RoutingPolicy,
 };
+pub use dns_verification::{
+    apply_dns_verification_evidence, DnsPropagationVerifier, DnsQueryOutcome, DnsRrsetExpectation,
+    DnsVerificationBinding, DnsVerificationBudgetUse, DnsVerificationError,
+    DnsVerificationErrorKind, DnsVerificationEvidence, DnsVerificationPolicy,
+    DnsVerificationRequest, DnsVerificationRequestId, DnsVerificationResult, DnsVerificationScope,
+    DnssecEvidenceSource, DnssecValidationState, DnssecVerificationEvidence,
+    DnssecVerificationExpectation, NameserverCheck, RecursiveResolverCheck, ResolverProfileId,
+    ResolverProfileRef, ResolverProfileRevision, SanitizedDnsFailureCode,
+};
 pub use operations::{
     ClaimedOperation, CloudOperation, CloudOperationAction, CloudOperationPhase,
     CloudOperationStep, CloudOperationStepPhase, CloudOperationStepPurpose, DispatchPolicy,
@@ -60,17 +70,25 @@ pub use operations::{
     NewCloudOperationStep, OperationError, OperationErrorKind, OperationId, OperationLease,
     OperationStore, StepCompletion, UnknownOutcomeResolution,
 };
+pub use origin::{
+    evaluate_origin_probe, select_origin_tier, HealthCheckExpectedResponse, HealthCheckMethod,
+    HealthCheckSourceRegion, HealthCheckSourceScope, HealthCheckSpec, OriginAddress,
+    OriginDrainState, OriginEndpoint, OriginEndpointName, OriginFailoverMode,
+    OriginHealthObservation, OriginHealthObserver, OriginHealthRequest, OriginHealthSource,
+    OriginHealthState, OriginHealthTransitionPolicy, OriginPoolCapabilities, OriginProbeSample,
+    OriginProtocol, OriginRequestHeaders, OriginSelection, OriginTlsMode,
+};
 pub use provider_errors::{NormalizedProviderError, ProviderErrorCategory};
 pub use status::{BoundedCloudEventHistory, CloudCorrelationId, CloudEvent};
 pub use zone_lifecycle::{
-    apply_zone_authority_evidence, authorize_zone_deletion, dnssec_transition_for_intent,
-    evaluate_zone_readiness, AuthoritativeDnsVerification, DelegationObservation, DelegationState,
-    DnssecDesiredState, DnssecDsRecord, DnssecExternalAction, DnssecObservation,
-    DnssecProviderState, ZoneAuthorityEvidence, ZoneAuthorityVerifier, ZoneCreationRequest,
-    ZoneDeletionAcknowledgement, ZoneDeletionApproval, ZoneDeletionBlocker, ZoneDeletionPlan,
-    ZoneDeletionRequest, ZoneLifecycleMutationId, ZoneLifecycleMutationReceipt,
-    ZoneLifecycleMutationState, ZoneLifecycleObservation, ZoneLifecycleProvider,
-    ZoneLifecycleProviderResult, ZoneLifecycleRevision, ZoneOrigin, ZoneReadiness,
+    authorize_zone_deletion, dnssec_transition_for_intent, evaluate_zone_readiness,
+    AuthoritativeDnsVerification, DelegationObservation, DelegationState, DnssecDesiredState,
+    DnssecDsRecord, DnssecExternalAction, DnssecObservation, DnssecProviderState,
+    ZoneAuthorityEvidence, ZoneCreationRequest, ZoneDeletionAcknowledgement, ZoneDeletionApproval,
+    ZoneDeletionBlocker, ZoneDeletionPlan, ZoneDeletionRequest, ZoneLifecycleMutationId,
+    ZoneLifecycleMutationReceipt, ZoneLifecycleMutationState, ZoneLifecycleObservation,
+    ZoneLifecycleProvider, ZoneLifecycleProviderResult, ZoneLifecycleRevision, ZoneOrigin,
+    ZoneReadiness,
 };
 
 #[cfg(feature = "test-support")]
@@ -502,50 +520,6 @@ pub struct EdgeApplicationSpec {
 
 resource!(EdgeApplication, EdgeApplicationSpec);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OriginProtocol {
-    Http,
-    Https,
-    Tcp,
-    Tls,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum OriginAddress {
-    Hostname(DomainName),
-    Ip(IpAddr),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OriginEndpoint {
-    pub name: String,
-    pub address: OriginAddress,
-    pub port: u16,
-    pub protocol: OriginProtocol,
-    pub host_header: Option<DomainName>,
-    pub server_name: Option<DomainName>,
-    pub weight: u16,
-    pub priority: u16,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HealthCheckSpec {
-    pub protocol: OriginProtocol,
-    pub port: u16,
-    pub path: Option<String>,
-    pub interval_seconds: u32,
-    pub timeout_seconds: u32,
-    pub healthy_threshold: u16,
-    pub unhealthy_threshold: u16,
-    #[serde(default)]
-    pub expected_statuses: Vec<u16>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OriginPoolSpec {
@@ -553,6 +527,14 @@ pub struct OriginPoolSpec {
     #[serde(default)]
     pub endpoints: Vec<OriginEndpoint>,
     pub health_check: Option<HealthCheckSpec>,
+    #[serde(default)]
+    pub failover_mode: OriginFailoverMode,
+    #[serde(default = "default_minimum_healthy")]
+    pub minimum_healthy: u16,
+}
+
+const fn default_minimum_healthy() -> u16 {
+    1
 }
 
 resource!(OriginPool, OriginPoolSpec);
@@ -696,31 +678,9 @@ impl CloudResource {
                     CloudResourceKind::ProviderAccount,
                     &metadata.id,
                 )?;
-                if resource
-                    .spec
-                    .endpoints
-                    .iter()
-                    .any(|endpoint| endpoint.name.trim().is_empty() || endpoint.port == 0)
-                {
-                    return Err(CoreError::Conflict(format!(
-                        "origin pool {} contains an invalid endpoint",
-                        metadata.id
-                    )));
-                }
-                if let Some(check) = &resource.spec.health_check {
-                    if check.port == 0
-                        || check.interval_seconds == 0
-                        || check.timeout_seconds == 0
-                        || check.healthy_threshold == 0
-                        || check.unhealthy_threshold == 0
-                    {
-                        return Err(CoreError::Conflict(format!(
-                            "origin pool {} contains an invalid health check",
-                            metadata.id
-                        )));
-                    }
-                }
-                Ok(())
+                resource.spec.validate().map_err(|error| {
+                    CoreError::Conflict(format!("origin pool {} is invalid: {error}", metadata.id))
+                })
             }
         }
     }

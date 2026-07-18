@@ -1,0 +1,18 @@
+[package]
+name = "edgion-center-adapter-dns-verifier"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish = false
+description = "Bounded authoritative and recursive DNS verifier for Edgion Center"
+
+[dependencies]
+async-trait.workspace = true
+edgion-center-core = { path = "../center-core" }
+hickory-proto.workspace = true
+hickory-resolver.workspace = true
+rand.workspace = true
+tokio = { version = "1.49", features = ["io-util", "net", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1.49", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

@@ -234,9 +234,11 @@ pub struct ZoneLifecycleObservation {
     pub non_default_record_count: u64,
 }
 
-/// Evidence produced independently from provider control-plane status. CLD-14
-/// may supply a network resolver implementation; tests and other compositions
-/// can inject an implementation without coupling it to a cloud adapter.
+/// Evidence produced independently from provider control-plane status.
+///
+/// This is a lifecycle projection only. It must be produced and applied by the
+/// validated DNS propagation contract; there is intentionally no legacy
+/// verifier/apply port that can turn an unbound timestamp into readiness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ZoneAuthorityEvidence {
@@ -244,35 +246,6 @@ pub struct ZoneAuthorityEvidence {
     pub observed_revision: ZoneLifecycleRevision,
     pub delegation: DelegationObservation,
     pub authoritative_verification: AuthoritativeDnsVerification,
-}
-
-#[async_trait]
-pub trait ZoneAuthorityVerifier: Send + Sync {
-    async fn verify(
-        &self,
-        zone: &DnsZoneRef,
-        authoritative_nameservers: &BTreeSet<AbsoluteDnsName>,
-    ) -> ZoneLifecycleProviderResult<ZoneAuthorityEvidence>;
-}
-
-pub fn apply_zone_authority_evidence(
-    observation: &mut ZoneLifecycleObservation,
-    evidence: ZoneAuthorityEvidence,
-) -> CoreResult<()> {
-    if evidence.delegation.expected_nameservers != observation.authoritative_nameservers {
-        return Err(CoreError::Conflict(
-            "authority evidence nameservers do not match the observed zone".into(),
-        ));
-    }
-    if evidence.zone != observation.zone || evidence.observed_revision != observation.revision {
-        return Err(CoreError::Conflict(
-            "authority evidence does not match the observed zone revision".into(),
-        ));
-    }
-    observation.delegation = evidence.delegation;
-    observation.authoritative_verification = evidence.authoritative_verification;
-    observation.readiness = evaluate_zone_readiness(&observation.authoritative_verification);
-    observation.validate()
 }
 
 impl ZoneLifecycleObservation {
@@ -693,55 +666,6 @@ mod tests {
         };
         assert!(authorize_zone_deletion(&plan, approval("r2", [])).is_ok());
         assert!(authorize_zone_deletion(&plan, approval("r1", [])).is_err());
-    }
-
-    #[test]
-    fn independent_authority_evidence_is_required_for_readiness() {
-        let nameservers: BTreeSet<_> = [AbsoluteDnsName::new("ns1.example.net").unwrap()]
-            .into_iter()
-            .collect();
-        let mut observation = ZoneLifecycleObservation {
-            zone: fixture_zone(),
-            revision: ZoneLifecycleRevision::new("r3").unwrap(),
-            authoritative_nameservers: nameservers.clone(),
-            delegation: DelegationObservation {
-                state: DelegationState::NotChecked,
-                expected_nameservers: nameservers.clone(),
-                parent_nameservers: BTreeSet::new(),
-                checked_at: None,
-                failure: None,
-            },
-            authoritative_verification: AuthoritativeDnsVerification::NotChecked,
-            readiness: ZoneReadiness::AwaitingAuthoritativeVerification,
-            dnssec: DnssecObservation {
-                state: DnssecProviderState::Disabled,
-                ds_records: Vec::new(),
-                external_action: DnssecExternalAction::None,
-                provider_detail: None,
-            },
-            non_default_record_count: 0,
-        };
-        let evidence_zone = observation.zone.clone();
-        let evidence_revision = observation.revision.clone();
-        apply_zone_authority_evidence(
-            &mut observation,
-            ZoneAuthorityEvidence {
-                zone: evidence_zone,
-                observed_revision: evidence_revision,
-                delegation: DelegationObservation {
-                    state: DelegationState::Delegated,
-                    expected_nameservers: nameservers.clone(),
-                    parent_nameservers: nameservers,
-                    checked_at: Some("2026-07-17T00:00:00Z".into()),
-                    failure: None,
-                },
-                authoritative_verification: AuthoritativeDnsVerification::Verified {
-                    checked_at: "2026-07-17T00:00:01Z".into(),
-                },
-            },
-        )
-        .unwrap();
-        assert_eq!(observation.readiness, ZoneReadiness::Ready);
     }
 
     fn fixture_zone() -> DnsZoneRef {

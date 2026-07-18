@@ -188,6 +188,14 @@ impl CloudflareHttpApi {
         decode_response(response, self.token.expose(), RequestKind::Read).await
     }
 
+    pub(crate) async fn read_result<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> CloudflareApiResult<T> {
+        require_result(self.get(path, query).await?)
+    }
+
     async fn post_batch<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -260,6 +268,45 @@ impl CloudflareHttpApi {
         }
         let response = request.send().await.map_err(map_write_transport_error)?;
         decode_response(response, self.token.expose(), RequestKind::Mutation).await
+    }
+
+    pub(crate) async fn mutation_result<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&Value>,
+    ) -> CloudflareApiResult<T> {
+        require_lifecycle_mutation_result(self.mutate(method, path, body).await?)
+    }
+
+    /// Executes a read-only provider operation which happens to use POST.
+    /// Transport ambiguity is retryable read evidence, not a mutation with an
+    /// unknown external outcome (for example Cloudflare Request Trace with
+    /// `skip_response=true`).
+    pub(crate) async fn execute_result<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> CloudflareApiResult<T> {
+        let encoded = serde_json::to_vec(body)
+            .map_err(|_| malformed("cloudflare_execute_encoding_failed"))?;
+        if encoded.len() > MAX_MUTATION_REQUEST_BYTES {
+            return Err(malformed("cloudflare_execute_request_too_large"));
+        }
+        let url = self
+            .base_url
+            .join(path)
+            .map_err(|_| malformed("invalid_cloudflare_request_path"))?;
+        let response = self
+            .client
+            .post(url)
+            .header(header::AUTHORIZATION, self.authorization_header()?)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(encoded)
+            .send()
+            .await
+            .map_err(map_transport_error)?;
+        require_result(decode_response(response, self.token.expose(), RequestKind::Read).await?)
     }
 
     fn authorization_header(&self) -> CloudflareApiResult<HeaderValue> {

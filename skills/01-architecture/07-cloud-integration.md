@@ -3,10 +3,16 @@
 ## Product boundary
 
 Cloud integration is an independent EdgionCenter capability for managing the public entry
-infrastructure in front of applications. Its initial boundary includes provider accounts,
-DNS zones and records, certificates, edge applications, and origin pools. It is not a
+infrastructure in front of applications. Its delivery boundary includes provider accounts,
+DNS zones and records, bounded Cloudflare and CloudFront edge applications, and origin pools. It is not a
 general-purpose cloud console and it does not depend on Edgion Controllers, Gateway API
 resources, RegionRoute, or the federation wire contract.
+
+Certificate lifecycle management is not part of Center delivery. Existing certificate model
+types remain for compatibility, but Center does not issue, import, upload, renew, rotate, or delete
+certificates or private keys. Edgion and cert-manager retain internal certificate ownership;
+CloudFront or other external edge resources may consume only an owner-supplied certificate
+reference plus fresh compatibility evidence.
 
 Future features may connect a `DomainBinding` to an Edgion region or route, but that is a
 separate integration layer. Provider adapters and the base cloud domain must remain useful
@@ -54,8 +60,8 @@ Every cloud resource has common metadata, a typed spec, and common observed stat
 | `ProviderAccount` | Selects a provider and references credentials without containing secret material. |
 | `ManagedZone` | Represents an imported or Center-created authoritative DNS zone. |
 | `DNSRecordSet` | Expresses one DNS owner name and record type with one or more values. |
-| `DomainBinding` | Declares that a public hostname is exposed through an optional certificate, edge application, and origin pool. |
-| `CertificateBinding` | Describes names, purpose, management mode, and an optional deployment target. |
+| `DomainBinding` | Declares that a public hostname is exposed through DNS, an optional edge application, and an origin pool; an external certificate reference may be attached as evidence. |
+| `CertificateBinding` | Compatibility model only; it is not a delivered Center certificate-management surface. |
 | `EdgeApplication` | Represents the provider edge/CDN application serving domains and forwarding to an origin pool. |
 | `OriginPool` | Describes independently addressable origins and portable active health checks. |
 
@@ -82,7 +88,7 @@ claim that a Center record alone proves ownership of an external object.
 ## Status contract
 
 Observed status uses generation-aware Conditions. At minimum, later reconcilers can publish
-`Accepted`, `CredentialsValid`, `DNSReady`, `CertificateReady`, `OriginHealthy`,
+`Accepted`, `CredentialsValid`, `DNSReady`, external TLS compatibility, `OriginHealthy`,
 `Programmed`, and `DriftDetected`. Unknown and stale observations must not be interpreted as
 success. Provider errors are summarized into stable reason codes; raw payloads and secrets
 must not be stored in status.
@@ -265,7 +271,8 @@ cross-page consistent snapshot. The shared adapter conformance kit verifies acco
 scope, deterministic token replay, complete traversal, exact-revision CRUD, guard negotiation,
 receipt isolation, and all-or-nothing preflight. The single-receipt port rejects per-change partial
 success until an outcome-per-change type exists. Concrete provider adapters must run this suite;
-canonical fingerprinting and CLD-14 authoritative verification remain follow-up work.
+canonical fingerprinting remains follow-up work. CLD-14 adds an independent DNS verifier; it is
+not composed into a provider adapter or product binary.
 
 The Cloudflare adapter is a separate account-bound crate. `ProviderAccountSpec` carries a typed
 provider-native account scope, so a Center resource ID is never sent as a Cloudflare account ID.
@@ -363,8 +370,225 @@ delegated/unverified, or DNSSEC-enabled zones are blockers that acknowledgement 
 Only a fresh safe plan plus a zone- and revision-bound approval can mint the sealed, non-wire
 deletion capability accepted by provider adapters, which re-observe provider state before delete.
 DNSSEC disable is likewise blocked until an independent parent check proves DS removal and the
-required cache hold; adapters never turn signing off first. CLD-14 owns the actual resolver,
-evidence freshness window, and parent NS/DS polling.
+required cache hold; adapters never turn signing off first.
+
+The CLD-14 verifier is a separate adapter with no provider SDK, persistence, Admin API, dashboard,
+federation, or Edgion dependency. Requests bind the provider account, zone, zone and record
+revisions, expected RRset, exact nameserver set, resolver profile ID and revision, retry/query
+budget, and evidence freshness window. Provider completion cannot construct DNS readiness. Public
+readiness requires every provider-observed authoritative server to publish the exact A, AAAA,
+CNAME, or TXT RRset, every configured recursive view to observe it, and a direct parent-authority
+delegation check to return the exact NS set. Parent discovery may use the bound authority resolver,
+but delegation evidence is accepted only after the target server proves authority for the parent
+with an authoritative SOA response. Delegated-child verification binds a separate child apex and
+child nameserver set and cannot update its parent zone's lifecycle readiness. Private and
+split-horizon checks use only their explicitly bound resolver profile and never fall back to
+ambient system DNS.
+
+Network access is bounded and fail closed. Public authoritative targets are provider- or
+delegation-derived nameserver addresses, pinned before connect, restricted to public unicast port
+53, and rechecked before UDP and TCP exchanges. Private targets require an explicit CIDR and port
+allowlist. Responses must match source endpoint, transaction ID, opcode, question, type, and class;
+truncated UDP retries only the same endpoint over bounded TCP. CNAME verification compares the
+direct RRset and never follows the target. Query attempts, backoff, per-query time, total time, and
+evidence age are bounded. Timeout and budget exhaustion remain per-nameserver evidence rather than
+an unscoped network error, and metrics expose only low-cardinality result classes.
+
+DNSSEC validation uses explicit resolver endpoints with system configuration, search domains, and
+hosts-file fallback disabled. Hickory validates locally from root trust anchors; a raw AD bit is
+never promoted to local-chain evidence. Signed readiness requires the expected RRset and parent DS
+set plus a secure local chain. Authenticated DS absence is kept distinct from an empty or failed
+answer. DNSSEC validation reserves bounded logical operations and is also constrained by the
+resolver's single attempt, per-lookup timeout, and the verifier's total deadline; Hickory's internal
+DNSKEY/DS exchanges are not individually exported as propagation-query metrics.
+
+## Origin routing and health contract
+
+`OriginPool` is an independent public-infrastructure resource. It does not contain Controller,
+cluster, Edgion Region, Gateway, HTTPRoute, or RegionRoute references. A future integration resource
+may attach one of those identities to a pool, but provider adapters and the base pool remain useful
+without Edgion.
+
+Each origin has a stable validated name, hostname or IP destination, explicit protocol and port,
+independent HTTP Host and TLS SNI values, TLS verification mode, relative weight, priority tier,
+and active, draining, or disabled administration state. Non-secret headers may be literal; secret
+headers are represented only by a composition-resolved credential reference. Health/status models
+never contain either header values or resolved secret material.
+
+Active health intent includes HTTP method/path when applicable, headers, expected status codes and
+optional bounded body match, interval, timeout, consecutive healthy/unhealthy thresholds, and a
+provider-default or explicit source-region scope. Provider adapters must validate the current
+source catalog and entitlement rather than accepting a syntactically valid region as available.
+Host/SNI/header fields on non-HTTP or non-TLS protocols fail before provider calls.
+
+Provider health and Center-observed health are separate evidence streams. Observations bind the
+endpoint and source, advance monotonically, retain consecutive success/failure counters, and have an
+exclusive freshness deadline. Threshold hysteresis controls state transitions; missing, unknown, or
+stale evidence never counts as healthy capacity. Portable selection either sends new traffic to all
+healthy active origins or to the first priority tier with sufficient healthy capacity. Draining and
+disabled origins remain observable but receive no new portable selection.
+
+Cloudflare Origin Rules use the zone `http_request_origin` phase and single-rule `route` mutations.
+Center must never update the whole phase ruleset because that would replace omitted user rules.
+Owned rules accept a bounded hostname and exact/prefix path match rather than arbitrary expressions,
+render Host, SNI, same-account DNS hostname, and port overrides explicitly, and use provider rule ID,
+stable ref, scope, version, observed revision, and stored ownership proof together. A marker alone is
+not ownership. Overlapping owned rules that write different values fail planning unless the later
+rule explicitly names the rule it overrides. Unowned rules remain opaque and retain their relative
+order. Delete plans expose whether a prior rule or provider default will become effective and require
+explicit acknowledgement when traffic may change. Trace is optional, safe GET/HEAD-only evidence;
+local preview reports that it is incomplete whenever opaque provider rules may participate.
+
+Cloudflare Load Balancing maps each portable priority tier to a distinct account-scoped pool because
+a Cloudflare pool origin has no priority or independent SNI field. The zone load balancer orders those
+pools in `default_pools` and references an explicit fallback pool. Weight conversion is exact or
+fails; Host and SNI that differ require an Origin Rule and are not silently collapsed. Provider
+monitor, pool, load-balancer, health, region, quota, and entitlement observations stay typed and
+account/zone scoped.
+
+The first transport mapping is deliberately HTTPS-only. A fresh scope- and credential-bound proof
+must show Zone SSL Routing, Full Strict at the same settings revision, and Always Use HTTPS so a
+visitor HTTP request is redirected before origin routing. Full Strict alone verifies certificates
+for HTTPS origin connections but does not prove that every request uses HTTPS. Origin Rules cannot
+serve as protocol-selection or TLS-verification evidence.
+
+Load-balancer rollout is expand, verify, then contract: create or reuse a content-bound monitor, add
+new pools/origins, verify sufficient provider health, attach them without removing old capacity,
+then drain and detach old objects. Cloudflare drain requires a proxied load balancer, session
+affinity, a drain duration, and disabling the origin; unsupported drain fails closed. Monitor and
+pool deletion requires both Center reverse-reference proof and an empty Cloudflare references
+response. Provider write ambiguity is `UnknownOutcome`, never an automatic retry. Public API plan,
+quota, region, and steering limitations are capability evidence; an unknown create quota cannot be
+treated as spare capacity.
+
+## CloudFront exposure contract
+
+CloudFront is modeled as a distribution rather than a DNS zone. Route 53 owns hosted zones and
+alias RRsets; a distribution owns its provider domain, origins, origin groups, ordered cache
+behaviors, alternate domain names, deployment state, and invalidations. The first delivery slice
+supports public custom HTTP(S) origins. A syntactically valid DNS hostname or an ambient resolver
+answer is not proof of that boundary: a plan requires fresh, scope-bound public-origin approval for
+the exact provider account, distribution observation, hostname, and protocol intent. Ordinary
+public origins and trusted-classified public AWS custom endpoints are allowed; S3/OAC, private and
+VPC origins, functions, WAF, continuous deployment, and policy authoring remain outside the
+contract and cannot be silently represented as public custom origins. The first slice supports
+only `http-only` and `https-only`; `match-viewer` remains unsupported.
+
+Persistent inventory retains a sanitized typed projection, opaque ETag, account/partition and
+credential authority, observation freshness, mutation eligibility, and a keyed MAC of the opaque
+ETag revision. The MAC is a scope-binding token, not a configuration content hash. Inventory never
+persists raw XML, a complete SDK configuration, or Origin Custom Header names or values; only a
+redacted count crosses the adapter seam. When a custom
+header is an origin access credential, its name and value form one composition-resolved secret;
+neither field may enter desired state, status, plans, events, logs, debug output, provider errors,
+or API projections. Validation identifies only the secret reference or collection position.
+CloudFront updates replace a full configuration, so CLD-28B emits only observation-bound origin and
+origin-group fragments with no dispatch authority. CLD-28F re-reads the complete config and ETag
+into one bounded in-memory mutation window, overlays an authorized fragment, preserves unsupported
+and unowned fields, submits once, and discards the sensitive object.
+If unknown fields cannot be detected or safely preserved, the resource is mutation-ineligible.
+Creation is composed only after a validated origin and default cache behavior exist. Update,
+enable, disable, and delete use the latest observed ETag and remain pending until a fresh
+observation reports the expected configuration as deployed. Ambiguous writes become
+`UnknownOutcome` and are resolved by observation rather than blind replay.
+
+CLD-28B planning consumes a non-deserializable live-inventory handle, not a persisted inventory
+DTO. Public-origin resolver/classifier inputs and their approval minter remain sealed inside the
+adapter until a trusted composition resolver is wired. CLD-23 contributes only a conservative
+endpoint shape: weight one, priority zero, active state, verified TLS, no portable health check,
+minimum healthy one, and priority-tier mode. No CLD-23 load-balancing or health semantics are
+silently translated to CloudFront.
+
+An origin group has exactly one primary and one secondary origin plus bounded failover status
+codes. It is not a weighted load balancer. CloudFront failover applies only to viewer `GET`, `HEAD`,
+and cacheable `OPTIONS` requests. AWS may route a mutating request to the primary member without
+failing it over, but Center deliberately rejects a behavior that combines an origin group with
+`POST`, `PUT`, `PATCH`, or `DELETE`. Plans, APIs, and UI must describe this as a stricter Center
+safety policy, not as an AWS API restriction, and must never claim failover for mutating methods.
+
+Reverse-reference inspection for an origin or origin group is impact diagnosis only. Even a fresh
+empty result does not prove provider ownership, override `DeletionPolicy::Retain`, authorize the
+caller, acknowledge traffic impact, or construct deletion authority. CLD-28F must independently
+require all ownership, policy, authorization, freshness, and approval fences before removal.
+
+Cache behaviors retain CloudFront first-match ordering and reference observed AWS-managed or
+pre-existing cache, origin-request, and response-header policies. Center does not author those
+policies in the first slice. Policy planning authority comes only from a live, scope-filtered List
+followed by an exact Get for every referenced policy; the sealed observation binds policy kind,
+managed/custom scope, ID, ETag, modification time, AWS account and partition, credential revision,
+and freshness. A sanitized policy DTO or persisted inventory cannot authorize a plan.
+
+The initial behavior planner is append-only: it preserves every observed ordered behavior and
+places new behavior fragments after them. It exposes no default replacement, existing behavior
+replacement/deletion, or reorder operation until CLD-05 ownership/adoption authority exists. An
+append can still divert requests that previously reached the default behavior, so this impact is
+explicit in the plan and is not mutation approval. Managed path patterns use a conservative exact
+or single trailing-wildcard subset. Local preview uses first-match order after RFC 3986 dot-segment
+normalization, preserves repeated slashes, is restricted to the observed provider hostname or an
+alias, and is always labeled as a local projection. An origin group preview reports its primary
+and conditional secondary plus eligible failover codes; it never claims that the secondary was
+actually selected. The fragment and plan carry no dispatch authority, and the
+`wire_schema_not_lossless` guard remains a mutation blocker until CLD-28F.
+
+Alternate domains consume an externally managed ACM ARN plus fresh, sealed account,
+commercial-partition, `us-east-1`, certificate-status/type/key, validity, SAN coverage, exact
+effective-hostname-set, and distribution-revision evidence. Center uses ACM
+`DescribeCertificate` only and never retrieves certificate material or owns request, import,
+renewal, export, rotation, or deletion. The conservative first subset accepts only
+`AMAZON_ISSUED` certificates that are not ACM-managed for CloudFront and additive exact-hostname
+distribution aliases; wildcard SANs may cover exact hostnames, but wildcard distribution aliases
+remain unsupported until inventory can represent them safely. A certificate already used by a
+different distribution is rejected until fresh evidence can prove compatible supported HTTP
+versions across all consumers. Exact aliases must enter the adapter in lowercase ASCII/A-label
+form; implicit Unicode-to-Punycode conversion is not part of the initial contract.
+
+Route 53 aliases use the freshly observed distribution domain and sealed, short-lived evidence
+from a composition-owned, versioned AWS endpoint catalog for the CloudFront alias hosted-zone ID.
+The initial production source is a strictly parsed, checked-in catalog artifact with a fixed source
+identity and an exact-byte SHA-256 revision; ordinary configuration, environment, or Admin input
+cannot replace its values. Observation time, rather than the static artifact, mints the five-minute
+evidence window.
+There is no hard-coded, request-supplied, or distribution-derived fallback. The initial subset is
+commercial AWS only and emits simple public alias desired state: A always, AAAA only when the
+distribution's observed IPv6 setting is enabled, inherited TTL, empty ordinary values, and
+`EvaluateTargetHealth=false`. The Route 53 zone may be in another AWS account, but every requested
+alias must have exactly one zone binding. Planning stages distribution attachment, deployed-state
+observation, Route 53 submission, `INSYNC` observation, and CLD-14 authoritative/recursive
+verification separately. AWS domain-conflict lookup requires the validation Distribution to
+already have a certificate covering the queried hostname, so the safe sequence is certificate-only
+attachment, deployed-state observation, complete bounded `ListDomainConflicts` scans for every new
+exact alias, Alias attachment, and a second deployed-state observation. Any returned item—including
+wildcard overlap, Distribution Tenant, or a partially masked cross-account identity—blocks the
+plan; this slice never migrates or takes over an Alias. Empty-scan evidence binds the Distribution
+ETag and credential authority, certificate ARN, exact new-hostname set, and a five-minute window,
+and contains no foreign identifiers. Until ownership/adoption, exact DNS revision, approval, and
+both mutation executors are composed, this plan has no dispatch authority. Serialized plans
+retain the Route 53 provider-account and hosted-zone scope for every alias group so later ownership
+and exact-revision evidence cannot be rebound to another zone.
+
+Invalidations are durable operations with stable CallerReference identities. Accepted and
+in-progress states are not completion. Paths, wildcard suffixes, quotas, costs, and broad-impact
+approval are validated before submission; ambiguous dispatch is observed by CallerReference or
+provider invalidation identity before any replay.
+
+The first invalidation slice is read/plan/reconciliation only. It exposes bounded GET-only List
+and Get transport and performs an exact Get for every list summary before sealing a complete
+distribution-scoped inventory. Provider-form paths are kept case- and byte-sensitive: Center does
+not percent-decode, remove dot segments, collapse slashes, or otherwise rewrite cache identity.
+Provider reads preserve bounded external query-string, tag, duplicate, and literal-mid-wildcard
+items as opaque observations; desired-state validation is intentionally separate. The conservative
+initial desired subset rejects query strings, raw non-ASCII, tilde, unnecessary percent encoding,
+and non-suffix wildcards. Targeted paths retain an explicit query-variant coverage blocker until
+cache-policy evidence proves completeness; a suffix wildcard is the conservative way to cover
+query variants. `/*` is available only through an explicit all-path intent. Canonical sorting and
+deduplication happen before the request digest; CallerReference binds distribution, operation
+identity, and that digest. Reconciliation accepts a provider invalidation only when both
+CallerReference and the complete canonical path vector match. Reconciliation uses the current
+fresh account/distribution scope rather than requiring the old plan ETag to remain fresh. A
+complete non-snapshot scan that finds no match is still indeterminate under concurrent creation or
+provider visibility delay and never authorizes a new CallerReference. Plans always report possible billing and missing ownership, approval,
+quota, operation-binding, and executor authority; no CreateInvalidation transport exists in this
+slice.
 
 ## Lifecycle examples
 
@@ -380,16 +604,18 @@ evidence freshness window, and parent NS/DS polling.
 1. Create or adopt a `ManagedZone`.
 2. Create an `OriginPool` independent of Edgion.
 3. Create an `EdgeApplication` referencing the origin pool.
-4. Create a `CertificateBinding` for the public hostname.
-5. Create a `DomainBinding` joining the zone, certificate, edge application, and pool.
-6. A later reconciler plans and applies child provider resources in dependency order.
+4. When the selected edge provider requires it, attach an owner-supplied external certificate
+   reference and fresh hostname/region compatibility evidence.
+5. Create a `DomainBinding` joining the zone, edge application, and pool.
+6. A later reconciler plans and applies child provider resources in dependency order without
+   taking ownership of certificate lifecycle.
 
 ### Delete a domain without deleting shared infrastructure
 
 1. Plan removal and calculate reverse references.
-2. Detach the hostname from the edge application and certificate target.
+2. Detach the hostname from the edge application without deleting the external certificate.
 3. Remove only owned DNS records created for the binding.
-4. Retain shared origin pools, certificates, zones, and provider accounts.
+4. Retain shared origin pools, external certificate references, zones, and provider accounts.
 5. Delete external resources only when their own deletion policy permits it and no live
    references remain.
 
