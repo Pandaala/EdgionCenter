@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgion-center
+spec:
+  template:
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: stage-cloud-credentials
+          image: ghcr.io/edgion/edgion-center-kubernetes:latest
+          command: [/bin/sh, -ec]
+          args:
+            - >-
+              umask 077 && mkdir -p /credentials/private &&
+              chmod 0700 /credentials/private &&
+              rm -f /credentials/private/.revision.key.tmp
+              /credentials/private/.cloudflare-api-token.tmp &&
+              cp /source/revision.key /credentials/private/.revision.key.tmp &&
+              cp /source/cloudflare-api-token
+              /credentials/private/.cloudflare-api-token.tmp &&
+              chmod 0400 /credentials/private/.revision.key.tmp
+              /credentials/private/.cloudflare-api-token.tmp &&
+              mv -f /credentials/private/.revision.key.tmp
+              /credentials/private/revision.key &&
+              mv -f /credentials/private/.cloudflare-api-token.tmp
+              /credentials/private/cloudflare-api-token
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: cloud-credentials-source
+              mountPath: /source
+              readOnly: true
+            - name: cloud-credentials
+              mountPath: /credentials
+      containers:
+        - name: center
+          volumeMounts:
+            - name: cloud-credentials
+              mountPath: /var/run/edgion-center/cloud-credentials
+              readOnly: true
+      volumes:
+        - name: cloud-credentials-source
+          secret:
+            secretName: edgion-center-cloudflare-credentials
+            defaultMode: 0440
+        - name: cloud-credentials
+          emptyDir:
+            medium: Memory

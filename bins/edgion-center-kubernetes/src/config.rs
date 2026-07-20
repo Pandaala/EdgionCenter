@@ -1,3 +1,4 @@
+use edgion_center_adapter_credential_files::MountedCredentialConfig;
 use edgion_center_app::common::{
     auth::AdminAuthConfig,
     config::{ConfSyncSecurityConfig, ConfSyncTlsConfig},
@@ -100,6 +101,8 @@ pub struct KubernetesCenterConfig {
     pub web: KubernetesWebConfig,
     pub audit_log_reads: bool,
     pub internal_forwarding: InternalForwardingConfig,
+    /// Deployment-owned mounted credentials. Disabled unless explicitly enabled.
+    pub mounted_credentials: MountedCredentialConfig,
 }
 
 impl Default for KubernetesCenterConfig {
@@ -114,6 +117,7 @@ impl Default for KubernetesCenterConfig {
             web: KubernetesWebConfig::default(),
             audit_log_reads: false,
             internal_forwarding: InternalForwardingConfig::default(),
+            mounted_credentials: MountedCredentialConfig::default(),
         }
     }
 }
@@ -226,6 +230,25 @@ mod tests {
     #[test]
     fn unknown_fields_fail_closed() {
         assert!(serde_yaml::from_str::<KubernetesCenterConfig>("database: {}\n").is_err());
+        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
+            "mounted_credentials:\n  enabledd: true\n"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn mounted_credentials_are_default_off_and_parse_strictly() {
+        assert!(
+            !KubernetesCenterConfig::default()
+                .mounted_credentials
+                .enabled
+        );
+        let config: KubernetesCenterConfig = serde_yaml::from_str(
+            "mounted_credentials:\n  enabled: true\n  root_directory: /var/run/edgion-center/cloud-credentials\n  revision_key_file: revision.key\n  bindings:\n    - credential_ref: cloudflare/main\n      provider_account_id: cf-main\n      provider: cloudflare\n      purpose: cloudflare_api_token\n      file: cloudflare/token\n",
+        )
+        .unwrap();
+        assert!(config.mounted_credentials.enabled);
+        assert_eq!(config.mounted_credentials.bindings.len(), 1);
     }
 
     #[test]

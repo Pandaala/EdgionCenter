@@ -55,6 +55,133 @@ impl CloudFrontFingerprintKey {
             digest.iter().map(|byte| format!("{byte:02x}")).collect(),
         ))
     }
+
+    #[allow(clippy::too_many_arguments)] // Every logical and provider scope fence is MAC-bound.
+    pub(crate) fn mac_enablement_intent(
+        &self,
+        provider_account_id: &CloudResourceId,
+        account_generation: u64,
+        credential_revision: &str,
+        partition: AwsPartition,
+        aws_account_id: &str,
+        distribution_id: &str,
+        etag: &str,
+        desired_enabled: bool,
+    ) -> CloudFrontApiResult<CloudFrontMutationIntentMac> {
+        let mut mac = HmacSha256::new_from_slice(&self.0)
+            .map_err(|_| validation("invalid_cloudfront_fingerprint_key"))?;
+        for component in [
+            "cloudfront_enablement_intent_v1",
+            provider_account_id.as_str(),
+            credential_revision,
+            partition.arn_partition(),
+            aws_account_id,
+            distribution_id,
+            etag,
+            if desired_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+        ] {
+            mac.update(&(component.len() as u64).to_be_bytes());
+            mac.update(component.as_bytes());
+        }
+        mac.update(&account_generation.to_be_bytes());
+        let digest = mac.finalize().into_bytes();
+        Ok(CloudFrontMutationIntentMac(
+            digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)] // The exact wire revision binds every execution fence.
+    pub(crate) fn mac_desired_wire_revision(
+        &self,
+        provider_account_id: &CloudResourceId,
+        account_generation: u64,
+        credential_revision: &str,
+        partition: AwsPartition,
+        aws_account_id: &str,
+        distribution_id: &str,
+        etag: &str,
+        desired_wire: &[u8],
+    ) -> CloudFrontApiResult<CloudFrontDesiredWireRevisionMac> {
+        let mut mac = HmacSha256::new_from_slice(&self.0)
+            .map_err(|_| validation("invalid_cloudfront_fingerprint_key"))?;
+        for component in [
+            "cloudfront_desired_wire_revision_v1",
+            aws_sdk_cloudfront::meta::PKG_VERSION,
+            "cloudfront_api_2020-05-31",
+            "ordered_xml_comparator_v1",
+            provider_account_id.as_str(),
+            credential_revision,
+            partition.arn_partition(),
+            aws_account_id,
+            distribution_id,
+            etag,
+        ] {
+            mac.update(&(component.len() as u64).to_be_bytes());
+            mac.update(component.as_bytes());
+        }
+        mac.update(&account_generation.to_be_bytes());
+        mac.update(&(desired_wire.len() as u64).to_be_bytes());
+        mac.update(desired_wire);
+        let digest = mac.finalize().into_bytes();
+        Ok(CloudFrontDesiredWireRevisionMac(
+            digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)] // Every immutable plan dimension is MAC-bound.
+    pub(crate) fn mac_enablement_plan_revision(
+        &self,
+        provider_account_id: &CloudResourceId,
+        account_generation: u64,
+        credential_revision: &str,
+        partition: AwsPartition,
+        aws_account_id: &str,
+        distribution_id: &str,
+        distribution_arn: &str,
+        valid_until_unix_ms: i64,
+        action: &str,
+        risk: &str,
+        intent_revision: &CloudFrontMutationIntentMac,
+        desired_wire_revision: &CloudFrontDesiredWireRevisionMac,
+        write_set: &BTreeSet<String>,
+        blockers: &BTreeSet<String>,
+    ) -> CloudFrontApiResult<CloudFrontEnablementPlanRevisionMac> {
+        let mut mac = HmacSha256::new_from_slice(&self.0)
+            .map_err(|_| validation("invalid_cloudfront_fingerprint_key"))?;
+        for component in [
+            "cloudfront_enablement_plan_v1",
+            provider_account_id.as_str(),
+            credential_revision,
+            partition.arn_partition(),
+            aws_account_id,
+            distribution_id,
+            distribution_arn,
+            action,
+            risk,
+            intent_revision.as_str(),
+            desired_wire_revision.as_str(),
+        ] {
+            mac.update(&(component.len() as u64).to_be_bytes());
+            mac.update(component.as_bytes());
+        }
+        mac.update(&account_generation.to_be_bytes());
+        mac.update(&valid_until_unix_ms.to_be_bytes());
+        for values in [write_set, blockers] {
+            mac.update(&(values.len() as u64).to_be_bytes());
+            for value in values {
+                mac.update(&(value.len() as u64).to_be_bytes());
+                mac.update(value.as_bytes());
+            }
+        }
+        let digest = mac.finalize().into_bytes();
+        Ok(CloudFrontEnablementPlanRevisionMac(
+            digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+        ))
+    }
 }
 
 impl Drop for CloudFrontFingerprintKey {
@@ -82,6 +209,54 @@ impl CloudFrontEtagRevisionMac {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// Scope-bound identifier for a mutation intent. It is not mutation authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct CloudFrontMutationIntentMac(String);
+
+impl CloudFrontMutationIntentMac {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_value(value: char) -> Self {
+        Self(value.to_string().repeat(64))
+    }
+}
+
+/// Keyed revision of the exact desired XML produced by the pinned SDK after wire admission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct CloudFrontDesiredWireRevisionMac(String);
+
+impl CloudFrontDesiredWireRevisionMac {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_value(value: char) -> Self {
+        Self(value.to_string().repeat(64))
+    }
+}
+
+/// Versioned keyed revision of one complete, immutable enablement preview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct CloudFrontEnablementPlanRevisionMac(String);
+
+impl CloudFrontEnablementPlanRevisionMac {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_value(value: char) -> Self {
+        Self(value.to_string().repeat(64))
     }
 }
 

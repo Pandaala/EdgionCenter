@@ -107,7 +107,33 @@ pub async fn authz_middleware(
                 Err(()) => return forbidden_response("<invalid-controller-id>"),
             };
             match authorizer.authorize(&principal, &action).await {
-                Ok(decision) if decision.allowed => PermissionSet::from_keys([key.to_string()]),
+                Ok(decision) if decision.allowed => {
+                    let mut granted = vec![key.to_string()];
+                    if matches!(method, axum::http::Method::POST | axum::http::Method::PUT)
+                        && (path == "/api/v1/center/cloud/provider-accounts"
+                            || path.starts_with("/api/v1/center/cloud/provider-accounts/"))
+                    {
+                        let credential_key = super::catalog::PROVIDER_CREDENTIALS_USE;
+                        let credential_action = Action {
+                            permission: credential_key.to_string(),
+                            controller_id: None,
+                            operation: Some(ActionOperation::Get),
+                            request_path: Some(format!("/permissions/{credential_key}")),
+                            request_verb: Some("get".to_string()),
+                        };
+                        match authorizer.authorize(&principal, &credential_action).await {
+                            Ok(decision) if decision.allowed => {
+                                granted.push(credential_key.to_string());
+                            }
+                            Ok(_) => return forbidden_response(credential_key),
+                            Err(error) => {
+                                tracing::warn!(component = "authz", %error, "credential-reference authorization failed closed");
+                                return authorization_unavailable_response();
+                            }
+                        }
+                    }
+                    PermissionSet::from_keys(granted)
+                }
                 Ok(_) => {
                     tracing::debug!(
                         component = "authz",
@@ -191,10 +217,12 @@ fn action_for_request(
     method: &axum::http::Method,
     path: &str,
 ) -> Result<Action, ()> {
-    let operation = if method == axum::http::Method::GET {
+    let is_read = method == axum::http::Method::GET || method == axum::http::Method::HEAD;
+    let operation = if is_read {
         if path == "/api/v1/controllers"
             || path == "/api/v1/clusters"
             || path == "/api/v1/center/admin/controllers"
+            || path == "/api/v1/center/cloud/provider-accounts"
         {
             ActionOperation::List
         } else {
@@ -205,6 +233,7 @@ fn action_for_request(
     } else if method == axum::http::Method::PATCH || method == axum::http::Method::PUT {
         ActionOperation::Update
     } else if path.ends_with("/reload")
+        || path.ends_with("/refresh")
         || path.ends_with("/sync")
         || path.ends_with("/failover")
         || path.starts_with("/api/v1/proxy/")
@@ -236,7 +265,11 @@ fn action_for_request(
         controller_id,
         operation: Some(operation),
         request_path: Some(path.to_string()),
-        request_verb: Some(method.as_str().to_ascii_lowercase()),
+        request_verb: Some(if method == axum::http::Method::HEAD {
+            "get".to_string()
+        } else {
+            method.as_str().to_ascii_lowercase()
+        }),
     })
 }
 
@@ -397,6 +430,82 @@ mod tests {
         let body = to_bytes(resp.into_body(), 1024).await.unwrap();
         let count: usize = String::from_utf8(body.to_vec()).unwrap().parse().unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn provider_account_mutation_also_requires_credential_use() {
+        let authorizer = Arc::new(CapturingAuthorizer {
+            principals: Mutex::new(Vec::new()),
+            actions: Mutex::new(Vec::new()),
+        });
+        let inner = Router::new().route(
+            "/api/v1/center/cloud/provider-accounts",
+            post(|| async { "ok" }),
+        );
+        let app = app_with(authorizer.clone(), inner);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri("/api/v1/center/cloud/provider-accounts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let actions = authorizer.actions.lock().unwrap();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].permission, catalog::PROVIDER_ACCOUNTS_WRITE);
+        assert_eq!(actions[1].permission, catalog::PROVIDER_CREDENTIALS_USE);
+        assert_eq!(
+            actions[1].request_path.as_deref(),
+            Some("/permissions/provider-credentials:use")
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_account_head_uses_read_permission_without_credential_use() {
+        for (path, expected_operation) in [
+            (
+                "/api/v1/center/cloud/provider-accounts",
+                ActionOperation::List,
+            ),
+            (
+                "/api/v1/center/cloud/provider-accounts/aws-main",
+                ActionOperation::Get,
+            ),
+        ] {
+            let authorizer = Arc::new(CapturingAuthorizer {
+                principals: Mutex::new(Vec::new()),
+                actions: Mutex::new(Vec::new()),
+            });
+            let inner = Router::new()
+                .route(
+                    "/api/v1/center/cloud/provider-accounts",
+                    get(|| async { "ok" }),
+                )
+                .route(
+                    "/api/v1/center/cloud/provider-accounts/{account_id}",
+                    get(|| async { "ok" }),
+                );
+            let response = app_with(authorizer.clone(), inner)
+                .oneshot(
+                    Request::builder()
+                        .method(axum::http::Method::HEAD)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let actions = authorizer.actions.lock().unwrap();
+            assert_eq!(actions.len(), 1);
+            assert_eq!(actions[0].permission, catalog::PROVIDER_ACCOUNTS_READ);
+            assert_eq!(actions[0].operation, Some(expected_operation));
+            assert_eq!(actions[0].request_verb.as_deref(), Some("get"));
+        }
     }
 
     #[tokio::test]

@@ -170,6 +170,12 @@ fn init_json_tracing() -> anyhow::Result<()> {
 
 async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
     let identity = config.validate()?;
+    let _mounted_credential_resolver =
+        edgion_center_adapter_credential_files::MountedCredentialResolver::from_config(
+            &config.mounted_credentials,
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!("Invalid mounted credential config: {error}"))?;
     ensure_distinct_internal_ca(&config).await?;
     let client = kube::Client::try_default()
         .await
@@ -189,6 +195,18 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         identity.namespace.clone(),
     ));
     let audit_writer = Arc::new(StructuredStdoutAudit);
+    let provider_account_store: Arc<dyn edgion_center_core::ProviderAccountStore> = Arc::new(
+        edgion_center_adapter_kubernetes::KubernetesProviderAccountStore::new(
+            client.clone(),
+            &identity.namespace,
+        )?,
+    );
+    let capability_snapshot_store: Arc<dyn edgion_center_core::CapabilitySnapshotStore> = Arc::new(
+        edgion_center_adapter_kubernetes::KubernetesCapabilitySnapshotStore::new(
+            client.clone(),
+            &identity.namespace,
+        )?,
+    );
     platform_health_check(
         directory.as_ref(),
         coordinator.as_ref(),
@@ -292,13 +310,23 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         user_admin: None,
         role_admin: None,
         audit_reader: None,
+        cloudflare_dns_admin: None,
+        provider_account_store: Some(provider_account_store),
+        capability_snapshot_store: Some(capability_snapshot_store),
+        // No Secret access or cloud SDK is composed by default.
+        credential_inspection_service: None,
         metadata_store: metadata_store.clone(),
         sync_client,
         registry: registry.clone(),
         platform_ready: platform_ready.clone(),
         authz_mode: AuthzMode::Rbac,
         platform_mode: CenterMode::Kubernetes,
-        capabilities: CenterCapabilities::for_mode(CenterMode::Kubernetes),
+        capabilities: {
+            let mut capabilities = CenterCapabilities::for_mode(CenterMode::Kubernetes);
+            capabilities.provider_account_admin = true;
+            capabilities.provider_capability_read = true;
+            capabilities
+        },
     };
 
     let auth_state = UnifiedAuthState::from_configs(Some(&config.auth), None, true, "center")?;

@@ -104,11 +104,62 @@ provider-neutral source modes are supported by the core contract:
 - `AssumeIdentity`: role assumption or service-account impersonation from an ambient or
   referenced base identity.
 
-Provider adapters own secret resolution and implement `CredentialInspector`. Inspection
-returns only non-secret principal/scope, an opaque credential revision, expiration time, and
-normalized issues. Authentication failure and permission denial are different issue kinds.
+Provider adapters own secret resolution and implement `CredentialInspector`. Inspection returns
+an internal provider identity, an opaque credential revision, expiration time, and normalized
+issues. The runtime validates principal shape but does not classify it as safe for serialization;
+only provider and scope can cross the generic Admin boundary. Authentication failure and
+permission denial are different issue kinds.
 When the revision or resolved identity changes, cached provider clients are rebuilt while the
 `ProviderAccount` and every resource reference to it remain unchanged.
+
+ProviderAccount persistence has a provider-neutral desired-state contract. API callers supply
+metadata and `ProviderAccountSpec`, but never generation or observed status. A store assigns
+generation one on create, increments it only through exact-generation compare-and-swap, and lists
+accounts with exact-byte keyset ordering. Persisted adapters must run the shared conformance suite
+and revalidate the complete stored shape on read. The first persistence slice is deliberately
+`Retain`-only and has no delete operation: deletion remains unavailable until desired-resource
+references and nonterminal cloud operations can be checked atomically. Credential sources remain
+bounded references or provider identity selectors; resolved secret material is never persisted.
+
+Standalone persists ProviderAccount desired state as an exact binary account ID, a signed positive
+generation, and bounded JSON. SQLite and MySQL use the database primary key for atomic create and a
+single conditional update for generation CAS; keyset listing compares the binary ID and fetches
+one extra row to prove whether a continuation exists. Every stored row is reconstructed through
+the core helper and revalidated. Malformed JSON, identity, generation, or desired state is an
+adapter failure, never a normal version conflict. The SQL adapter runs the same conformance suite
+that the Kubernetes adapter must implement.
+
+Kubernetes persists the same desired state in a namespaced `EdgionProviderAccount`. Its DNS-safe
+name is derived from a domain-separated account-ID digest, while the immutable original ID remains
+in spec for collision detection. An explicit desired generation changes on every replacement and
+must equal the API-server generation; `resourceVersion` provides the write CAS. Metadata-only
+conflicts are retried within a fixed bound, but a competing desired-state winner returns the same
+typed generation mismatch as SQL. The runtime RBAC grants only get, list, create, and update on the
+main resource and grants no ProviderAccount delete, status, watch, or Secret access.
+
+The ProviderAccount Admin surface is mounted at `/api/v1/center/cloud/provider-accounts` only when
+the active composition supplies a store. It supports create, exact-byte keyset list, get, and
+strong ETag/If-Match replacement; delete remains absent. HTTP request DTOs are independent from the
+core serde model and recursively reject unknown fields. New API account IDs use a bounded URL-safe
+form, provider-native scope is required and immutable, and deletion policy is fixed to `Retain`.
+Mutations require both `provider-accounts:write` and `provider-credentials:use`, while observation
+uses the separate high-trust `provider-accounts:read` permission. Responses expose configured
+credential references and identity selectors but never resolved material, status authorities, or
+provider responses. Existing installations must explicitly grant the new permissions to roles.
+
+Capability snapshot reads are a separate high-trust surface at
+`/api/v1/center/cloud/provider-capabilities/accounts/{account_id}` and require
+`provider-capabilities:read`. Keeping this outside the ProviderAccount route tree prevents a
+Kubernetes non-resource wildcard for account observation from implicitly granting capability
+posture access. The query identifies one exact account, region, or provider-resource
+scope; the API does not add a broad snapshot-list port. Responses preserve discovery state, typed
+six-dimension evidence, reasons, and each observation's validity window, but remove persistence
+contract version, credential revision, discovery epoch/token, and adapter diagnostic text/code.
+The response compares the snapshot's observed account generation with the current ProviderAccount
+and reports stale or unknown authority explicitly. `Observed` and `Complete` never mean usable,
+fresh, or allowed: credential authority remains unknown until a later credential-inspection
+composition can prove it. Missing snapshots are reported as `not_discovered`. This read slice does
+not construct a discoverer or make provider requests.
 
 ### Standalone mode
 
@@ -128,8 +179,41 @@ When the revision or resolved identity changes, cached provider clients are rebu
 - Secret RBAC must avoid list/watch access. A resolver receives access only to explicitly
   configured secret objects or mounted paths.
 
+The first static-secret slice is the SDK-free `center-adapter-credential-files` crate. Both
+compositions share a strict `mounted_credentials` configuration that defaults off. When enabled,
+the process opens one absolute root as a `cap-std` directory capability, validates strict relative
+locators, rejects a Unix root writable by group or world, reads a 32-byte non-zero revision key,
+and constructs only an optional resolver. Alias
+resolution requires an exact credential-reference, ProviderAccount, provider, and closed-purpose
+match before file I/O. Credential files retain exact bytes, are limited to 16 KiB, zeroize on drop,
+and must be regular and non-empty; Unix group/world-writable files and special files fail closed.
+Nonblocking opens prevent FIFO startup hangs. Domain-separated length-framed HMAC-SHA256 revisions
+change with binding authority or exact material without exposing a raw secret hash.
+
+Capability-relative symlink traversal permits Kubernetes projected-volume `..data` rotation but
+cannot leave the opened root. The base Kubernetes manifests and RBAC remain unchanged. A
+non-default example lets a non-root init container read two explicitly named `0440` Secret files
+through `fsGroup`, then stages them into a UID-1000-owned, memory-backed `0400` directory before
+Center starts. Center gains no Secret API permission. CLD-02A does not inject the resolver into
+`ApiState`, build an inspector/provider client, or cause network traffic.
+
 Cloudflare API Tokens are preferred to legacy global API keys. AWS and Google adapters must
 prefer automatically refreshed temporary credentials through the SDK provider chains.
+
+Credential inspection orchestration lives in the provider-neutral runtime. It loads the current
+ProviderAccount, resolves an inspector against that exact account authority, coalesces concurrent
+requests by account ID and generation, and reuses both successful and fixed failed results for a
+short, non-zero cooldown. One total deadline covers account lookup, follower waiting, concurrency
+admission, asynchronous resolver work, and inspection; resolver implementations must not perform
+blocking I/O. Returned identity must match both the configured provider and provider-native scope,
+and a valid expiry must exceed completion time by the configured minimum skew. Cached valid results
+stop being reusable before that expiry safety boundary, even when their cooldown is longer. Opaque
+credential revision, provider principal, adapter issue codes/messages, credential references, raw responses,
+and resolved values remain outside the Admin wire contract; the Admin identity contains only
+provider and scope. The explicit refresh route is independently authorized by
+`provider-credentials:inspect` and is mounted only when a service is composed. Both production
+compositions leave the service absent by default, so this foundation causes no cloud egress and
+adds no Kubernetes Secret permission.
 
 ## Provider capability contract
 
@@ -234,6 +318,33 @@ future work. Consumers must evaluate the requested condition at the exact desire
 must not treat the top-level observed generation alone as readiness.
 
 ## DNS provider contract
+
+Cloud-provider Admin APIs remain provider-specific product surfaces. There is no unified DNS menu
+or generic DNS control endpoint: Cloudflare, Route 53, and Google Cloud DNS expose their own
+inventory and operation routes, permissions, capabilities, and dashboard entries. A future Region
+failover workflow may call a selected provider-specific `switch-target` operation, but that caller
+does not change ownership of the provider integration.
+
+The first Cloudflare Admin API slice exposes only sanitized zone inventory through an SDK-free
+application port. The port is optional and the capability defaults to disabled in both production
+compositions. Until ProviderAccount and credential resolution can construct an account-bound
+service, the Cloudflare routes are not mounted and no provider network request is possible.
+
+The Cloudflare adapter exposes a separate account-bound zone-inventory seam because the portable
+DNS contract intentionally omits Cloudflare zone kind, status, and authoritative nameservers.
+Inventory cursors are authenticated and scope-bound, but their decodable payload contains only
+versioned, method-specific, domain-separated HMAC scope tags; Center account IDs,
+Cloudflare-native account IDs, zone IDs, and offline-verifiable plain hashes are never serialized
+into a cursor. A production application service must still resolve a Center ProviderAccount and
+its credential before constructing this adapter.
+
+Cloudflare record inventory is modeled as canonical RRsets identified by owner name and record
+type, not by one physical Cloudflare record ID. The provider-specific Admin DTO explicitly
+projects typed record values, automatic or explicit TTL, proxy state, CNAME flattening, comment,
+tags, all physical object IDs, and the canonical revision. TXT segments and CAA values remain
+lossless octets encoded as canonical Base64URL. Record responses are checked against a separately
+validated zone projection, preventing a provider service from rebinding a zone ID to another apex
+or visibility.
 
 The provider DNS port uses a separate canonical model instead of the CLD-01 `Vec<String>` resource
 placeholder. Names are stored as lowercase ASCII IDNA A-labels without a trailing dot; provider
@@ -487,6 +598,34 @@ origin-group fragments with no dispatch authority. CLD-28F re-reads the complete
 into one bounded in-memory mutation window, overlays an authorized fragment, preserves unsupported
 and unowned fields, submits once, and discards the sensitive object.
 If unknown fields cannot be detected or safely preserved, the resource is mutation-ineligible.
+CLD-28F now performs a private live re-read and an `Enabled`-only overlay preview. The same bounded
+GET operation captures its raw response after deserialization. A serializer probe captures the
+current and desired SDK request bodies and raises a typed interceptor abort before identity,
+signing, or transmit. Strict ordered, namespace-aware comparison rejects any raw/SDK mismatch and
+proves that the desired wire changes only the root `Enabled` scalar. A successful proof removes
+only that plan's wire-schema and full-config-revision blockers; ownership, approval, reliability,
+secret-memory zeroization, and executor blockers remain, and no dispatch method is exposed.
+The secret-bearing SDK configuration is consumed and dropped within the planner rather than
+returned to its caller. Preview fields are private, and its intent MAC binds the logical provider
+account, generation, credential revision, AWS account and partition, distribution, ETag, and
+desired enablement state; the MAC is still not mutation authority.
+A persistable ownership claim and approval record now bind that composite plan revision to the
+exact Center resource, ownership revision, action, risk, AWS scope, and freshness window. A joint
+verifier must validate both records from one authoritative snapshot or transaction. The resulting
+sealed preauthorization also binds the fresh inventory observation token and earliest evidence
+deadline, but remains deliberately non-serializable and non-dispatchable. It removes no planner
+blocker; durable storage, one-time approval consumption, and an operation-fence check immediately
+before provider dispatch are still required.
+A `cfg(test)`-only `UpdateDistribution` protocol harness specifies a separate one-attempt SDK
+client and its error contract. Explicit ETag rejection requires a replan; deterministic `4xx`
+responses are terminal or explicitly throttled; ambiguous transport failures, `408`, `5xx`,
+malformed success, or response identity/config drift are `UnknownOutcome`. A valid response proves
+only provider acceptance, never deployment. Production builds contain no CloudFront mutation
+client because the SDK request body can contain credential-bearing custom headers and must not be
+sent until a secret-safe logging boundary and sealed authority exist. The SDK version is exactly
+pinned for reproducibility, but this does not replace runtime full-wire preservation proof and
+cannot by itself remove preview blockers; only the live raw-versus-serialized admission can remove
+the two wire-related blockers for that exact ETag.
 Creation is composed only after a validated origin and default cache behavior exist. Update,
 enable, disable, and delete use the latest observed ETag and remain pending until a fresh
 observation reports the expected configuration as deployed. Ambiguous writes become

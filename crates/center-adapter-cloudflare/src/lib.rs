@@ -145,6 +145,20 @@ pub struct CloudflarePage<T> {
     pub total_pages: u32,
 }
 
+/// Provider-specific, sanitized Cloudflare zone inventory observation.
+///
+/// The provider-native account ID, credentials, raw response metadata, and
+/// provider error details are intentionally absent. The Center account ID in
+/// `zone` is the only account identity exposed to consumers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedCloudflareZone {
+    pub zone: DnsZoneRef,
+    pub kind: CloudflareZoneKind,
+    pub status: CloudflareZoneStatus,
+    pub name_servers: BTreeSet<AbsoluteDnsName>,
+    pub revision: Option<DnsRecordRevision>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudflareBatchRequest {
@@ -235,6 +249,27 @@ pub trait CloudflareApi: Send + Sync {
     ) -> CloudflareApiResult<CloudflareBatchResult>;
 }
 
+/// Account-bound, read-only Cloudflare zone inventory.
+///
+/// Unlike the portable [`DnsProvider`] contract, this seam retains the
+/// Cloudflare zone kind, status, and authoritative nameservers required by a
+/// provider-specific management surface. Implementations never return the
+/// provider-native account ID.
+#[async_trait]
+pub trait CloudflareZoneInventory: Send + Sync {
+    async fn list_zone_inventory(
+        &self,
+        provider_account_id: &CloudResourceId,
+        page: &DnsPageRequest,
+    ) -> DnsProviderResult<DnsPage<ObservedCloudflareZone>>;
+
+    async fn get_zone_by_id(
+        &self,
+        provider_account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+    ) -> DnsProviderResult<Option<ObservedCloudflareZone>>;
+}
+
 /// Stable composition-provided key for opaque cursor authentication.
 ///
 /// All replicas serving one account must receive the same key. The type is
@@ -322,6 +357,36 @@ impl CloudflareDnsAdapter {
         Err(validation("cloudflare_zone_pagination_limit"))
     }
 
+    async fn all_zone_inventory(&self) -> DnsProviderResult<Vec<ObservedCloudflareZone>> {
+        let mut zones = Vec::new();
+        let mut expected_total_pages = None;
+        for page in 1..=MAX_PROVIDER_PAGES {
+            let result = self
+                .api
+                .list_zones(&self.cloudflare_account_id, page, 50)
+                .await?;
+            validate_provider_page(page, 50, &result)?;
+            validate_stable_total_pages(&mut expected_total_pages, result.total_pages)?;
+            for zone in result.items {
+                zones.push(self.map_zone_inventory(zone)?);
+            }
+            if zones.len() > MAX_INVENTORY_ZONES {
+                return Err(validation("cloudflare_zone_inventory_limit"));
+            }
+            if page >= result.total_pages {
+                zones.sort_by(|left, right| left.zone.zone_id.cmp(&right.zone.zone_id));
+                if zones
+                    .windows(2)
+                    .any(|pair| pair[0].zone.zone_id == pair[1].zone.zone_id)
+                {
+                    return Err(validation("duplicate_cloudflare_zone_id"));
+                }
+                return Ok(zones);
+            }
+        }
+        Err(validation("cloudflare_zone_pagination_limit"))
+    }
+
     async fn all_records(&self, zone: &DnsZoneRef) -> DnsProviderResult<Vec<ObservedDnsRecordSet>> {
         aggregate_records(zone, self.all_cloudflare_records(zone).await?)
     }
@@ -331,6 +396,9 @@ impl CloudflareDnsAdapter {
         zone: &DnsZoneRef,
     ) -> DnsProviderResult<Vec<CloudflareRecord>> {
         self.validate_zone_ref(zone)?;
+        if !valid_cloudflare_identifier(zone.zone_id.as_str()) {
+            return Err(validation("invalid_cloudflare_zone_id"));
+        }
         let provider_zone = self
             .api
             .get_zone(zone.zone_id.as_str())
@@ -383,6 +451,29 @@ impl CloudflareDnsAdapter {
                 .map(DnsRecordRevision::new)
                 .transpose()
                 .map_err(|_| validation("invalid_zone_revision"))?,
+        })
+    }
+
+    fn map_zone_inventory(
+        &self,
+        zone: CloudflareZone,
+    ) -> DnsProviderResult<ObservedCloudflareZone> {
+        if !valid_cloudflare_identifier(&zone.id) {
+            return Err(validation("invalid_cloudflare_zone_id"));
+        }
+        if !valid_cloudflare_identifier(&zone.account_id) {
+            return Err(validation("invalid_cloudflare_zone_account_id"));
+        }
+        let kind = zone.kind;
+        let status = zone.status;
+        let name_servers = zone.name_servers.clone();
+        let observed = self.map_zone(zone)?;
+        Ok(ObservedCloudflareZone {
+            zone: observed.zone,
+            kind,
+            status,
+            name_servers,
+            revision: observed.revision,
         })
     }
 
@@ -531,8 +622,16 @@ impl DnsProvider for CloudflareDnsAdapter {
             self.all_zones().await?,
             page,
             CursorScope::Zones {
-                account_id: self.center_account_id.as_str().to_string(),
-                external_account_id: self.cloudflare_account_id.clone(),
+                center_scope: cursor_scope_tag(
+                    &self.cursor_key,
+                    b"center-account",
+                    self.center_account_id.as_str(),
+                ),
+                external_scope: cursor_scope_tag(
+                    &self.cursor_key,
+                    b"native-account",
+                    &self.cloudflare_account_id,
+                ),
             },
             &self.cursor_key,
         )
@@ -562,9 +661,17 @@ impl DnsProvider for CloudflareDnsAdapter {
             self.all_records(zone).await?,
             page,
             CursorScope::Records {
-                account_id: self.center_account_id.as_str().to_string(),
-                external_account_id: self.cloudflare_account_id.clone(),
-                zone_id: zone.zone_id.as_str().to_string(),
+                center_scope: cursor_scope_tag(
+                    &self.cursor_key,
+                    b"center-account",
+                    self.center_account_id.as_str(),
+                ),
+                external_scope: cursor_scope_tag(
+                    &self.cursor_key,
+                    b"native-account",
+                    &self.cloudflare_account_id,
+                ),
+                zone_scope: cursor_scope_tag(&self.cursor_key, b"zone", zone.zone_id.as_str()),
             },
             &self.cursor_key,
         )
@@ -599,6 +706,64 @@ impl DnsProvider for CloudflareDnsAdapter {
     ) -> DnsProviderResult<DnsChangeReceipt> {
         self.validate_zone_ref(zone)?;
         self.observe_receipt(zone, change_id)
+    }
+}
+
+#[async_trait]
+impl CloudflareZoneInventory for CloudflareDnsAdapter {
+    async fn list_zone_inventory(
+        &self,
+        provider_account_id: &CloudResourceId,
+        page: &DnsPageRequest,
+    ) -> DnsProviderResult<DnsPage<ObservedCloudflareZone>> {
+        page.validate().map_err(|_| validation("invalid_page"))?;
+        if provider_account_id != &self.center_account_id {
+            return Err(validation("cloudflare_account_scope_mismatch"));
+        }
+        paginate(
+            self.all_zone_inventory().await?,
+            page,
+            CursorScope::Zones {
+                center_scope: cursor_scope_tag(
+                    &self.cursor_key,
+                    b"center-account",
+                    self.center_account_id.as_str(),
+                ),
+                external_scope: cursor_scope_tag(
+                    &self.cursor_key,
+                    b"native-account",
+                    &self.cloudflare_account_id,
+                ),
+            },
+            &self.cursor_key,
+        )
+    }
+
+    async fn get_zone_by_id(
+        &self,
+        provider_account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+    ) -> DnsProviderResult<Option<ObservedCloudflareZone>> {
+        provider_account_id
+            .validate()
+            .map_err(|_| validation("invalid_provider_account_id"))?;
+        zone_id
+            .validate()
+            .map_err(|_| validation("invalid_cloudflare_zone_id"))?;
+        if provider_account_id != &self.center_account_id {
+            return Err(validation("cloudflare_account_scope_mismatch"));
+        }
+        if !valid_cloudflare_identifier(zone_id.as_str()) {
+            return Err(validation("invalid_cloudflare_zone_id"));
+        }
+        let Some(zone) = self.api.get_zone(zone_id.as_str()).await? else {
+            return Ok(None);
+        };
+        let observed = self.map_zone_inventory(zone)?;
+        if &observed.zone.zone_id != zone_id {
+            return Err(validation("cloudflare_zone_identity_mismatch"));
+        }
+        Ok(Some(observed))
     }
 }
 
@@ -1258,6 +1423,9 @@ fn aggregate_records(
     let mut groups = BTreeMap::<DnsRecordSetKey, Vec<CloudflareRecord>>::new();
     let mut object_ids = BTreeSet::new();
     for record in records {
+        if !valid_cloudflare_identifier(&record.id) {
+            return Err(validation("invalid_cloudflare_record_object_id"));
+        }
         if !object_ids.insert(record.id.clone()) {
             return Err(validation("duplicate_cloudflare_record_id"));
         }
@@ -1363,6 +1531,9 @@ fn cloudflare_extension(
     record: &CloudflareRecord,
     record_type: ProviderDnsRecordType,
 ) -> DnsProviderResult<Option<DnsRecordExtension>> {
+    if record_type != ProviderDnsRecordType::Cname && record.flatten_cname.is_some() {
+        return Err(validation("invalid_cloudflare_cname_flattening"));
+    }
     let proxiable = matches!(
         record_type,
         ProviderDnsRecordType::A | ProviderDnsRecordType::Aaaa | ProviderDnsRecordType::Cname
@@ -1402,14 +1573,26 @@ fn cloudflare_extension(
 #[serde(tag = "method", rename_all = "snake_case")]
 enum CursorScope {
     Zones {
-        account_id: String,
-        external_account_id: String,
+        center_scope: String,
+        external_scope: String,
     },
     Records {
-        account_id: String,
-        external_account_id: String,
-        zone_id: String,
+        center_scope: String,
+        external_scope: String,
+        zone_scope: String,
     },
+}
+
+fn cursor_scope_tag(key: &CloudflareCursorKey, domain: &[u8], value: &str) -> String {
+    let tag = HmacSha256::new_from_slice(&key.0)
+        .expect("fixed HMAC key")
+        .chain_update(b"edgion-cloudflare-cursor-scope-v2\0")
+        .chain_update(domain)
+        .chain_update(b"\0")
+        .chain_update(value.as_bytes())
+        .finalize()
+        .into_bytes();
+    URL_SAFE_NO_PAD.encode(tag)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1442,7 +1625,7 @@ fn paginate<T>(
                 .map_err(|_| validation("invalid_cloudflare_cursor_signature"))?;
             let cursor: Cursor = serde_json::from_slice(bytes)
                 .map_err(|_| validation("invalid_cloudflare_cursor"))?;
-            if cursor.version != 1 || cursor.scope != scope {
+            if cursor.version != 2 || cursor.scope != scope {
                 return Err(validation("cloudflare_cursor_scope_mismatch"));
             }
             cursor.offset
@@ -1454,7 +1637,7 @@ fn paginate<T>(
     let end = (offset + usize::from(request.limit)).min(items.len());
     let next = if end < items.len() {
         let encoded = serde_json::to_vec(&Cursor {
-            version: 1,
+            version: 2,
             scope,
             offset: end,
         })
@@ -1552,8 +1735,17 @@ mod tests {
 
     use super::*;
 
+    const ZONE_A_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const ZONE_B_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const ZONE_OTHER_ID: &str = "cccccccccccccccccccccccccccccccc";
+    const RECORD_A_ID: &str = "11111111111111111111111111111111";
+    const RECORD_B_ID: &str = "22222222222222222222222222222222";
+    const RECORD_C_ID: &str = "33333333333333333333333333333333";
+
     struct FakeApi {
         zones: Mutex<Vec<CloudflareZone>>,
+        get_zone_override: Mutex<Option<CloudflareZone>>,
+        get_zone_calls: Mutex<u64>,
         records: Mutex<BTreeMap<String, Vec<CloudflareRecord>>>,
         dnssec: Mutex<BTreeMap<String, CloudflareDnssec>>,
         sequence: Mutex<u64>,
@@ -1587,6 +1779,10 @@ mod tests {
         }
 
         async fn get_zone(&self, zone_id: &str) -> CloudflareApiResult<Option<CloudflareZone>> {
+            *self.get_zone_calls.lock().unwrap() += 1;
+            if let Some(zone) = self.get_zone_override.lock().unwrap().clone() {
+                return Ok(Some(zone));
+            }
             Ok(self
                 .zones
                 .lock()
@@ -1789,7 +1985,7 @@ mod tests {
         let zone = DnsZoneRef {
             provider_account_id: center_account.clone(),
             provider: CloudProvider::Cloudflare,
-            zone_id: DnsZoneId::new("zone-a").unwrap(),
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
             apex: AbsoluteDnsName::new("example.test").unwrap(),
             visibility: ZoneVisibility::Public,
         };
@@ -1898,6 +2094,190 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inventory_cursors_bind_keyed_scopes_without_disclosing_identifiers() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let native_account = "0123456789abcdef0123456789abcdef";
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            Arc::new(fake_api()),
+            CloudflareCursorKey::new([8; 32]).unwrap(),
+        )
+        .unwrap();
+
+        let zone_page = adapter
+            .list_zones(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let zone_token = zone_page.next.unwrap();
+        let zone_bytes = URL_SAFE_NO_PAD.decode(zone_token.as_str()).unwrap();
+        let zone_payload = std::str::from_utf8(&zone_bytes[..zone_bytes.len() - 32]).unwrap();
+        assert!(!zone_payload.contains(center_account.as_str()));
+        assert!(!zone_payload.contains(native_account));
+        assert!(!zone_payload.contains(&scope_hash(center_account.as_str())));
+        assert!(!zone_payload.contains(&scope_hash(native_account)));
+        let zone_cursor: Cursor = serde_json::from_str(zone_payload).unwrap();
+        assert_eq!(zone_cursor.version, 2);
+        assert!(matches!(zone_cursor.scope, CursorScope::Zones { .. }));
+
+        let zone = zone_page.items.into_iter().next().unwrap().zone;
+        let record_page = adapter
+            .list_record_sets(
+                &zone,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let record_token = record_page.next.unwrap();
+        let record_bytes = URL_SAFE_NO_PAD.decode(record_token.as_str()).unwrap();
+        let record_payload = std::str::from_utf8(&record_bytes[..record_bytes.len() - 32]).unwrap();
+        assert!(!record_payload.contains(center_account.as_str()));
+        assert!(!record_payload.contains(native_account));
+        assert!(!record_payload.contains(zone.zone_id.as_str()));
+        assert!(!record_payload.contains(&scope_hash(center_account.as_str())));
+        assert!(!record_payload.contains(&scope_hash(native_account)));
+        assert!(!record_payload.contains(&scope_hash(zone.zone_id.as_str())));
+        let record_cursor: Cursor = serde_json::from_str(record_payload).unwrap();
+        assert_eq!(record_cursor.version, 2);
+        assert!(matches!(record_cursor.scope, CursorScope::Records { .. }));
+    }
+
+    #[tokio::test]
+    async fn provider_specific_zone_inventory_retains_cloudflare_fields() {
+        const ZONE_ID: &str = "abcdef0123456789abcdef0123456789";
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = fake_api();
+        {
+            let mut zones = api.zones.lock().unwrap();
+            zones.truncate(1);
+            zones[0].id = ZONE_ID.to_string();
+        }
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            Arc::new(api),
+            CloudflareCursorKey::new([6; 32]).unwrap(),
+        )
+        .unwrap();
+
+        let page = adapter
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 10,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        let observed = &page.items[0];
+        assert_eq!(observed.zone.provider_account_id, center_account);
+        assert_eq!(observed.zone.zone_id.as_str(), ZONE_ID);
+        assert_eq!(observed.kind, CloudflareZoneKind::Full);
+        assert_eq!(observed.status, CloudflareZoneStatus::Active);
+        assert_eq!(observed.name_servers, fake_nameservers());
+        assert_eq!(
+            observed.revision.as_ref().unwrap().as_str(),
+            "zone-a-revision"
+        );
+
+        let detail = adapter
+            .get_zone_by_id(&center_account, &DnsZoneId::new(ZONE_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail, *observed);
+    }
+
+    #[tokio::test]
+    async fn provider_specific_zone_inventory_rejects_malformed_provider_scope() {
+        const ZONE_ID: &str = "abcdef0123456789abcdef0123456789";
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+
+        let malformed_zone_api = fake_api();
+        malformed_zone_api.zones.lock().unwrap()[0].id = "zone-a".to_string();
+        let malformed_zone_adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            Arc::new(malformed_zone_api),
+            CloudflareCursorKey::new([4; 32]).unwrap(),
+        )
+        .unwrap();
+        let malformed_zone = malformed_zone_adapter
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 10,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(malformed_zone.code(), "invalid_cloudflare_zone_id");
+
+        let api = fake_api();
+        {
+            let mut zones = api.zones.lock().unwrap();
+            zones.truncate(1);
+            zones[0].id = ZONE_ID.to_string();
+            zones[0].account_id = "not-a-cloudflare-account-id".to_string();
+        }
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            Arc::new(api),
+            CloudflareCursorKey::new([5; 32]).unwrap(),
+        )
+        .unwrap();
+
+        let error = adapter
+            .get_zone_by_id(&center_account, &DnsZoneId::new(ZONE_ID).unwrap())
+            .await
+            .unwrap_err();
+        assert_eq!(error.category(), ProviderErrorCategory::Validation);
+        assert_eq!(error.code(), "invalid_cloudflare_zone_account_id");
+
+        let invalid_id = adapter
+            .get_zone_by_id(&center_account, &DnsZoneId::new("zone-a").unwrap())
+            .await
+            .unwrap_err();
+        assert_eq!(invalid_id.code(), "invalid_cloudflare_zone_id");
+
+        let mismatched_api = fake_api();
+        *mismatched_api.get_zone_override.lock().unwrap() = Some(CloudflareZone {
+            id: "11111111111111111111111111111111".to_string(),
+            account_id: "0123456789abcdef0123456789abcdef".to_string(),
+            name: "example.test".to_string(),
+            kind: CloudflareZoneKind::Full,
+            status: CloudflareZoneStatus::Active,
+            name_servers: fake_nameservers(),
+            modified_on: None,
+        });
+        let mismatched_adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            Arc::new(mismatched_api),
+            CloudflareCursorKey::new([3; 32]).unwrap(),
+        )
+        .unwrap();
+        let mismatch = mismatched_adapter
+            .get_zone_by_id(&center_account, &DnsZoneId::new(ZONE_ID).unwrap())
+            .await
+            .unwrap_err();
+        assert_eq!(mismatch.code(), "cloudflare_zone_identity_mismatch");
+    }
+
+    #[tokio::test]
     async fn record_inventory_revalidates_provider_zone_account() {
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
         let adapter = CloudflareDnsAdapter::new(
@@ -1910,7 +2290,7 @@ mod tests {
         let forged = DnsZoneRef {
             provider_account_id: center_account,
             provider: CloudProvider::Cloudflare,
-            zone_id: DnsZoneId::new("zone-other").unwrap(),
+            zone_id: DnsZoneId::new(ZONE_OTHER_ID).unwrap(),
             apex: AbsoluteDnsName::new("other.example").unwrap(),
             visibility: ZoneVisibility::Public,
         };
@@ -1924,6 +2304,40 @@ mod tests {
             )
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn record_inventory_rejects_invalid_zone_id_before_provider_call() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            CloudflareCursorKey::new([3; 32]).unwrap(),
+        )
+        .unwrap();
+        let zone = DnsZoneRef {
+            provider_account_id: center_account,
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new("zone-a").unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+
+        let error = adapter
+            .list_record_sets(
+                &zone,
+                &DnsPageRequest {
+                    limit: 10,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), "invalid_cloudflare_zone_id");
+        assert_eq!(*api.get_zone_calls.lock().unwrap(), 0);
     }
 
     #[tokio::test]
@@ -2161,7 +2575,7 @@ mod tests {
         let zone = DnsZoneRef {
             provider_account_id: center_account,
             provider: CloudProvider::Cloudflare,
-            zone_id: DnsZoneId::new("zone-a").unwrap(),
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
             apex: AbsoluteDnsName::new("example.test").unwrap(),
             visibility: ZoneVisibility::Public,
         };
@@ -2181,7 +2595,7 @@ mod tests {
         let tampered = DnsChangeId::new(URL_SAFE_NO_PAD.encode(bytes)).unwrap();
         assert!(adapter.observe_receipt(&zone, &tampered).is_err());
         let mut other_zone = zone;
-        other_zone.zone_id = DnsZoneId::new("zone-b").unwrap();
+        other_zone.zone_id = DnsZoneId::new(ZONE_B_ID).unwrap();
         assert!(adapter.observe_receipt(&other_zone, &receipt.id).is_err());
     }
 
@@ -2198,7 +2612,7 @@ mod tests {
         let zone = DnsZoneRef {
             provider_account_id: center_account,
             provider: CloudProvider::Cloudflare,
-            zone_id: DnsZoneId::new("zone-a").unwrap(),
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
             apex: AbsoluteDnsName::new("example.test").unwrap(),
             visibility: ZoneVisibility::Public,
         };
@@ -2221,15 +2635,51 @@ mod tests {
         let zone = DnsZoneRef {
             provider_account_id: CloudResourceId::new("cloudflare-main").unwrap(),
             provider: CloudProvider::Cloudflare,
-            zone_id: DnsZoneId::new("zone-a").unwrap(),
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
             apex: AbsoluteDnsName::new("example.test").unwrap(),
             visibility: ZoneVisibility::Public,
         };
-        let mut first = a_record("object-a", "192.0.2.1");
-        let mut second = a_record("object-b", "192.0.2.2");
+        let mut first = a_record(RECORD_A_ID, "192.0.2.1");
+        let mut second = a_record(RECORD_B_ID, "192.0.2.2");
         first.comment = Some("one".to_string());
         second.comment = Some("two".to_string());
         assert!(aggregate_records(&zone, vec![first, second]).is_err());
+    }
+
+    #[test]
+    fn record_inventory_rejects_non_cloudflare_object_ids() {
+        let zone = DnsZoneRef {
+            provider_account_id: CloudResourceId::new("cloudflare-main").unwrap(),
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        for id in [
+            "record-a",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "gggggggggggggggggggggggggggggggg",
+        ] {
+            let error = aggregate_records(&zone, vec![a_record(id, "192.0.2.1")]).unwrap_err();
+            assert_eq!(error.code(), "invalid_cloudflare_record_object_id");
+        }
+    }
+
+    #[test]
+    fn record_inventory_rejects_flattening_on_non_cname_records() {
+        let zone = DnsZoneRef {
+            provider_account_id: CloudResourceId::new("cloudflare-main").unwrap(),
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        for flatten_cname in [false, true] {
+            let mut record = a_record(RECORD_A_ID, "192.0.2.1");
+            record.flatten_cname = Some(flatten_cname);
+            let error = aggregate_records(&zone, vec![record]).unwrap_err();
+            assert_eq!(error.code(), "invalid_cloudflare_cname_flattening");
+        }
     }
 
     #[test]
@@ -2249,7 +2699,7 @@ mod tests {
         let zone = DnsZoneRef {
             provider_account_id: CloudResourceId::new("cloudflare-main").unwrap(),
             provider: CloudProvider::Cloudflare,
-            zone_id: DnsZoneId::new("zone-a").unwrap(),
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
             apex: AbsoluteDnsName::new("example.test").unwrap(),
             visibility: ZoneVisibility::Public,
         };
@@ -2290,7 +2740,7 @@ mod tests {
     fn fake_api() -> FakeApi {
         let zones = vec![
             CloudflareZone {
-                id: "zone-a".to_string(),
+                id: ZONE_A_ID.to_string(),
                 account_id: "0123456789abcdef0123456789abcdef".to_string(),
                 name: "example.test".to_string(),
                 kind: CloudflareZoneKind::Full,
@@ -2299,7 +2749,7 @@ mod tests {
                 modified_on: Some("zone-a-revision".to_string()),
             },
             CloudflareZone {
-                id: "zone-b".to_string(),
+                id: ZONE_B_ID.to_string(),
                 account_id: "0123456789abcdef0123456789abcdef".to_string(),
                 name: "example.net".to_string(),
                 kind: CloudflareZoneKind::Full,
@@ -2308,7 +2758,7 @@ mod tests {
                 modified_on: Some("zone-b-revision".to_string()),
             },
             CloudflareZone {
-                id: "zone-other".to_string(),
+                id: ZONE_OTHER_ID.to_string(),
                 account_id: "fedcba9876543210fedcba9876543210".to_string(),
                 name: "other.example".to_string(),
                 kind: CloudflareZoneKind::Full,
@@ -2318,11 +2768,11 @@ mod tests {
             },
         ];
         let records = BTreeMap::from([(
-            "zone-a".to_string(),
+            ZONE_A_ID.to_string(),
             vec![
-                a_record("object-a", "192.0.2.1"),
+                a_record(RECORD_A_ID, "192.0.2.1"),
                 CloudflareRecord {
-                    id: "object-b".to_string(),
+                    id: RECORD_B_ID.to_string(),
                     name: "txt.example.test".to_string(),
                     ttl: 300,
                     value: txt_value("seed"),
@@ -2337,7 +2787,7 @@ mod tests {
                     modified_on: Some("revision-b".to_string()),
                 },
                 CloudflareRecord {
-                    id: "object-c".to_string(),
+                    id: RECORD_C_ID.to_string(),
                     name: "ns.example.test".to_string(),
                     ttl: 300,
                     value: DnsRecordSetValue::Ns {
@@ -2357,6 +2807,8 @@ mod tests {
         )]);
         FakeApi {
             zones: Mutex::new(zones),
+            get_zone_override: Mutex::new(None),
+            get_zone_calls: Mutex::new(0),
             records: Mutex::new(records),
             dnssec: Mutex::new(BTreeMap::new()),
             sequence: Mutex::new(1000),

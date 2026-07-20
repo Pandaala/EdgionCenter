@@ -1,6 +1,7 @@
 use crate::common::auth::AdminAuthConfig;
 use crate::common::config::{AdminTlsConfig, ConfSyncSecurityConfig};
 use crate::common::local_auth::LocalAuthConfig;
+use edgion_center_adapter_credential_files::MountedCredentialConfig;
 use serde::{Deserialize, Serialize};
 
 pub use edgion_center_adapter_sql::DatabaseConfig;
@@ -113,6 +114,9 @@ pub struct CenterConfig {
     /// Database-backed user login. See [`DbAuthConfig`].
     #[serde(default)]
     pub db_auth: DbAuthConfig,
+    /// Deployment-owned mounted credentials. Disabled unless explicitly enabled.
+    #[serde(default)]
+    pub mounted_credentials: MountedCredentialConfig,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -130,6 +134,7 @@ impl Default for CenterConfig {
             audit: AuditConfig::default(),
             authz: AuthzConfig::default(),
             db_auth: DbAuthConfig::default(),
+            mounted_credentials: MountedCredentialConfig::default(),
         }
     }
 }
@@ -237,10 +242,21 @@ mod tests {
             "auth:\n  enabledd: false\n",
             "local_auth:\n  enabledd: false\n",
             "sync:\n  ping_interval_secss: 1\n",
+            "mounted_credentials:\n  enabledd: true\n",
         ] {
             serde_yaml::from_str::<CenterConfig>(yaml)
                 .expect_err("unknown nested fields must fail closed");
         }
+    }
+
+    #[test]
+    fn mounted_credentials_are_default_off_and_parse_strictly_in_production() {
+        assert!(!CenterConfig::default().mounted_credentials.enabled);
+        let config = parse_via_production(
+            "mounted_credentials:\n  enabled: true\n  root_directory: /var/run/edgion-center/cloud-credentials\n  revision_key_file: revision.key\n  bindings:\n    - credential_ref: cloudflare/main\n      provider_account_id: cf-main\n      provider: cloudflare\n      purpose: cloudflare_api_token\n      file: cloudflare/token\n",
+        );
+        assert!(config.mounted_credentials.enabled);
+        assert_eq!(config.mounted_credentials.bindings.len(), 1);
     }
 
     #[test]

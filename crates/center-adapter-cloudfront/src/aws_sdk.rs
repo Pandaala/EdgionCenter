@@ -31,6 +31,8 @@ use crate::{
 };
 
 const READ_MAX_ATTEMPTS: u32 = 3;
+#[cfg(test)]
+const MUTATION_MAX_ATTEMPTS: u32 = 1;
 const THROTTLE_RETRY_AFTER_MS: u64 = 1_000;
 const OPERATION_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -168,14 +170,37 @@ pub struct AwsCloudFrontApiOptions {
     pub sts_endpoint_url: Option<String>,
 }
 
-/// Credential-owning, read-only CloudFront SDK transport.
+/// Credential-owning CloudFront read transport. Mutation machinery is test-only until CLD-28F's
+/// wire-fidelity, authority, secret-redaction, and reliability gates are complete.
 pub struct AwsCloudFrontApi {
     account_id: String,
     partition: AwsPartition,
     credential_revision: String,
     read_client: aws_sdk_cloudfront::Client,
+    #[cfg(test)]
+    mutation_client: aws_sdk_cloudfront::Client,
     acm_read_client: aws_sdk_acm::Client,
     fingerprint_key: CloudFrontFingerprintKey,
+}
+
+/// A bounded, transient full provider configuration read for CLD-28F composition.
+///
+/// Deliberately not `Debug`, `Clone`, `Serialize`, or public: origin custom headers may contain
+/// credentials. The SDK value must never become durable state or a diagnostic payload.
+pub(crate) struct CloudFrontSensitiveSdkConfigSnapshot {
+    pub(crate) config: DistributionConfig,
+    pub(crate) projection: CloudFrontDistributionConfigProjection,
+    pub(crate) etag: String,
+    pub(crate) wire: crate::wire_fidelity::CloudFrontSensitiveWireBytes,
+}
+
+/// Sanitized acknowledgement that CloudFront accepted an update request.
+/// It does not mean that the distribution is deployed or that the desired state was observed.
+#[cfg(test)]
+pub(crate) struct CloudFrontUpdateSubmission {
+    pub(crate) distribution_id: String,
+    pub(crate) etag: String,
+    pub(crate) status: String,
 }
 
 impl AwsCloudFrontApi {
@@ -246,8 +271,19 @@ impl AwsCloudFrontApi {
             .interceptor(ResponseBodyLimit {
                 max_bytes: MAX_RESPONSE_BODY_BYTES,
             });
-        if let Some(endpoint) = options.cloudfront_endpoint_url {
+        if let Some(endpoint) = options.cloudfront_endpoint_url.as_deref() {
             read_config = read_config.endpoint_url(endpoint);
+        }
+        #[cfg(test)]
+        let mut mutation_config = aws_sdk_cloudfront::config::Builder::from(sdk_config)
+            .retry_config(RetryConfig::standard().with_max_attempts(MUTATION_MAX_ATTEMPTS))
+            .timeout_config(timeout.clone())
+            .interceptor(ResponseBodyLimit {
+                max_bytes: MAX_RESPONSE_BODY_BYTES,
+            });
+        #[cfg(test)]
+        if let Some(endpoint) = options.cloudfront_endpoint_url.as_deref() {
+            mutation_config = mutation_config.endpoint_url(endpoint);
         }
         let mut acm_config = aws_sdk_acm::config::Builder::from(sdk_config)
             .region(aws_sdk_acm::config::Region::new("us-east-1"))
@@ -267,9 +303,279 @@ impl AwsCloudFrontApi {
             partition,
             credential_revision,
             read_client: aws_sdk_cloudfront::Client::from_conf(read_config.build()),
+            #[cfg(test)]
+            mutation_client: aws_sdk_cloudfront::Client::from_conf(mutation_config.build()),
             acm_read_client: aws_sdk_acm::Client::from_conf(acm_config.build()),
             fingerprint_key,
         })
+    }
+
+    pub(crate) async fn read_sensitive_sdk_config_snapshot(
+        &self,
+        distribution_id: &str,
+    ) -> CloudFrontApiResult<Option<CloudFrontSensitiveSdkConfigSnapshot>> {
+        validate_distribution_id(distribution_id)?;
+        let (capture, capture_handle) = crate::wire_fidelity::cloudfront_response_capture();
+        let output = match self
+            .read_client
+            .get_distribution_config()
+            .id(distribution_id)
+            .customize()
+            .interceptor(capture)
+            .send()
+            .await
+        {
+            Ok(output) => output,
+            Err(error) if service_code(&error) == Some("NoSuchDistribution") => return Ok(None),
+            Err(error) => return Err(map_read_error(service_code(&error))),
+        };
+        let etag = require_etag(output.e_tag())?.to_string();
+        let config = output
+            .distribution_config()
+            .ok_or_else(|| validation("missing_cloudfront_distribution_config"))?
+            .clone();
+        let projection = map_config(&config)?;
+        let wire = capture_handle.take()?;
+        Ok(Some(CloudFrontSensitiveSdkConfigSnapshot {
+            config,
+            projection,
+            etag,
+            wire,
+        }))
+    }
+
+    pub(crate) async fn admit_enablement_wire_fidelity(
+        &self,
+        distribution_id: &str,
+        etag: &str,
+        observed_wire: &crate::wire_fidelity::CloudFrontSensitiveWireBytes,
+        current: &DistributionConfig,
+        desired: &DistributionConfig,
+    ) -> CloudFrontApiResult<crate::wire_fidelity::CloudFrontWireFidelityEvidence> {
+        validate_distribution_id(distribution_id)?;
+        require_etag(Some(etag))?;
+        crate::wire_fidelity::admit_enablement_wire_fidelity(
+            &self.read_client,
+            distribution_id,
+            etag,
+            observed_wire,
+            current,
+            desired,
+        )
+        .await
+    }
+
+    pub(crate) fn enablement_intent_mac(
+        &self,
+        provider_account_id: &edgion_center_core::CloudResourceId,
+        account_generation: u64,
+        credential_revision: &str,
+        distribution_id: &str,
+        etag: &str,
+        desired_enabled: bool,
+    ) -> CloudFrontApiResult<crate::CloudFrontMutationIntentMac> {
+        self.fingerprint_key.mac_enablement_intent(
+            provider_account_id,
+            account_generation,
+            credential_revision,
+            self.partition,
+            &self.account_id,
+            distribution_id,
+            etag,
+            desired_enabled,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Every provider and authority fence is MAC-bound.
+    pub(crate) fn desired_wire_revision_mac(
+        &self,
+        provider_account_id: &edgion_center_core::CloudResourceId,
+        account_generation: u64,
+        credential_revision: &str,
+        distribution_id: &str,
+        etag: &str,
+        desired_wire: &[u8],
+    ) -> CloudFrontApiResult<crate::CloudFrontDesiredWireRevisionMac> {
+        self.fingerprint_key.mac_desired_wire_revision(
+            provider_account_id,
+            account_generation,
+            credential_revision,
+            self.partition,
+            &self.account_id,
+            distribution_id,
+            etag,
+            desired_wire,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Every immutable plan dimension is MAC-bound.
+    pub(crate) fn enablement_plan_revision_mac(
+        &self,
+        provider_account_id: &edgion_center_core::CloudResourceId,
+        account_generation: u64,
+        credential_revision: &str,
+        distribution_id: &str,
+        distribution_arn: &str,
+        valid_until_unix_ms: i64,
+        action: &str,
+        risk: &str,
+        intent_revision: &crate::CloudFrontMutationIntentMac,
+        desired_wire_revision: &crate::CloudFrontDesiredWireRevisionMac,
+        write_set: &std::collections::BTreeSet<String>,
+        blockers: &std::collections::BTreeSet<String>,
+    ) -> CloudFrontApiResult<crate::CloudFrontEnablementPlanRevisionMac> {
+        self.fingerprint_key.mac_enablement_plan_revision(
+            provider_account_id,
+            account_generation,
+            credential_revision,
+            self.partition,
+            &self.account_id,
+            distribution_id,
+            distribution_arn,
+            valid_until_unix_ms,
+            action,
+            risk,
+            intent_revision,
+            desired_wire_revision,
+            write_set,
+            blockers,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn update_distribution_once(
+        &self,
+        distribution_id: &str,
+        exact_if_match: &str,
+        config: DistributionConfig,
+    ) -> CloudFrontApiResult<CloudFrontUpdateSubmission> {
+        validate_distribution_id(distribution_id)?;
+        require_etag(Some(exact_if_match))?;
+        let expected_config = config.clone();
+        let output = self
+            .mutation_client
+            .update_distribution()
+            .id(distribution_id)
+            .if_match(exact_if_match)
+            .distribution_config(config)
+            .send()
+            .await
+            .map_err(|error| map_mutation_error(&error))?;
+        let distribution = output
+            .distribution()
+            .ok_or_else(|| unknown_outcome("cloudfront_update_response_incomplete"))?;
+        if distribution.id() != distribution_id
+            || validate_distribution_arn(
+                distribution.arn(),
+                self.partition,
+                &self.account_id,
+                Some(distribution_id),
+            )
+            .is_err()
+        {
+            return Err(unknown_outcome("cloudfront_update_response_mismatch"));
+        }
+        let returned_config = distribution
+            .distribution_config()
+            .ok_or_else(|| unknown_outcome("cloudfront_update_response_config_missing"))?;
+        if let Some(code) = first_distribution_config_difference(&expected_config, returned_config)
+        {
+            return Err(unknown_outcome(code));
+        }
+        let etag = require_etag(output.e_tag())
+            .map_err(|_| unknown_outcome("cloudfront_update_response_incomplete"))?;
+        let status = distribution.status();
+        if status.is_empty() || status.len() > 128 || status.chars().any(char::is_control) {
+            return Err(unknown_outcome("cloudfront_update_response_incomplete"));
+        }
+        Ok(CloudFrontUpdateSubmission {
+            distribution_id: distribution_id.to_string(),
+            etag: etag.to_string(),
+            status: status.to_string(),
+        })
+    }
+}
+#[cfg(test)]
+fn first_distribution_config_difference(
+    expected: &DistributionConfig,
+    returned: &DistributionConfig,
+) -> Option<&'static str> {
+    macro_rules! same {
+        ($field:ident, $code:literal) => {
+            if expected.$field != returned.$field {
+                return Some($code);
+            }
+        };
+    }
+    same!(
+        caller_reference,
+        "cloudfront_update_config_caller_reference_mismatch"
+    );
+    same!(aliases, "cloudfront_update_config_aliases_mismatch");
+    same!(
+        default_root_object,
+        "cloudfront_update_config_root_mismatch"
+    );
+    same!(origins, "cloudfront_update_config_origins_mismatch");
+    same!(origin_groups, "cloudfront_update_config_groups_mismatch");
+    same!(
+        default_cache_behavior,
+        "cloudfront_update_config_default_behavior_mismatch"
+    );
+    same!(
+        cache_behaviors,
+        "cloudfront_update_config_behaviors_mismatch"
+    );
+    same!(
+        custom_error_responses,
+        "cloudfront_update_config_errors_mismatch"
+    );
+    same!(comment, "cloudfront_update_config_comment_mismatch");
+    same!(logging, "cloudfront_update_config_logging_mismatch");
+    same!(price_class, "cloudfront_update_config_price_mismatch");
+    same!(enabled, "cloudfront_update_config_enabled_mismatch");
+    same!(
+        viewer_certificate,
+        "cloudfront_update_config_certificate_mismatch"
+    );
+    same!(
+        restrictions,
+        "cloudfront_update_config_restrictions_mismatch"
+    );
+    same!(web_acl_id, "cloudfront_update_config_waf_mismatch");
+    same!(
+        http_version,
+        "cloudfront_update_config_http_version_mismatch"
+    );
+    same!(is_ipv6_enabled, "cloudfront_update_config_ipv6_mismatch");
+    same!(
+        continuous_deployment_policy_id,
+        "cloudfront_update_config_deployment_policy_mismatch"
+    );
+    same!(staging, "cloudfront_update_config_staging_mismatch");
+    same!(
+        anycast_ip_list_id,
+        "cloudfront_update_config_anycast_mismatch"
+    );
+    same!(tenant_config, "cloudfront_update_config_tenant_mismatch");
+    same!(
+        connection_mode,
+        "cloudfront_update_config_connection_mode_mismatch"
+    );
+    same!(viewer_mtls_config, "cloudfront_update_config_mtls_mismatch");
+    same!(
+        connection_function_association,
+        "cloudfront_update_config_connection_function_mismatch"
+    );
+    same!(
+        cache_tag_config,
+        "cloudfront_update_config_cache_tag_mismatch"
+    );
+    if expected == returned {
+        None
+    } else {
+        // A newly added SDK field must fail closed even before this diagnostic list is updated.
+        Some("cloudfront_update_config_unclassified_mismatch")
     }
 }
 
@@ -2034,6 +2340,79 @@ fn map_read_error(code: Option<&str>) -> NormalizedProviderError {
         ),
     }
 }
+#[cfg(test)]
+fn map_mutation_error<E>(error: &aws_sdk_cloudfront::error::SdkError<E>) -> NormalizedProviderError
+where
+    E: ProvideErrorMetadata,
+{
+    if matches!(
+        error,
+        aws_sdk_cloudfront::error::SdkError::ConstructionFailure(_)
+    ) {
+        return validation("invalid_cloudfront_update_request");
+    }
+    let status = error
+        .raw_response()
+        .map(|response| response.status().as_u16());
+    if status.is_some_and(|status| matches!(status, 408 | 500..=599)) {
+        return unknown_outcome("cloudfront_update_outcome_unknown");
+    }
+    match (status, service_code(error)) {
+        (Some(412), _) | (_, Some("PreconditionFailed" | "InvalidIfMatchVersion")) => {
+            provider_error(
+                ProviderErrorCategory::Conflict,
+                "cloudfront_update_requires_replan",
+                None,
+            )
+        }
+        (Some(400..=499), Some(code)) => map_update_rejection(code),
+        (Some(400..=499), None) => validation("cloudfront_update_rejected"),
+        _ => unknown_outcome("cloudfront_update_outcome_unknown"),
+    }
+}
+#[cfg(test)]
+fn map_update_rejection(code: &str) -> NormalizedProviderError {
+    let category = if matches!(
+        code,
+        "InvalidClientTokenId"
+            | "SignatureDoesNotMatch"
+            | "ExpiredToken"
+            | "ExpiredTokenException"
+            | "UnrecognizedClientException"
+    ) {
+        ProviderErrorCategory::Authentication
+    } else if matches!(
+        code,
+        "AccessDenied" | "AccessDeniedException" | "NotAuthorized"
+    ) {
+        ProviderErrorCategory::Authorization
+    } else if matches!(code, "Throttling" | "ThrottlingException") {
+        return provider_error(
+            ProviderErrorCategory::Throttled,
+            "cloudfront_update_rejected",
+            Some(THROTTLE_RETRY_AFTER_MS),
+        );
+    } else if code.starts_with("TooMany") || code == "LimitsExceeded" {
+        ProviderErrorCategory::Quota
+    } else if code.starts_with("NoSuch")
+        || code.ends_with("DoesNotExist")
+        || code == "EntityNotFound"
+    {
+        ProviderErrorCategory::NotFound
+    } else if matches!(
+        code,
+        "CNAMEAlreadyExists"
+            | "ContinuousDeploymentPolicyInUse"
+            | "IllegalUpdate"
+            | "RealtimeLogConfigOwnerMismatch"
+            | "StagingDistributionInUse"
+    ) {
+        ProviderErrorCategory::Conflict
+    } else {
+        ProviderErrorCategory::Validation
+    };
+    provider_error(category, "cloudfront_update_rejected", None)
+}
 fn map_service_error(code: &str) -> NormalizedProviderError {
     let (category, retry) = match code {
         "InvalidClientTokenId"
@@ -2066,6 +2445,10 @@ fn map_service_error(code: &str) -> NormalizedProviderError {
 }
 fn validation(code: &str) -> NormalizedProviderError {
     provider_error(ProviderErrorCategory::Validation, code, None)
+}
+#[cfg(test)]
+fn unknown_outcome(code: &str) -> NormalizedProviderError {
+    provider_error(ProviderErrorCategory::UnknownOutcome, code, None)
 }
 fn provider_error(
     category: ProviderErrorCategory,
@@ -2121,5 +2504,26 @@ mod tests {
             map_service_error("EntityNotFound").category(),
             ProviderErrorCategory::NotFound
         );
+    }
+
+    #[test]
+    fn update_rejections_are_terminal_or_explicitly_throttled() {
+        for (code, category) in [
+            ("CNAMEAlreadyExists", ProviderErrorCategory::Conflict),
+            ("IllegalUpdate", ProviderErrorCategory::Conflict),
+            ("TooManyOrigins", ProviderErrorCategory::Quota),
+            ("NoSuchOrigin", ProviderErrorCategory::NotFound),
+            (
+                "InvalidViewerCertificate",
+                ProviderErrorCategory::Validation,
+            ),
+            (
+                "FutureDeterministicRejection",
+                ProviderErrorCategory::Validation,
+            ),
+            ("Throttling", ProviderErrorCategory::Throttled),
+        ] {
+            assert_eq!(map_update_rejection(code).category(), category);
+        }
     }
 }

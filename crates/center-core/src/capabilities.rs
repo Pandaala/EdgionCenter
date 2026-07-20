@@ -17,6 +17,14 @@ pub struct CenterCapabilities {
     pub native_rbac: bool,
     pub leader_election: bool,
     pub password_login: bool,
+    /// Cloudflare-specific, read-only DNS zone inventory Admin API.
+    pub cloudflare_dns_read: bool,
+    /// Provider-neutral, secret-free ProviderAccount desired-state Admin API.
+    pub provider_account_admin: bool,
+    /// Read-only, sanitized ProviderAccount capability snapshot Admin API.
+    pub provider_capability_read: bool,
+    /// Explicit, bounded ProviderAccount credential inspection Admin API.
+    pub provider_credential_inspection: bool,
 }
 
 impl CenterCapabilities {
@@ -30,6 +38,10 @@ impl CenterCapabilities {
                 native_rbac: false,
                 leader_election: false,
                 password_login: true,
+                cloudflare_dns_read: false,
+                provider_account_admin: false,
+                provider_capability_read: false,
+                provider_credential_inspection: false,
             },
             CenterMode::Kubernetes => Self {
                 user_admin: false,
@@ -39,6 +51,10 @@ impl CenterCapabilities {
                 native_rbac: true,
                 leader_election: true,
                 password_login: false,
+                cloudflare_dns_read: false,
+                provider_account_admin: false,
+                provider_capability_read: false,
+                provider_credential_inspection: false,
             },
         }
     }
@@ -52,6 +68,10 @@ impl CenterCapabilities {
         native_rbac: bool,
         leader_election: bool,
         password_login: bool,
+        cloudflare_dns_read: bool,
+        provider_account_admin: bool,
+        provider_capability_read: bool,
+        provider_credential_inspection: bool,
     ) -> Self {
         Self {
             user_admin,
@@ -61,6 +81,10 @@ impl CenterCapabilities {
             native_rbac,
             leader_election,
             password_login,
+            cloudflare_dns_read,
+            provider_account_admin,
+            provider_capability_read,
+            provider_credential_inspection,
         }
     }
 }
@@ -77,5 +101,12 @@ mod tests {
         assert!(!standalone.native_rbac);
         assert!(!kubernetes.user_admin && !kubernetes.audit_query);
         assert!(kubernetes.native_rbac && kubernetes.leader_election);
+        assert!(!standalone.cloudflare_dns_read && !kubernetes.cloudflare_dns_read);
+        assert!(!standalone.provider_account_admin && !kubernetes.provider_account_admin);
+        assert!(!standalone.provider_capability_read && !kubernetes.provider_capability_read);
+        assert!(
+            !standalone.provider_credential_inspection
+                && !kubernetes.provider_credential_inspection
+        );
     }
 }

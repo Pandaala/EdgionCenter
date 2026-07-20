@@ -2,12 +2,16 @@ use std::time::Duration;
 
 use anyhow::{ensure, Context};
 use edgion_center_adapter_kubernetes::{
-    controller_resource_name, EdgionController, KubernetesControllerDirectory,
-    KubernetesLeaseCoordinator,
+    controller_resource_name, provider_account_resource_name, EdgionController,
+    EdgionProviderAccount, KubernetesControllerDirectory, KubernetesLeaseCoordinator,
+    KubernetesProviderAccountStore,
 };
 use edgion_center_core::{
-    ControllerDirectory, ControllerId, ControllerRegistration, CoordinationRole, Coordinator,
-    OwnershipFence, ReleaseOutcome, SessionId,
+    CloudProvider, CloudResourceId, ControllerDirectory, ControllerId, ControllerRegistration,
+    CoordinationRole, Coordinator, CredentialRef, CredentialSource, DeletionPolicy,
+    ManagementPolicy, OwnershipFence, ProviderAccountCreateResult, ProviderAccountDesired,
+    ProviderAccountReplaceResult, ProviderAccountScope, ProviderAccountSpec, ProviderAccountStore,
+    ReleaseOutcome, SessionId,
 };
 use k8s_openapi::api::coordination::v1::Lease;
 use kube::{
@@ -15,6 +19,73 @@ use kube::{
     Api, Client,
 };
 use uuid::Uuid;
+
+#[tokio::test]
+async fn provider_account_survives_restart_and_uses_generation_cas() {
+    if std::env::var("EDGION_TEST_KUBERNETES").as_deref() != Ok("1") {
+        eprintln!("skipping: EDGION_TEST_KUBERNETES=1 is not set");
+        return;
+    }
+    let namespace = std::env::var("EDGION_TEST_KUBERNETES_NAMESPACE")
+        .expect("EDGION_TEST_KUBERNETES_NAMESPACE must name a disposable namespace");
+    let client = Client::try_default().await.expect("Kubernetes client");
+    let id = CloudResourceId::new(format!(
+        "real-kubernetes/provider-account/{}",
+        Uuid::new_v4().simple()
+    ))
+    .unwrap();
+    let name = provider_account_resource_name(&id).unwrap();
+    let result = async {
+        let first = KubernetesProviderAccountStore::new(client.clone(), &namespace)?;
+        let created = first.create(&id, &provider_desired("first")).await?;
+        ensure!(matches!(created, ProviderAccountCreateResult::Created(_)));
+
+        let restarted = KubernetesProviderAccountStore::new(client.clone(), &namespace)?;
+        let loaded = restarted.get(&id).await?.context("account after restart")?;
+        ensure!(loaded.metadata.generation == 1);
+        let replaced = restarted
+            .replace_if_generation(&id, 1, &provider_desired("second"))
+            .await?;
+        ensure!(matches!(replaced, ProviderAccountReplaceResult::Stored(_)));
+        ensure!(matches!(
+            restarted
+                .replace_if_generation(&id, 1, &provider_desired("stale"))
+                .await?,
+            ProviderAccountReplaceResult::GenerationMismatch {
+                actual_generation: 2
+            }
+        ));
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let accounts: Api<EdgionProviderAccount> = Api::namespaced(client, &namespace);
+    let cleanup = accounts.delete(&name, &DeleteParams::default()).await;
+    if let Err(error) = cleanup {
+        if !matches!(&error, kube::Error::Api(response) if response.code == 404) && result.is_ok() {
+            panic!("provider account integration cleanup failed: {error}");
+        }
+    }
+    result.unwrap_or_else(|error| panic!("provider account real kube matrix failed: {error:#}"));
+}
+
+fn provider_desired(suffix: &str) -> ProviderAccountDesired {
+    ProviderAccountDesired {
+        display_name: format!("Cloudflare {suffix}"),
+        owner: Some("integration".to_string()),
+        labels: Default::default(),
+        management_policy: ManagementPolicy::ObserveOnly,
+        deletion_policy: DeletionPolicy::Retain,
+        spec: ProviderAccountSpec {
+            provider: CloudProvider::Cloudflare,
+            scope: Some(ProviderAccountScope::Cloudflare {
+                account_id: "0123456789abcdef0123456789abcdef".to_string(),
+            }),
+            credential_source: CredentialSource::StaticSecret {
+                credential_ref: CredentialRef::new("cloudflare/integration").unwrap(),
+            },
+        },
+    }
+}
 
 /// Real kube-apiserver matrix. It is opt-in because it creates namespaced CRD
 /// and Lease resources. The target namespace and EdgionController CRD must

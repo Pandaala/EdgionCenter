@@ -1,0 +1,48 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: edgionprovideraccounts.center.edgion.io
+spec:
+  group: center.edgion.io
+  names:
+    kind: EdgionProviderAccount
+    plural: edgionprovideraccounts
+    shortNames: [epa]
+    singular: edgionprovideraccount
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [contractVersion, accountId, desiredGeneration, desiredJson]
+              x-kubernetes-validations:
+                - rule: self == oldSelf || self.desiredGeneration == oldSelf.desiredGeneration + 1
+              properties:
+                contractVersion:
+                  type: integer
+                  format: int32
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                accountId:
+                  type: string
+                  maxLength: 512
+                  x-kubernetes-validations:
+                    - rule: self != ''
+                    - rule: self == oldSelf
+                desiredGeneration:
+                  type: integer
+                  format: int64
+                  minimum: 1.0
+                  x-kubernetes-validations:
+                    - rule: self > 0
+                desiredJson:
+                  type: string
+                  minLength: 1
+                  maxLength: 65536

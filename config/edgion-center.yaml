@@ -89,6 +89,20 @@ database:
   # backend: mysql
   # mysql_url: "mysql://user:pass@host:3306/edgion_center"
 
+# Mounted cloud credentials are an explicit, default-off deployment capability.
+# Enabling this only constructs a local resolver; it does not enable an Admin
+# API, credential inspection, or cloud-provider traffic.
+# mounted_credentials:
+#   enabled: true
+#   root_directory: /var/run/edgion-center/cloud-credentials
+#   revision_key_file: revision.key
+#   bindings:
+#     - credential_ref: cloudflare/main
+#       provider_account_id: cf-main
+#       provider: cloudflare
+#       purpose: cloudflare_api_token
+#       file: cloudflare-api-token
+
 # ============================================================================
 # Audit log (`audit:`)
 # ============================================================================

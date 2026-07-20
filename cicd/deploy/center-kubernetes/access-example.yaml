@@ -28,10 +28,9 @@ metadata:
   name: edgion-center-api-reader
 rules:
   - nonResourceURLs:
-      - /api/v1/server-info
-      - /api/v1/controllers
-      - /api/v1/clusters
-      - /api/v1/center/*
+      - /edgion-center-authz/api/v1/server-info
+      - /edgion-center-authz/api/v1/controllers
+      - /edgion-center-authz/api/v1/clusters
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -46,3 +45,81 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: edgion-center-api-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-provider-account-reader
+rules:
+  # ProviderAccount responses expose credential aliases and identity selectors.
+  # Keep this high-trust read separate from general Center API observation.
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/cloud/provider-accounts
+      - /edgion-center-authz/api/v1/center/cloud/provider-accounts/*
+      - /edgion-center-authz/permissions/provider-accounts:read
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-provider-account-reader
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-cloud-account-readers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-provider-account-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-provider-capability-reader
+rules:
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/cloud/provider-capabilities/accounts/*
+      - /edgion-center-authz/permissions/provider-capabilities:read
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-provider-capability-reader
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-capability-readers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-provider-capability-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-provider-account-writer
+rules:
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/cloud/provider-accounts
+    verbs: [post]
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/cloud/provider-accounts/*
+    verbs: [put]
+  - nonResourceURLs:
+      - /edgion-center-authz/permissions/provider-credentials:use
+      - /edgion-center-authz/permissions/provider-accounts:write
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-provider-account-writer
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-cloud-admins
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-provider-account-writer

@@ -7,21 +7,26 @@ use edgion_center_core::{
 };
 
 mod api;
+mod authority;
 mod aws_sdk;
 mod behaviors;
 mod catalog;
 mod domains;
 mod invalidations;
 mod model;
+mod mutations;
 mod origins;
+mod wire_fidelity;
 
 pub use api::*;
+pub use authority::*;
 pub use aws_sdk::*;
 pub use behaviors::*;
 pub use catalog::*;
 pub use domains::*;
 pub use invalidations::*;
 pub use model::*;
+pub use mutations::*;
 pub use origins::*;
 
 const DISTRIBUTION_PAGE_SIZE: u16 = 100;

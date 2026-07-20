@@ -34,6 +34,11 @@
 //!   GET    /api/v1/center/admin/permission-catalog                → grouped permission catalog for the matrix UI
 //!   GET  /api/v1/center/admin/watch-status                          → watch cache sync status per controller
 //!   GET  /api/v1/center/admin/metadata-store                         → metadata store key summary
+//!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones   → Cloudflare zone inventory
+//!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id} → Cloudflare zone detail
+//!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets → Cloudflare RRset inventory
+//!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → Cloudflare RRset detail
+//!   GET  /api/v1/center/cloud/provider-capabilities/accounts/{account_id} → sanitized capability snapshot
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
 
 use axum::{
@@ -68,8 +73,12 @@ const PROXY_RESPONSE_HEADER_ALLOWLIST: &[&str] = &[
 ];
 
 mod audit;
+pub mod cloudflare_dns;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
+pub mod provider_accounts;
+pub mod provider_capabilities;
+pub mod provider_credential_inspections;
 mod region_route_handlers;
 mod roles;
 #[cfg(feature = "password-auth")]
@@ -96,6 +105,17 @@ pub struct ApiState {
     pub user_admin: Option<Arc<dyn edgion_center_core::UserAdmin>>,
     pub role_admin: Option<Arc<dyn edgion_center_core::RoleAdmin>>,
     pub audit_reader: Option<Arc<dyn edgion_center_core::AuditReader>>,
+    /// Optional SDK-free Cloudflare DNS read service. Provider clients and credentials remain
+    /// behind the composition boundary.
+    pub cloudflare_dns_admin: Option<cloudflare_dns::SharedCloudflareDnsAdminService>,
+    /// Optional secret-free provider account desired-state store.
+    pub provider_account_store: Option<Arc<dyn edgion_center_core::ProviderAccountStore>>,
+    /// Optional capability snapshot store. Admin handlers only perform exact-key reads.
+    pub capability_snapshot_store: Option<Arc<dyn edgion_center_core::CapabilitySnapshotStore>>,
+    /// Optional bounded credential inspection orchestration. Provider clients
+    /// and resolved credentials remain behind this runtime service.
+    pub credential_inspection_service:
+        Option<edgion_center_runtime::cloud::CredentialInspectionService>,
     pub metadata_store: Arc<CenterMetaDataStore>,
     pub sync_client: Arc<CenterSyncClient>,
     /// Needed by Admin DELETE to cascade eviction into the fed-sync registry.
@@ -195,7 +215,16 @@ impl ApiState {
     }
 }
 
-pub fn router(state: ApiState) -> Router {
+pub fn router(mut state: ApiState) -> Router {
+    // Advertise only capabilities that are actually composed. Keeping this
+    // effective value in state also makes `/server-info` and route mounting
+    // report the same surface when a composition is incomplete.
+    state.capabilities.cloudflare_dns_read &= state.cloudflare_dns_admin.is_some();
+    state.capabilities.provider_account_admin &= state.provider_account_store.is_some();
+    state.capabilities.provider_capability_read &=
+        state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
+    state.capabilities.provider_credential_inspection &=
+        state.credential_inspection_service.is_some();
     let capabilities = state.capabilities.clone();
     let mut app = Router::new()
         // Center-specific endpoints
@@ -323,6 +352,54 @@ pub fn router(state: ApiState) -> Router {
         app = app.route(
             "/api/v1/center/admin/audit-logs",
             get(audit::audit_list_handler),
+        );
+    }
+    if capabilities.cloudflare_dns_read && state.cloudflare_dns_admin.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones",
+                get(cloudflare_dns::list_zones),
+            )
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}",
+                get(cloudflare_dns::get_zone),
+            )
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets",
+                get(cloudflare_dns::list_record_sets),
+            )
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}",
+                get(cloudflare_dns::get_record_set),
+            );
+    }
+    if capabilities.provider_account_admin && state.provider_account_store.is_some() {
+        let provider_account_routes = Router::new()
+            .route(
+                "/api/v1/center/cloud/provider-accounts",
+                get(provider_accounts::list).post(provider_accounts::create),
+            )
+            .route(
+                "/api/v1/center/cloud/provider-accounts/{account_id}",
+                get(provider_accounts::get).put(provider_accounts::replace),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(70 * 1024));
+        app = app.merge(provider_account_routes);
+    }
+    if capabilities.provider_capability_read
+        && state.provider_account_store.is_some()
+        && state.capability_snapshot_store.is_some()
+    {
+        app = app.route(
+            "/api/v1/center/cloud/provider-capabilities/accounts/{account_id}",
+            get(provider_capabilities::get),
+        );
+    }
+    if capabilities.provider_credential_inspection && state.credential_inspection_service.is_some()
+    {
+        app = app.route(
+            "/api/v1/center/cloud/provider-credential-inspections/accounts/{account_id}/refresh",
+            post(provider_credential_inspections::refresh),
         );
     }
 
@@ -905,6 +982,10 @@ mod tests {
             user_admin: None,
             role_admin: None,
             audit_reader: None,
+            cloudflare_dns_admin: None,
+            provider_account_store: None,
+            capability_snapshot_store: None,
+            credential_inspection_service: None,
             metadata_store,
             sync_client,
             registry,
@@ -919,6 +1000,10 @@ mod tests {
                 false,
                 false,
                 db_auth_enabled,
+                false,
+                false,
+                false,
+                false,
             ),
         }
     }

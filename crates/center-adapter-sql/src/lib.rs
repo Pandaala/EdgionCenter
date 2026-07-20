@@ -23,6 +23,7 @@ pub mod audit;
 mod cloud_capabilities;
 mod cloud_operations;
 pub mod controllers;
+mod provider_accounts;
 mod users;
 
 #[cfg(test)]

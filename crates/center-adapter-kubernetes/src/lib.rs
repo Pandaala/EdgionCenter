@@ -11,6 +11,8 @@ mod controller_directory;
 mod crd;
 mod lease;
 mod owner_locator;
+mod provider_account_crd;
+mod provider_account_store;
 mod sar;
 mod stdout_audit;
 
@@ -31,5 +33,7 @@ pub use crd::{
 };
 pub use lease::KubernetesLeaseCoordinator;
 pub use owner_locator::KubernetesControllerOwnerLocator;
+pub use provider_account_crd::{EdgionProviderAccount, EdgionProviderAccountSpec};
+pub use provider_account_store::{provider_account_resource_name, KubernetesProviderAccountStore};
 pub use sar::KubernetesSarAuthorizer;
 pub use stdout_audit::StructuredStdoutAudit;

@@ -103,6 +103,12 @@ impl EdgionCenterCli {
             })?
         };
         validate_startup_policy(&config)?;
+        let _mounted_credential_resolver =
+            edgion_center_adapter_credential_files::MountedCredentialResolver::from_config(
+                &config.mounted_credentials,
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("Invalid mounted credential config: {error}"))?;
 
         let registry = ControllerRegistry::with_metrics(Arc::new(
             crate::fed_sync::registry::FedRegistryMetrics,
@@ -269,6 +275,16 @@ impl EdgionCenterCli {
             audit_reader: audit_log
                 .clone()
                 .map(|log| log as Arc<dyn edgion_center_core::AuditReader>),
+            cloudflare_dns_admin: None,
+            provider_account_store: db
+                .clone()
+                .map(|store| store as Arc<dyn edgion_center_core::ProviderAccountStore>),
+            capability_snapshot_store: db
+                .clone()
+                .map(|store| store as Arc<dyn edgion_center_core::CapabilitySnapshotStore>),
+            // Credential inspectors are not composed until an operator opts
+            // into a provider-specific credential integration.
+            credential_inspection_service: None,
             metadata_store: metadata_store.clone(),
             sync_client,
             registry: registry.clone(),
@@ -285,6 +301,10 @@ impl EdgionCenterCli {
                 false,
                 false,
                 resolved_password_login_capability(&config, db.is_some()),
+                false,
+                db.is_some(),
+                db.is_some(),
+                false,
             ),
         };
         let http_addr: std::net::SocketAddr = config.server.http_addr.parse()?;

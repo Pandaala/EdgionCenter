@@ -20,6 +20,9 @@ mod dns_provider_conformance;
 mod dns_verification;
 mod operations;
 mod origin;
+#[cfg(feature = "test-support")]
+mod provider_account_store_conformance;
+mod provider_accounts;
 mod provider_errors;
 mod status;
 mod zone_lifecycle;
@@ -78,6 +81,11 @@ pub use origin::{
     OriginHealthState, OriginHealthTransitionPolicy, OriginPoolCapabilities, OriginProbeSample,
     OriginProtocol, OriginRequestHeaders, OriginSelection, OriginTlsMode,
 };
+pub use provider_accounts::{
+    provider_account_from_desired, validate_stored_provider_account, ProviderAccountCreateResult,
+    ProviderAccountDesired, ProviderAccountPage, ProviderAccountPageRequest,
+    ProviderAccountReplaceResult, ProviderAccountStore,
+};
 pub use provider_errors::{NormalizedProviderError, ProviderErrorCategory};
 pub use status::{BoundedCloudEventHistory, CloudCorrelationId, CloudEvent};
 pub use zone_lifecycle::{
@@ -95,6 +103,7 @@ pub use zone_lifecycle::{
 pub mod test_support {
     pub use super::capability_store_conformance::*;
     pub use super::dns_provider_conformance::*;
+    pub use super::provider_account_store_conformance::*;
 }
 
 macro_rules! identifier {

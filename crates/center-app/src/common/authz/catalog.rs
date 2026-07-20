@@ -31,6 +31,13 @@ pub const PROXY_ACCESS: &str = "proxy:access";
 // User / role administration (db_auth; gates the /admin/users & /admin/roles endpoints).
 pub const USERS_MANAGE: &str = "users:manage";
 pub const ROLES_MANAGE: &str = "roles:manage";
+// Cloudflare-specific DNS zone inventory.
+pub const CLOUDFLARE_DNS_READ: &str = "cloudflare-dns:read";
+pub const PROVIDER_ACCOUNTS_READ: &str = "provider-accounts:read";
+pub const PROVIDER_ACCOUNTS_WRITE: &str = "provider-accounts:write";
+pub const PROVIDER_CREDENTIALS_USE: &str = "provider-credentials:use";
+pub const PROVIDER_CAPABILITIES_READ: &str = "provider-capabilities:read";
+pub const PROVIDER_CREDENTIALS_INSPECT: &str = "provider-credentials:inspect";
 
 /// Every permission key known to the system, in a stable order.
 pub fn all_keys() -> &'static [&'static str] {
@@ -46,6 +53,12 @@ pub fn all_keys() -> &'static [&'static str] {
         PROXY_ACCESS,
         USERS_MANAGE,
         ROLES_MANAGE,
+        CLOUDFLARE_DNS_READ,
+        PROVIDER_ACCOUNTS_READ,
+        PROVIDER_ACCOUNTS_WRITE,
+        PROVIDER_CREDENTIALS_USE,
+        PROVIDER_CAPABILITIES_READ,
+        PROVIDER_CREDENTIALS_INSPECT,
     ]
 }
 
@@ -98,6 +111,22 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
             group: "Access Control",
             keys: vec![USERS_MANAGE, ROLES_MANAGE],
         },
+        PermissionGroup {
+            group: "Cloudflare DNS",
+            keys: vec![CLOUDFLARE_DNS_READ],
+        },
+        PermissionGroup {
+            group: "Provider Accounts",
+            keys: vec![PROVIDER_ACCOUNTS_READ, PROVIDER_ACCOUNTS_WRITE],
+        },
+        PermissionGroup {
+            group: "Provider Credentials",
+            keys: vec![PROVIDER_CREDENTIALS_USE, PROVIDER_CREDENTIALS_INSPECT],
+        },
+        PermissionGroup {
+            group: "Provider Capabilities",
+            keys: vec![PROVIDER_CAPABILITIES_READ],
+        },
     ]
 }
 
@@ -130,11 +159,46 @@ fn under_segment(path: &str, base: &str) -> bool {
 /// `path` is the request URI path (no query string), e.g.
 /// `/api/v1/center/global-connection-ip-restrictions/default/foo`.
 pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
-    let is_get = method == Method::GET;
+    let is_read = method == Method::GET || method == Method::HEAD;
 
     // HTTP proxy — any method forwards to a controller.
     if path.starts_with("/api/v1/proxy/") {
         return Some(PROXY_ACCESS);
+    }
+
+    if under_segment(path, "/api/v1/center/cloudflare/dns") {
+        return is_read.then_some(CLOUDFLARE_DNS_READ);
+    }
+
+    if let Some(suffix) = path.strip_prefix("/api/v1/center/cloud/provider-capabilities/accounts/")
+    {
+        let mut segments = suffix.split('/');
+        if segments
+            .next()
+            .is_some_and(|account_id| !account_id.is_empty())
+            && segments.next().is_none()
+        {
+            return is_read.then_some(PROVIDER_CAPABILITIES_READ);
+        }
+    }
+
+    if let Some(suffix) =
+        path.strip_prefix("/api/v1/center/cloud/provider-credential-inspections/accounts/")
+    {
+        if suffix
+            .strip_suffix("/refresh")
+            .is_some_and(|account_id| !account_id.is_empty() && !account_id.contains('/'))
+        {
+            return (method == Method::POST).then_some(PROVIDER_CREDENTIALS_INSPECT);
+        }
+    }
+
+    if under_segment(path, "/api/v1/center/cloud/provider-accounts") {
+        return match *method {
+            Method::GET | Method::HEAD => Some(PROVIDER_ACCOUNTS_READ),
+            Method::POST | Method::PUT => Some(PROVIDER_ACCOUNTS_WRITE),
+            _ => None,
+        };
     }
 
     // Audit log read (distinct path; matched before the admin-controllers prefix).
@@ -152,7 +216,7 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     if path == "/api/v1/center/admin/controllers"
         || path.starts_with("/api/v1/center/admin/controllers/")
     {
-        return Some(if is_get {
+        return Some(if is_read {
             CONTROLLERS_READ
         } else {
             CONTROLLERS_WRITE
@@ -178,7 +242,7 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         || under_segment(path, "/api/v1/center/cluster-region-routes")
         || under_segment(path, "/api/v1/center/service-region-routes")
     {
-        return Some(if is_get {
+        return Some(if is_read {
             REGION_ROUTES_READ
         } else {
             REGION_ROUTES_WRITE
@@ -188,7 +252,7 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     // Global connection IP restrictions: all reads are GET, every mutation
     // (POST/PUT/DELETE/PATCH) is a write.
     if under_segment(path, "/api/v1/center/global-connection-ip-restrictions") {
-        return Some(if is_get {
+        return Some(if is_read {
             IP_RESTRICTIONS_READ
         } else {
             IP_RESTRICTIONS_WRITE
@@ -296,6 +360,40 @@ mod tests {
             (Method::GET, "/api/v1/center/admin/audit-logs"),
             (Method::GET, "/api/v1/center/admin/watch-status"),
             (Method::GET, "/api/v1/center/admin/metadata-store"),
+            (
+                Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A",
+            ),
+            (Method::GET, "/api/v1/center/cloud/provider-accounts"),
+            (Method::POST, "/api/v1/center/cloud/provider-accounts"),
+            (
+                Method::GET,
+                "/api/v1/center/cloud/provider-accounts/aws-main",
+            ),
+            (
+                Method::PUT,
+                "/api/v1/center/cloud/provider-accounts/aws-main",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/cloud/provider-capabilities/accounts/aws-main",
+            ),
+            (
+                Method::POST,
+                "/api/v1/center/cloud/provider-credential-inspections/accounts/aws-main/refresh",
+            ),
             (Method::GET, "/api/v1/proxy/c1/some/sub/path"),
             (Method::POST, "/api/v1/proxy/c1/some/sub/path"),
         ];
@@ -375,6 +473,60 @@ mod tests {
     /// GET endpoints resolve to `:read`, mutations to `:write`.
     #[test]
     fn read_vs_write_keys() {
+        for path in [
+            "/api/v1/center/cloud/provider-accounts",
+            "/api/v1/center/cloud/provider-accounts/aws-main",
+        ] {
+            assert_eq!(
+                route_permission(&Method::HEAD, path),
+                Some(PROVIDER_ACCOUNTS_READ)
+            );
+        }
+        assert_eq!(
+            route_permission(
+                &Method::DELETE,
+                "/api/v1/center/cloud/provider-accounts/aws-main"
+            ),
+            None
+        );
+        let capability_path = "/api/v1/center/cloud/provider-capabilities/accounts/aws-main";
+        assert_eq!(
+            route_permission(&Method::GET, capability_path),
+            Some(PROVIDER_CAPABILITIES_READ)
+        );
+        assert_eq!(
+            route_permission(&Method::HEAD, capability_path),
+            Some(PROVIDER_CAPABILITIES_READ)
+        );
+        assert_eq!(route_permission(&Method::POST, capability_path), None);
+        let inspection_path =
+            "/api/v1/center/cloud/provider-credential-inspections/accounts/aws-main/refresh";
+        assert_eq!(
+            route_permission(&Method::POST, inspection_path),
+            Some(PROVIDER_CREDENTIALS_INSPECT)
+        );
+        assert_eq!(route_permission(&Method::GET, inspection_path), None);
+        assert_eq!(
+            route_permission(
+                &Method::POST,
+                "/api/v1/center/cloud/provider-credential-inspections/accounts/aws-main/nested/refresh"
+            ),
+            None
+        );
+        assert_ne!(
+            route_permission(
+                &Method::GET,
+                "/api/v1/center/cloud/provider-capabilities/accounts/aws-main/nested"
+            ),
+            Some(PROVIDER_CAPABILITIES_READ)
+        );
+        assert_ne!(
+            route_permission(
+                &Method::GET,
+                "/api/v1/center/cloud/provider-accounts/aws-main/capabilities"
+            ),
+            Some(PROVIDER_CAPABILITIES_READ)
+        );
         assert_eq!(
             route_permission(&Method::GET, "/api/v1/center/region-routes"),
             Some(REGION_ROUTES_READ)
@@ -416,6 +568,34 @@ mod tests {
             route_permission(&Method::GET, "/api/v1/center/admin/audit-logs"),
             Some(AUDIT_READ)
         );
+        assert_eq!(
+            route_permission(
+                &Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones"
+            ),
+            Some(CLOUDFLARE_DNS_READ)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::POST,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones"
+            ),
+            None
+        );
+        assert_eq!(
+            route_permission(
+                &Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A"
+            ),
+            Some(CLOUDFLARE_DNS_READ)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::DELETE,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A"
+            ),
+            None
+        );
     }
 
     /// `is_business_path` covers /api/v1/ except the public auth routes.
@@ -449,6 +629,10 @@ mod tests {
                 &Method::GET,
                 "/api/v1/center/global-connection-ip-restrictions-v2"
             ),
+            None
+        );
+        assert_eq!(
+            route_permission(&Method::GET, "/api/v1/center/cloudflare/dns-v2"),
             None
         );
         // Exact base and segment-boundary children still resolve.

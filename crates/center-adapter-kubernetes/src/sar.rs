@@ -397,6 +397,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn provider_capability_read_uses_an_independent_non_resource_path() {
+        let (reviews, authorizer) = fake(SubjectAccessReviewStatus {
+            allowed: true,
+            ..SubjectAccessReviewStatus::default()
+        });
+        let decision = authorizer
+            .authorize(
+                &principal(),
+                &Action {
+                    permission: "provider-capabilities:read".to_string(),
+                    controller_id: None,
+                    operation: Some(ActionOperation::Get),
+                    request_path: Some(
+                        "/api/v1/center/cloud/provider-capabilities/accounts/cf-main".to_string(),
+                    ),
+                    request_verb: Some("get".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(decision.allowed);
+        let attributes = reviews
+            .requests
+            .lock()
+            .unwrap()
+            .pop()
+            .unwrap()
+            .spec
+            .non_resource_attributes
+            .unwrap();
+        assert_eq!(
+            attributes.path.as_deref(),
+            Some("/edgion-center-authz/api/v1/center/cloud/provider-capabilities/accounts/cf-main")
+        );
+        assert_eq!(attributes.verb.as_deref(), Some("get"));
+        assert!(!attributes.path.unwrap().contains("provider-accounts"));
+    }
+
+    #[tokio::test]
     async fn api_errors_and_missing_status_fail_closed() {
         let reviews = Arc::new(FakeReviews {
             response: Err("apiserver unavailable".to_string()),
