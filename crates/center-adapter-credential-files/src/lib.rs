@@ -37,6 +37,7 @@ const REVISION_DOMAIN: &[u8] = b"edgion-center/mounted-credential-revision/v1";
 #[serde(rename_all = "snake_case")]
 pub enum CredentialPurpose {
     CloudflareApiToken,
+    CloudflareDnsCursorHmac,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +103,7 @@ pub enum CredentialConfigError {
     NoBindings,
     TooManyBindings,
     InvalidBinding,
+    CredentialFileConflictsRevisionKey,
     DuplicateBinding,
 }
 
@@ -115,6 +117,9 @@ impl fmt::Display for CredentialConfigError {
             Self::NoBindings => "mounted credential bindings are empty",
             Self::TooManyBindings => "mounted credential binding limit was exceeded",
             Self::InvalidBinding => "mounted credential binding is invalid",
+            Self::CredentialFileConflictsRevisionKey => {
+                "mounted credential file conflicts with the revision key"
+            }
             Self::DuplicateBinding => "mounted credential binding is duplicated",
         })
     }
@@ -131,6 +136,7 @@ pub enum CredentialResolutionError {
     TooLarge,
     Empty,
     UnsafePermissions,
+    RevisionKeyConflict,
 }
 
 impl fmt::Display for CredentialResolutionError {
@@ -143,6 +149,7 @@ impl fmt::Display for CredentialResolutionError {
             Self::TooLarge => "mounted credential file exceeded its size limit",
             Self::Empty => "mounted credential file was empty",
             Self::UnsafePermissions => "mounted credential file permissions were unsafe",
+            Self::RevisionKeyConflict => "mounted credential file conflicts with the revision key",
         })
     }
 }
@@ -208,6 +215,7 @@ struct ValidatedBinding {
 pub struct MountedCredentialResolver {
     root: Arc<Dir>,
     revision_key: Arc<Zeroizing<[u8; REVISION_KEY_BYTES]>>,
+    revision_key_identity: Option<FileIdentity>,
     bindings: Vec<ValidatedBinding>,
 }
 
@@ -257,7 +265,11 @@ impl MountedCredentialResolver {
             if binding.credential_ref.len() > MAX_IDENTITY_BYTES
                 || binding.provider_account_id.len() > MAX_IDENTITY_BYTES
                 || binding.provider != CloudProvider::Cloudflare
-                || binding.purpose != CredentialPurpose::CloudflareApiToken
+                || !matches!(
+                    binding.purpose,
+                    CredentialPurpose::CloudflareApiToken
+                        | CredentialPurpose::CloudflareDnsCursorHmac
+                )
             {
                 return Err(CredentialConfigError::InvalidBinding);
             }
@@ -267,6 +279,9 @@ impl MountedCredentialResolver {
                 .map_err(|_| CredentialConfigError::InvalidBinding)?;
             let file = validate_locator(&binding.file)
                 .map_err(|_| CredentialConfigError::InvalidBinding)?;
+            if file == revision_key_file {
+                return Err(CredentialConfigError::CredentialFileConflictsRevisionKey);
+            }
             let identity = (
                 credential_ref.as_str().to_string(),
                 provider_account_id.as_str().to_string(),
@@ -285,7 +300,7 @@ impl MountedCredentialResolver {
             });
         }
 
-        let (root, key) = tokio::task::spawn_blocking(move || {
+        let (root, key, revision_key_identity) = tokio::task::spawn_blocking(move || {
             let root = Dir::open_ambient_dir(root, ambient_authority())
                 .map_err(|_| CredentialConfigError::InvalidRootDirectory)?;
             #[cfg(unix)]
@@ -300,12 +315,14 @@ impl MountedCredentialResolver {
             }
             let key = read_regular_file(&root, &revision_key_file, REVISION_KEY_BYTES)
                 .map_err(|_| CredentialConfigError::InvalidRevisionKey)?;
-            if key.len() != REVISION_KEY_BYTES || key.iter().all(|byte| *byte == 0) {
+            if key.material.len() != REVISION_KEY_BYTES
+                || key.material.iter().all(|byte| *byte == 0)
+            {
                 return Err(CredentialConfigError::InvalidRevisionKey);
             }
             let mut revision_key = Zeroizing::new([0_u8; REVISION_KEY_BYTES]);
-            revision_key.copy_from_slice(&key);
-            Ok((root, revision_key))
+            revision_key.copy_from_slice(&key.material);
+            Ok((root, revision_key, key.identity))
         })
         .await
         .map_err(|_| CredentialConfigError::InvalidRootDirectory)??;
@@ -313,6 +330,7 @@ impl MountedCredentialResolver {
         Ok(Some(Self {
             root: Arc::new(root),
             revision_key: Arc::new(key),
+            revision_key_identity,
             bindings,
         }))
     }
@@ -342,14 +360,23 @@ impl MountedCredentialResolver {
         let file = binding.file.clone();
         let root = self.root.clone();
         let revision_key = self.revision_key.clone();
+        let revision_key_identity = self.revision_key_identity;
         let account_id = request.provider_account_id.clone();
         let provider = request.provider.clone();
         let purpose = request.purpose;
         let credential_ref = request.credential_ref.clone();
         tokio::task::spawn_blocking(move || {
-            let material = read_regular_file(&root, &file, MAX_CREDENTIAL_BYTES)?;
+            let credential_file = read_regular_file(&root, &file, MAX_CREDENTIAL_BYTES)?;
+            if revision_key_identity.is_some() && credential_file.identity == revision_key_identity
+            {
+                return Err(CredentialResolutionError::RevisionKeyConflict);
+            }
+            let material = credential_file.material;
             if material.is_empty() {
                 return Err(CredentialResolutionError::Empty);
+            }
+            if material.as_slice() == revision_key.as_slice() {
+                return Err(CredentialResolutionError::RevisionKeyConflict);
             }
             let revision = revision(
                 revision_key.as_slice(),
@@ -396,11 +423,25 @@ fn validate_locator(value: &str) -> Result<PathBuf, ()> {
     Ok(path.to_path_buf())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+struct ReadFile {
+    material: Zeroizing<Vec<u8>>,
+    identity: Option<FileIdentity>,
+}
+
 fn read_regular_file(
     root: &Dir,
     path: &Path,
     max_bytes: usize,
-) -> Result<Zeroizing<Vec<u8>>, CredentialResolutionError> {
+) -> Result<ReadFile, CredentialResolutionError> {
+    #[cfg(unix)]
+    use cap_std::fs::MetadataExt as _;
+
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -417,11 +458,17 @@ fn read_regular_file(
     }
     #[cfg(unix)]
     {
-        use cap_std::fs::MetadataExt as _;
         if metadata.mode() & 0o022 != 0 {
             return Err(CredentialResolutionError::UnsafePermissions);
         }
     }
+    #[cfg(unix)]
+    let identity = Some(FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    });
+    #[cfg(not(unix))]
+    let identity = None;
     if metadata.len() > max_bytes as u64 {
         return Err(CredentialResolutionError::TooLarge);
     }
@@ -433,14 +480,19 @@ fn read_regular_file(
     if material.len() > max_bytes {
         return Err(CredentialResolutionError::TooLarge);
     }
-    let final_len = file
+    let final_metadata = file
         .metadata()
-        .map_err(|_| CredentialResolutionError::Unreadable)?
-        .len();
-    if final_len != metadata.len() || final_len != material.len() as u64 {
+        .map_err(|_| CredentialResolutionError::Unreadable)?;
+    #[cfg(unix)]
+    {
+        if final_metadata.dev() != metadata.dev() || final_metadata.ino() != metadata.ino() {
+            return Err(CredentialResolutionError::Unreadable);
+        }
+    }
+    if final_metadata.len() != metadata.len() || final_metadata.len() != material.len() as u64 {
         return Err(CredentialResolutionError::Unreadable);
     }
-    Ok(material)
+    Ok(ReadFile { material, identity })
 }
 
 fn revision(
@@ -484,6 +536,7 @@ fn provider_tag(provider: &CloudProvider) -> &'static str {
 fn purpose_tag(purpose: CredentialPurpose) -> &'static str {
     match purpose {
         CredentialPurpose::CloudflareApiToken => "cloudflare_api_token",
+        CredentialPurpose::CloudflareDnsCursorHmac => "cloudflare_dns_cursor_hmac",
     }
 }
 
@@ -579,6 +632,12 @@ mod tests {
         assert!(matches!(
             MountedCredentialResolver::from_config(&value).await,
             Err(CredentialConfigError::InvalidBinding)
+        ));
+        value = config(root);
+        value.bindings[0].file = "revision.key".into();
+        assert!(matches!(
+            MountedCredentialResolver::from_config(&value).await,
+            Err(CredentialConfigError::CredentialFileConflictsRevisionKey)
         ));
         value = config(root);
         value.bindings.push(value.bindings[0].clone());
@@ -723,6 +782,93 @@ mod tests {
                 .await
                 .unwrap_err(),
             CredentialResolutionError::Empty
+        );
+    }
+
+    #[tokio::test]
+    async fn cursor_hmac_uses_a_separate_closed_purpose_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("revision.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("token"), b"token")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("cursor.key"), [8_u8; 32])
+            .await
+            .unwrap();
+        let mut config = config(dir.path());
+        config.bindings.push(MountedCredentialBinding {
+            credential_ref: "cloudflare/dns-cursor".into(),
+            provider_account_id: "cf-main".into(),
+            provider: CloudProvider::Cloudflare,
+            purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+            file: "cursor.key".into(),
+        });
+        let resolver = MountedCredentialResolver::from_config(&config)
+            .await
+            .unwrap()
+            .unwrap();
+        let account = CloudResourceId::new("cf-main").unwrap();
+        let cursor_ref = CredentialRef::new("cloudflare/dns-cursor").unwrap();
+        let cursor = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &CloudProvider::Cloudflare,
+                purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+                credential_ref: &cursor_ref,
+            })
+            .await
+            .unwrap();
+        assert_eq!(cursor.with_bytes(|bytes| bytes.to_vec()), vec![8_u8; 32]);
+
+        let token_ref = CredentialRef::new("cloudflare/main").unwrap();
+        assert_eq!(
+            resolver
+                .resolve(ResolveCredentialRequest {
+                    provider_account_id: &account,
+                    provider: &CloudProvider::Cloudflare,
+                    purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+                    credential_ref: &token_ref,
+                })
+                .await
+                .unwrap_err(),
+            CredentialResolutionError::ScopeMismatch
+        );
+
+        tokio::fs::write(dir.path().join("cursor.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        assert_eq!(
+            resolver
+                .resolve(ResolveCredentialRequest {
+                    provider_account_id: &account,
+                    provider: &CloudProvider::Cloudflare,
+                    purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+                    credential_ref: &cursor_ref,
+                })
+                .await
+                .unwrap_err(),
+            CredentialResolutionError::RevisionKeyConflict
+        );
+    }
+
+    #[tokio::test]
+    async fn copied_revision_key_bytes_are_rejected_for_api_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let value = resolver(dir.path(), &[7_u8; 32]).await;
+        let account = CloudResourceId::new("cf-main").unwrap();
+        let credential_ref = CredentialRef::new("cloudflare/main").unwrap();
+        assert_eq!(
+            value
+                .resolve(request(
+                    &account,
+                    &CloudProvider::Cloudflare,
+                    &credential_ref,
+                ))
+                .await
+                .unwrap_err(),
+            CredentialResolutionError::RevisionKeyConflict
         );
     }
 
@@ -943,6 +1089,37 @@ mod tests {
                 .unwrap_err(),
             CredentialResolutionError::UnsafePermissions
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn revision_key_aliases_are_rejected_by_file_identity() {
+        use std::os::unix::fs::symlink;
+
+        for hard_link in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let value = resolver(dir.path(), b"secret").await;
+            std::fs::remove_file(dir.path().join("token")).unwrap();
+            if hard_link {
+                std::fs::hard_link(dir.path().join("revision.key"), dir.path().join("token"))
+                    .unwrap();
+            } else {
+                symlink("revision.key", dir.path().join("token")).unwrap();
+            }
+            let account = CloudResourceId::new("cf-main").unwrap();
+            let credential_ref = CredentialRef::new("cloudflare/main").unwrap();
+            assert_eq!(
+                value
+                    .resolve(request(
+                        &account,
+                        &CloudProvider::Cloudflare,
+                        &credential_ref,
+                    ))
+                    .await
+                    .unwrap_err(),
+                CredentialResolutionError::RevisionKeyConflict
+            );
+        }
     }
 
     #[cfg(unix)]

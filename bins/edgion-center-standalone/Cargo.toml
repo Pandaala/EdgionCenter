@@ -19,6 +19,7 @@ edgion-center-runtime = { path = "../../crates/center-runtime" }
 edgion-center-app = { path = "../../crates/center-app" }
 edgion-center-adapter-sql = { path = "../../crates/center-adapter-sql" }
 edgion-center-adapter-credential-files = { path = "../../crates/center-adapter-credential-files" }
+edgion-center-integration-cloudflare = { path = "../../crates/center-integration-cloudflare" }
 tokio = { version = "1.49", features = ["full"] }
 tokio-util = "0.7"
 tokio-stream = "0.1"

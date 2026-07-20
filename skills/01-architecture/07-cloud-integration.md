@@ -197,6 +197,36 @@ through `fsGroup`, then stages them into a UID-1000-owned, memory-backed `0400` 
 Center starts. Center gains no Secret API permission. CLD-02A does not inject the resolver into
 `ApiState`, build an inspector/provider client, or cause network traffic.
 
+The first provider-specific consumer is the independent `center-integration-cloudflare` crate.
+Both binaries share a second strict, default-off `cloudflare_credential_inspection` switch. When
+enabled it requires the active mode's ProviderAccount store plus the mounted resolver and installs
+the existing credential-inspection service in `ApiState`; the capability bit follows that actual
+service value. It accepts only exact Cloudflare `StaticSecret` authority, verifies token state,
+then probes `zones` with page/per-page one for the configured provider account. A non-empty exact-
+account result proves scope; an empty successful page remains `Unknown`. Production always uses
+`api.cloudflare.com` and configuration exposes no endpoint override. Provider diagnostics and
+credential details are mapped to fixed typed issues, while the resolver's keyed revision remains
+opaque. Credential inspection itself does not mount Cloudflare DNS Admin, run background probes,
+or change Kubernetes Secret RBAC.
+
+Read-only Cloudflare DNS production access is a separate strict `cloudflare_dns_read` composition.
+It implements the existing four-method Admin port in `center-integration-cloudflare`, constructs a
+fresh account-bound client per operation for the fixed production endpoint, and advertises the
+route capability only from the actual service value. One operation deadline covers store access,
+bounded global/per-account admission, both mounted-key reads, every provider page, and pre/post
+authority checks. Account generation/spec and both token/cursor revisions must remain unchanged or
+the observation is discarded. Cursor verification precedes provider I/O, and provider loops are
+bounded to 200 zone pages and 20 record pages. The service never retries automatically.
+
+The cursor HMAC is an exact 32-byte binding under the closed
+`cloudflare_dns_cursor_hmac` purpose. Its reference and material must differ from the API token;
+the resolver revision key remains separately protected by path and file identity. Every replica
+uses one identical active cursor key. This slice has no fallback key, so coordinated key rotation
+invalidates old cursors and clients restart pagination. `cloudflare-dns:read` is a high-trust grant
+across all configured Cloudflare accounts, not an account-scoped permission. Record HTTP handlers
+retain their separate authoritative-zone preflight and may execute two independently bounded
+operations; zone handlers execute at most one. Base Kubernetes Secret RBAC remains unchanged.
+
 Cloudflare API Tokens are preferred to legacy global API keys. AWS and Google adapters must
 prefer automatically refreshed temporary credentials through the SDK provider chains.
 

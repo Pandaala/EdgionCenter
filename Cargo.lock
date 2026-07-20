@@ -1743,6 +1743,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "edgion-center-integration-cloudflare"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "edgion-center-adapter-cloudflare",
+ "edgion-center-adapter-credential-files",
+ "edgion-center-app",
+ "edgion-center-core",
+ "edgion-center-runtime",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "edgion-center-kubernetes"
 version = "0.1.0"
 dependencies = [
@@ -1754,6 +1772,7 @@ dependencies = [
  "edgion-center-adapter-kubernetes",
  "edgion-center-app",
  "edgion-center-core",
+ "edgion-center-integration-cloudflare",
  "edgion-center-runtime",
  "kube",
  "parking_lot",
@@ -1808,6 +1827,7 @@ dependencies = [
  "edgion-center-adapter-sql",
  "edgion-center-app",
  "edgion-center-core",
+ "edgion-center-integration-cloudflare",
  "edgion-center-runtime",
  "futures",
  "http 1.4.2",

@@ -90,8 +90,8 @@ database:
   # mysql_url: "mysql://user:pass@host:3306/edgion_center"
 
 # Mounted cloud credentials are an explicit, default-off deployment capability.
-# Enabling this only constructs a local resolver; it does not enable an Admin
-# API, credential inspection, or cloud-provider traffic.
+# Enabling this only constructs a local resolver. Cloud-provider traffic still
+# requires the separate provider-specific inspection switch below.
 # mounted_credentials:
 #   enabled: true
 #   root_directory: /var/run/edgion-center/cloud-credentials
@@ -102,6 +102,29 @@ database:
 #       provider: cloudflare
 #       purpose: cloudflare_api_token
 #       file: cloudflare-api-token
+#     - credential_ref: cloudflare/dns-cursor
+#       provider_account_id: cf-main
+#       provider: cloudflare
+#       purpose: cloudflare_dns_cursor_hmac
+#       file: cloudflare-dns-cursor.key
+
+# Cloudflare inspection is independently default-off. When enabled it exposes
+# the existing credential-inspection API and, only on an authorized inspection
+# request, verifies the token and issues an account-scoped one-item zone query.
+# It requires database.enabled and mounted_credentials.enabled. The production
+# endpoint is fixed to https://api.cloudflare.com; no endpoint override exists.
+# cloudflare_credential_inspection:
+#   enabled: true
+
+# Read-only Cloudflare DNS inventory is independently default-off. The cursor key is a separate
+# exact 32-byte deployment secret shared by all replicas. `cloudflare-dns:read` is a high-trust
+# permission for every configured Cloudflare account. The production endpoint is fixed.
+# cloudflare_dns_read:
+#   enabled: true
+#   cursor_key_ref: cloudflare/dns-cursor
+#   operation_timeout_secs: 30
+#   global_concurrency: 16
+#   per_account_concurrency: 2
 
 # ============================================================================
 # Audit log (`audit:`)

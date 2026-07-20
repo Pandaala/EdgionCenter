@@ -1,0 +1,25 @@
+[package]
+name = "edgion-center-integration-cloudflare"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish = false
+description = "Cloudflare-specific production composition for Edgion Center"
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+edgion-center-adapter-cloudflare = { path = "../center-adapter-cloudflare" }
+edgion-center-adapter-credential-files = { path = "../center-adapter-credential-files" }
+edgion-center-app = { path = "../center-app", default-features = false }
+edgion-center-core = { path = "../center-core" }
+edgion-center-runtime = { path = "../center-runtime" }
+serde.workspace = true
+tokio = { version = "1.49", features = ["sync", "time"] }
+zeroize.workspace = true
+
+[dev-dependencies]
+edgion-center-core = { path = "../center-core", features = ["test-support"] }
+serde_yaml = "0.9"
+tempfile = "3"
+tokio = { version = "1.49", features = ["macros", "rt-multi-thread"] }

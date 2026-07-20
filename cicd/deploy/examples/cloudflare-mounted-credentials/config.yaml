@@ -46,3 +46,16 @@ data:
           provider: cloudflare
           purpose: cloudflare_api_token
           file: cloudflare-api-token
+        - credential_ref: cloudflare/dns-cursor
+          provider_account_id: cf-main
+          provider: cloudflare
+          purpose: cloudflare_dns_cursor_hmac
+          file: cloudflare-dns-cursor.key
+    cloudflare_credential_inspection:
+      enabled: true
+    cloudflare_dns_read:
+      enabled: true
+      cursor_key_ref: cloudflare/dns-cursor
+      operation_timeout_secs: 30
+      global_concurrency: 16
+      per_account_concurrency: 2

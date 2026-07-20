@@ -2,6 +2,9 @@ use crate::common::auth::AdminAuthConfig;
 use crate::common::config::{AdminTlsConfig, ConfSyncSecurityConfig};
 use crate::common::local_auth::LocalAuthConfig;
 use edgion_center_adapter_credential_files::MountedCredentialConfig;
+use edgion_center_integration_cloudflare::{
+    CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig,
+};
 use serde::{Deserialize, Serialize};
 
 pub use edgion_center_adapter_sql::DatabaseConfig;
@@ -117,6 +120,12 @@ pub struct CenterConfig {
     /// Deployment-owned mounted credentials. Disabled unless explicitly enabled.
     #[serde(default)]
     pub mounted_credentials: MountedCredentialConfig,
+    /// Cloudflare token verification and account-scoped DNS Read probe.
+    #[serde(default)]
+    pub cloudflare_credential_inspection: CloudflareCredentialInspectionConfig,
+    /// Account-bound, read-only Cloudflare DNS inventory. Disabled by default.
+    #[serde(default)]
+    pub cloudflare_dns_read: CloudflareDnsReadConfig,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -135,6 +144,8 @@ impl Default for CenterConfig {
             authz: AuthzConfig::default(),
             db_auth: DbAuthConfig::default(),
             mounted_credentials: MountedCredentialConfig::default(),
+            cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
+            cloudflare_dns_read: CloudflareDnsReadConfig::default(),
         }
     }
 }
@@ -243,6 +254,8 @@ mod tests {
             "local_auth:\n  enabledd: false\n",
             "sync:\n  ping_interval_secss: 1\n",
             "mounted_credentials:\n  enabledd: true\n",
+            "cloudflare_credential_inspection:\n  enabledd: true\n",
+            "cloudflare_dns_read:\n  enabledd: true\n",
         ] {
             serde_yaml::from_str::<CenterConfig>(yaml)
                 .expect_err("unknown nested fields must fail closed");
@@ -257,6 +270,31 @@ mod tests {
         );
         assert!(config.mounted_credentials.enabled);
         assert_eq!(config.mounted_credentials.bindings.len(), 1);
+    }
+
+    #[test]
+    fn cloudflare_credential_inspection_is_default_off_and_strict() {
+        assert!(
+            !CenterConfig::default()
+                .cloudflare_credential_inspection
+                .enabled
+        );
+        let config = parse_via_production("cloudflare_credential_inspection:\n  enabled: true\n");
+        assert!(config.cloudflare_credential_inspection.enabled);
+        assert!(serde_yaml::from_str::<CenterConfig>(
+            "cloudflare_credential_inspection:\n  base_url: https://example.invalid\n"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn cloudflare_dns_read_is_default_off_and_strict() {
+        assert!(!CenterConfig::default().cloudflare_dns_read.enabled);
+        let config = parse_via_production(
+            "cloudflare_dns_read:\n  enabled: true\n  cursor_key_ref: cloudflare/dns-cursor\n  operation_timeout_secs: 30\n  global_concurrency: 16\n  per_account_concurrency: 2\n",
+        );
+        assert!(config.cloudflare_dns_read.enabled);
+        assert_eq!(config.cloudflare_dns_read.operation_timeout_secs, 30);
     }
 
     #[test]

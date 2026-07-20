@@ -170,12 +170,13 @@ fn init_json_tracing() -> anyhow::Result<()> {
 
 async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
     let identity = config.validate()?;
-    let _mounted_credential_resolver =
+    let mounted_credential_resolver =
         edgion_center_adapter_credential_files::MountedCredentialResolver::from_config(
             &config.mounted_credentials,
         )
         .await
-        .map_err(|error| anyhow::anyhow!("Invalid mounted credential config: {error}"))?;
+        .map_err(|error| anyhow::anyhow!("Invalid mounted credential config: {error}"))?
+        .map(Arc::new);
     ensure_distinct_internal_ca(&config).await?;
     let client = kube::Client::try_default()
         .await
@@ -207,6 +208,21 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
             &identity.namespace,
         )?,
     );
+    let credential_inspection_service =
+        edgion_center_integration_cloudflare::compose_credential_inspection(
+            &config.cloudflare_credential_inspection,
+            Some(provider_account_store.clone()),
+            mounted_credential_resolver.clone(),
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Invalid Cloudflare credential inspection config: {error}")
+        })?;
+    let cloudflare_dns_admin = edgion_center_integration_cloudflare::compose_dns_admin(
+        &config.cloudflare_dns_read,
+        Some(provider_account_store.clone()),
+        mounted_credential_resolver,
+    )
+    .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS read config: {error}"))?;
     platform_health_check(
         directory.as_ref(),
         coordinator.as_ref(),
@@ -310,11 +326,10 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         user_admin: None,
         role_admin: None,
         audit_reader: None,
-        cloudflare_dns_admin: None,
+        cloudflare_dns_admin: cloudflare_dns_admin.clone(),
         provider_account_store: Some(provider_account_store),
         capability_snapshot_store: Some(capability_snapshot_store),
-        // No Secret access or cloud SDK is composed by default.
-        credential_inspection_service: None,
+        credential_inspection_service: credential_inspection_service.clone(),
         metadata_store: metadata_store.clone(),
         sync_client,
         registry: registry.clone(),
@@ -325,6 +340,8 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
             let mut capabilities = CenterCapabilities::for_mode(CenterMode::Kubernetes);
             capabilities.provider_account_admin = true;
             capabilities.provider_capability_read = true;
+            capabilities.provider_credential_inspection = credential_inspection_service.is_some();
+            capabilities.cloudflare_dns_read = cloudflare_dns_admin.is_some();
             capabilities
         },
     };

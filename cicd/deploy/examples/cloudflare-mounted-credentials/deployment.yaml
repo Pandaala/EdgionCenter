@@ -17,16 +17,22 @@ spec:
               umask 077 && mkdir -p /credentials/private &&
               chmod 0700 /credentials/private &&
               rm -f /credentials/private/.revision.key.tmp
-              /credentials/private/.cloudflare-api-token.tmp &&
+              /credentials/private/.cloudflare-api-token.tmp
+              /credentials/private/.cloudflare-dns-cursor.key.tmp &&
               cp /source/revision.key /credentials/private/.revision.key.tmp &&
               cp /source/cloudflare-api-token
               /credentials/private/.cloudflare-api-token.tmp &&
+              cp /source/cloudflare-dns-cursor.key
+              /credentials/private/.cloudflare-dns-cursor.key.tmp &&
               chmod 0400 /credentials/private/.revision.key.tmp
-              /credentials/private/.cloudflare-api-token.tmp &&
+              /credentials/private/.cloudflare-api-token.tmp
+              /credentials/private/.cloudflare-dns-cursor.key.tmp &&
               mv -f /credentials/private/.revision.key.tmp
               /credentials/private/revision.key &&
               mv -f /credentials/private/.cloudflare-api-token.tmp
-              /credentials/private/cloudflare-api-token
+              /credentials/private/cloudflare-api-token &&
+              mv -f /credentials/private/.cloudflare-dns-cursor.key.tmp
+              /credentials/private/cloudflare-dns-cursor.key
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

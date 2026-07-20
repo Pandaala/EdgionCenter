@@ -75,6 +75,23 @@ pub enum CloudflareTokenStatus {
     Unknown,
 }
 
+/// Sanitized, non-secret evidence returned by Cloudflare's token endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudflareTokenVerification {
+    pub token_id: String,
+    pub status: CloudflareTokenStatus,
+}
+
+/// Narrow read-only seam used by credential inspection composition.
+#[async_trait]
+pub trait CloudflareCredentialProbe: Send + Sync {
+    async fn verify_api_token(&self) -> CloudflareApiResult<CloudflareTokenVerification>;
+
+    /// Probes the exact provider account with a one-item zone query. `true`
+    /// means at least one returned zone proved that exact account scope.
+    async fn probe_account_zone_scope(&self, account_id: &str) -> CloudflareApiResult<bool>;
+}
+
 /// Minimal Cloudflare v4 HTTP client. It owns credential material and never
 /// includes provider response bodies, headers, or tokens in returned errors.
 pub struct CloudflareHttpApi {
@@ -153,14 +170,19 @@ impl CloudflareHttpApi {
 
     /// Verifies only token state. This does not prove DNS Read or DNS Write
     /// authorization, which must be checked by an account-scoped DNS request.
-    pub async fn verify_user_token(&self) -> CloudflareApiResult<CloudflareTokenStatus> {
+    pub async fn verify_user_token(&self) -> CloudflareApiResult<CloudflareTokenVerification> {
         let envelope: Envelope<TokenVerification> = self.get("user/tokens/verify", &[]).await?;
         let result = require_result(envelope)?;
-        Ok(match result.status.as_str() {
+        validate_safe_principal(&result.id)?;
+        let status = match result.status.as_str() {
             "active" => CloudflareTokenStatus::Active,
             "disabled" => CloudflareTokenStatus::Disabled,
             "expired" => CloudflareTokenStatus::Expired,
             _ => CloudflareTokenStatus::Unknown,
+        };
+        Ok(CloudflareTokenVerification {
+            token_id: result.id,
+            status,
         })
     }
 
@@ -323,6 +345,21 @@ impl CloudflareHttpApi {
         })?;
         value.set_sensitive(true);
         Ok(value)
+    }
+}
+
+#[async_trait]
+impl CloudflareCredentialProbe for CloudflareHttpApi {
+    async fn verify_api_token(&self) -> CloudflareApiResult<CloudflareTokenVerification> {
+        self.verify_user_token().await
+    }
+
+    async fn probe_account_zone_scope(&self, account_id: &str) -> CloudflareApiResult<bool> {
+        let page = <Self as CloudflareApi>::list_zones(self, account_id, 1, 1).await?;
+        if page.items.iter().any(|zone| zone.account_id != account_id) {
+            return Err(malformed("cloudflare_zone_account_scope_mismatch"));
+        }
+        Ok(!page.items.is_empty())
     }
 }
 
@@ -518,6 +555,7 @@ struct ResultInfo {
 
 #[derive(Deserialize)]
 struct TokenVerification {
+    id: String,
     status: String,
 }
 
@@ -895,6 +933,18 @@ fn validate_identifier(value: &str, code: &str) -> CloudflareApiResult<()> {
     }
 }
 
+fn validate_safe_principal(value: &str) -> CloudflareApiResult<()> {
+    if value.is_empty()
+        || value.len() > 256
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        Err(malformed("invalid_cloudflare_token_id"))
+    } else {
+        Ok(())
+    }
+}
+
 fn validate_page(page: u32, per_page: u32, maximum: u32) -> CloudflareApiResult<()> {
     if page == 0 || per_page == 0 || per_page > maximum {
         Err(error(
@@ -1269,6 +1319,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn credential_scope_probe_is_bounded_and_fails_closed() {
+        let empty = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/client/v4/zones"))
+            .and(query_param("account.id", ACCOUNT_ID))
+            .and(query_param("page", "1"))
+            .and(query_param("per_page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "errors": [],
+                "result": [],
+                "result_info": { "page": 1, "per_page": 1, "total_pages": 1, "count": 0 }
+            })))
+            .mount(&empty)
+            .await;
+        assert!(!api(&empty)
+            .await
+            .probe_account_zone_scope(ACCOUNT_ID)
+            .await
+            .unwrap());
+
+        let mismatched = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/client/v4/zones"))
+            .and(query_param("account.id", ACCOUNT_ID))
+            .and(query_param("page", "1"))
+            .and(query_param("per_page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "errors": [],
+                "result": [{
+                    "id": ZONE_ID,
+                    "account": { "id": "fedcba9876543210fedcba9876543210" },
+                    "name": "example.test",
+                    "type": "full",
+                    "status": "active",
+                    "name_servers": []
+                }],
+                "result_info": { "page": 1, "per_page": 1, "total_pages": 1, "count": 1 }
+            })))
+            .mount(&mismatched)
+            .await;
+        let error = api(&mismatched)
+            .await
+            .probe_account_zone_scope(ACCOUNT_ID)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "cloudflare_zone_account_scope_mismatch");
+    }
+
+    #[tokio::test]
     async fn decodes_supported_record_shapes_and_rejects_unknown_types() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1479,7 +1580,10 @@ mod tests {
             .await;
         assert_eq!(
             api(&server).await.verify_user_token().await.unwrap(),
-            CloudflareTokenStatus::Active
+            CloudflareTokenVerification {
+                token_id: "token-id".into(),
+                status: CloudflareTokenStatus::Active,
+            }
         );
     }
 

@@ -32,6 +32,8 @@ pub const PROXY_ACCESS: &str = "proxy:access";
 pub const USERS_MANAGE: &str = "users:manage";
 pub const ROLES_MANAGE: &str = "roles:manage";
 // Cloudflare-specific DNS zone inventory.
+/// High-trust inventory access across every configured Cloudflare account.
+/// This permission is not scoped to one ProviderAccount.
 pub const CLOUDFLARE_DNS_READ: &str = "cloudflare-dns:read";
 pub const PROVIDER_ACCOUNTS_READ: &str = "provider-accounts:read";
 pub const PROVIDER_ACCOUNTS_WRITE: &str = "provider-accounts:write";

@@ -11,6 +11,7 @@ members = [
     "crates/center-adapter-google-cloud-dns",
     "crates/center-adapter-dns-verifier",
     "crates/center-adapter-credential-files",
+    "crates/center-integration-cloudflare",
     "bins/edgion-center-standalone",
     "bins/edgion-center-kubernetes",
 ]

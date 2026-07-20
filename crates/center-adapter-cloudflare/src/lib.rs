@@ -7,7 +7,10 @@ mod http;
 pub mod load_balancing;
 pub mod origin_rules;
 
-pub use http::{CloudflareApiToken, CloudflareHttpApi, CloudflareTokenStatus};
+pub use http::{
+    CloudflareApiToken, CloudflareCredentialProbe, CloudflareHttpApi, CloudflareTokenStatus,
+    CloudflareTokenVerification,
+};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -34,9 +37,10 @@ use edgion_center_core::{
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
-const MAX_PROVIDER_PAGES: u32 = 10_000;
+const MAX_ZONE_PROVIDER_PAGES: u32 = 200;
+const MAX_RECORD_PROVIDER_PAGES: u32 = 20;
 const PROVIDER_PAGE_SIZE: u32 = 5_000;
 const MAX_INVENTORY_ZONES: usize = 10_000;
 const MAX_INVENTORY_RECORDS: usize = 100_000;
@@ -274,20 +278,21 @@ pub trait CloudflareZoneInventory: Send + Sync {
 ///
 /// All replicas serving one account must receive the same key. The type is
 /// intentionally neither printable nor serializable.
-pub struct CloudflareCursorKey([u8; 32]);
+pub struct CloudflareCursorKey(Zeroizing<[u8; 32]>);
 
 impl CloudflareCursorKey {
     pub fn new(value: [u8; 32]) -> Result<Self, NormalizedProviderError> {
         if value.iter().all(|byte| *byte == 0) {
             return Err(validation("weak_cloudflare_cursor_key"));
         }
-        Ok(Self(value))
+        Ok(Self(Zeroizing::new(value)))
     }
-}
 
-impl Drop for CloudflareCursorKey {
-    fn drop(&mut self) {
-        self.0.zeroize();
+    pub fn from_zeroizing(value: Zeroizing<[u8; 32]>) -> Result<Self, NormalizedProviderError> {
+        if value.iter().all(|byte| *byte == 0) {
+            return Err(validation("weak_cloudflare_cursor_key"));
+        }
+        Ok(Self(value))
     }
 }
 
@@ -327,15 +332,47 @@ impl CloudflareDnsAdapter {
         })
     }
 
+    /// Validates an opaque record-page cursor for the exact account and zone without provider I/O.
+    pub fn validate_record_inventory_cursor(
+        &self,
+        zone_id: &DnsZoneId,
+        page: &DnsPageRequest,
+    ) -> DnsProviderResult<()> {
+        page.validate().map_err(|_| validation("invalid_page"))?;
+        if !valid_cloudflare_identifier(zone_id.as_str()) {
+            return Err(validation("invalid_cloudflare_zone_id"));
+        }
+        decode_cursor_offset(page, &self.record_cursor_scope(zone_id), &self.cursor_key).map(drop)
+    }
+
+    fn record_cursor_scope(&self, zone_id: &DnsZoneId) -> CursorScope {
+        CursorScope::Records {
+            center_scope: cursor_scope_tag(
+                &self.cursor_key,
+                b"center-account",
+                self.center_account_id.as_str(),
+            ),
+            external_scope: cursor_scope_tag(
+                &self.cursor_key,
+                b"native-account",
+                &self.cloudflare_account_id,
+            ),
+            zone_scope: cursor_scope_tag(&self.cursor_key, b"zone", zone_id.as_str()),
+        }
+    }
+
     async fn all_zones(&self) -> DnsProviderResult<Vec<ObservedDnsZone>> {
         let mut zones = Vec::new();
         let mut expected_total_pages = None;
-        for page in 1..=MAX_PROVIDER_PAGES {
+        for page in 1..=MAX_ZONE_PROVIDER_PAGES {
             let result = self
                 .api
                 .list_zones(&self.cloudflare_account_id, page, 50)
                 .await?;
             validate_provider_page(page, 50, &result)?;
+            if result.total_pages > MAX_ZONE_PROVIDER_PAGES {
+                return Err(validation("cloudflare_zone_pagination_limit"));
+            }
             validate_stable_total_pages(&mut expected_total_pages, result.total_pages)?;
             for zone in result.items {
                 zones.push(self.map_zone(zone)?);
@@ -360,12 +397,15 @@ impl CloudflareDnsAdapter {
     async fn all_zone_inventory(&self) -> DnsProviderResult<Vec<ObservedCloudflareZone>> {
         let mut zones = Vec::new();
         let mut expected_total_pages = None;
-        for page in 1..=MAX_PROVIDER_PAGES {
+        for page in 1..=MAX_ZONE_PROVIDER_PAGES {
             let result = self
                 .api
                 .list_zones(&self.cloudflare_account_id, page, 50)
                 .await?;
             validate_provider_page(page, 50, &result)?;
+            if result.total_pages > MAX_ZONE_PROVIDER_PAGES {
+                return Err(validation("cloudflare_zone_pagination_limit"));
+            }
             validate_stable_total_pages(&mut expected_total_pages, result.total_pages)?;
             for zone in result.items {
                 zones.push(self.map_zone_inventory(zone)?);
@@ -409,12 +449,15 @@ impl CloudflareDnsAdapter {
         }
         let mut records = Vec::new();
         let mut expected_total_pages = None;
-        for page in 1..=MAX_PROVIDER_PAGES {
+        for page in 1..=MAX_RECORD_PROVIDER_PAGES {
             let result = self
                 .api
                 .list_records(zone.zone_id.as_str(), page, PROVIDER_PAGE_SIZE)
                 .await?;
             validate_provider_page(page, PROVIDER_PAGE_SIZE, &result)?;
+            if result.total_pages > MAX_RECORD_PROVIDER_PAGES {
+                return Err(validation("cloudflare_record_pagination_limit"));
+            }
             validate_stable_total_pages(&mut expected_total_pages, result.total_pages)?;
             records.extend(result.items);
             if records.len() > MAX_INVENTORY_RECORDS {
@@ -618,22 +661,25 @@ impl DnsProvider for CloudflareDnsAdapter {
         if provider_account_id != &self.center_account_id {
             return Err(validation("cloudflare_account_scope_mismatch"));
         }
+        let scope = CursorScope::Zones {
+            center_scope: cursor_scope_tag(
+                &self.cursor_key,
+                b"center-account",
+                self.center_account_id.as_str(),
+            ),
+            external_scope: cursor_scope_tag(
+                &self.cursor_key,
+                b"native-account",
+                &self.cloudflare_account_id,
+            ),
+        };
+        let offset = decode_cursor_offset(page, &scope, &self.cursor_key)?;
         paginate(
             self.all_zones().await?,
             page,
-            CursorScope::Zones {
-                center_scope: cursor_scope_tag(
-                    &self.cursor_key,
-                    b"center-account",
-                    self.center_account_id.as_str(),
-                ),
-                external_scope: cursor_scope_tag(
-                    &self.cursor_key,
-                    b"native-account",
-                    &self.cloudflare_account_id,
-                ),
-            },
+            scope,
             &self.cursor_key,
+            offset,
         )
     }
 
@@ -657,23 +703,15 @@ impl DnsProvider for CloudflareDnsAdapter {
         page: &DnsPageRequest,
     ) -> DnsProviderResult<DnsPage<ObservedDnsRecordSet>> {
         page.validate().map_err(|_| validation("invalid_page"))?;
+        self.validate_zone_ref(zone)?;
+        let scope = self.record_cursor_scope(&zone.zone_id);
+        let offset = decode_cursor_offset(page, &scope, &self.cursor_key)?;
         paginate(
             self.all_records(zone).await?,
             page,
-            CursorScope::Records {
-                center_scope: cursor_scope_tag(
-                    &self.cursor_key,
-                    b"center-account",
-                    self.center_account_id.as_str(),
-                ),
-                external_scope: cursor_scope_tag(
-                    &self.cursor_key,
-                    b"native-account",
-                    &self.cloudflare_account_id,
-                ),
-                zone_scope: cursor_scope_tag(&self.cursor_key, b"zone", zone.zone_id.as_str()),
-            },
+            scope,
             &self.cursor_key,
+            offset,
         )
     }
 
@@ -720,22 +758,25 @@ impl CloudflareZoneInventory for CloudflareDnsAdapter {
         if provider_account_id != &self.center_account_id {
             return Err(validation("cloudflare_account_scope_mismatch"));
         }
+        let scope = CursorScope::Zones {
+            center_scope: cursor_scope_tag(
+                &self.cursor_key,
+                b"center-account",
+                self.center_account_id.as_str(),
+            ),
+            external_scope: cursor_scope_tag(
+                &self.cursor_key,
+                b"native-account",
+                &self.cloudflare_account_id,
+            ),
+        };
+        let offset = decode_cursor_offset(page, &scope, &self.cursor_key)?;
         paginate(
             self.all_zone_inventory().await?,
             page,
-            CursorScope::Zones {
-                center_scope: cursor_scope_tag(
-                    &self.cursor_key,
-                    b"center-account",
-                    self.center_account_id.as_str(),
-                ),
-                external_scope: cursor_scope_tag(
-                    &self.cursor_key,
-                    b"native-account",
-                    &self.cloudflare_account_id,
-                ),
-            },
+            scope,
             &self.cursor_key,
+            offset,
         )
     }
 
@@ -1387,7 +1428,7 @@ fn committed_receipt(id: DnsChangeId) -> DnsChangeReceipt {
 fn sign_token<T: Serialize>(value: &T, key: &CloudflareCursorKey) -> DnsProviderResult<String> {
     let encoded =
         serde_json::to_vec(value).map_err(|_| validation("cloudflare_token_encoding_failed"))?;
-    let signature = HmacSha256::new_from_slice(&key.0)
+    let signature = HmacSha256::new_from_slice(key.0.as_ref())
         .expect("fixed HMAC key")
         .chain_update(&encoded)
         .finalize()
@@ -1408,7 +1449,7 @@ fn verify_token<T: for<'de> Deserialize<'de>>(
         return Err(validation("invalid_cloudflare_token"));
     }
     let (encoded, signature) = authenticated.split_at(authenticated.len() - 32);
-    HmacSha256::new_from_slice(&key.0)
+    HmacSha256::new_from_slice(key.0.as_ref())
         .expect("fixed HMAC key")
         .chain_update(encoded)
         .verify_slice(signature)
@@ -1584,7 +1625,7 @@ enum CursorScope {
 }
 
 fn cursor_scope_tag(key: &CloudflareCursorKey, domain: &[u8], value: &str) -> String {
-    let tag = HmacSha256::new_from_slice(&key.0)
+    let tag = HmacSha256::new_from_slice(key.0.as_ref())
         .expect("fixed HMAC key")
         .chain_update(b"edgion-cloudflare-cursor-scope-v2\0")
         .chain_update(domain)
@@ -1602,12 +1643,11 @@ struct Cursor {
     offset: usize,
 }
 
-fn paginate<T>(
-    items: Vec<T>,
+fn decode_cursor_offset(
     request: &DnsPageRequest,
-    scope: CursorScope,
+    scope: &CursorScope,
     key: &CloudflareCursorKey,
-) -> DnsProviderResult<DnsPage<T>> {
+) -> DnsProviderResult<usize> {
     let offset = match request.token.as_ref() {
         None => 0,
         Some(token) => {
@@ -1618,19 +1658,29 @@ fn paginate<T>(
                 return Err(validation("invalid_cloudflare_cursor"));
             }
             let (bytes, signature) = authenticated.split_at(authenticated.len() - 32);
-            HmacSha256::new_from_slice(&key.0)
+            HmacSha256::new_from_slice(key.0.as_ref())
                 .expect("fixed HMAC key")
                 .chain_update(bytes)
                 .verify_slice(signature)
                 .map_err(|_| validation("invalid_cloudflare_cursor_signature"))?;
             let cursor: Cursor = serde_json::from_slice(bytes)
                 .map_err(|_| validation("invalid_cloudflare_cursor"))?;
-            if cursor.version != 2 || cursor.scope != scope {
+            if cursor.version != 2 || &cursor.scope != scope {
                 return Err(validation("cloudflare_cursor_scope_mismatch"));
             }
             cursor.offset
         }
     };
+    Ok(offset)
+}
+
+fn paginate<T>(
+    items: Vec<T>,
+    request: &DnsPageRequest,
+    scope: CursorScope,
+    key: &CloudflareCursorKey,
+    offset: usize,
+) -> DnsProviderResult<DnsPage<T>> {
     if offset > items.len() {
         return Err(validation("invalid_cloudflare_cursor_offset"));
     }
@@ -1642,7 +1692,7 @@ fn paginate<T>(
             offset: end,
         })
         .map_err(|_| validation("cloudflare_cursor_encoding_failed"))?;
-        let signature = HmacSha256::new_from_slice(&key.0)
+        let signature = HmacSha256::new_from_slice(key.0.as_ref())
             .expect("fixed HMAC key")
             .chain_update(&encoded)
             .finalize()
@@ -1746,6 +1796,8 @@ mod tests {
         zones: Mutex<Vec<CloudflareZone>>,
         get_zone_override: Mutex<Option<CloudflareZone>>,
         get_zone_calls: Mutex<u64>,
+        list_zone_calls: Mutex<u64>,
+        zone_total_pages: u32,
         records: Mutex<BTreeMap<String, Vec<CloudflareRecord>>>,
         dnssec: Mutex<BTreeMap<String, CloudflareDnssec>>,
         sequence: Mutex<u64>,
@@ -1834,6 +1886,7 @@ mod tests {
             page: u32,
             _per_page: u32,
         ) -> CloudflareApiResult<CloudflarePage<CloudflareZone>> {
+            *self.list_zone_calls.lock().unwrap() += 1;
             Ok(CloudflarePage {
                 items: self
                     .zones
@@ -1844,7 +1897,7 @@ mod tests {
                     .cloned()
                     .collect(),
                 page,
-                total_pages: 1,
+                total_pages: self.zone_total_pages,
             })
         }
 
@@ -2061,10 +2114,11 @@ mod tests {
     #[tokio::test]
     async fn modified_cursor_fails_authentication() {
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
         let adapter = CloudflareDnsAdapter::new(
             center_account.clone(),
             &account(),
-            Arc::new(fake_api()),
+            api.clone(),
             CloudflareCursorKey::new([9; 32]).unwrap(),
         )
         .unwrap();
@@ -2091,6 +2145,34 @@ mod tests {
             )
             .await
             .is_err());
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn excessive_zone_page_count_fails_after_one_provider_call() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let mut fake = fake_api();
+        fake.zone_total_pages = MAX_ZONE_PROVIDER_PAGES + 1;
+        let api = Arc::new(fake);
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            CloudflareCursorKey::new([9; 32]).unwrap(),
+        )
+        .unwrap();
+        let error = adapter
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "cloudflare_zone_pagination_limit");
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), 1);
     }
 
     #[tokio::test]
@@ -2809,6 +2891,8 @@ mod tests {
             zones: Mutex::new(zones),
             get_zone_override: Mutex::new(None),
             get_zone_calls: Mutex::new(0),
+            list_zone_calls: Mutex::new(0),
+            zone_total_pages: 1,
             records: Mutex::new(records),
             dnssec: Mutex::new(BTreeMap::new()),
             sequence: Mutex::new(1000),

@@ -103,12 +103,13 @@ impl EdgionCenterCli {
             })?
         };
         validate_startup_policy(&config)?;
-        let _mounted_credential_resolver =
+        let mounted_credential_resolver =
             edgion_center_adapter_credential_files::MountedCredentialResolver::from_config(
                 &config.mounted_credentials,
             )
             .await
-            .map_err(|error| anyhow::anyhow!("Invalid mounted credential config: {error}"))?;
+            .map_err(|error| anyhow::anyhow!("Invalid mounted credential config: {error}"))?
+            .map(Arc::new);
 
         let registry = ControllerRegistry::with_metrics(Arc::new(
             crate::fed_sync::registry::FedRegistryMetrics,
@@ -146,6 +147,24 @@ impl EdgionCenterCli {
         } else {
             None
         };
+        let provider_account_store = db
+            .clone()
+            .map(|store| store as Arc<dyn edgion_center_core::ProviderAccountStore>);
+        let credential_inspection_service =
+            edgion_center_integration_cloudflare::compose_credential_inspection(
+                &config.cloudflare_credential_inspection,
+                provider_account_store.clone(),
+                mounted_credential_resolver.clone(),
+            )
+            .map_err(|error| {
+                anyhow::anyhow!("Invalid Cloudflare credential inspection config: {error}")
+            })?;
+        let cloudflare_dns_admin = edgion_center_integration_cloudflare::compose_dns_admin(
+            &config.cloudflare_dns_read,
+            provider_account_store.clone(),
+            mounted_credential_resolver,
+        )
+        .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS read config: {error}"))?;
 
         // Audit sink: spawn the background writer only when a Store exists and
         // audit is enabled. When the DB is disabled but audit is on, log a WARN
@@ -275,16 +294,12 @@ impl EdgionCenterCli {
             audit_reader: audit_log
                 .clone()
                 .map(|log| log as Arc<dyn edgion_center_core::AuditReader>),
-            cloudflare_dns_admin: None,
-            provider_account_store: db
-                .clone()
-                .map(|store| store as Arc<dyn edgion_center_core::ProviderAccountStore>),
+            cloudflare_dns_admin: cloudflare_dns_admin.clone(),
+            provider_account_store,
             capability_snapshot_store: db
                 .clone()
                 .map(|store| store as Arc<dyn edgion_center_core::CapabilitySnapshotStore>),
-            // Credential inspectors are not composed until an operator opts
-            // into a provider-specific credential integration.
-            credential_inspection_service: None,
+            credential_inspection_service: credential_inspection_service.clone(),
             metadata_store: metadata_store.clone(),
             sync_client,
             registry: registry.clone(),
@@ -298,13 +313,13 @@ impl EdgionCenterCli {
                 db.is_some(),
                 audit_log.is_some(),
                 controller_directory.is_some(),
-                false,
+                cloudflare_dns_admin.is_some(),
                 false,
                 resolved_password_login_capability(&config, db.is_some()),
                 false,
                 db.is_some(),
                 db.is_some(),
-                false,
+                credential_inspection_service.is_some(),
             ),
         };
         let http_addr: std::net::SocketAddr = config.server.http_addr.parse()?;

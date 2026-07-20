@@ -3,6 +3,9 @@ use edgion_center_app::common::{
     auth::AdminAuthConfig,
     config::{ConfSyncSecurityConfig, ConfSyncTlsConfig},
 };
+use edgion_center_integration_cloudflare::{
+    CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig,
+};
 use edgion_center_runtime::federation::config::CenterSyncConfig;
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +106,10 @@ pub struct KubernetesCenterConfig {
     pub internal_forwarding: InternalForwardingConfig,
     /// Deployment-owned mounted credentials. Disabled unless explicitly enabled.
     pub mounted_credentials: MountedCredentialConfig,
+    /// Cloudflare token verification and account-scoped DNS Read probe.
+    pub cloudflare_credential_inspection: CloudflareCredentialInspectionConfig,
+    /// Account-bound, read-only Cloudflare DNS inventory. Disabled by default.
+    pub cloudflare_dns_read: CloudflareDnsReadConfig,
 }
 
 impl Default for KubernetesCenterConfig {
@@ -118,6 +125,8 @@ impl Default for KubernetesCenterConfig {
             audit_log_reads: false,
             internal_forwarding: InternalForwardingConfig::default(),
             mounted_credentials: MountedCredentialConfig::default(),
+            cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
+            cloudflare_dns_read: CloudflareDnsReadConfig::default(),
         }
     }
 }
@@ -234,6 +243,14 @@ mod tests {
             "mounted_credentials:\n  enabledd: true\n"
         )
         .is_err());
+        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
+            "cloudflare_credential_inspection:\n  base_url: https://example.invalid\n"
+        )
+        .is_err());
+        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
+            "cloudflare_dns_read:\n  enabledd: true\n"
+        )
+        .is_err());
     }
 
     #[test]
@@ -249,6 +266,32 @@ mod tests {
         .unwrap();
         assert!(config.mounted_credentials.enabled);
         assert_eq!(config.mounted_credentials.bindings.len(), 1);
+    }
+
+    #[test]
+    fn cloudflare_credential_inspection_is_default_off_and_strict() {
+        assert!(
+            !KubernetesCenterConfig::default()
+                .cloudflare_credential_inspection
+                .enabled
+        );
+        let config: KubernetesCenterConfig =
+            serde_yaml::from_str("cloudflare_credential_inspection:\n  enabled: true\n").unwrap();
+        assert!(config.cloudflare_credential_inspection.enabled);
+    }
+
+    #[test]
+    fn cloudflare_dns_read_is_default_off_and_strict() {
+        assert!(
+            !KubernetesCenterConfig::default()
+                .cloudflare_dns_read
+                .enabled
+        );
+        let config: KubernetesCenterConfig = serde_yaml::from_str(
+            "cloudflare_dns_read:\n  enabled: true\n  cursor_key_ref: cloudflare/dns-cursor\n  operation_timeout_secs: 30\n  global_concurrency: 16\n  per_account_concurrency: 2\n",
+        )
+        .unwrap();
+        assert!(config.cloudflare_dns_read.enabled);
     }
 
     #[test]
