@@ -35,6 +35,9 @@ pub const ROLES_MANAGE: &str = "roles:manage";
 /// High-trust inventory access across every configured Cloudflare account.
 /// This permission is not scoped to one ProviderAccount.
 pub const CLOUDFLARE_DNS_READ: &str = "cloudflare-dns:read";
+/// High-trust mutation access across every configured Cloudflare account.
+/// This permission is not scoped to one ProviderAccount.
+pub const CLOUDFLARE_DNS_WRITE: &str = "cloudflare-dns:write";
 pub const PROVIDER_ACCOUNTS_READ: &str = "provider-accounts:read";
 pub const PROVIDER_ACCOUNTS_WRITE: &str = "provider-accounts:write";
 pub const PROVIDER_CREDENTIALS_USE: &str = "provider-credentials:use";
@@ -56,6 +59,7 @@ pub fn all_keys() -> &'static [&'static str] {
         USERS_MANAGE,
         ROLES_MANAGE,
         CLOUDFLARE_DNS_READ,
+        CLOUDFLARE_DNS_WRITE,
         PROVIDER_ACCOUNTS_READ,
         PROVIDER_ACCOUNTS_WRITE,
         PROVIDER_CREDENTIALS_USE,
@@ -115,7 +119,7 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         },
         PermissionGroup {
             group: "Cloudflare DNS",
-            keys: vec![CLOUDFLARE_DNS_READ],
+            keys: vec![CLOUDFLARE_DNS_READ, CLOUDFLARE_DNS_WRITE],
         },
         PermissionGroup {
             group: "Provider Accounts",
@@ -169,7 +173,13 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     }
 
     if under_segment(path, "/api/v1/center/cloudflare/dns") {
-        return is_read.then_some(CLOUDFLARE_DNS_READ);
+        return match *method {
+            Method::GET | Method::HEAD => Some(CLOUDFLARE_DNS_READ),
+            Method::POST | Method::PUT | Method::PATCH | Method::DELETE => {
+                Some(CLOUDFLARE_DNS_WRITE)
+            }
+            _ => None,
+        };
     }
 
     if let Some(suffix) = path.strip_prefix("/api/v1/center/cloud/provider-capabilities/accounts/")
@@ -367,7 +377,15 @@ mod tests {
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones",
             ),
             (
+                Method::POST,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones",
+            ),
+            (
                 Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1",
+            ),
+            (
+                Method::DELETE,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1",
             ),
             (
@@ -376,6 +394,14 @@ mod tests {
             ),
             (
                 Method::GET,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A",
+            ),
+            (
+                Method::PUT,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A",
+            ),
+            (
+                Method::DELETE,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A",
             ),
             (Method::GET, "/api/v1/center/cloud/provider-accounts"),
@@ -582,7 +608,14 @@ mod tests {
                 &Method::POST,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones"
             ),
-            None
+            Some(CLOUDFLARE_DNS_WRITE)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::DELETE,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1"
+            ),
+            Some(CLOUDFLARE_DNS_WRITE)
         );
         assert_eq!(
             route_permission(
@@ -596,8 +629,17 @@ mod tests {
                 &Method::DELETE,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A"
             ),
-            None
+            Some(CLOUDFLARE_DNS_WRITE)
         );
+        for method in [Method::PUT, Method::PATCH] {
+            assert_eq!(
+                route_permission(
+                    &method,
+                    "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1"
+                ),
+                Some(CLOUDFLARE_DNS_WRITE)
+            );
+        }
     }
 
     /// `is_business_path` covers /api/v1/ except the public auth routes.

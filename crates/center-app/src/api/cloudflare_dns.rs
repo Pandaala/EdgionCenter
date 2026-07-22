@@ -1,4 +1,4 @@
-//! Cloudflare-specific, read-only DNS zone Admin API.
+//! Cloudflare-specific DNS zone inventory and bounded synchronous write Admin API.
 //!
 //! The HTTP layer depends only on this sanitized service port. Cloudflare HTTP clients, SDK
 //! response types, credentials, and raw provider failures must remain behind the composition
@@ -12,7 +12,7 @@ use std::{
 
 use async_trait::async_trait;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{rejection::JsonRejection, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -209,8 +209,13 @@ impl CloudflareRecordType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", content = "seconds", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    content = "seconds",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum CloudflareRecordTtlDto {
     Automatic,
     Seconds(u32),
@@ -226,8 +231,8 @@ impl CloudflareRecordTtlDto {
 }
 
 /// Lossless DNS character-string projection. TXT and CAA data are octets, not necessarily UTF-8.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudflareOctetsDto {
     pub base64: String,
 }
@@ -246,11 +251,12 @@ impl CloudflareOctetsDto {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "UPPERCASE",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 pub enum CloudflareRecordValueDto {
     A {
@@ -361,6 +367,16 @@ impl CloudflareRecordValueDto {
 pub struct CloudflareRecordSetKey {
     pub owner: DnsOwnerName,
     pub record_type: CloudflareRecordType,
+}
+
+impl CloudflareRecordSetKey {
+    pub fn core(&self) -> DnsRecordSetKey {
+        DnsRecordSetKey {
+            owner: self.owner.clone(),
+            record_type: self.record_type.core(),
+            routing: DnsRoutingIdentity::Simple,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -541,6 +557,32 @@ impl CloudflareRecordPageDto {
     }
 }
 
+/// Internal service envelope used to validate an RRset page against the exact authoritative zone
+/// observed in the same service operation. Only `page` is serialized by the HTTP handler.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudflareRecordPageResult {
+    pub zone: CloudflareZoneDto,
+    pub page: CloudflareRecordPageDto,
+}
+
+impl CloudflareRecordPageResult {
+    fn validate(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        requested_limit: u16,
+    ) -> CoreResult<()> {
+        self.zone.validate()?;
+        if &self.zone.provider_account_id != account_id || &self.zone.zone_id != zone_id {
+            return Err(CoreError::Conflict(
+                "Cloudflare authoritative zone scope is inconsistent".to_string(),
+            ));
+        }
+        self.page
+            .validate(account_id, zone_id, &self.zone, requested_limit)
+    }
+}
+
 #[async_trait]
 pub trait CloudflareDnsAdminService: Send + Sync {
     async fn list_zones(
@@ -560,7 +602,7 @@ pub trait CloudflareDnsAdminService: Send + Sync {
         account_id: &CloudResourceId,
         zone_id: &DnsZoneId,
         page: &CloudflareRecordPageRequest,
-    ) -> Result<CloudflareRecordPageDto, CloudflareDnsAdminError>;
+    ) -> Result<CloudflareRecordPageResult, CloudflareDnsAdminError>;
 
     async fn get_record_set(
         &self,
@@ -570,16 +612,236 @@ pub trait CloudflareDnsAdminService: Send + Sync {
     ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudflareZoneCreateRequest {
+    pub name: AbsoluteDnsName,
+}
+
+/// Exact provider observation and human-readable apex confirmation required before deleting a
+/// Cloudflare Zone. Account and Zone identities remain path-owned and are deliberately absent.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudflareZoneDeleteRequest {
+    pub expected_revision: DnsRecordRevision,
+    pub confirm_name: AbsoluteDnsName,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CloudflareRecordMutationGuardDto {
+    MustNotExist,
+    MatchRevision { revision: DnsRecordRevision },
+}
+
+impl CloudflareRecordMutationGuardDto {
+    pub fn expected_revision(&self) -> Option<&DnsRecordRevision> {
+        match self {
+            Self::MustNotExist => None,
+            Self::MatchRevision { revision } => Some(revision),
+        }
+    }
+}
+
+/// Desired Cloudflare RRset state. Account, zone, owner, type, provider object IDs, and the
+/// resulting revision are path- or provider-owned identity and are deliberately absent.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudflareRecordSetPutRequest {
+    pub guard: CloudflareRecordMutationGuardDto,
+    pub ttl: CloudflareRecordTtlDto,
+    pub values: Vec<CloudflareRecordValueDto>,
+    pub proxy: Option<CloudflareProxyOptions>,
+    #[serde(default)]
+    pub cname_flattening: CloudflareCnameFlattening,
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+impl CloudflareRecordSetPutRequest {
+    pub fn record_set(&self, key: &CloudflareRecordSetKey) -> CoreResult<ProviderDnsRecordSet> {
+        if key.record_type == CloudflareRecordType::Soa {
+            return Err(CoreError::Conflict(
+                "SOA changes require the zone lifecycle contract".to_string(),
+            ));
+        }
+        if self.values.is_empty() || self.values.len() > 100 {
+            return Err(CoreError::Conflict(
+                "Cloudflare RRset value count is invalid".to_string(),
+            ));
+        }
+        let values = self
+            .values
+            .iter()
+            .map(CloudflareRecordValueDto::core)
+            .collect::<CoreResult<BTreeSet<_>>>()?;
+        if values.len() != self.values.len()
+            || values
+                .iter()
+                .any(|value| value.record_type() != key.record_type.core())
+        {
+            return Err(CoreError::Conflict(
+                "Cloudflare RRset values do not match the path identity".to_string(),
+            ));
+        }
+        if matches!(key.record_type, CloudflareRecordType::Cname) && values.len() != 1 {
+            return Err(CoreError::Conflict(
+                "Cloudflare CNAME RRsets require exactly one value".to_string(),
+            ));
+        }
+        if let CloudflareRecordTtlDto::Seconds(seconds) = self.ttl {
+            if !(30..=86_400).contains(&seconds) {
+                return Err(CoreError::Conflict(
+                    "Cloudflare RRset TTL is outside the provider range".to_string(),
+                ));
+            }
+        }
+        let proxy_capable = matches!(
+            key.record_type,
+            CloudflareRecordType::A | CloudflareRecordType::Aaaa | CloudflareRecordType::Cname
+        );
+        if proxy_capable != self.proxy.is_some() {
+            return Err(CoreError::Conflict(
+                "Cloudflare proxy state does not match the record type".to_string(),
+            ));
+        }
+        if self.proxy == Some(CloudflareProxyOptions::Proxied)
+            && self.ttl != CloudflareRecordTtlDto::Automatic
+        {
+            return Err(CoreError::Conflict(
+                "proxied Cloudflare records require automatic TTL".to_string(),
+            ));
+        }
+        if key.record_type != CloudflareRecordType::Cname
+            && self.cname_flattening != CloudflareCnameFlattening::ProviderDefault
+        {
+            return Err(CoreError::Conflict(
+                "Cloudflare CNAME flattening applies only to CNAME records".to_string(),
+            ));
+        }
+        if self.proxy == Some(CloudflareProxyOptions::Proxied)
+            && self.cname_flattening != CloudflareCnameFlattening::ProviderDefault
+        {
+            return Err(CoreError::Conflict(
+                "proxied Cloudflare CNAME records cannot override flattening".to_string(),
+            ));
+        }
+        if self
+            .comment
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 500 || value.chars().any(char::is_control))
+        {
+            return Err(CoreError::Conflict(
+                "Cloudflare DNS record comment is invalid".to_string(),
+            ));
+        }
+        let tags = self.tags.iter().cloned().collect::<BTreeSet<_>>();
+        if tags.len() != self.tags.len() || tags.len() > 20 {
+            return Err(CoreError::Conflict(
+                "Cloudflare DNS record tags are invalid".to_string(),
+            ));
+        }
+        let mut tag_names = BTreeSet::new();
+        for tag in &tags {
+            if tag.is_empty() || tag.chars().count() > 133 || tag.chars().any(char::is_control) {
+                return Err(CoreError::Conflict(
+                    "Cloudflare DNS record tags are invalid".to_string(),
+                ));
+            }
+            let Some((name, value)) = tag.split_once(':') else {
+                return Err(CoreError::Conflict(
+                    "Cloudflare DNS record tags are invalid".to_string(),
+                ));
+            };
+            if name.is_empty()
+                || name.chars().count() > 32
+                || value.chars().count() > 100
+                || !name.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                })
+                || !tag_names.insert(name.to_ascii_lowercase())
+            {
+                return Err(CoreError::Conflict(
+                    "Cloudflare DNS record tags are invalid".to_string(),
+                ));
+            }
+        }
+        let has_metadata = self.comment.is_some() || !tags.is_empty();
+        let extension = if proxy_capable
+            || has_metadata
+            || self.cname_flattening != CloudflareCnameFlattening::ProviderDefault
+        {
+            Some(DnsRecordExtension::Cloudflare {
+                proxy: self.proxy,
+                cname_flattening: self.cname_flattening,
+                comment: self.comment.clone(),
+                tags,
+            })
+        } else {
+            None
+        };
+        Ok(ProviderDnsRecordSet {
+            key: key.core(),
+            ttl: self.ttl.core(),
+            values,
+            extension,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudflareRecordSetDeleteRequest {
+    pub expected_revision: DnsRecordRevision,
+}
+
+#[async_trait]
+pub trait CloudflareDnsWriteAdminService: Send + Sync {
+    async fn create_zone(
+        &self,
+        account_id: &CloudResourceId,
+        request: &CloudflareZoneCreateRequest,
+    ) -> Result<CloudflareZoneDto, CloudflareDnsAdminError>;
+
+    async fn delete_zone(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        request: &CloudflareZoneDeleteRequest,
+    ) -> Result<(), CloudflareDnsAdminError>;
+
+    async fn put_record_set(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        key: &CloudflareRecordSetKey,
+        request: &CloudflareRecordSetPutRequest,
+    ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError>;
+
+    async fn delete_record_set(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        key: &CloudflareRecordSetKey,
+        request: &CloudflareRecordSetDeleteRequest,
+    ) -> Result<(), CloudflareDnsAdminError>;
+}
+
 /// Sanitized service failures. Provider payloads and diagnostic text are deliberately absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloudflareDnsAdminError {
     InvalidRequest,
     NotFound,
+    Conflict,
+    UnknownOutcome,
     Unavailable,
+    RestartRequired,
     InvalidProviderObservation,
 }
 
 pub type SharedCloudflareDnsAdminService = Arc<dyn CloudflareDnsAdminService>;
+pub type SharedCloudflareDnsWriteAdminService = Arc<dyn CloudflareDnsWriteAdminService>;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct CloudflareZoneListQuery {
@@ -615,6 +877,7 @@ fn parse_record_page(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CloudflareRecordDetailQuery {
     owner: Option<String>,
 }
@@ -626,16 +889,50 @@ fn parse_zone_id(value: String) -> Result<DnsZoneId, &'static str> {
     }
 }
 
+fn parse_record_identity(
+    account_id: String,
+    zone_id: String,
+    record_type: String,
+    owner: Option<String>,
+) -> Result<(CloudResourceId, DnsZoneId, CloudflareRecordSetKey), &'static str> {
+    let account_id = CloudResourceId::new(account_id).map_err(|_| "invalid_account_id")?;
+    let zone_id = parse_zone_id(zone_id)?;
+    let record_type = CloudflareRecordType::parse(&record_type).ok_or("invalid_record_type")?;
+    let owner = owner
+        .and_then(|owner| DnsOwnerName::new(owner).ok())
+        .ok_or("invalid_record_owner")?;
+    Ok((
+        account_id,
+        zone_id,
+        CloudflareRecordSetKey { owner, record_type },
+    ))
+}
+
 fn error_response(status: StatusCode, code: &'static str) -> Response {
     (status, Json(ApiResponse::<()>::err_body(code.to_string()))).into_response()
+}
+
+fn json_rejection_response(rejection: JsonRejection) -> Response {
+    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        error_response(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large")
+    } else {
+        error_response(StatusCode::BAD_REQUEST, "invalid_request")
+    }
 }
 
 fn map_service_error(error: CloudflareDnsAdminError) -> Response {
     let (status, code) = match error {
         CloudflareDnsAdminError::InvalidRequest => (StatusCode::BAD_REQUEST, "invalid_request"),
         CloudflareDnsAdminError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+        CloudflareDnsAdminError::Conflict => (StatusCode::CONFLICT, "conflict"),
+        CloudflareDnsAdminError::UnknownOutcome => {
+            (StatusCode::SERVICE_UNAVAILABLE, "unknown_outcome")
+        }
         CloudflareDnsAdminError::Unavailable => {
             (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable")
+        }
+        CloudflareDnsAdminError::RestartRequired => {
+            (StatusCode::CONFLICT, "pagination_restart_required")
         }
         CloudflareDnsAdminError::InvalidProviderObservation => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -643,6 +940,157 @@ fn map_service_error(error: CloudflareDnsAdminError) -> Response {
         ),
     };
     error_response(status, code)
+}
+
+pub async fn create_zone(
+    State(state): State<ApiState>,
+    Path(account_id): Path<String>,
+    body: Result<Json<CloudflareZoneCreateRequest>, JsonRejection>,
+) -> Response {
+    let account_id = match CloudResourceId::new(account_id) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_account_id"),
+    };
+    let Json(request) = match body {
+        Ok(value) => value,
+        Err(rejection) => return json_rejection_response(rejection),
+    };
+    let service = match state.cloudflare_dns_write_admin.as_deref() {
+        Some(value) => value,
+        None => return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
+    };
+    match service.create_zone(&account_id, &request).await {
+        Ok(result) => {
+            if result.validate().is_err()
+                || result.provider_account_id != account_id
+                || result.name != request.name
+                || result.kind != CloudflareZoneKind::Full
+                || result.visibility != ZoneVisibility::Public
+            {
+                return map_service_error(CloudflareDnsAdminError::UnknownOutcome);
+            }
+            (StatusCode::CREATED, Json(ApiResponse::ok_body(result))).into_response()
+        }
+        Err(error) => map_service_error(error),
+    }
+}
+
+pub async fn delete_zone(
+    State(state): State<ApiState>,
+    Path((account_id, zone_id)): Path<(String, String)>,
+    body: Result<Json<CloudflareZoneDeleteRequest>, JsonRejection>,
+) -> Response {
+    let account_id = match CloudResourceId::new(account_id) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_account_id"),
+    };
+    let zone_id = match parse_zone_id(zone_id) {
+        Ok(value) => value,
+        Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
+    };
+    let Json(request) = match body {
+        Ok(value) if value.expected_revision.validate().is_ok() => value,
+        Ok(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_request"),
+        Err(rejection) => return json_rejection_response(rejection),
+    };
+    let service = match state.cloudflare_dns_write_admin.as_deref() {
+        Some(value) => value,
+        None => return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
+    };
+    match service.delete_zone(&account_id, &zone_id, &request).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_service_error(error),
+    }
+}
+
+pub async fn put_record_set(
+    State(state): State<ApiState>,
+    Path((account_id, zone_id, record_type)): Path<(String, String, String)>,
+    Query(query): Query<CloudflareRecordDetailQuery>,
+    body: Result<Json<CloudflareRecordSetPutRequest>, JsonRejection>,
+) -> Response {
+    let (account_id, zone_id, key) =
+        match parse_record_identity(account_id, zone_id, record_type, query.owner) {
+            Ok(value) => value,
+            Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
+        };
+    let Json(request) = match body {
+        Ok(value) => value,
+        Err(rejection) => return json_rejection_response(rejection),
+    };
+    let desired = match request.record_set(&key) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_request"),
+    };
+    if request
+        .guard
+        .expected_revision()
+        .is_some_and(|revision| revision.validate().is_err())
+    {
+        return error_response(StatusCode::BAD_REQUEST, "invalid_request");
+    }
+    let service = match state.cloudflare_dns_write_admin.as_deref() {
+        Some(value) => value,
+        None => return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
+    };
+    match service
+        .put_record_set(&account_id, &zone_id, &key, &request)
+        .await
+    {
+        Ok(result) => {
+            let result_values = result
+                .values
+                .iter()
+                .map(CloudflareRecordValueDto::core)
+                .collect::<CoreResult<BTreeSet<_>>>();
+            if result.validate().is_err()
+                || !result.matches_scope(&account_id, &zone_id, Some(&key))
+                || result.ttl.core() != desired.ttl
+                || result_values.as_ref().ok() != Some(&desired.values)
+                || result.proxy != request.proxy
+                || result.cname_flattening != request.cname_flattening
+                || result.comment != request.comment
+                || result.tags.iter().cloned().collect::<BTreeSet<_>>()
+                    != request.tags.iter().cloned().collect::<BTreeSet<_>>()
+            {
+                return map_service_error(CloudflareDnsAdminError::UnknownOutcome);
+            }
+            Json(ApiResponse::ok_body(result)).into_response()
+        }
+        Err(error) => map_service_error(error),
+    }
+}
+
+pub async fn delete_record_set(
+    State(state): State<ApiState>,
+    Path((account_id, zone_id, record_type)): Path<(String, String, String)>,
+    Query(query): Query<CloudflareRecordDetailQuery>,
+    body: Result<Json<CloudflareRecordSetDeleteRequest>, JsonRejection>,
+) -> Response {
+    let (account_id, zone_id, key) =
+        match parse_record_identity(account_id, zone_id, record_type, query.owner) {
+            Ok(value) => value,
+            Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
+        };
+    if key.record_type == CloudflareRecordType::Soa {
+        return error_response(StatusCode::BAD_REQUEST, "invalid_request");
+    }
+    let Json(request) = match body {
+        Ok(value) if value.expected_revision.validate().is_ok() => value,
+        Ok(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_request"),
+        Err(rejection) => return json_rejection_response(rejection),
+    };
+    let service = match state.cloudflare_dns_write_admin.as_deref() {
+        Some(value) => value,
+        None => return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
+    };
+    match service
+        .delete_record_set(&account_id, &zone_id, &key, &request)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => map_service_error(error),
+    }
 }
 
 enum AuthoritativeZoneError {
@@ -756,19 +1204,12 @@ pub async fn list_record_sets(
         Some(value) => value,
         None => return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
     };
-    let zone = match load_authoritative_zone(service, &account_id, &zone_id).await {
-        Ok(value) => value,
-        Err(error) => return map_authoritative_zone_error(error),
-    };
     match service.list_record_sets(&account_id, &zone_id, &page).await {
         Ok(result) => {
-            if result
-                .validate(&account_id, &zone_id, &zone, page.limit)
-                .is_err()
-            {
+            if result.validate(&account_id, &zone_id, page.limit).is_err() {
                 return error_response(StatusCode::SERVICE_UNAVAILABLE, "invalid_service_response");
             }
-            Json(ApiResponse::ok_body(result)).into_response()
+            Json(ApiResponse::ok_body(result.page)).into_response()
         }
         Err(error) => map_service_error(error),
     }
@@ -779,23 +1220,11 @@ pub async fn get_record_set(
     Path((account_id, zone_id, record_type)): Path<(String, String, String)>,
     Query(query): Query<CloudflareRecordDetailQuery>,
 ) -> Response {
-    let account_id = match CloudResourceId::new(account_id) {
-        Ok(value) => value,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_account_id"),
-    };
-    let zone_id = match parse_zone_id(zone_id) {
-        Ok(value) => value,
-        Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
-    };
-    let record_type = match CloudflareRecordType::parse(&record_type) {
-        Some(value) => value,
-        None => return error_response(StatusCode::BAD_REQUEST, "invalid_record_type"),
-    };
-    let owner = match query.owner.and_then(|owner| DnsOwnerName::new(owner).ok()) {
-        Some(value) => value,
-        None => return error_response(StatusCode::BAD_REQUEST, "invalid_record_owner"),
-    };
-    let key = CloudflareRecordSetKey { owner, record_type };
+    let (account_id, zone_id, key) =
+        match parse_record_identity(account_id, zone_id, record_type, query.owner) {
+            Ok(value) => value,
+            Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
+        };
     let service = match state.cloudflare_dns_admin.as_deref() {
         Some(value) => value,
         None => return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
@@ -821,7 +1250,13 @@ pub async fn get_record_set(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Mutex};
+    use std::{
+        collections::HashMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        },
+    };
 
     use axum::{body::Body, http::Request};
     use edgion_center_core::{AuthzMode, CenterCapabilities, CenterMode};
@@ -847,6 +1282,117 @@ mod tests {
         record_response: Mutex<Option<CloudflareRecordSetDto>>,
         last_record_page: Mutex<Option<CloudflareRecordPageRequest>>,
         last_record_key: Mutex<Option<CloudflareRecordSetKey>>,
+        get_zone_calls: AtomicUsize,
+        list_record_calls: AtomicUsize,
+    }
+
+    struct FakeWriteService {
+        error: Mutex<Option<CloudflareDnsAdminError>>,
+        response: Mutex<Option<CloudflareZoneDto>>,
+        record_response: Mutex<Option<CloudflareRecordSetDto>>,
+        last_account_id: Mutex<Option<CloudResourceId>>,
+        last_request: Mutex<Option<CloudflareZoneCreateRequest>>,
+        last_zone_id: Mutex<Option<DnsZoneId>>,
+        last_zone_delete_request: Mutex<Option<CloudflareZoneDeleteRequest>>,
+        last_record_key: Mutex<Option<CloudflareRecordSetKey>>,
+        last_put_request: Mutex<Option<CloudflareRecordSetPutRequest>>,
+        last_delete_request: Mutex<Option<CloudflareRecordSetDeleteRequest>>,
+        calls: AtomicUsize,
+        record_calls: AtomicUsize,
+    }
+
+    impl Default for FakeWriteService {
+        fn default() -> Self {
+            Self {
+                error: Mutex::new(None),
+                response: Mutex::new(None),
+                record_response: Mutex::new(None),
+                last_account_id: Mutex::new(None),
+                last_request: Mutex::new(None),
+                last_zone_id: Mutex::new(None),
+                last_zone_delete_request: Mutex::new(None),
+                last_record_key: Mutex::new(None),
+                last_put_request: Mutex::new(None),
+                last_delete_request: Mutex::new(None),
+                calls: AtomicUsize::new(0),
+                record_calls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl CloudflareDnsWriteAdminService for FakeWriteService {
+        async fn create_zone(
+            &self,
+            account_id: &CloudResourceId,
+            request: &CloudflareZoneCreateRequest,
+        ) -> Result<CloudflareZoneDto, CloudflareDnsAdminError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_account_id.lock().unwrap() = Some(account_id.clone());
+            *self.last_request.lock().unwrap() = Some(request.clone());
+            if let Some(error) = self.error.lock().unwrap().take() {
+                return Err(error);
+            }
+            Ok(self
+                .response
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| zone(account_id.as_str(), ZONE_ID)))
+        }
+
+        async fn put_record_set(
+            &self,
+            account_id: &CloudResourceId,
+            zone_id: &DnsZoneId,
+            key: &CloudflareRecordSetKey,
+            request: &CloudflareRecordSetPutRequest,
+        ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError> {
+            self.record_calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_record_key.lock().unwrap() = Some(key.clone());
+            *self.last_put_request.lock().unwrap() = Some(request.clone());
+            if let Some(error) = self.error.lock().unwrap().take() {
+                return Err(error);
+            }
+            Ok(self
+                .record_response
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| record(account_id.as_str(), zone_id.as_str())))
+        }
+
+        async fn delete_zone(
+            &self,
+            account_id: &CloudResourceId,
+            zone_id: &DnsZoneId,
+            request: &CloudflareZoneDeleteRequest,
+        ) -> Result<(), CloudflareDnsAdminError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_account_id.lock().unwrap() = Some(account_id.clone());
+            *self.last_zone_id.lock().unwrap() = Some(zone_id.clone());
+            *self.last_zone_delete_request.lock().unwrap() = Some(request.clone());
+            if let Some(error) = self.error.lock().unwrap().take() {
+                return Err(error);
+            }
+            Ok(())
+        }
+
+        async fn delete_record_set(
+            &self,
+            _account_id: &CloudResourceId,
+            _zone_id: &DnsZoneId,
+            key: &CloudflareRecordSetKey,
+            request: &CloudflareRecordSetDeleteRequest,
+        ) -> Result<(), CloudflareDnsAdminError> {
+            self.record_calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_record_key.lock().unwrap() = Some(key.clone());
+            *self.last_delete_request.lock().unwrap() = Some(request.clone());
+            if let Some(error) = self.error.lock().unwrap().take() {
+                return Err(error);
+            }
+            Ok(())
+        }
     }
 
     impl Default for FakeService {
@@ -859,6 +1405,8 @@ mod tests {
                 record_response: Mutex::new(None),
                 last_record_page: Mutex::new(None),
                 last_record_key: Mutex::new(None),
+                get_zone_calls: AtomicUsize::new(0),
+                list_record_calls: AtomicUsize::new(0),
             }
         }
     }
@@ -885,6 +1433,7 @@ mod tests {
             account_id: &CloudResourceId,
             zone_id: &DnsZoneId,
         ) -> Result<CloudflareZoneDto, CloudflareDnsAdminError> {
+            self.get_zone_calls.fetch_add(1, Ordering::SeqCst);
             if let Some(error) = self.get_error.lock().unwrap().take() {
                 return Err(error);
             }
@@ -896,7 +1445,8 @@ mod tests {
             account_id: &CloudResourceId,
             zone_id: &DnsZoneId,
             page: &CloudflareRecordPageRequest,
-        ) -> Result<CloudflareRecordPageDto, CloudflareDnsAdminError> {
+        ) -> Result<CloudflareRecordPageResult, CloudflareDnsAdminError> {
+            self.list_record_calls.fetch_add(1, Ordering::SeqCst);
             *self.last_record_page.lock().unwrap() = Some(page.clone());
             if let Some(error) = self.record_error.lock().unwrap().take() {
                 return Err(error);
@@ -907,9 +1457,12 @@ mod tests {
                 .unwrap()
                 .clone()
                 .unwrap_or_else(|| record(account_id.as_str(), zone_id.as_str()));
-            Ok(CloudflareRecordPageDto {
-                items: vec![item],
-                next_cursor: Some(DnsPageToken::new("record-cursor-2").unwrap()),
+            Ok(CloudflareRecordPageResult {
+                zone: zone(account_id.as_str(), zone_id.as_str()),
+                page: CloudflareRecordPageDto {
+                    items: vec![item],
+                    next_cursor: Some(DnsPageToken::new("record-cursor-2").unwrap()),
+                },
             })
         }
 
@@ -968,7 +1521,41 @@ mod tests {
         }
     }
 
+    fn txt_record(account_id: &str, zone_id: &str) -> CloudflareRecordSetDto {
+        CloudflareRecordSetDto {
+            provider_account_id: CloudResourceId::new(account_id).unwrap(),
+            zone_id: DnsZoneId::new(zone_id).unwrap(),
+            zone_apex: AbsoluteDnsName::new("example.com").unwrap(),
+            zone_visibility: ZoneVisibility::Public,
+            owner: DnsOwnerName::new("txt.example.com").unwrap(),
+            record_type: CloudflareRecordType::Txt,
+            ttl: CloudflareRecordTtlDto::Seconds(300),
+            values: vec![CloudflareRecordValueDto::Txt {
+                segments: vec![CloudflareOctetsDto {
+                    base64: "aGVsbG8".to_string(),
+                }],
+            }],
+            proxy: None,
+            cname_flattening: CloudflareCnameFlattening::ProviderDefault,
+            comment: None,
+            tags: Vec::new(),
+            provider_object_ids: vec![
+                DnsRecordObjectId::new("abcdef0123456789abcdef0123456789").unwrap()
+            ],
+            revision: DnsRecordRevision::new("sha256:txt-record-revision").unwrap(),
+        }
+    }
+
     fn state(service: Option<SharedCloudflareDnsAdminService>, capability: bool) -> ApiState {
+        state_with_write(service, capability, None, false)
+    }
+
+    fn state_with_write(
+        service: Option<SharedCloudflareDnsAdminService>,
+        capability: bool,
+        write_service: Option<SharedCloudflareDnsWriteAdminService>,
+        write_capability: bool,
+    ) -> ApiState {
         let registry = ControllerRegistry::new();
         let metadata_store = Arc::new(CenterMetaDataStore::new());
         let sync_client = Arc::new(CenterSyncClient {
@@ -986,6 +1573,7 @@ mod tests {
         ));
         let mut capabilities = CenterCapabilities::for_mode(CenterMode::Standalone);
         capabilities.cloudflare_dns_read = capability;
+        capabilities.cloudflare_dns_write = write_capability;
         ApiState {
             aggregator: Arc::new(ResourceAggregator::new()),
             commander,
@@ -996,6 +1584,7 @@ mod tests {
             role_admin: None,
             audit_reader: None,
             cloudflare_dns_admin: service,
+            cloudflare_dns_write_admin: write_service,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,
@@ -1010,8 +1599,24 @@ mod tests {
     }
 
     async fn request(app: axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {
+        json_request(app, axum::http::Method::GET, uri, Body::empty()).await
+    }
+
+    async fn json_request(
+        app: axum::Router,
+        method: axum::http::Method,
+        uri: &str,
+        body: Body,
+    ) -> (StatusCode, serde_json::Value) {
         let response = app
-            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(body)
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let status = response.status();
@@ -1114,9 +1719,24 @@ mod tests {
                 "service_unavailable",
             ),
             (
+                CloudflareDnsAdminError::RestartRequired,
+                StatusCode::CONFLICT,
+                "pagination_restart_required",
+            ),
+            (
                 CloudflareDnsAdminError::InvalidProviderObservation,
                 StatusCode::SERVICE_UNAVAILABLE,
                 "invalid_provider_observation",
+            ),
+            (
+                CloudflareDnsAdminError::Conflict,
+                StatusCode::CONFLICT,
+                "conflict",
+            ),
+            (
+                CloudflareDnsAdminError::UnknownOutcome,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unknown_outcome",
             ),
         ] {
             let service = Arc::new(FakeService::default());
@@ -1172,6 +1792,624 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_zone_is_strict_synchronous_and_returns_created() {
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let path = "/api/v1/center/cloudflare/dns/accounts/account-1/zones";
+        let (status, body) = json_request(
+            app,
+            axum::http::Method::POST,
+            path,
+            Body::from(r#"{"name":"example.com"}"#),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(body["data"]["providerAccountId"], "account-1");
+        assert_eq!(body["data"]["name"], "example.com");
+        assert_eq!(service.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            service
+                .last_account_id
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "account-1"
+        );
+        assert_eq!(
+            service
+                .last_request
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .name
+                .as_str(),
+            "example.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_zone_rejects_unknown_fields_and_invalid_names_before_calling_service() {
+        for body in [
+            r#"{"name":"example.com","account":"secret"}"#,
+            r#"{"name":"bad..example.com"}"#,
+            r#"{"name":"example.com","nameServers":[]}"#,
+        ] {
+            let service = Arc::new(FakeWriteService::default());
+            let app =
+                super::super::router(state_with_write(None, false, Some(service.clone()), true));
+            let (status, response) = json_request(
+                app,
+                axum::http::Method::POST,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones",
+                Body::from(body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(response["error"], "invalid_request");
+            assert_eq!(service.calls.load(Ordering::SeqCst), 0);
+            assert!(!response.to_string().contains("secret"));
+        }
+    }
+
+    #[tokio::test]
+    async fn create_zone_errors_are_stable_redacted_and_scope_is_validated() {
+        let path = "/api/v1/center/cloudflare/dns/accounts/account-1/zones";
+        for (error, expected_status, expected_code) in [
+            (
+                CloudflareDnsAdminError::Conflict,
+                StatusCode::CONFLICT,
+                "conflict",
+            ),
+            (
+                CloudflareDnsAdminError::UnknownOutcome,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unknown_outcome",
+            ),
+        ] {
+            let service = Arc::new(FakeWriteService::default());
+            *service.error.lock().unwrap() = Some(error);
+            let app = super::super::router(state_with_write(None, false, Some(service), true));
+            let (status, body) = json_request(
+                app,
+                axum::http::Method::POST,
+                path,
+                Body::from(r#"{"name":"example.com"}"#),
+            )
+            .await;
+            assert_eq!(status, expected_status);
+            assert_eq!(body["error"], expected_code);
+            assert_eq!(body.as_object().unwrap().len(), 2);
+        }
+
+        for invalid in [
+            zone("another-account", ZONE_ID),
+            {
+                let mut value = zone("account-1", ZONE_ID);
+                value.name = AbsoluteDnsName::new("another.example").unwrap();
+                value
+            },
+            {
+                let mut value = zone("account-1", ZONE_ID);
+                value.kind = CloudflareZoneKind::Internal;
+                value.visibility = ZoneVisibility::Private;
+                value
+            },
+        ] {
+            let service = Arc::new(FakeWriteService::default());
+            *service.response.lock().unwrap() = Some(invalid);
+            let app = super::super::router(state_with_write(None, false, Some(service), true));
+            let (status, body) = json_request(
+                app,
+                axum::http::Method::POST,
+                path,
+                Body::from(r#"{"name":"example.com"}"#),
+            )
+            .await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(body["error"], "unknown_outcome");
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_zone_is_strict_synchronous_path_scoped_and_returns_no_content() {
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let path = format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}");
+        let (status, body) = json_request(
+            app,
+            axum::http::Method::DELETE,
+            &path,
+            Body::from(r#"{"expectedRevision":"revision-1","confirmName":"example.com"}"#),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(body, serde_json::Value::Null);
+        assert_eq!(service.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            service
+                .last_account_id
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "account-1"
+        );
+        assert_eq!(
+            service
+                .last_zone_id
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            ZONE_ID
+        );
+        let request = service
+            .last_zone_delete_request
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap();
+        assert_eq!(request.expected_revision.as_str(), "revision-1");
+        assert_eq!(request.confirm_name.as_str(), "example.com");
+    }
+
+    #[tokio::test]
+    async fn delete_zone_rejects_missing_unknown_body_identity_and_invalid_path_before_service() {
+        let cases = [
+            (
+                format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}"),
+                r#"{"confirmName":"example.com"}"#,
+                "invalid_request",
+            ),
+            (
+                format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}"),
+                r#"{"expectedRevision":"revision-1"}"#,
+                "invalid_request",
+            ),
+            (
+                format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}"),
+                r#"{"expectedRevision":"revision-1","confirmName":"example.com","zoneId":"0123456789abcdef0123456789abcdef"}"#,
+                "invalid_request",
+            ),
+            (
+                format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}"),
+                r#"{"expectedRevision":" ","confirmName":"example.com"}"#,
+                "invalid_request",
+            ),
+            (
+                format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}"),
+                r#"{"expectedRevision":"revision-1","confirmName":"bad..example.com"}"#,
+                "invalid_request",
+            ),
+            (
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/not-a-zone-id".to_string(),
+                r#"{"expectedRevision":"revision-1","confirmName":"example.com"}"#,
+                "invalid_zone_id",
+            ),
+            (
+                format!("/api/v1/center/cloudflare/dns/accounts/%20/zones/{ZONE_ID}"),
+                r#"{"expectedRevision":"revision-1","confirmName":"example.com"}"#,
+                "invalid_account_id",
+            ),
+        ];
+        for (path, body, expected_error) in cases {
+            let service = Arc::new(FakeWriteService::default());
+            let app =
+                super::super::router(state_with_write(None, false, Some(service.clone()), true));
+            let (status, response) =
+                json_request(app, axum::http::Method::DELETE, &path, Body::from(body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(response["error"], expected_error);
+            assert_eq!(service.calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_zone_maps_errors_without_provider_diagnostics() {
+        let path = format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}");
+        for (error, expected_status, expected_code) in [
+            (
+                CloudflareDnsAdminError::Conflict,
+                StatusCode::CONFLICT,
+                "conflict",
+            ),
+            (
+                CloudflareDnsAdminError::UnknownOutcome,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unknown_outcome",
+            ),
+        ] {
+            let service = Arc::new(FakeWriteService::default());
+            *service.error.lock().unwrap() = Some(error);
+            let app = super::super::router(state_with_write(None, false, Some(service), true));
+            let (status, body) = json_request(
+                app,
+                axum::http::Method::DELETE,
+                &path,
+                Body::from(r#"{"expectedRevision":"revision-1","confirmName":"example.com"}"#),
+            )
+            .await;
+            assert_eq!(status, expected_status);
+            assert_eq!(body["error"], expected_code);
+            assert_eq!(body.as_object().unwrap().len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_zone_route_requires_write_service_and_capability() {
+        let path = format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}");
+        for state in [
+            state_with_write(None, false, None, false),
+            state_with_write(None, false, None, true),
+            state_with_write(
+                None,
+                false,
+                Some(Arc::new(FakeWriteService::default())),
+                false,
+            ),
+        ] {
+            let (status, _) = json_request(
+                super::super::router(state),
+                axum::http::Method::DELETE,
+                &path,
+                Body::from(r#"{"expectedRevision":"revision-1","confirmName":"example.com"}"#),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_zone_request_body_is_bounded() {
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let path = format!("/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}");
+        let body = format!(
+            r#"{{"expectedRevision":"revision-1","confirmName":"example.com","padding":"{}"}}"#,
+            "x".repeat(70 * 1024)
+        );
+        let (status, response) =
+            json_request(app, axum::http::Method::DELETE, &path, Body::from(body)).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(response["error"], "request_too_large");
+        assert_eq!(service.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn create_zone_route_and_advertised_capability_require_service_and_flag() {
+        let path = "/api/v1/center/cloudflare/dns/accounts/account-1/zones";
+        for state in [
+            state_with_write(None, false, None, false),
+            state_with_write(None, false, None, true),
+            state_with_write(
+                None,
+                false,
+                Some(Arc::new(FakeWriteService::default())),
+                false,
+            ),
+        ] {
+            let app = super::super::router(state);
+            let (status, _) = json_request(
+                app.clone(),
+                axum::http::Method::POST,
+                path,
+                Body::from(r#"{"name":"example.com"}"#),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+            let (status, info) = request(app, "/api/v1/server-info").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(info["data"]["capabilities"]["cloudflareDnsWrite"], false);
+        }
+
+        let app = super::super::router(state_with_write(
+            None,
+            false,
+            Some(Arc::new(FakeWriteService::default())),
+            true,
+        ));
+        let (status, info) = request(app, "/api/v1/server-info").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(info["data"]["capabilities"]["cloudflareDnsWrite"], true);
+    }
+
+    #[tokio::test]
+    async fn read_and_write_services_share_the_zone_collection_path() {
+        let app = super::super::router(state_with_write(
+            Some(Arc::new(FakeService::default())),
+            true,
+            Some(Arc::new(FakeWriteService::default())),
+            true,
+        ));
+        let path = "/api/v1/center/cloudflare/dns/accounts/account-1/zones";
+
+        let (status, _) = request(app.clone(), path).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = json_request(
+            app,
+            axum::http::Method::POST,
+            path,
+            Body::from(r#"{"name":"example.com"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
+    const PUT_A_BODY: &str = r#"{
+        "guard":{"type":"must_not_exist"},
+        "ttl":{"type":"automatic"},
+        "values":[{"type":"A","address":"192.0.2.1"}],
+        "proxy":"proxied",
+        "cnameFlattening":"provider_default",
+        "comment":"managed by Center",
+        "tags":["owner:edge"]
+    }"#;
+
+    #[tokio::test]
+    async fn record_put_and_delete_are_synchronous_and_path_scoped() {
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A?owner=www.example.com"
+        );
+
+        let (status, body) = json_request(
+            app.clone(),
+            axum::http::Method::PUT,
+            &path,
+            Body::from(PUT_A_BODY),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["owner"], "www.example.com");
+        assert_eq!(body["data"]["recordType"], "A");
+        assert_eq!(service.record_calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            service
+                .last_put_request
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .guard,
+            CloudflareRecordMutationGuardDto::MustNotExist
+        ));
+
+        let (status, body) = json_request(
+            app,
+            axum::http::Method::DELETE,
+            &path,
+            Body::from(r#"{"expectedRevision":"sha256:record-revision"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(body, serde_json::Value::Null);
+        assert_eq!(service.record_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            service
+                .last_delete_request
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .expected_revision
+                .as_str(),
+            "sha256:record-revision"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_put_normalizes_unproxied_txt_without_metadata() {
+        let service = Arc::new(FakeWriteService::default());
+        *service.record_response.lock().unwrap() = Some(txt_record("account-1", ZONE_ID));
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/TXT?owner=txt.example.com"
+        );
+        let body = r#"{
+            "guard":{"type":"must_not_exist"},
+            "ttl":{"type":"seconds","seconds":300},
+            "values":[{"type":"TXT","segments":[{"base64":"aGVsbG8"}]}],
+            "proxy":null
+        }"#;
+
+        let (status, response) =
+            json_request(app, axum::http::Method::PUT, &path, Body::from(body)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["data"]["recordType"], "TXT");
+        assert_eq!(response["data"]["ttl"]["seconds"], 300);
+
+        let request = service.last_put_request.lock().unwrap().clone().unwrap();
+        let desired = request
+            .record_set(&CloudflareRecordSetKey {
+                owner: DnsOwnerName::new("txt.example.com").unwrap(),
+                record_type: CloudflareRecordType::Txt,
+            })
+            .unwrap();
+        assert_eq!(desired.extension, None);
+    }
+
+    #[tokio::test]
+    async fn record_write_rejects_body_identity_and_invalid_semantics_before_service() {
+        let cases = [
+            PUT_A_BODY.replace(
+                "\"tags\":[\"owner:edge\"]",
+                "\"tags\":[\"owner:edge\"],\"owner\":\"other.example.com\"",
+            ),
+            PUT_A_BODY.replace("\"type\":\"A\"", "\"type\":\"AAAA\""),
+            PUT_A_BODY.replace("\"proxy\":\"proxied\",", ""),
+            PUT_A_BODY.replace(
+                "\"cnameFlattening\":\"provider_default\"",
+                "\"cnameFlattening\":\"flatten\"",
+            ),
+            PUT_A_BODY.replace(
+                "\"ttl\":{\"type\":\"automatic\"}",
+                "\"ttl\":{\"type\":\"automatic\",\"seconds\":300}",
+            ),
+        ];
+        for body in cases {
+            let service = Arc::new(FakeWriteService::default());
+            let app =
+                super::super::router(state_with_write(None, false, Some(service.clone()), true));
+            let path = format!(
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A?owner=www.example.com"
+            );
+            let (status, response) =
+                json_request(app, axum::http::Method::PUT, &path, Body::from(body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(response["error"], "invalid_request");
+            assert_eq!(service.record_calls.load(Ordering::SeqCst), 0);
+        }
+
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A?owner=www.example.com"
+        );
+        let (status, response) = json_request(
+            app,
+            axum::http::Method::DELETE,
+            &path,
+            Body::from(r#"{"expectedRevision":"sha256:record-revision","providerObjectIds":[]}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(response["error"], "invalid_request");
+        assert_eq!(service.record_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn record_mutation_query_rejects_unknown_fields() {
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A?owner=www.example.com&unexpected=value"
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(PUT_A_BODY))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(service.record_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn record_write_rejects_control_plane_types_and_maps_unknown_outcome() {
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let soa_path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/SOA?owner=example.com"
+        );
+        let (status, _) = json_request(
+            app,
+            axum::http::Method::DELETE,
+            &soa_path,
+            Body::from(r#"{"expectedRevision":"sha256:record-revision"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(service.record_calls.load(Ordering::SeqCst), 0);
+
+        *service.error.lock().unwrap() = Some(CloudflareDnsAdminError::UnknownOutcome);
+        let app = super::super::router(state_with_write(None, false, Some(service), true));
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A?owner=www.example.com"
+        );
+        let (status, body) =
+            json_request(app, axum::http::Method::PUT, &path, Body::from(PUT_A_BODY)).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"], "unknown_outcome");
+    }
+
+    #[tokio::test]
+    async fn record_replace_guard_is_forwarded_and_invalid_success_is_unknown() {
+        let replace_body = PUT_A_BODY.replace(
+            r#"{"type":"must_not_exist"}"#,
+            r#"{"type":"match_revision","revision":"sha256:record-revision"}"#,
+        );
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A?owner=www.example.com"
+        );
+        let service = Arc::new(FakeWriteService::default());
+        let app = super::super::router(state_with_write(None, false, Some(service.clone()), true));
+        let (status, _) = json_request(
+            app,
+            axum::http::Method::PUT,
+            &path,
+            Body::from(replace_body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            service
+                .last_put_request
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .guard
+                .expected_revision()
+                .unwrap()
+                .as_str(),
+            "sha256:record-revision"
+        );
+
+        let mut invalid = record("another-account", ZONE_ID);
+        invalid.proxy = Some(CloudflareProxyOptions::Proxied);
+        *service.record_response.lock().unwrap() = Some(invalid);
+        let app = super::super::router(state_with_write(None, false, Some(service), true));
+        let (status, body) = json_request(
+            app,
+            axum::http::Method::PUT,
+            &path,
+            Body::from(replace_body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"], "unknown_outcome");
+    }
+
+    #[tokio::test]
+    async fn record_write_routes_require_service_and_capability() {
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A?owner=www.example.com"
+        );
+        for state in [
+            state_with_write(None, false, None, false),
+            state_with_write(None, false, None, true),
+            state_with_write(
+                None,
+                false,
+                Some(Arc::new(FakeWriteService::default())),
+                false,
+            ),
+        ] {
+            let (status, _) = json_request(
+                super::super::router(state),
+                axum::http::Method::PUT,
+                &path,
+                Body::from(PUT_A_BODY),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
     async fn server_info_reports_cloudflare_dns_read_capability() {
         let app = super::super::router(state(Some(Arc::new(FakeService::default())), true));
         let (status, body) = request(app, "/api/v1/server-info").await;
@@ -1207,6 +2445,8 @@ mod tests {
         let page = service.last_record_page.lock().unwrap().clone().unwrap();
         assert_eq!(page.limit, 10);
         assert_eq!(page.cursor.unwrap().as_str(), "record-cursor-1");
+        assert_eq!(service.list_record_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(service.get_zone_calls.load(Ordering::SeqCst), 0);
 
         let (status, body) = request(app, &format!("{base}/a?owner=www.example.com")).await;
         assert_eq!(status, StatusCode::OK);
@@ -1218,6 +2458,25 @@ mod tests {
         for forbidden in ["apiToken", "externalAccountId", "modifiedOn", "rawError"] {
             assert!(!serialized.contains(forbidden));
         }
+    }
+
+    #[tokio::test]
+    async fn record_list_uses_one_list_call_without_a_get_zone_preflight() {
+        let service = Arc::new(FakeService::default());
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets?limit=10&cursor=record-cursor-1"
+        );
+
+        let (status, body) = request(
+            super::super::router(state(Some(service.clone()), true)),
+            &path,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["nextCursor"], "record-cursor-2");
+        assert_eq!(service.list_record_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(service.get_zone_calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

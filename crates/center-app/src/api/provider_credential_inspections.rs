@@ -229,6 +229,7 @@ mod tests {
             role_admin: None,
             audit_reader: None,
             cloudflare_dns_admin: None,
+            cloudflare_dns_write_admin: None,
             provider_account_store: Some(account_store),
             capability_snapshot_store: None,
             credential_inspection_service: service,

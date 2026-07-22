@@ -25,8 +25,10 @@ use serde::{Deserialize, Serialize};
 
 mod dns_admin;
 mod dns_admin_service;
+mod dns_write_service;
 
 pub use dns_admin_service::{compose_dns_admin, CloudflareDnsReadConfig};
+pub use dns_write_service::{compose_dns_write_admin, CloudflareDnsWriteConfig};
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(30);
 

@@ -1,32 +1,40 @@
 # Cloudflare mounted credential example
 
 This non-default overlay enables the local mounted-file resolver, Cloudflare credential
-inspection, and read-only DNS inventory. The base deployment and its RBAC remain unchanged: Kubernetes mounts one explicitly
-named Secret through the kubelet, and Center receives no permission to get, list, or watch Secret
-objects.
+inspection, read-only DNS inventory, and synchronous DNS writes. The base deployment and its RBAC
+remain unchanged:
+Kubernetes mounts one explicitly named Secret through the kubelet, and Center receives no
+permission to get, list, or watch Secret objects.
+
+The configured Cloudflare API token must have the provider permissions needed by the explicitly
+enabled operations. DNS record changes require DNS Edit; zone creation requires Zone Edit. Center
+does not probe mutation permissions or send provider requests at startup.
 
 Create exact-byte files locally and create the Secret in the deployment namespace:
 
 ```sh
 head -c 32 /dev/urandom > revision.key
-head -c 32 /dev/urandom > cloudflare-dns-cursor.key
+head -c 32 /dev/urandom > cloudflare-dns-cursor-a.key
+head -c 32 /dev/urandom > cloudflare-dns-cursor-b.key
 printf %s "$CLOUDFLARE_API_TOKEN" > cloudflare-api-token
 kubectl -n edgion-system create secret generic edgion-center-cloudflare-credentials \
   --from-file=revision.key \
-  --from-file=cloudflare-dns-cursor.key \
+  --from-file=cloudflare-dns-cursor-a.key \
+  --from-file=cloudflare-dns-cursor-b.key \
   --from-file=cloudflare-api-token
 ```
 
-The revision and DNS cursor keys must each contain exactly 32 non-zero bytes. The cursor key must
-be different from both the revision key and API token and identical on every Center replica.
-Credential material must be non-empty,
-no larger than 16 KiB, regular, and not group- or world-writable. Secret volumes are root-owned,
-while Center runs as UID 1000. The overlay uses `fsGroup: 1000` to make the three explicitly named
-`0440` source files readable by a non-root init container. That container copies them into a
-memory-backed `emptyDir` it owns and restricts the staged files to `0400`. The Center container
-mounts only that staging volume read-only; the resolver opens its private `0700` child as the
-directory capability. No root container, added Linux capability, or Secret API permission is
-involved.
+The revision and DNS cursor keys must each contain exactly 32 non-zero bytes. Both cursor keys must
+be different from one another, the revision key, and the API token. Every completed rollout stage
+must give all Center replicas the same exact key material and assignment; during the Stage-A to
+Stage-B rollout, both keys remain present while the active assignment intentionally differs.
+Credential material must be non-empty, no larger than 16 KiB, regular, and not group- or
+world-writable. Secret volumes are root-owned, while Center runs as UID 1000. The overlay uses
+`fsGroup: 1000` to make the four explicitly named `0440` source files readable by a non-root init
+container. That container copies them into a memory-backed `emptyDir` it owns and restricts the
+staged files to `0400`. The Center container mounts only that staging volume read-only; the resolver
+opens its private `0700` child as the directory capability. No root container, added Linux
+capability, or Secret API permission is involved.
 
 Staging is idempotent across init-container retries. Each source is copied to a private temporary
 file, restricted, and renamed into place; Center cannot start while a staging attempt is incomplete.
@@ -50,11 +58,48 @@ endpoint is fixed to `https://api.cloudflare.com`; configuration cannot redirect
 
 The DNS service uses the same account-bound token without caching clients. One operation deadline
 covers account lookup, concurrency admission, credential reads, every provider page, and authority
-rechecks. Zone HTTP requests execute at most one operation. Record HTTP requests deliberately run
-an authoritative-zone operation before the record operation and can therefore consume two
+rechecks. Zone and record-list HTTP requests execute at most one operation. Record detail retains
+a separate authoritative-zone operation before the record operation and can therefore consume two
 sequential operation deadlines. `cloudflare-dns:read` is a high-trust permission that can observe
 every configured Cloudflare account; it is not scoped to one account.
 
-This first slice has one active cursor key and no fallback key. Coordinated replacement must update
-all replicas together and invalidates cursors issued with the previous key; clients then restart
-pagination from the first page. Overlap-window cursor-key rotation is tracked separately.
+The write service is independently default-off and uses only the ProviderAccount API-token
+binding already shown above. It does not resolve either cursor key or a mutation-token key, create
+a durable operation, or retry a provider mutation. The per-account concurrency default is one.
+If a response is lost after Cloudflare may have accepted a request, Center returns a fixed unknown
+outcome and the caller must read the target state before deciding whether another write is safe.
+
+The same write switch exposes direct provider-specific RRset PUT and DELETE on
+`.../zones/{zone_id}/record-sets/{record_type}?owner=...`. PUT uses either `must_not_exist` or an
+exact observed revision; DELETE always requires the exact observed revision. Center refreshes the
+Zone and complete canonical RRset before one Cloudflare batch and observes the result afterward.
+SOA and apex delegation NS changes remain unavailable. Guard conflicts issue no mutation, and
+Center performs no automatic retry when a dispatched result is unknown.
+
+Pagination cursors bind the page size and a keyed tag of the complete canonical inventory. When
+Cloudflare data changes between pages, Center returns `409 pagination_restart_required`; clients
+restart from the first page rather than combining different inventory versions. Continuations
+remain bounded rescans and are not provider point-in-time snapshots.
+
+`cursor_key_ref` is the only signing key. `cursor_fallback_key_ref`, when present, is
+verification-only. New cursors are never signed by the fallback key. Cursors authenticate their
+issue and expiry times; this example permits a 900-second lifetime and 30 seconds of clock skew.
+The complete key ring is resolved and its credential revisions are checked before and after every
+provider operation.
+
+Rotate keys with three deployments, using the same Secret and ConfigMap revision for every replica:
+
+1. Stage A: keep key A active and add key B as fallback. Complete the rollout before promotion.
+2. Stage B: set key B active and key A fallback. During this rollout, Stage-A and Stage-B replicas
+   can verify cursors produced by one another. Rolling back to Stage A remains safe while both keys
+   are present.
+3. Stage C: after the last Stage-A Pod has terminated, wait at least
+   `cursor_max_lifetime_secs + 2 * cursor_clock_skew_secs` (960 seconds with this example). Then
+   remove key A as fallback, remove its mounted binding and file, and complete another rollout.
+
+The wait starts after the last old-active Pod terminates because that Pod can sign with key A until
+shutdown. Removing A earlier makes still-valid cursors fail closed and requires clients to restart
+pagination. This staged example reads the Secret only in the init container, so changing Secret
+data without restarting Pods does not rotate their in-memory key ring. The deployment still uses a
+kubelet-mounted, explicitly named Secret and does not add permission to get, list, or watch Secret
+objects.

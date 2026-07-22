@@ -4,7 +4,7 @@ use edgion_center_app::common::{
     config::{ConfSyncSecurityConfig, ConfSyncTlsConfig},
 };
 use edgion_center_integration_cloudflare::{
-    CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig,
+    CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
 };
 use edgion_center_runtime::federation::config::CenterSyncConfig;
 use serde::{Deserialize, Serialize};
@@ -110,6 +110,8 @@ pub struct KubernetesCenterConfig {
     pub cloudflare_credential_inspection: CloudflareCredentialInspectionConfig,
     /// Account-bound, read-only Cloudflare DNS inventory. Disabled by default.
     pub cloudflare_dns_read: CloudflareDnsReadConfig,
+    /// Account-bound synchronous Cloudflare DNS writes. Disabled by default.
+    pub cloudflare_dns_write: CloudflareDnsWriteConfig,
 }
 
 impl Default for KubernetesCenterConfig {
@@ -127,6 +129,7 @@ impl Default for KubernetesCenterConfig {
             mounted_credentials: MountedCredentialConfig::default(),
             cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
+            cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
         }
     }
 }
@@ -288,10 +291,36 @@ mod tests {
                 .enabled
         );
         let config: KubernetesCenterConfig = serde_yaml::from_str(
-            "cloudflare_dns_read:\n  enabled: true\n  cursor_key_ref: cloudflare/dns-cursor\n  operation_timeout_secs: 30\n  global_concurrency: 16\n  per_account_concurrency: 2\n",
+            "cloudflare_dns_read:\n  enabled: true\n  cursor_key_ref: cloudflare/dns-cursor-a\n  cursor_fallback_key_ref: cloudflare/dns-cursor-b\n  cursor_max_lifetime_secs: 900\n  cursor_clock_skew_secs: 30\n  operation_timeout_secs: 30\n  global_concurrency: 16\n  per_account_concurrency: 2\n",
         )
         .unwrap();
         assert!(config.cloudflare_dns_read.enabled);
+        assert_eq!(
+            config
+                .cloudflare_dns_read
+                .cursor_fallback_key_ref
+                .as_deref(),
+            Some("cloudflare/dns-cursor-b")
+        );
+        assert_eq!(config.cloudflare_dns_read.cursor_max_lifetime_secs, 900);
+        assert_eq!(config.cloudflare_dns_read.cursor_clock_skew_secs, 30);
+    }
+
+    #[test]
+    fn cloudflare_dns_write_is_default_off_and_strict() {
+        assert!(
+            !KubernetesCenterConfig::default()
+                .cloudflare_dns_write
+                .enabled
+        );
+        let config: KubernetesCenterConfig = serde_yaml::from_str(
+            "cloudflare_dns_write:\n  enabled: true\n  operation_timeout_secs: 30\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
+        )
+        .unwrap();
+        assert!(config.cloudflare_dns_write.enabled);
+        assert_eq!(config.cloudflare_dns_write.operation_timeout_secs, 30);
+        assert_eq!(config.cloudflare_dns_write.global_concurrency, 4);
+        assert_eq!(config.cloudflare_dns_write.per_account_concurrency, 1);
     }
 
     #[test]

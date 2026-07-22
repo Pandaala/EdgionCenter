@@ -220,9 +220,15 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
     let cloudflare_dns_admin = edgion_center_integration_cloudflare::compose_dns_admin(
         &config.cloudflare_dns_read,
         Some(provider_account_store.clone()),
-        mounted_credential_resolver,
+        mounted_credential_resolver.clone(),
     )
     .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS read config: {error}"))?;
+    let cloudflare_dns_write_admin = edgion_center_integration_cloudflare::compose_dns_write_admin(
+        &config.cloudflare_dns_write,
+        Some(provider_account_store.clone()),
+        mounted_credential_resolver,
+    )
+    .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS write config: {error}"))?;
     platform_health_check(
         directory.as_ref(),
         coordinator.as_ref(),
@@ -327,6 +333,7 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         role_admin: None,
         audit_reader: None,
         cloudflare_dns_admin: cloudflare_dns_admin.clone(),
+        cloudflare_dns_write_admin: cloudflare_dns_write_admin.clone(),
         provider_account_store: Some(provider_account_store),
         capability_snapshot_store: Some(capability_snapshot_store),
         credential_inspection_service: credential_inspection_service.clone(),
@@ -342,6 +349,7 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
             capabilities.provider_capability_read = true;
             capabilities.provider_credential_inspection = credential_inspection_service.is_some();
             capabilities.cloudflare_dns_read = cloudflare_dns_admin.is_some();
+            capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
             capabilities
         },
     };

@@ -102,11 +102,16 @@ database:
 #       provider: cloudflare
 #       purpose: cloudflare_api_token
 #       file: cloudflare-api-token
-#     - credential_ref: cloudflare/dns-cursor
+#     - credential_ref: cloudflare/dns-cursor-a
 #       provider_account_id: cf-main
 #       provider: cloudflare
 #       purpose: cloudflare_dns_cursor_hmac
-#       file: cloudflare-dns-cursor.key
+#       file: cloudflare-dns-cursor-a.key
+#     - credential_ref: cloudflare/dns-cursor-b
+#       provider_account_id: cf-main
+#       provider: cloudflare
+#       purpose: cloudflare_dns_cursor_hmac
+#       file: cloudflare-dns-cursor-b.key
 
 # Cloudflare inspection is independently default-off. When enabled it exposes
 # the existing credential-inspection API and, only on an authorized inspection
@@ -116,15 +121,28 @@ database:
 # cloudflare_credential_inspection:
 #   enabled: true
 
-# Read-only Cloudflare DNS inventory is independently default-off. The cursor key is a separate
-# exact 32-byte deployment secret shared by all replicas. `cloudflare-dns:read` is a high-trust
+# Read-only Cloudflare DNS inventory is independently default-off. Cursor keys are separate exact
+# 32-byte deployment secrets shared by all replicas. `cursor_key_ref` signs new cursors; the
+# optional fallback only verifies cursors during rotation. `cloudflare-dns:read` is a high-trust
 # permission for every configured Cloudflare account. The production endpoint is fixed.
 # cloudflare_dns_read:
 #   enabled: true
-#   cursor_key_ref: cloudflare/dns-cursor
+#   cursor_key_ref: cloudflare/dns-cursor-a
+#   cursor_fallback_key_ref: cloudflare/dns-cursor-b
+#   cursor_max_lifetime_secs: 900
+#   cursor_clock_skew_secs: 30
 #   operation_timeout_secs: 30
 #   global_concurrency: 16
 #   per_account_concurrency: 2
+
+# Synchronous Cloudflare DNS writes are independently default-off. They use only the API token
+# already referenced by the target ProviderAccount. No cursor or mutation-token key is resolved,
+# no durable operation is created, and provider mutations are never retried automatically.
+# cloudflare_dns_write:
+#   enabled: true
+#   operation_timeout_secs: 30
+#   global_concurrency: 4
+#   per_account_concurrency: 1
 
 # ============================================================================
 # Audit log (`audit:`)

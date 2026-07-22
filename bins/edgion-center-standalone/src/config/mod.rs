@@ -3,7 +3,7 @@ use crate::common::config::{AdminTlsConfig, ConfSyncSecurityConfig};
 use crate::common::local_auth::LocalAuthConfig;
 use edgion_center_adapter_credential_files::MountedCredentialConfig;
 use edgion_center_integration_cloudflare::{
-    CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig,
+    CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +126,9 @@ pub struct CenterConfig {
     /// Account-bound, read-only Cloudflare DNS inventory. Disabled by default.
     #[serde(default)]
     pub cloudflare_dns_read: CloudflareDnsReadConfig,
+    /// Account-bound synchronous Cloudflare DNS writes. Disabled by default.
+    #[serde(default)]
+    pub cloudflare_dns_write: CloudflareDnsWriteConfig,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -146,6 +149,7 @@ impl Default for CenterConfig {
             mounted_credentials: MountedCredentialConfig::default(),
             cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
+            cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
         }
     }
 }
@@ -291,10 +295,31 @@ mod tests {
     fn cloudflare_dns_read_is_default_off_and_strict() {
         assert!(!CenterConfig::default().cloudflare_dns_read.enabled);
         let config = parse_via_production(
-            "cloudflare_dns_read:\n  enabled: true\n  cursor_key_ref: cloudflare/dns-cursor\n  operation_timeout_secs: 30\n  global_concurrency: 16\n  per_account_concurrency: 2\n",
+            "cloudflare_dns_read:\n  enabled: true\n  cursor_key_ref: cloudflare/dns-cursor-a\n  cursor_fallback_key_ref: cloudflare/dns-cursor-b\n  cursor_max_lifetime_secs: 900\n  cursor_clock_skew_secs: 30\n  operation_timeout_secs: 30\n  global_concurrency: 16\n  per_account_concurrency: 2\n",
         );
         assert!(config.cloudflare_dns_read.enabled);
+        assert_eq!(
+            config
+                .cloudflare_dns_read
+                .cursor_fallback_key_ref
+                .as_deref(),
+            Some("cloudflare/dns-cursor-b")
+        );
+        assert_eq!(config.cloudflare_dns_read.cursor_max_lifetime_secs, 900);
+        assert_eq!(config.cloudflare_dns_read.cursor_clock_skew_secs, 30);
         assert_eq!(config.cloudflare_dns_read.operation_timeout_secs, 30);
+    }
+
+    #[test]
+    fn cloudflare_dns_write_is_default_off_and_strict() {
+        assert!(!CenterConfig::default().cloudflare_dns_write.enabled);
+        let config = parse_via_production(
+            "cloudflare_dns_write:\n  enabled: true\n  operation_timeout_secs: 30\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
+        );
+        assert!(config.cloudflare_dns_write.enabled);
+        assert_eq!(config.cloudflare_dns_write.operation_timeout_secs, 30);
+        assert_eq!(config.cloudflare_dns_write.global_concurrency, 4);
+        assert_eq!(config.cloudflare_dns_write.per_account_concurrency, 1);
     }
 
     #[test]

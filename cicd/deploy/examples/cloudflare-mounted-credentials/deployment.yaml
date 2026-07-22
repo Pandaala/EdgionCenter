@@ -18,21 +18,27 @@ spec:
               chmod 0700 /credentials/private &&
               rm -f /credentials/private/.revision.key.tmp
               /credentials/private/.cloudflare-api-token.tmp
-              /credentials/private/.cloudflare-dns-cursor.key.tmp &&
+              /credentials/private/.cloudflare-dns-cursor-a.key.tmp
+              /credentials/private/.cloudflare-dns-cursor-b.key.tmp &&
               cp /source/revision.key /credentials/private/.revision.key.tmp &&
               cp /source/cloudflare-api-token
               /credentials/private/.cloudflare-api-token.tmp &&
-              cp /source/cloudflare-dns-cursor.key
-              /credentials/private/.cloudflare-dns-cursor.key.tmp &&
+              cp /source/cloudflare-dns-cursor-a.key
+              /credentials/private/.cloudflare-dns-cursor-a.key.tmp &&
+              cp /source/cloudflare-dns-cursor-b.key
+              /credentials/private/.cloudflare-dns-cursor-b.key.tmp &&
               chmod 0400 /credentials/private/.revision.key.tmp
               /credentials/private/.cloudflare-api-token.tmp
-              /credentials/private/.cloudflare-dns-cursor.key.tmp &&
+              /credentials/private/.cloudflare-dns-cursor-a.key.tmp
+              /credentials/private/.cloudflare-dns-cursor-b.key.tmp &&
               mv -f /credentials/private/.revision.key.tmp
               /credentials/private/revision.key &&
               mv -f /credentials/private/.cloudflare-api-token.tmp
               /credentials/private/cloudflare-api-token &&
-              mv -f /credentials/private/.cloudflare-dns-cursor.key.tmp
-              /credentials/private/cloudflare-dns-cursor.key
+              mv -f /credentials/private/.cloudflare-dns-cursor-a.key.tmp
+              /credentials/private/cloudflare-dns-cursor-a.key &&
+              mv -f /credentials/private/.cloudflare-dns-cursor-b.key.tmp
+              /credentials/private/cloudflare-dns-cursor-b.key
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

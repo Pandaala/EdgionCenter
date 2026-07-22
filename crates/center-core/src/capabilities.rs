@@ -19,6 +19,8 @@ pub struct CenterCapabilities {
     pub password_login: bool,
     /// Cloudflare-specific, read-only DNS zone inventory Admin API.
     pub cloudflare_dns_read: bool,
+    /// Cloudflare-specific, synchronous DNS zone write Admin API.
+    pub cloudflare_dns_write: bool,
     /// Provider-neutral, secret-free ProviderAccount desired-state Admin API.
     pub provider_account_admin: bool,
     /// Read-only, sanitized ProviderAccount capability snapshot Admin API.
@@ -39,6 +41,7 @@ impl CenterCapabilities {
                 leader_election: false,
                 password_login: true,
                 cloudflare_dns_read: false,
+                cloudflare_dns_write: false,
                 provider_account_admin: false,
                 provider_capability_read: false,
                 provider_credential_inspection: false,
@@ -52,6 +55,7 @@ impl CenterCapabilities {
                 leader_election: true,
                 password_login: false,
                 cloudflare_dns_read: false,
+                cloudflare_dns_write: false,
                 provider_account_admin: false,
                 provider_capability_read: false,
                 provider_credential_inspection: false,
@@ -82,6 +86,7 @@ impl CenterCapabilities {
             leader_election,
             password_login,
             cloudflare_dns_read,
+            cloudflare_dns_write: false,
             provider_account_admin,
             provider_capability_read,
             provider_credential_inspection,
@@ -102,6 +107,7 @@ mod tests {
         assert!(!kubernetes.user_admin && !kubernetes.audit_query);
         assert!(kubernetes.native_rbac && kubernetes.leader_election);
         assert!(!standalone.cloudflare_dns_read && !kubernetes.cloudflare_dns_read);
+        assert!(!standalone.cloudflare_dns_write && !kubernetes.cloudflare_dns_write);
         assert!(!standalone.provider_account_admin && !kubernetes.provider_account_admin);
         assert!(!standalone.provider_capability_read && !kubernetes.provider_capability_read);
         assert!(

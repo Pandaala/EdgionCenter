@@ -266,6 +266,7 @@ mod tests {
             role_admin: role_admin.clone(),
             audit_reader: None,
             cloudflare_dns_admin: None,
+            cloudflare_dns_write_admin: None,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,

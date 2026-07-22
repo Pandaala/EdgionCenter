@@ -162,9 +162,16 @@ impl EdgionCenterCli {
         let cloudflare_dns_admin = edgion_center_integration_cloudflare::compose_dns_admin(
             &config.cloudflare_dns_read,
             provider_account_store.clone(),
-            mounted_credential_resolver,
+            mounted_credential_resolver.clone(),
         )
         .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS read config: {error}"))?;
+        let cloudflare_dns_write_admin =
+            edgion_center_integration_cloudflare::compose_dns_write_admin(
+                &config.cloudflare_dns_write,
+                provider_account_store.clone(),
+                mounted_credential_resolver,
+            )
+            .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS write config: {error}"))?;
 
         // Audit sink: spawn the background writer only when a Store exists and
         // audit is enabled. When the DB is disabled but audit is on, log a WARN
@@ -295,6 +302,7 @@ impl EdgionCenterCli {
                 .clone()
                 .map(|log| log as Arc<dyn edgion_center_core::AuditReader>),
             cloudflare_dns_admin: cloudflare_dns_admin.clone(),
+            cloudflare_dns_write_admin: cloudflare_dns_write_admin.clone(),
             provider_account_store,
             capability_snapshot_store: db
                 .clone()
@@ -308,19 +316,23 @@ impl EdgionCenterCli {
             )),
             authz_mode: config.authz.mode,
             platform_mode: edgion_center_core::CenterMode::Standalone,
-            capabilities: edgion_center_core::CenterCapabilities::resolved(
-                db.is_some(),
-                db.is_some(),
-                audit_log.is_some(),
-                controller_directory.is_some(),
-                cloudflare_dns_admin.is_some(),
-                false,
-                resolved_password_login_capability(&config, db.is_some()),
-                false,
-                db.is_some(),
-                db.is_some(),
-                credential_inspection_service.is_some(),
-            ),
+            capabilities: {
+                let mut capabilities = edgion_center_core::CenterCapabilities::resolved(
+                    db.is_some(),
+                    db.is_some(),
+                    audit_log.is_some(),
+                    controller_directory.is_some(),
+                    cloudflare_dns_admin.is_some(),
+                    false,
+                    resolved_password_login_capability(&config, db.is_some()),
+                    false,
+                    db.is_some(),
+                    db.is_some(),
+                    credential_inspection_service.is_some(),
+                );
+                capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
+                capabilities
+            },
         };
         let http_addr: std::net::SocketAddr = config.server.http_addr.parse()?;
         let grpc_addr: std::net::SocketAddr = config.server.grpc_addr.parse()?;

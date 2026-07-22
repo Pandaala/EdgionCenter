@@ -38,6 +38,7 @@ const REVISION_DOMAIN: &[u8] = b"edgion-center/mounted-credential-revision/v1";
 pub enum CredentialPurpose {
     CloudflareApiToken,
     CloudflareDnsCursorHmac,
+    CloudflareDnsMutationTokenHmac,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +157,21 @@ impl fmt::Display for CredentialResolutionError {
 
 impl std::error::Error for CredentialResolutionError {}
 
+/// A fixed, redacted failure returned when independently scoped authorities
+/// resolve to the same file identity or exact material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialAuthorityError {
+    Conflict,
+}
+
+impl fmt::Display for CredentialAuthorityError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("resolved credential authorities are not distinct")
+    }
+}
+
+impl std::error::Error for CredentialAuthorityError {}
+
 pub struct ResolveCredentialRequest<'a> {
     pub provider_account_id: &'a CloudResourceId,
     pub provider: &'a CloudProvider,
@@ -180,6 +196,7 @@ impl fmt::Debug for ResolvedCredentialRevision {
 pub struct ResolvedCredential {
     material: Zeroizing<Vec<u8>>,
     revision: ResolvedCredentialRevision,
+    file_identity: Option<FileIdentity>,
 }
 
 impl ResolvedCredential {
@@ -200,6 +217,28 @@ impl fmt::Debug for ResolvedCredential {
             .field("revision", &"[REDACTED]")
             .finish()
     }
+}
+
+/// Verifies that a complete, already-resolved authority set does not reuse a
+/// file (including a hard link on Unix) or exact credential material.
+///
+/// The failure intentionally exposes no identity, material, reference, or
+/// revision details. Callers must validate the complete set before using any
+/// member to construct a provider client or sign a token.
+pub fn ensure_distinct_authorities(
+    authorities: &[&ResolvedCredential],
+) -> Result<(), CredentialAuthorityError> {
+    for (index, left) in authorities.iter().enumerate() {
+        for right in &authorities[index + 1..] {
+            let same_file =
+                left.file_identity.is_some() && left.file_identity == right.file_identity;
+            let same_material = left.material.as_slice() == right.material.as_slice();
+            if same_file || same_material {
+                return Err(CredentialAuthorityError::Conflict);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -269,6 +308,7 @@ impl MountedCredentialResolver {
                     binding.purpose,
                     CredentialPurpose::CloudflareApiToken
                         | CredentialPurpose::CloudflareDnsCursorHmac
+                        | CredentialPurpose::CloudflareDnsMutationTokenHmac
                 )
             {
                 return Err(CredentialConfigError::InvalidBinding);
@@ -371,6 +411,7 @@ impl MountedCredentialResolver {
             {
                 return Err(CredentialResolutionError::RevisionKeyConflict);
             }
+            let file_identity = credential_file.identity;
             let material = credential_file.material;
             if material.is_empty() {
                 return Err(CredentialResolutionError::Empty);
@@ -389,6 +430,7 @@ impl MountedCredentialResolver {
             Ok(ResolvedCredential {
                 material,
                 revision: ResolvedCredentialRevision(revision),
+                file_identity,
             })
         })
         .await
@@ -537,6 +579,7 @@ fn purpose_tag(purpose: CredentialPurpose) -> &'static str {
     match purpose {
         CredentialPurpose::CloudflareApiToken => "cloudflare_api_token",
         CredentialPurpose::CloudflareDnsCursorHmac => "cloudflare_dns_cursor_hmac",
+        CredentialPurpose::CloudflareDnsMutationTokenHmac => "cloudflare_dns_mutation_token_hmac",
     }
 }
 
@@ -557,6 +600,73 @@ mod tests {
                 file: "token".into(),
             }],
         }
+    }
+
+    fn authority_config(root: &Path, files: [&str; 3]) -> MountedCredentialConfig {
+        MountedCredentialConfig {
+            enabled: true,
+            root_directory: Some(root.to_string_lossy().into_owned()),
+            revision_key_file: Some("revision.key".into()),
+            bindings: vec![
+                MountedCredentialBinding {
+                    credential_ref: "cloudflare/api".into(),
+                    provider_account_id: "cf-main".into(),
+                    provider: CloudProvider::Cloudflare,
+                    purpose: CredentialPurpose::CloudflareApiToken,
+                    file: files[0].into(),
+                },
+                MountedCredentialBinding {
+                    credential_ref: "cloudflare/cursor".into(),
+                    provider_account_id: "cf-main".into(),
+                    provider: CloudProvider::Cloudflare,
+                    purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+                    file: files[1].into(),
+                },
+                MountedCredentialBinding {
+                    credential_ref: "cloudflare/mutation".into(),
+                    provider_account_id: "cf-main".into(),
+                    provider: CloudProvider::Cloudflare,
+                    purpose: CredentialPurpose::CloudflareDnsMutationTokenHmac,
+                    file: files[2].into(),
+                },
+            ],
+        }
+    }
+
+    async fn resolve_authorities(resolver: &MountedCredentialResolver) -> [ResolvedCredential; 3] {
+        let account = CloudResourceId::new("cf-main").unwrap();
+        let provider = CloudProvider::Cloudflare;
+        let api_ref = CredentialRef::new("cloudflare/api").unwrap();
+        let cursor_ref = CredentialRef::new("cloudflare/cursor").unwrap();
+        let mutation_ref = CredentialRef::new("cloudflare/mutation").unwrap();
+        let api = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &provider,
+                purpose: CredentialPurpose::CloudflareApiToken,
+                credential_ref: &api_ref,
+            })
+            .await
+            .unwrap();
+        let cursor = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &provider,
+                purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+                credential_ref: &cursor_ref,
+            })
+            .await
+            .unwrap();
+        let mutation = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &provider,
+                purpose: CredentialPurpose::CloudflareDnsMutationTokenHmac,
+                credential_ref: &mutation_ref,
+            })
+            .await
+            .unwrap();
+        [api, cursor, mutation]
     }
 
     async fn resolver(root: &Path, token: &[u8]) -> MountedCredentialResolver {
@@ -851,6 +961,234 @@ mod tests {
                 .unwrap_err(),
             CredentialResolutionError::RevisionKeyConflict
         );
+    }
+
+    #[tokio::test]
+    async fn mutation_token_hmac_uses_an_independent_closed_purpose_domain() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("revision.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("mutation.key"), [8_u8; 32])
+            .await
+            .unwrap();
+        let binding = MountedCredentialBinding {
+            credential_ref: "cloudflare/dns-mutation-token".into(),
+            provider_account_id: "cf-main".into(),
+            provider: CloudProvider::Cloudflare,
+            purpose: CredentialPurpose::CloudflareDnsMutationTokenHmac,
+            file: "mutation.key".into(),
+        };
+        let parsed: MountedCredentialBinding = serde_yaml::from_str(
+            "credential_ref: cloudflare/dns-mutation-token\nprovider_account_id: cf-main\nprovider: cloudflare\npurpose: cloudflare_dns_mutation_token_hmac\nfile: mutation.key\n",
+        )
+        .unwrap();
+        assert_eq!(parsed, binding);
+        let diagnostics = format!("{binding:?}");
+        assert!(!diagnostics.contains("cloudflare/dns-mutation-token"));
+        assert!(!diagnostics.contains("cf-main"));
+        assert!(!diagnostics.contains("mutation.key"));
+
+        let resolver = MountedCredentialResolver::from_config(&MountedCredentialConfig {
+            enabled: true,
+            root_directory: Some(dir.path().to_string_lossy().into_owned()),
+            revision_key_file: Some("revision.key".into()),
+            bindings: vec![binding],
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        let account = CloudResourceId::new("cf-main").unwrap();
+        let credential_ref = CredentialRef::new("cloudflare/dns-mutation-token").unwrap();
+        assert_eq!(
+            resolver
+                .resolve(ResolveCredentialRequest {
+                    provider_account_id: &account,
+                    provider: &CloudProvider::Cloudflare,
+                    purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+                    credential_ref: &credential_ref,
+                })
+                .await
+                .unwrap_err(),
+            CredentialResolutionError::ScopeMismatch
+        );
+        let mutation = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &CloudProvider::Cloudflare,
+                purpose: CredentialPurpose::CloudflareDnsMutationTokenHmac,
+                credential_ref: &credential_ref,
+            })
+            .await
+            .unwrap();
+        assert_eq!(mutation.with_bytes(|bytes| bytes.to_vec()), vec![8_u8; 32]);
+        let mutation_revision = mutation.revision().as_str();
+        let cursor_revision = revision(
+            &[7_u8; 32],
+            &account,
+            &CloudProvider::Cloudflare,
+            CredentialPurpose::CloudflareDnsCursorHmac,
+            &credential_ref,
+            &[8_u8; 32],
+        );
+        assert_ne!(mutation_revision, cursor_revision);
+        assert!(!format!("{mutation:?}").contains(mutation_revision));
+
+        tokio::fs::write(dir.path().join("mutation.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        assert_eq!(
+            resolver
+                .resolve(ResolveCredentialRequest {
+                    provider_account_id: &account,
+                    provider: &CloudProvider::Cloudflare,
+                    purpose: CredentialPurpose::CloudflareDnsMutationTokenHmac,
+                    credential_ref: &credential_ref,
+                })
+                .await
+                .unwrap_err(),
+            CredentialResolutionError::RevisionKeyConflict
+        );
+    }
+
+    #[tokio::test]
+    async fn distinct_authority_check_rejects_same_file_and_copied_material() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("revision.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("shared.key"), [1_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("mutation.key"), [3_u8; 32])
+            .await
+            .unwrap();
+        let resolver = MountedCredentialResolver::from_config(&authority_config(
+            dir.path(),
+            ["shared.key", "shared.key", "mutation.key"],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+        let authorities = resolve_authorities(&resolver).await;
+        let error =
+            ensure_distinct_authorities(&[&authorities[0], &authorities[1], &authorities[2]])
+                .unwrap_err();
+        assert_eq!(error, CredentialAuthorityError::Conflict);
+        let diagnostics = format!("{error:?} {error}");
+        assert!(!diagnostics.contains("shared.key"));
+        assert!(!diagnostics.contains("cloudflare/"));
+        assert!(!diagnostics.contains(authorities[0].revision().as_str()));
+
+        tokio::fs::write(dir.path().join("api-copy.key"), [4_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("cursor-copy.key"), [4_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("mutation-copy.key"), [5_u8; 32])
+            .await
+            .unwrap();
+        let resolver = MountedCredentialResolver::from_config(&authority_config(
+            dir.path(),
+            ["api-copy.key", "cursor-copy.key", "mutation-copy.key"],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+        let authorities = resolve_authorities(&resolver).await;
+        assert_eq!(
+            ensure_distinct_authorities(&[&authorities[0], &authorities[1], &authorities[2],]),
+            Err(CredentialAuthorityError::Conflict)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn distinct_authority_check_rejects_hard_links() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("revision.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("api.key"), [1_u8; 32])
+            .await
+            .unwrap();
+        std::fs::hard_link(dir.path().join("api.key"), dir.path().join("cursor.key")).unwrap();
+        tokio::fs::write(dir.path().join("mutation.key"), [3_u8; 32])
+            .await
+            .unwrap();
+        let resolver = MountedCredentialResolver::from_config(&authority_config(
+            dir.path(),
+            ["api.key", "cursor.key", "mutation.key"],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+        let account = CloudResourceId::new("cf-main").unwrap();
+        let provider = CloudProvider::Cloudflare;
+        let api_ref = CredentialRef::new("cloudflare/api").unwrap();
+        let cursor_ref = CredentialRef::new("cloudflare/cursor").unwrap();
+        let mutation_ref = CredentialRef::new("cloudflare/mutation").unwrap();
+        let api = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &provider,
+                purpose: CredentialPurpose::CloudflareApiToken,
+                credential_ref: &api_ref,
+            })
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("cursor.key"), [2_u8; 32])
+            .await
+            .unwrap();
+        let cursor = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &provider,
+                purpose: CredentialPurpose::CloudflareDnsCursorHmac,
+                credential_ref: &cursor_ref,
+            })
+            .await
+            .unwrap();
+        let mutation = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &provider,
+                purpose: CredentialPurpose::CloudflareDnsMutationTokenHmac,
+                credential_ref: &mutation_ref,
+            })
+            .await
+            .unwrap();
+        assert_ne!(
+            api.with_bytes(|bytes| bytes.to_vec()),
+            cursor.with_bytes(|bytes| bytes.to_vec())
+        );
+        assert_eq!(
+            ensure_distinct_authorities(&[&api, &cursor, &mutation]),
+            Err(CredentialAuthorityError::Conflict)
+        );
+    }
+
+    #[tokio::test]
+    async fn distinct_authority_check_accepts_distinct_files_and_material() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("revision.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        for (file, material) in [("api.key", 1_u8), ("cursor.key", 2), ("mutation.key", 3)] {
+            tokio::fs::write(dir.path().join(file), [material; 32])
+                .await
+                .unwrap();
+        }
+        let resolver = MountedCredentialResolver::from_config(&authority_config(
+            dir.path(),
+            ["api.key", "cursor.key", "mutation.key"],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+        let authorities = resolve_authorities(&resolver).await;
+        ensure_distinct_authorities(&[&authorities[0], &authorities[1], &authorities[2]]).unwrap();
     }
 
     #[tokio::test]

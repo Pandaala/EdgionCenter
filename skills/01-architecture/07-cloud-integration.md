@@ -214,18 +214,28 @@ It implements the existing four-method Admin port in `center-integration-cloudfl
 fresh account-bound client per operation for the fixed production endpoint, and advertises the
 route capability only from the actual service value. One operation deadline covers store access,
 bounded global/per-account admission, both mounted-key reads, every provider page, and pre/post
-authority checks. Account generation/spec and both token/cursor revisions must remain unchanged or
-the observation is discarded. Cursor verification precedes provider I/O, and provider loops are
-bounded to 200 zone pages and 20 record pages. The service never retries automatically.
+authority checks. Account generation/spec plus token, active-cursor, and optional fallback-cursor
+revisions must remain unchanged or the observation is discarded. Cursor verification precedes
+provider I/O, and provider loops are bounded to 200 zone pages and 20 record pages. Cursor version
+4 binds page size, exact list method, keyed canonical inventory, issue time, and expiry. A changed
+inventory returns a fixed restart-required response instead of combining pages from different
+observations. The service never retries automatically.
 
 The cursor HMAC is an exact 32-byte binding under the closed
 `cloudflare_dns_cursor_hmac` purpose. Its reference and material must differ from the API token;
-the resolver revision key remains separately protected by path and file identity. Every replica
-uses one identical active cursor key. This slice has no fallback key, so coordinated key rotation
-invalidates old cursors and clients restart pagination. `cloudflare-dns:read` is a high-trust grant
-across all configured Cloudflare accounts, not an account-scoped permission. Record HTTP handlers
-retain their separate authoritative-zone preflight and may execute two independently bounded
-operations; zone handlers execute at most one. Base Kubernetes Secret RBAC remains unchanged.
+the resolver revision key remains separately protected by path and file identity. Pagination uses
+one active signing key and at most one verification-only fallback. Successful fallback
+continuations are immediately reissued by active; rotation uses an explicit three-stage rollout
+and waits lifetime plus twice the permitted clock skew after the last old-active replica exits.
+The stateless protocol fails closed per replica but does not claim distributed configuration
+consensus. `cloudflare-dns:read` is a high-trust grant across all configured Cloudflare accounts,
+not an account-scoped permission. Record-list handlers
+receive the authoritative zone and page from one service operation so cursor validation precedes
+all provider I/O; record-detail handlers retain two independently bounded operations. Zone handlers
+execute at most one. Base Kubernetes Secret RBAC remains unchanged. Cloudflare exposes numbered
+pages rather than a snapshot token, so continuation still performs a bounded rescan. Snapshot
+persistence remains deferred until measured scale or quota evidence justifies separate SQL and
+Kubernetes implementations.
 
 Cloudflare API Tokens are preferred to legacy global API keys. AWS and Google adapters must
 prefer automatically refreshed temporary credentials through the SDK provider chains.
@@ -421,9 +431,51 @@ Inventory exhausts Cloudflare physical-record pages before grouping by canonical
 mixed member TTL, proxy, flattening, comments, or tags fail closed rather than being flattened into
 false state. Provider object IDs remain observed metadata and the canonical revision hashes the
 ordered complete member representation. HMAC-authenticated local cursors bind the exact Center
-account, provider-native account, zone, and list method using a stable composition-provided key.
-Comments and tags are currently representable only when all physical RRset members agree. The
-adapter is not composed into either binary.
+account, provider-native account, zone, list method, page size, and complete canonical inventory
+using a stable composition-provided key. Cursor v4 additionally authenticates issue and expiry
+times. A continuation fails with restart-required when that inventory changes. An optional
+fallback key can verify pagination only; change receipts and lifecycle mutation IDs remain
+active-only until CLD-35H5 gives them an independent, domain-separated
+`cloudflare_dns_mutation_token_hmac` authority. Its active signer plus optional observation-only
+fallback is an adapter reseal mechanism, not a production rotation protocol; H5 defines no receipt
+time or durable retention semantics. Receipt observation is repeatable and side-effect free; a
+receipt must never authorize another provider mutation. CLD-35H5 deliberately does not enable
+writes. H5 does not promise payload confidentiality: a lifecycle receipt may authenticate only the
+32-character Cloudflare zone ID needed for observation and, for create, the canonical apex. Raw
+Center/native account identity, credential authority, requests, approvals, leases, and execution
+fences remain forbidden; request and idempotency bindings are keyed tags. The adapter preflights
+the worst-case lifecycle receipt size before mutation. Mounted credentials expose a resolved-
+authority distinctness helper for file-identity and exact-material checks; exact resolve requests
+and composer validation bind purpose and reference. Existing read and synchronous write
+compositions resolve no mutation authority. If unattended automation is later required, deferred
+CLD-35H6 migrates the minimal lifecycle locator into a
+durable recovery descriptor and must first add authenticated receipt lifetime and rotation
+retention plus a durable prepare/persist/execute/observe protocol: persist a sanitized recovery
+descriptor before the single provider dispatch, reconcile every ambiguous outcome against real
+provider state, and commit results only under the exact operation, step, attempt, and execution-token
+fence. Mutation-key generations and ProviderAccount authority required by nonterminal operations
+cannot be removed or have their native scope replaced.
+
+CLD-35H7 adds a separate, independently default-off synchronous Zone-create composition. It only
+accepts `Managed` ProviderAccounts, resolves their existing Cloudflare API token, issues exactly
+one public/full Zone-create request, and returns the validated provider observation directly. It
+does not resolve cursor or mutation-token keys, create an operation, persist recovery state, or
+retry a mutation. A timeout, ambiguous transport result, malformed success, post-dispatch
+authority change, or mismatched provider result is returned as `unknown_outcome`; callers must
+read Cloudflare state before deciding whether another request is safe. Read and write permissions,
+capabilities, concurrency limits, and configuration switches remain independent.
+
+CLD-35H8 extends that same default-off synchronous write composition with provider-specific RRset
+PUT and DELETE routes. Each request targets one canonical owner/type identity and carries either a
+must-not-exist guard or the exact observed revision. The composition first observes the exact
+public Zone and complete canonical RRset; the adapter repeats the fresh guard and submits exactly
+one Cloudflare batch. Create/replace returns the authoritative post-mutation RRset, while delete
+returns success only after absence is observed. A pre-batch timeout is unavailable; any timeout,
+authority change, malformed result, mapping failure, or post-observation failure after batch
+dispatch is an unknown outcome and is never retried automatically. SOA and apex delegation NS
+remain outside the ordinary RRset authority. Comments and tags are representable only when all
+physical RRset members agree. Only the explicitly enabled read inventory and synchronous write
+services are composed into the binaries; all other adapter mutation surfaces remain unavailable.
 
 The credential-owning HTTP client uses the fixed Cloudflare v4 production endpoint, disables
 redirects, applies connection/request and decoded-body bounds, marks Authorization as sensitive,

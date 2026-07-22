@@ -35,9 +35,13 @@
 //!   GET  /api/v1/center/admin/watch-status                          → watch cache sync status per controller
 //!   GET  /api/v1/center/admin/metadata-store                         → metadata store key summary
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones   → Cloudflare zone inventory
+//!   POST /api/v1/center/cloudflare/dns/accounts/{account_id}/zones   → create a Cloudflare zone
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id} → Cloudflare zone detail
+//!   DELETE /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id} → delete one Cloudflare zone
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets → Cloudflare RRset inventory
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → Cloudflare RRset detail
+//!   PUT  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → create/replace one Cloudflare RRset
+//!   DELETE /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → delete one Cloudflare RRset
 //!   GET  /api/v1/center/cloud/provider-capabilities/accounts/{account_id} → sanitized capability snapshot
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
 
@@ -108,6 +112,8 @@ pub struct ApiState {
     /// Optional SDK-free Cloudflare DNS read service. Provider clients and credentials remain
     /// behind the composition boundary.
     pub cloudflare_dns_admin: Option<cloudflare_dns::SharedCloudflareDnsAdminService>,
+    /// Optional SDK-free Cloudflare DNS synchronous write service.
+    pub cloudflare_dns_write_admin: Option<cloudflare_dns::SharedCloudflareDnsWriteAdminService>,
     /// Optional secret-free provider account desired-state store.
     pub provider_account_store: Option<Arc<dyn edgion_center_core::ProviderAccountStore>>,
     /// Optional capability snapshot store. Admin handlers only perform exact-key reads.
@@ -220,6 +226,7 @@ pub fn router(mut state: ApiState) -> Router {
     // effective value in state also makes `/server-info` and route mounting
     // report the same surface when a composition is incomplete.
     state.capabilities.cloudflare_dns_read &= state.cloudflare_dns_admin.is_some();
+    state.capabilities.cloudflare_dns_write &= state.cloudflare_dns_write_admin.is_some();
     state.capabilities.provider_account_admin &= state.provider_account_store.is_some();
     state.capabilities.provider_capability_read &=
         state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
@@ -372,6 +379,24 @@ pub fn router(mut state: ApiState) -> Router {
                 "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}",
                 get(cloudflare_dns::get_record_set),
             );
+    }
+    if capabilities.cloudflare_dns_write && state.cloudflare_dns_write_admin.is_some() {
+        let cloudflare_dns_write_routes = Router::new()
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones",
+                post(cloudflare_dns::create_zone),
+            )
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}",
+                delete(cloudflare_dns::delete_zone),
+            )
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}",
+                axum::routing::put(cloudflare_dns::put_record_set)
+                    .delete(cloudflare_dns::delete_record_set),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
+        app = app.merge(cloudflare_dns_write_routes);
     }
     if capabilities.provider_account_admin && state.provider_account_store.is_some() {
         let provider_account_routes = Router::new()
@@ -983,6 +1008,7 @@ mod tests {
             role_admin: None,
             audit_reader: None,
             cloudflare_dns_admin: None,
+            cloudflare_dns_write_admin: None,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,

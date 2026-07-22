@@ -14,7 +14,9 @@ pub use http::{
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Write,
     sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use async_trait::async_trait;
@@ -44,7 +46,12 @@ const MAX_RECORD_PROVIDER_PAGES: u32 = 20;
 const PROVIDER_PAGE_SIZE: u32 = 5_000;
 const MAX_INVENTORY_ZONES: usize = 10_000;
 const MAX_INVENTORY_RECORDS: usize = 100_000;
+const MAX_INVENTORY_TAG_BYTES: usize = 64 * 1024 * 1024;
 const MAX_BATCH_OPERATIONS: usize = 10_000;
+const DEFAULT_CURSOR_TTL_SECS: u64 = 900;
+const MAX_CURSOR_TTL_SECS: u64 = 3_600;
+const DEFAULT_CURSOR_CLOCK_SKEW_SECS: u64 = 30;
+const MAX_CURSOR_CLOCK_SKEW_SECS: u64 = 300;
 type HmacSha256 = Hmac<Sha256>;
 
 pub type CloudflareApiResult<T> = Result<T, NormalizedProviderError>;
@@ -154,7 +161,7 @@ pub struct CloudflarePage<T> {
 /// The provider-native account ID, credentials, raw response metadata, and
 /// provider error details are intentionally absent. The Center account ID in
 /// `zone` is the only account identity exposed to consumers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ObservedCloudflareZone {
     pub zone: DnsZoneRef,
     pub kind: CloudflareZoneKind,
@@ -274,6 +281,329 @@ pub trait CloudflareZoneInventory: Send + Sync {
     ) -> DnsProviderResult<Option<ObservedCloudflareZone>>;
 }
 
+/// Minimal synchronous Cloudflare DNS writer.
+///
+/// This surface intentionally has no cursor or mutation-token authority. A successful call
+/// returns the provider's validated resource directly; an ambiguous provider response remains an
+/// `UnknownOutcome` and must be reconciled by a subsequent read before any retry.
+pub struct CloudflareDnsSyncWriter {
+    center_account_id: CloudResourceId,
+    cloudflare_account_id: String,
+    api: Arc<dyn CloudflareApi>,
+    instance: Arc<()>,
+}
+
+/// Result of one synchronous RRset mutation.
+///
+/// Create and replace return the authoritative post-mutation observation. Delete succeeds only
+/// after a post-mutation observation confirms that the RRset is absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloudflareDnsSyncRecordOutcome {
+    Present(Box<ObservedDnsRecordSet>),
+    Deleted,
+}
+
+/// Opaque, single-use proof that one exact Zone passed the synchronous deletion preflight.
+///
+/// Fields are private so callers cannot bypass the fresh apex, revision, record, and DNSSEC
+/// checks. Consuming the guard prevents accidental repeated dispatch through the same proof.
+#[derive(Debug)]
+pub struct CloudflareDnsSyncZoneDeleteGuard {
+    zone_id: DnsZoneId,
+    writer_instance: Arc<()>,
+}
+
+impl CloudflareDnsSyncWriter {
+    pub fn new(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn CloudflareApi>,
+    ) -> Result<Self, NormalizedProviderError> {
+        center_account_id
+            .validate()
+            .map_err(|_| validation("invalid_provider_account_id"))?;
+        account
+            .validate()
+            .map_err(|_| validation("invalid_provider_account"))?;
+        if account.provider != CloudProvider::Cloudflare {
+            return Err(validation("cloudflare_provider_required"));
+        }
+        let ProviderAccountScope::Cloudflare { account_id } = account
+            .scope
+            .as_ref()
+            .ok_or_else(|| validation("cloudflare_account_scope_required"))?
+        else {
+            return Err(validation("cloudflare_account_scope_mismatch"));
+        };
+        if !valid_cloudflare_identifier(account_id) {
+            return Err(validation("invalid_cloudflare_account_id"));
+        }
+        Ok(Self {
+            center_account_id,
+            cloudflare_account_id: account_id.clone(),
+            api,
+            instance: Arc::new(()),
+        })
+    }
+
+    /// Creates one public, full Cloudflare zone with exactly one provider request and no retry.
+    pub async fn create_zone(
+        &self,
+        apex: &AbsoluteDnsName,
+    ) -> DnsProviderResult<ObservedCloudflareZone> {
+        let request = CloudflareCreateZoneRequest {
+            account_id: self.cloudflare_account_id.clone(),
+            name: apex.as_str().to_owned(),
+            kind: CloudflareZoneKind::Full,
+        };
+        let created = self.api.create_zone(&request).await?;
+        if created.account_id != self.cloudflare_account_id
+            || created.name != apex.as_str()
+            || created.kind != CloudflareZoneKind::Full
+            || created.name_servers.is_empty()
+            || !valid_cloudflare_identifier(&created.id)
+        {
+            return Err(unknown_outcome("cloudflare_create_zone_result_mismatch"));
+        }
+        let observed = map_zone_inventory_for_account(
+            &self.center_account_id,
+            &self.cloudflare_account_id,
+            created,
+        )
+        .map_err(|_| unknown_outcome("cloudflare_create_zone_result_mismatch"))?;
+        if observed.zone.apex != *apex || observed.zone.visibility != ZoneVisibility::Public {
+            return Err(unknown_outcome("cloudflare_create_zone_result_mismatch"));
+        }
+        Ok(observed)
+    }
+
+    /// Observes one exact zone without cursor authority or mutation side effects.
+    pub async fn observe_zone(
+        &self,
+        zone_id: &DnsZoneId,
+    ) -> DnsProviderResult<Option<ObservedCloudflareZone>> {
+        zone_id
+            .validate()
+            .map_err(|_| validation("invalid_cloudflare_zone_id"))?;
+        if !valid_cloudflare_identifier(zone_id.as_str()) {
+            return Err(validation("invalid_cloudflare_zone_id"));
+        }
+        self.api
+            .get_zone(zone_id.as_str())
+            .await?
+            .map(|zone| {
+                map_zone_inventory_for_account(
+                    &self.center_account_id,
+                    &self.cloudflare_account_id,
+                    zone,
+                )
+            })
+            .transpose()
+    }
+
+    /// Validates one exact empty, DNSSEC-disabled zone without mutation.
+    ///
+    /// The apex and provider revision are checked against a fresh zone observation. Records and
+    /// DNSSEC are observed before an opaque guard is returned. The caller must recheck its local
+    /// account and credential authority before consuming the guard in [`Self::delete_zone`].
+    pub async fn preflight_zone_delete(
+        &self,
+        zone_id: &DnsZoneId,
+        expected_apex: &AbsoluteDnsName,
+        expected_revision: &DnsRecordRevision,
+    ) -> DnsProviderResult<CloudflareDnsSyncZoneDeleteGuard> {
+        zone_id
+            .validate()
+            .map_err(|_| validation("invalid_cloudflare_zone_id"))?;
+        expected_revision
+            .validate()
+            .map_err(|_| validation("invalid_cloudflare_zone_revision"))?;
+        if !valid_cloudflare_identifier(zone_id.as_str()) {
+            return Err(validation("invalid_cloudflare_zone_id"));
+        }
+        let provider_zone = self
+            .api
+            .get_zone(zone_id.as_str())
+            .await?
+            .ok_or_else(|| not_found("cloudflare_zone_not_found"))?;
+        let observed = map_zone_inventory_for_account(
+            &self.center_account_id,
+            &self.cloudflare_account_id,
+            provider_zone,
+        )?;
+        if observed.zone.apex != *expected_apex {
+            return Err(conflict("cloudflare_zone_name_confirmation_mismatch"));
+        }
+        if observed.zone.visibility != ZoneVisibility::Public {
+            return Err(validation("cloudflare_zone_scope_mismatch"));
+        }
+        if observed.revision.as_ref() != Some(expected_revision) {
+            return Err(conflict("cloudflare_zone_revision_conflict"));
+        }
+
+        let mut records = Vec::new();
+        let mut expected_total_pages = None;
+        for page in 1..=MAX_RECORD_PROVIDER_PAGES {
+            let result = self
+                .api
+                .list_records(zone_id.as_str(), page, PROVIDER_PAGE_SIZE)
+                .await?;
+            validate_provider_page(page, PROVIDER_PAGE_SIZE, &result)?;
+            if result.total_pages > MAX_RECORD_PROVIDER_PAGES {
+                return Err(validation("cloudflare_record_pagination_limit"));
+            }
+            validate_stable_total_pages(&mut expected_total_pages, result.total_pages)?;
+            records.extend(result.items);
+            if records.len() > MAX_INVENTORY_RECORDS {
+                return Err(validation("cloudflare_record_inventory_limit"));
+            }
+            if page >= result.total_pages {
+                break;
+            }
+        }
+        if records.iter().any(|record| {
+            !(record.name == expected_apex.as_str()
+                && matches!(
+                    record.value,
+                    DnsRecordSetValue::Soa { .. } | DnsRecordSetValue::Ns { .. }
+                ))
+        }) {
+            return Err(conflict("cloudflare_zone_not_empty"));
+        }
+
+        let dnssec = self.api.get_dnssec(zone_id.as_str()).await?;
+        let dnssec = map_dnssec_observation(dnssec.as_ref())?;
+        if !matches!(
+            dnssec.state,
+            DnssecProviderState::Disabled | DnssecProviderState::Unsupported
+        ) {
+            return Err(conflict("cloudflare_zone_dnssec_not_disabled"));
+        }
+
+        Ok(CloudflareDnsSyncZoneDeleteGuard {
+            zone_id: zone_id.clone(),
+            writer_instance: self.instance.clone(),
+        })
+    }
+
+    /// Consumes one validated preflight guard and dispatches exactly one provider delete.
+    pub async fn delete_zone(
+        &self,
+        guard: CloudflareDnsSyncZoneDeleteGuard,
+    ) -> DnsProviderResult<()> {
+        if !Arc::ptr_eq(&self.instance, &guard.writer_instance) {
+            return Err(validation("cloudflare_zone_delete_guard_scope_mismatch"));
+        }
+        let ack = self.api.delete_zone(guard.zone_id.as_str()).await?;
+        if ack.id != guard.zone_id.as_str() {
+            return Err(unknown_outcome("cloudflare_delete_zone_result_mismatch"));
+        }
+        Ok(())
+    }
+
+    /// Observes one exact RRset using a bounded provider scan.
+    pub async fn observe_record_set(
+        &self,
+        zone: &DnsZoneRef,
+        key: &DnsRecordSetKey,
+    ) -> DnsProviderResult<Option<ObservedDnsRecordSet>> {
+        key.validate()
+            .map_err(|_| validation("invalid_record_key"))?;
+        Ok(self
+            .all_records(zone)
+            .await?
+            .into_iter()
+            .find(|record| &record.record_set.key == key))
+    }
+
+    /// Applies exactly one guarded RRset change with one Cloudflare batch request and no retry.
+    pub async fn apply_record_change(
+        &self,
+        zone: &DnsZoneRef,
+        change: &DnsRecordChange,
+    ) -> DnsProviderResult<CloudflareDnsSyncRecordOutcome> {
+        self.validate_zone_ref(zone)?;
+        validate_dns_changes(zone, std::slice::from_ref(change))
+            .map_err(|_| validation("invalid_dns_changes"))?;
+        let current = self.all_records(zone).await?;
+        let request = plan_batch(std::slice::from_ref(change), current)?;
+        let result = self
+            .api
+            .batch_records(zone.zone_id.as_str(), &request)
+            .await?;
+        validate_batch_result(zone, std::slice::from_ref(change), &request, result)?;
+
+        let (key, expected) = match change {
+            DnsRecordChange::Create { record_set, .. } => (&record_set.key, Some(record_set)),
+            DnsRecordChange::Replace { desired, .. } => (&desired.key, Some(desired)),
+            DnsRecordChange::Delete { previous, .. } => (&previous.record_set.key, None),
+        };
+        let observed = self
+            .observe_record_set(zone, key)
+            .await
+            .map_err(|_| unknown_outcome("cloudflare_record_post_observation_failed"))?;
+        match (expected, observed) {
+            (Some(expected), Some(observed)) if &observed.record_set == expected => {
+                Ok(CloudflareDnsSyncRecordOutcome::Present(Box::new(observed)))
+            }
+            (None, None) => Ok(CloudflareDnsSyncRecordOutcome::Deleted),
+            _ => Err(unknown_outcome(
+                "cloudflare_record_post_observation_mismatch",
+            )),
+        }
+    }
+
+    async fn all_records(&self, zone: &DnsZoneRef) -> DnsProviderResult<Vec<ObservedDnsRecordSet>> {
+        self.validate_zone_ref(zone)?;
+        let provider_zone = self
+            .api
+            .get_zone(zone.zone_id.as_str())
+            .await?
+            .ok_or_else(|| not_found("cloudflare_zone_not_found"))?;
+        let observed_zone = map_zone_for_account(
+            &self.center_account_id,
+            &self.cloudflare_account_id,
+            provider_zone,
+        )?;
+        if observed_zone.zone != *zone {
+            return Err(validation("cloudflare_zone_identity_mismatch"));
+        }
+        let mut records = Vec::new();
+        let mut expected_total_pages = None;
+        for page in 1..=MAX_RECORD_PROVIDER_PAGES {
+            let result = self
+                .api
+                .list_records(zone.zone_id.as_str(), page, PROVIDER_PAGE_SIZE)
+                .await?;
+            validate_provider_page(page, PROVIDER_PAGE_SIZE, &result)?;
+            if result.total_pages > MAX_RECORD_PROVIDER_PAGES {
+                return Err(validation("cloudflare_record_pagination_limit"));
+            }
+            validate_stable_total_pages(&mut expected_total_pages, result.total_pages)?;
+            records.extend(result.items);
+            if records.len() > MAX_INVENTORY_RECORDS {
+                return Err(validation("cloudflare_record_inventory_limit"));
+            }
+            if page >= result.total_pages {
+                return aggregate_records(zone, records);
+            }
+        }
+        Err(validation("cloudflare_record_pagination_limit"))
+    }
+
+    fn validate_zone_ref(&self, zone: &DnsZoneRef) -> DnsProviderResult<()> {
+        zone.validate().map_err(|_| validation("invalid_zone"))?;
+        if zone.provider != CloudProvider::Cloudflare
+            || zone.provider_account_id != self.center_account_id
+            || zone.visibility != ZoneVisibility::Public
+            || !valid_cloudflare_identifier(zone.zone_id.as_str())
+        {
+            return Err(validation("cloudflare_zone_scope_mismatch"));
+        }
+        Ok(())
+    }
+}
+
 /// Stable composition-provided key for opaque cursor authentication.
 ///
 /// All replicas serving one account must receive the same key. The type is
@@ -296,12 +626,182 @@ impl CloudflareCursorKey {
     }
 }
 
+trait CloudflareCursorClock: Send + Sync {
+    fn unix_seconds(&self) -> DnsProviderResult<u64>;
+}
+
+struct SystemCloudflareCursorClock;
+
+impl CloudflareCursorClock for SystemCloudflareCursorClock {
+    fn unix_seconds(&self) -> DnsProviderResult<u64> {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .map_err(|_| validation("cloudflare_cursor_clock_unavailable"))
+    }
+}
+
+/// Active signing key and optional verification-only fallback for DNS cursors.
+///
+/// Mutation and change receipt tokens deliberately continue to use only the
+/// active key; the fallback is confined to pagination cursor verification.
+pub struct CloudflareCursorKeyRing {
+    active: CloudflareCursorKey,
+    fallback: Option<CloudflareCursorKey>,
+    ttl_secs: u64,
+    clock_skew_secs: u64,
+    clock: Arc<dyn CloudflareCursorClock>,
+}
+
+impl std::fmt::Debug for CloudflareCursorKeyRing {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CloudflareCursorKeyRing")
+            .field("active", &"[REDACTED]")
+            .field("fallback", &self.fallback.as_ref().map(|_| "[REDACTED]"))
+            .field("ttl_secs", &self.ttl_secs)
+            .field("clock_skew_secs", &self.clock_skew_secs)
+            .finish()
+    }
+}
+
+impl CloudflareCursorKeyRing {
+    pub fn new(
+        active: CloudflareCursorKey,
+        fallback: Option<CloudflareCursorKey>,
+        ttl: Duration,
+        clock_skew: Duration,
+    ) -> Result<Self, NormalizedProviderError> {
+        Self::with_clock(
+            active,
+            fallback,
+            ttl,
+            clock_skew,
+            Arc::new(SystemCloudflareCursorClock),
+        )
+    }
+
+    fn with_clock(
+        active: CloudflareCursorKey,
+        fallback: Option<CloudflareCursorKey>,
+        ttl: Duration,
+        clock_skew: Duration,
+        clock: Arc<dyn CloudflareCursorClock>,
+    ) -> Result<Self, NormalizedProviderError> {
+        let ttl_secs = ttl.as_secs();
+        let clock_skew_secs = clock_skew.as_secs();
+        if ttl.subsec_nanos() != 0
+            || clock_skew.subsec_nanos() != 0
+            || ttl_secs == 0
+            || ttl_secs > MAX_CURSOR_TTL_SECS
+            || clock_skew_secs > MAX_CURSOR_CLOCK_SKEW_SECS
+            || clock_skew_secs >= ttl_secs
+        {
+            return Err(validation("invalid_cloudflare_cursor_lifetime"));
+        }
+        if fallback
+            .as_ref()
+            .is_some_and(|fallback| fallback.0.as_ref() == active.0.as_ref())
+        {
+            return Err(validation("duplicate_cloudflare_cursor_key"));
+        }
+        Ok(Self {
+            active,
+            fallback,
+            ttl_secs,
+            clock_skew_secs,
+            clock,
+        })
+    }
+
+    fn now(&self) -> DnsProviderResult<u64> {
+        self.clock.unix_seconds()
+    }
+}
+
+impl From<CloudflareCursorKey> for CloudflareCursorKeyRing {
+    fn from(active: CloudflareCursorKey) -> Self {
+        Self::new(
+            active,
+            None,
+            Duration::from_secs(DEFAULT_CURSOR_TTL_SECS),
+            Duration::from_secs(DEFAULT_CURSOR_CLOCK_SKEW_SECS),
+        )
+        .expect("static cursor lifetime is valid")
+    }
+}
+
+/// Independent HMAC key for Cloudflare mutation observation tokens.
+///
+/// This type is intentionally not interchangeable with pagination cursor keys.
+pub struct CloudflareMutationTokenKey(Zeroizing<[u8; 32]>);
+
+impl CloudflareMutationTokenKey {
+    pub fn new(value: [u8; 32]) -> Result<Self, NormalizedProviderError> {
+        if value.iter().all(|byte| *byte == 0) {
+            return Err(validation("weak_cloudflare_mutation_token_key"));
+        }
+        Ok(Self(Zeroizing::new(value)))
+    }
+
+    pub fn from_zeroizing(value: Zeroizing<[u8; 32]>) -> Result<Self, NormalizedProviderError> {
+        if value.iter().all(|byte| *byte == 0) {
+            return Err(validation("weak_cloudflare_mutation_token_key"));
+        }
+        Ok(Self(value))
+    }
+}
+
+/// Active signer and optional verification-only fallback for mutation tokens.
+pub struct CloudflareMutationTokenKeyRing {
+    active: CloudflareMutationTokenKey,
+    fallback: Option<CloudflareMutationTokenKey>,
+}
+
+impl CloudflareMutationTokenKeyRing {
+    pub fn new(
+        active: CloudflareMutationTokenKey,
+        fallback: Option<CloudflareMutationTokenKey>,
+    ) -> Result<Self, NormalizedProviderError> {
+        if fallback
+            .as_ref()
+            .is_some_and(|fallback| fallback.0.as_ref() == active.0.as_ref())
+        {
+            return Err(validation("duplicate_cloudflare_mutation_token_key"));
+        }
+        Ok(Self { active, fallback })
+    }
+}
+
+impl std::fmt::Debug for CloudflareMutationTokenKeyRing {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CloudflareMutationTokenKeyRing")
+            .field("active", &"[REDACTED]")
+            .field("fallback", &self.fallback.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
+/// Opaque proof that a record cursor was checked before authoritative provider I/O.
+pub struct ValidatedCloudflareRecordCursor {
+    adapter_instance: Arc<()>,
+    center_account_id: CloudResourceId,
+    cloudflare_account_id: String,
+    zone_id: DnsZoneId,
+    request: DnsPageRequest,
+    cursor: Option<VerifiedCursor>,
+    now: u64,
+}
+
 /// Account-bound Cloudflare DNS adapter.
 pub struct CloudflareDnsAdapter {
+    adapter_instance: Arc<()>,
     center_account_id: CloudResourceId,
     cloudflare_account_id: String,
     api: Arc<dyn CloudflareApi>,
-    cursor_key: CloudflareCursorKey,
+    cursor_keys: CloudflareCursorKeyRing,
+    mutation_token_keys: Option<CloudflareMutationTokenKeyRing>,
 }
 
 impl CloudflareDnsAdapter {
@@ -309,7 +809,17 @@ impl CloudflareDnsAdapter {
         center_account_id: CloudResourceId,
         account: &ProviderAccountSpec,
         api: Arc<dyn CloudflareApi>,
-        cursor_key: CloudflareCursorKey,
+        cursor_keys: impl Into<CloudflareCursorKeyRing>,
+    ) -> Result<Self, NormalizedProviderError> {
+        Self::build(center_account_id, account, api, cursor_keys.into(), None)
+    }
+
+    fn build(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn CloudflareApi>,
+        cursor_keys: CloudflareCursorKeyRing,
+        mutation_token_keys: Option<CloudflareMutationTokenKeyRing>,
     ) -> Result<Self, NormalizedProviderError> {
         account
             .validate()
@@ -324,12 +834,63 @@ impl CloudflareDnsAdapter {
         if account.provider != CloudProvider::Cloudflare {
             return Err(validation("cloudflare_provider_required"));
         }
+        if let Some(mutation_keys) = mutation_token_keys.as_ref() {
+            let cursor_materials =
+                std::iter::once(&cursor_keys.active).chain(cursor_keys.fallback.as_ref());
+            let mutation_materials =
+                std::iter::once(&mutation_keys.active).chain(mutation_keys.fallback.as_ref());
+            if cursor_materials.clone().any(|cursor| {
+                mutation_materials
+                    .clone()
+                    .any(|mutation| cursor.0.as_ref() == mutation.0.as_ref())
+            }) {
+                return Err(validation("cloudflare_token_key_material_reused"));
+            }
+        }
         Ok(Self {
+            adapter_instance: Arc::new(()),
             center_account_id,
             cloudflare_account_id: account_id.clone(),
             api,
-            cursor_key,
+            cursor_keys,
+            mutation_token_keys,
         })
+    }
+
+    pub fn new_with_cursor_key_ring(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn CloudflareApi>,
+        cursor_keys: CloudflareCursorKeyRing,
+    ) -> Result<Self, NormalizedProviderError> {
+        Self::new(center_account_id, account, api, cursor_keys)
+    }
+
+    /// Constructs a write-capable adapter with independent cursor and mutation authorities.
+    ///
+    /// H5a keeps this adapter API available for hermetic provider work only. Production write
+    /// composition remains blocked until H5b supplies durable operation fences and recovery
+    /// evidence around every provider mutation.
+    pub fn new_with_cursor_and_mutation_key_rings(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn CloudflareApi>,
+        cursor_keys: CloudflareCursorKeyRing,
+        mutation_token_keys: CloudflareMutationTokenKeyRing,
+    ) -> Result<Self, NormalizedProviderError> {
+        Self::build(
+            center_account_id,
+            account,
+            api,
+            cursor_keys,
+            Some(mutation_token_keys),
+        )
+    }
+
+    fn mutation_token_keys(&self) -> DnsProviderResult<&CloudflareMutationTokenKeyRing> {
+        self.mutation_token_keys
+            .as_ref()
+            .ok_or_else(|| validation("cloudflare_mutation_token_authority_required"))
     }
 
     /// Validates an opaque record-page cursor for the exact account and zone without provider I/O.
@@ -337,28 +898,59 @@ impl CloudflareDnsAdapter {
         &self,
         zone_id: &DnsZoneId,
         page: &DnsPageRequest,
-    ) -> DnsProviderResult<()> {
+    ) -> DnsProviderResult<ValidatedCloudflareRecordCursor> {
         page.validate().map_err(|_| validation("invalid_page"))?;
         if !valid_cloudflare_identifier(zone_id.as_str()) {
             return Err(validation("invalid_cloudflare_zone_id"));
         }
-        decode_cursor_offset(page, &self.record_cursor_scope(zone_id), &self.cursor_key).map(drop)
+        let now = self.cursor_keys.now()?;
+        let cursor = decode_cursor(page, &self.cursor_keys, now, |key| {
+            self.record_cursor_scope(zone_id, key)
+        })?;
+        Ok(ValidatedCloudflareRecordCursor {
+            adapter_instance: self.adapter_instance.clone(),
+            center_account_id: self.center_account_id.clone(),
+            cloudflare_account_id: self.cloudflare_account_id.clone(),
+            zone_id: zone_id.clone(),
+            request: page.clone(),
+            cursor,
+            now,
+        })
     }
 
-    fn record_cursor_scope(&self, zone_id: &DnsZoneId) -> CursorScope {
+    fn record_cursor_scope(&self, zone_id: &DnsZoneId, key: &CloudflareCursorKey) -> CursorScope {
         CursorScope::Records {
-            center_scope: cursor_scope_tag(
-                &self.cursor_key,
-                b"center-account",
-                self.center_account_id.as_str(),
-            ),
-            external_scope: cursor_scope_tag(
-                &self.cursor_key,
-                b"native-account",
-                &self.cloudflare_account_id,
-            ),
-            zone_scope: cursor_scope_tag(&self.cursor_key, b"zone", zone_id.as_str()),
+            center_scope: cursor_scope_tag(key, b"center-account", self.center_account_id.as_str()),
+            external_scope: cursor_scope_tag(key, b"native-account", &self.cloudflare_account_id),
+            zone_scope: cursor_scope_tag(key, b"zone", zone_id.as_str()),
         }
+    }
+
+    /// Lists record sets using a cursor proof captured before any provider read.
+    pub async fn list_record_sets_with_validated_cursor(
+        &self,
+        zone: &DnsZoneRef,
+        page: &DnsPageRequest,
+        validated: ValidatedCloudflareRecordCursor,
+    ) -> DnsProviderResult<DnsPage<ObservedDnsRecordSet>> {
+        page.validate().map_err(|_| validation("invalid_page"))?;
+        self.validate_zone_ref(zone)?;
+        if !Arc::ptr_eq(&validated.adapter_instance, &self.adapter_instance)
+            || validated.center_account_id != self.center_account_id
+            || validated.cloudflare_account_id != self.cloudflare_account_id
+            || validated.zone_id != zone.zone_id
+            || validated.request != *page
+        {
+            return Err(validation("cloudflare_cursor_scope_mismatch"));
+        }
+        paginate(
+            self.all_records(zone).await?,
+            page,
+            |key| self.record_cursor_scope(&zone.zone_id, key),
+            &self.cursor_keys,
+            validated.cursor,
+            validated.now,
+        )
     }
 
     async fn all_zones(&self) -> DnsProviderResult<Vec<ObservedDnsZone>> {
@@ -471,53 +1063,14 @@ impl CloudflareDnsAdapter {
     }
 
     fn map_zone(&self, zone: CloudflareZone) -> DnsProviderResult<ObservedDnsZone> {
-        if zone.account_id != self.cloudflare_account_id {
-            return Err(validation("cloudflare_zone_account_mismatch"));
-        }
-        let visibility = match zone.kind {
-            CloudflareZoneKind::Full
-            | CloudflareZoneKind::Partial
-            | CloudflareZoneKind::Secondary => ZoneVisibility::Public,
-            CloudflareZoneKind::Internal => ZoneVisibility::Private,
-        };
-        Ok(ObservedDnsZone {
-            zone: DnsZoneRef {
-                provider_account_id: self.center_account_id.clone(),
-                provider: CloudProvider::Cloudflare,
-                zone_id: DnsZoneId::new(zone.id).map_err(|_| validation("invalid_zone_id"))?,
-                apex: AbsoluteDnsName::new(zone.name)
-                    .map_err(|_| validation("invalid_zone_name"))?,
-                visibility,
-            },
-            revision: zone
-                .modified_on
-                .map(DnsRecordRevision::new)
-                .transpose()
-                .map_err(|_| validation("invalid_zone_revision"))?,
-        })
+        map_zone_for_account(&self.center_account_id, &self.cloudflare_account_id, zone)
     }
 
     fn map_zone_inventory(
         &self,
         zone: CloudflareZone,
     ) -> DnsProviderResult<ObservedCloudflareZone> {
-        if !valid_cloudflare_identifier(&zone.id) {
-            return Err(validation("invalid_cloudflare_zone_id"));
-        }
-        if !valid_cloudflare_identifier(&zone.account_id) {
-            return Err(validation("invalid_cloudflare_zone_account_id"));
-        }
-        let kind = zone.kind;
-        let status = zone.status;
-        let name_servers = zone.name_servers.clone();
-        let observed = self.map_zone(zone)?;
-        Ok(ObservedCloudflareZone {
-            zone: observed.zone,
-            kind,
-            status,
-            name_servers,
-            revision: observed.revision,
-        })
+        map_zone_inventory_for_account(&self.center_account_id, &self.cloudflare_account_id, zone)
     }
 
     fn validate_zone_ref(&self, zone: &DnsZoneRef) -> DnsProviderResult<()> {
@@ -588,15 +1141,58 @@ impl CloudflareDnsAdapter {
         mutation: LifecycleMutation,
         state: ZoneLifecycleMutationState,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        let keys = self.mutation_token_keys()?;
         let token = LifecycleMutationToken {
-            version: 1,
-            center_scope: scope_hash(self.center_account_id.as_str()),
-            external_scope: scope_hash(&self.cloudflare_account_id),
+            version: 2,
+            center_scope: mutation_scope_tag(
+                &keys.active,
+                b"center-account",
+                self.center_account_id.as_str().as_bytes(),
+            ),
+            external_scope: mutation_scope_tag(
+                &keys.active,
+                b"native-account",
+                self.cloudflare_account_id.as_bytes(),
+            ),
+            resource_scope: lifecycle_resource_scope(&keys.active, &mutation)?,
             mutation,
         };
-        let mutation_id = ZoneLifecycleMutationId::new(sign_token(&token, &self.cursor_key)?)
-            .map_err(|_| validation("cloudflare_lifecycle_receipt_encoding_failed"))?;
+        let mutation_id = ZoneLifecycleMutationId::new(sign_mutation_token(
+            &token,
+            &keys.active,
+            MutationTokenDomain::ZoneLifecycle,
+        )?)
+        .map_err(|_| validation("cloudflare_lifecycle_receipt_encoding_failed"))?;
         Ok(ZoneLifecycleMutationReceipt { mutation_id, state })
+    }
+
+    fn preflight_lifecycle_receipt(
+        &self,
+        mutation: &LifecycleMutation,
+    ) -> ZoneLifecycleProviderResult<()> {
+        let keys = self.mutation_token_keys()?;
+        let token = LifecycleMutationToken {
+            version: 2,
+            center_scope: mutation_scope_tag(
+                &keys.active,
+                b"center-account",
+                self.center_account_id.as_str().as_bytes(),
+            ),
+            external_scope: mutation_scope_tag(
+                &keys.active,
+                b"native-account",
+                self.cloudflare_account_id.as_bytes(),
+            ),
+            resource_scope: lifecycle_resource_scope(&keys.active, mutation)?,
+            mutation: mutation.clone(),
+        };
+        ZoneLifecycleMutationId::new(sign_mutation_token(
+            &token,
+            &keys.active,
+            MutationTokenDomain::ZoneLifecycle,
+        )?)
+        .map(|_| ())
+        .map_err(|_| validation("cloudflare_lifecycle_receipt_encoding_failed"))
     }
 
     fn build_receipt(
@@ -604,18 +1200,31 @@ impl CloudflareDnsAdapter {
         zone: &DnsZoneRef,
         request: &CloudflareBatchRequest,
     ) -> DnsProviderResult<DnsChangeReceipt> {
+        let keys = self.mutation_token_keys()?;
         let request_bytes = serde_json::to_vec(request)
             .map_err(|_| validation("cloudflare_batch_encoding_failed"))?;
         let token = ChangeToken {
-            version: 1,
-            center_scope: scope_hash(self.center_account_id.as_str()),
-            external_scope: scope_hash(&self.cloudflare_account_id),
-            zone_scope: scope_hash(zone.zone_id.as_str()),
-            request_scope: URL_SAFE_NO_PAD.encode(Sha256::digest(request_bytes)),
+            version: 2,
+            center_scope: mutation_scope_tag(
+                &keys.active,
+                b"center-account",
+                self.center_account_id.as_str().as_bytes(),
+            ),
+            external_scope: mutation_scope_tag(
+                &keys.active,
+                b"native-account",
+                self.cloudflare_account_id.as_bytes(),
+            ),
+            zone_scope: mutation_scope_tag(&keys.active, b"zone", zone.zone_id.as_str().as_bytes()),
+            request_scope: mutation_scope_tag(&keys.active, b"request", &request_bytes),
             guard: DnsGuardStrength::BestEffort,
         };
-        let id = DnsChangeId::new(sign_token(&token, &self.cursor_key)?)
-            .map_err(|_| validation("cloudflare_receipt_encoding_failed"))?;
+        let id = DnsChangeId::new(sign_mutation_token(
+            &token,
+            &keys.active,
+            MutationTokenDomain::DnsChange,
+        )?)
+        .map_err(|_| validation("cloudflare_receipt_encoding_failed"))?;
         Ok(committed_receipt(id))
     }
 
@@ -624,18 +1233,105 @@ impl CloudflareDnsAdapter {
         zone: &DnsZoneRef,
         change_id: &DnsChangeId,
     ) -> DnsProviderResult<DnsChangeReceipt> {
-        let token: ChangeToken = verify_token(change_id.as_str(), &self.cursor_key)
-            .map_err(|_| not_found("cloudflare_change_not_found"))?;
-        if token.version != 1
-            || token.center_scope != scope_hash(self.center_account_id.as_str())
-            || token.external_scope != scope_hash(&self.cloudflare_account_id)
-            || token.zone_scope != scope_hash(zone.zone_id.as_str())
+        let keys = self.mutation_token_keys()?;
+        let verified: VerifiedMutationToken<ChangeToken> =
+            verify_mutation_token(change_id.as_str(), keys, MutationTokenDomain::DnsChange)
+                .map_err(|_| not_found("cloudflare_change_not_found"))?;
+        let verification_key = keys.verification_key(verified.key)?;
+        let mut token = verified.value;
+        if token.version != 2
+            || token.center_scope
+                != mutation_scope_tag(
+                    verification_key,
+                    b"center-account",
+                    self.center_account_id.as_str().as_bytes(),
+                )
+            || token.external_scope
+                != mutation_scope_tag(
+                    verification_key,
+                    b"native-account",
+                    self.cloudflare_account_id.as_bytes(),
+                )
+            || token.zone_scope
+                != mutation_scope_tag(verification_key, b"zone", zone.zone_id.as_str().as_bytes())
             || token.guard != DnsGuardStrength::BestEffort
         {
             return Err(not_found("cloudflare_change_not_found"));
         }
-        Ok(committed_receipt(change_id.clone()))
+        token.center_scope = mutation_scope_tag(
+            &keys.active,
+            b"center-account",
+            self.center_account_id.as_str().as_bytes(),
+        );
+        token.external_scope = mutation_scope_tag(
+            &keys.active,
+            b"native-account",
+            self.cloudflare_account_id.as_bytes(),
+        );
+        token.zone_scope =
+            mutation_scope_tag(&keys.active, b"zone", zone.zone_id.as_str().as_bytes());
+        let resealed = DnsChangeId::new(sign_mutation_token(
+            &token,
+            &keys.active,
+            MutationTokenDomain::DnsChange,
+        )?)
+        .map_err(|_| validation("cloudflare_receipt_encoding_failed"))?;
+        Ok(committed_receipt(resealed))
     }
+}
+
+fn map_zone_for_account(
+    center_account_id: &CloudResourceId,
+    cloudflare_account_id: &str,
+    zone: CloudflareZone,
+) -> DnsProviderResult<ObservedDnsZone> {
+    if zone.account_id != cloudflare_account_id {
+        return Err(validation("cloudflare_zone_account_mismatch"));
+    }
+    let visibility = match zone.kind {
+        CloudflareZoneKind::Full | CloudflareZoneKind::Partial | CloudflareZoneKind::Secondary => {
+            ZoneVisibility::Public
+        }
+        CloudflareZoneKind::Internal => ZoneVisibility::Private,
+    };
+    Ok(ObservedDnsZone {
+        zone: DnsZoneRef {
+            provider_account_id: center_account_id.clone(),
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(zone.id).map_err(|_| validation("invalid_zone_id"))?,
+            apex: AbsoluteDnsName::new(zone.name).map_err(|_| validation("invalid_zone_name"))?,
+            visibility,
+        },
+        revision: zone
+            .modified_on
+            .map(DnsRecordRevision::new)
+            .transpose()
+            .map_err(|_| validation("invalid_zone_revision"))?,
+    })
+}
+
+fn map_zone_inventory_for_account(
+    center_account_id: &CloudResourceId,
+    cloudflare_account_id: &str,
+    zone: CloudflareZone,
+) -> DnsProviderResult<ObservedCloudflareZone> {
+    if !valid_cloudflare_identifier(&zone.id) {
+        return Err(validation("invalid_cloudflare_zone_id"));
+    }
+    if !valid_cloudflare_identifier(&zone.account_id) {
+        return Err(validation("invalid_cloudflare_zone_account_id"));
+    }
+    let kind = zone.kind;
+    let status = zone.status;
+    let name_servers = zone.name_servers.clone();
+    let observed = map_zone_for_account(center_account_id, cloudflare_account_id, zone)?;
+    Ok(ObservedCloudflareZone {
+        zone: observed.zone,
+        kind,
+        status,
+        name_servers,
+        revision: observed.revision,
+    })
 }
 
 #[async_trait]
@@ -661,25 +1357,19 @@ impl DnsProvider for CloudflareDnsAdapter {
         if provider_account_id != &self.center_account_id {
             return Err(validation("cloudflare_account_scope_mismatch"));
         }
-        let scope = CursorScope::Zones {
-            center_scope: cursor_scope_tag(
-                &self.cursor_key,
-                b"center-account",
-                self.center_account_id.as_str(),
-            ),
-            external_scope: cursor_scope_tag(
-                &self.cursor_key,
-                b"native-account",
-                &self.cloudflare_account_id,
-            ),
+        let now = self.cursor_keys.now()?;
+        let scope = |key: &CloudflareCursorKey| CursorScope::DnsZones {
+            center_scope: cursor_scope_tag(key, b"center-account", self.center_account_id.as_str()),
+            external_scope: cursor_scope_tag(key, b"native-account", &self.cloudflare_account_id),
         };
-        let offset = decode_cursor_offset(page, &scope, &self.cursor_key)?;
+        let cursor = decode_cursor(page, &self.cursor_keys, now, scope)?;
         paginate(
             self.all_zones().await?,
             page,
             scope,
-            &self.cursor_key,
-            offset,
+            &self.cursor_keys,
+            cursor,
+            now,
         )
     }
 
@@ -704,15 +1394,9 @@ impl DnsProvider for CloudflareDnsAdapter {
     ) -> DnsProviderResult<DnsPage<ObservedDnsRecordSet>> {
         page.validate().map_err(|_| validation("invalid_page"))?;
         self.validate_zone_ref(zone)?;
-        let scope = self.record_cursor_scope(&zone.zone_id);
-        let offset = decode_cursor_offset(page, &scope, &self.cursor_key)?;
-        paginate(
-            self.all_records(zone).await?,
-            page,
-            scope,
-            &self.cursor_key,
-            offset,
-        )
+        let validated = self.validate_record_inventory_cursor(&zone.zone_id, page)?;
+        self.list_record_sets_with_validated_cursor(zone, page, validated)
+            .await
     }
 
     async fn apply_record_changes(
@@ -721,6 +1405,7 @@ impl DnsProvider for CloudflareDnsAdapter {
         changes: &[DnsRecordChange],
         minimum_guard: DnsGuardStrength,
     ) -> DnsProviderResult<DnsChangeReceipt> {
+        self.mutation_token_keys()?;
         self.validate_zone_ref(zone)?;
         validate_dns_changes(zone, changes).map_err(|_| validation("invalid_dns_changes"))?;
         if minimum_guard > DnsGuardStrength::BestEffort {
@@ -742,6 +1427,7 @@ impl DnsProvider for CloudflareDnsAdapter {
         zone: &DnsZoneRef,
         change_id: &DnsChangeId,
     ) -> DnsProviderResult<DnsChangeReceipt> {
+        self.mutation_token_keys()?;
         self.validate_zone_ref(zone)?;
         self.observe_receipt(zone, change_id)
     }
@@ -758,25 +1444,19 @@ impl CloudflareZoneInventory for CloudflareDnsAdapter {
         if provider_account_id != &self.center_account_id {
             return Err(validation("cloudflare_account_scope_mismatch"));
         }
-        let scope = CursorScope::Zones {
-            center_scope: cursor_scope_tag(
-                &self.cursor_key,
-                b"center-account",
-                self.center_account_id.as_str(),
-            ),
-            external_scope: cursor_scope_tag(
-                &self.cursor_key,
-                b"native-account",
-                &self.cloudflare_account_id,
-            ),
+        let now = self.cursor_keys.now()?;
+        let scope = |key: &CloudflareCursorKey| CursorScope::CloudflareZones {
+            center_scope: cursor_scope_tag(key, b"center-account", self.center_account_id.as_str()),
+            external_scope: cursor_scope_tag(key, b"native-account", &self.cloudflare_account_id),
         };
-        let offset = decode_cursor_offset(page, &scope, &self.cursor_key)?;
+        let cursor = decode_cursor(page, &self.cursor_keys, now, scope)?;
         paginate(
             self.all_zone_inventory().await?,
             page,
             scope,
-            &self.cursor_key,
-            offset,
+            &self.cursor_keys,
+            cursor,
+            now,
         )
     }
 
@@ -814,6 +1494,12 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
         &self,
         request: &ZoneCreationRequest,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        let keys = self.mutation_token_keys()?;
+        let request_scope = mutation_scope_tag(
+            &keys.active,
+            b"create-idempotency",
+            request.idempotency_key.as_str().as_bytes(),
+        );
         if request.provider != CloudProvider::Cloudflare
             || request.provider_account_id != self.center_account_id
         {
@@ -822,6 +1508,11 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
         if request.visibility != ZoneVisibility::Public {
             return Err(validation("cloudflare_private_zone_creation_unsupported"));
         }
+        self.preflight_lifecycle_receipt(&LifecycleMutation::Create {
+            zone_id: "0".repeat(32),
+            apex: request.apex.clone(),
+            request_scope: request_scope.clone(),
+        })?;
         let provider_request = CloudflareCreateZoneRequest {
             account_id: self.cloudflare_account_id.clone(),
             name: request.apex.as_str().to_string(),
@@ -835,18 +1526,14 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
         {
             return Err(unknown_outcome("cloudflare_create_zone_result_mismatch"));
         }
-        let zone = DnsZoneRef {
-            provider_account_id: self.center_account_id.clone(),
-            provider: CloudProvider::Cloudflare,
-            zone_id: DnsZoneId::new(created.id)
-                .map_err(|_| unknown_outcome("cloudflare_create_zone_id_invalid"))?,
-            apex: request.apex.clone(),
-            visibility: ZoneVisibility::Public,
-        };
+        if !valid_cloudflare_identifier(&created.id) {
+            return Err(unknown_outcome("cloudflare_create_zone_id_invalid"));
+        }
         self.lifecycle_receipt(
             LifecycleMutation::Create {
-                zone,
-                request_scope: scope_hash(request.idempotency_key.as_str()),
+                zone_id: created.id,
+                apex: request.apex.clone(),
+                request_scope,
             },
             ZoneLifecycleMutationState::Pending,
         )
@@ -865,6 +1552,12 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
         desired: DnssecDesiredState,
         expected_revision: &ZoneLifecycleRevision,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        self.mutation_token_keys()?;
+        let mutation = LifecycleMutation::Dnssec {
+            zone_id: zone.zone_id.as_str().to_owned(),
+            desired,
+        };
+        self.preflight_lifecycle_receipt(&mutation)?;
         let observed = self
             .lifecycle_observation(zone)
             .await?
@@ -878,32 +1571,21 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
                     "cloudflare_parent_ds_removal_verification_required",
                 ));
             }
-            return self.lifecycle_receipt(
-                LifecycleMutation::Dnssec {
-                    zone: zone.clone(),
-                    desired,
-                },
-                ZoneLifecycleMutationState::Succeeded,
-            );
+            return self.lifecycle_receipt(mutation, ZoneLifecycleMutationState::Succeeded);
         }
         let result = self
             .api
             .patch_dnssec(zone.zone_id.as_str(), desired)
             .await?;
         map_dnssec_observation(Some(&result))?;
-        self.lifecycle_receipt(
-            LifecycleMutation::Dnssec {
-                zone: zone.clone(),
-                desired,
-            },
-            ZoneLifecycleMutationState::Pending,
-        )
+        self.lifecycle_receipt(mutation, ZoneLifecycleMutationState::Pending)
     }
 
     async fn delete_zone(
         &self,
         request: &ZoneDeletionRequest,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        self.mutation_token_keys()?;
         if request.approval().approved_revision != *request.revision()
             || request.approval().approved_zone != *request.zone()
             || request.approval().approved_by.trim().is_empty()
@@ -911,6 +1593,10 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
         {
             return Err(validation("invalid_cloudflare_zone_deletion_approval"));
         }
+        let mutation = LifecycleMutation::Delete {
+            zone_id: request.zone().zone_id.as_str().to_owned(),
+        };
+        self.preflight_lifecycle_receipt(&mutation)?;
         let observed = self
             .lifecycle_observation(request.zone())
             .await?
@@ -925,31 +1611,52 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
         if ack.id != request.zone().zone_id.as_str() {
             return Err(unknown_outcome("cloudflare_delete_zone_result_mismatch"));
         }
-        self.lifecycle_receipt(
-            LifecycleMutation::Delete {
-                zone: request.zone().clone(),
-            },
-            ZoneLifecycleMutationState::Pending,
-        )
+        self.lifecycle_receipt(mutation, ZoneLifecycleMutationState::Pending)
     }
 
     async fn observe_mutation(
         &self,
         mutation_id: &ZoneLifecycleMutationId,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
-        let token: LifecycleMutationToken = verify_token(mutation_id.as_str(), &self.cursor_key)
-            .map_err(|_| not_found("cloudflare_lifecycle_mutation_not_found"))?;
-        if token.version != 1
-            || token.center_scope != scope_hash(self.center_account_id.as_str())
-            || token.external_scope != scope_hash(&self.cloudflare_account_id)
+        let keys = self.mutation_token_keys()?;
+        let verified: VerifiedMutationToken<LifecycleMutationToken> = verify_mutation_token(
+            mutation_id.as_str(),
+            keys,
+            MutationTokenDomain::ZoneLifecycle,
+        )
+        .map_err(|_| not_found("cloudflare_lifecycle_mutation_not_found"))?;
+        let verification_key = keys.verification_key(verified.key)?;
+        let mut token = verified.value;
+        if token.version != 2
+            || token.center_scope
+                != mutation_scope_tag(
+                    verification_key,
+                    b"center-account",
+                    self.center_account_id.as_str().as_bytes(),
+                )
+            || token.external_scope
+                != mutation_scope_tag(
+                    verification_key,
+                    b"native-account",
+                    self.cloudflare_account_id.as_bytes(),
+                )
+            || token.resource_scope != lifecycle_resource_scope(verification_key, &token.mutation)?
         {
             return Err(not_found("cloudflare_lifecycle_mutation_not_found"));
         }
         let state = match &token.mutation {
-            LifecycleMutation::Create { zone, .. } => {
-                match self.api.get_zone(zone.zone_id.as_str()).await? {
+            LifecycleMutation::Create { zone_id, apex, .. } => {
+                let expected_zone = DnsZoneRef {
+                    provider_account_id: self.center_account_id.clone(),
+                    provider: CloudProvider::Cloudflare,
+                    zone_id: DnsZoneId::new(zone_id.clone())
+                        .map_err(|_| not_found("cloudflare_lifecycle_mutation_not_found"))?,
+                    apex: apex.clone(),
+                    visibility: ZoneVisibility::Public,
+                };
+                match self.api.get_zone(zone_id).await? {
                     Some(value) => {
-                        if self.map_zone(value)?.zone == *zone {
+                        if self.map_zone(value)?.zone == expected_zone {
                             ZoneLifecycleMutationState::Succeeded
                         } else {
                             ZoneLifecycleMutationState::UnknownOutcome
@@ -958,47 +1665,101 @@ impl ZoneLifecycleProvider for CloudflareDnsAdapter {
                     None => ZoneLifecycleMutationState::Pending,
                 }
             }
-            LifecycleMutation::Delete { zone } => {
-                if self.api.get_zone(zone.zone_id.as_str()).await?.is_none() {
+            LifecycleMutation::Delete { zone_id } => {
+                if self.api.get_zone(zone_id).await?.is_none() {
                     ZoneLifecycleMutationState::Succeeded
                 } else {
                     ZoneLifecycleMutationState::Pending
                 }
             }
-            LifecycleMutation::Dnssec { zone, desired } => {
-                let value = self.api.get_dnssec(zone.zone_id.as_str()).await?;
+            LifecycleMutation::Dnssec { zone_id, desired } => {
+                let value = self.api.get_dnssec(zone_id).await?;
                 dnssec_mutation_state(value.as_ref(), *desired)
             }
         };
+        token.center_scope = mutation_scope_tag(
+            &keys.active,
+            b"center-account",
+            self.center_account_id.as_str().as_bytes(),
+        );
+        token.external_scope = mutation_scope_tag(
+            &keys.active,
+            b"native-account",
+            self.cloudflare_account_id.as_bytes(),
+        );
+        token.resource_scope = lifecycle_resource_scope(&keys.active, &token.mutation)?;
+        let resealed = ZoneLifecycleMutationId::new(sign_mutation_token(
+            &token,
+            &keys.active,
+            MutationTokenDomain::ZoneLifecycle,
+        )?)
+        .map_err(|_| validation("cloudflare_lifecycle_receipt_encoding_failed"))?;
         Ok(ZoneLifecycleMutationReceipt {
-            mutation_id: mutation_id.clone(),
+            mutation_id: resealed,
             state,
         })
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct LifecycleMutationToken {
     version: u8,
     center_scope: String,
     external_scope: String,
+    resource_scope: String,
     mutation: LifecycleMutation,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum LifecycleMutation {
     Create {
-        zone: DnsZoneRef,
+        zone_id: String,
+        apex: AbsoluteDnsName,
         request_scope: String,
     },
     Delete {
-        zone: DnsZoneRef,
+        zone_id: String,
     },
     Dnssec {
-        zone: DnsZoneRef,
+        zone_id: String,
         desired: DnssecDesiredState,
     },
+}
+
+fn lifecycle_resource_scope(
+    key: &CloudflareMutationTokenKey,
+    mutation: &LifecycleMutation,
+) -> DnsProviderResult<String> {
+    let encoded = match mutation {
+        LifecycleMutation::Create { zone_id, apex, .. } => {
+            if !valid_cloudflare_identifier(zone_id) {
+                return Err(validation("invalid_cloudflare_lifecycle_locator"));
+            }
+            format!("create\0{zone_id}\0{}", apex.as_str())
+        }
+        LifecycleMutation::Delete { zone_id } => {
+            if !valid_cloudflare_identifier(zone_id) {
+                return Err(validation("invalid_cloudflare_lifecycle_locator"));
+            }
+            format!("delete\0{zone_id}")
+        }
+        LifecycleMutation::Dnssec { zone_id, desired } => {
+            if !valid_cloudflare_identifier(zone_id) {
+                return Err(validation("invalid_cloudflare_lifecycle_locator"));
+            }
+            let desired = match desired {
+                DnssecDesiredState::Disabled => "disabled",
+                DnssecDesiredState::Enabled => "enabled",
+            };
+            format!("dnssec\0{zone_id}\0{desired}")
+        }
+    };
+    Ok(mutation_scope_tag(
+        key,
+        b"lifecycle-resource",
+        encoded.as_bytes(),
+    ))
 }
 
 fn lifecycle_revision(
@@ -1411,6 +2172,7 @@ struct ChangeToken {
     guard: DnsGuardStrength,
 }
 
+#[cfg(test)]
 fn scope_hash(value: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(value.as_bytes()))
 }
@@ -1425,36 +2187,137 @@ fn committed_receipt(id: DnsChangeId) -> DnsChangeReceipt {
     }
 }
 
-fn sign_token<T: Serialize>(value: &T, key: &CloudflareCursorKey) -> DnsProviderResult<String> {
+#[derive(Clone, Copy)]
+enum MutationTokenDomain {
+    DnsChange,
+    ZoneLifecycle,
+}
+
+impl MutationTokenDomain {
+    fn separator(self) -> &'static [u8] {
+        match self {
+            Self::DnsChange => b"edgion-cloudflare-dns-change-token-v2\0",
+            Self::ZoneLifecycle => b"edgion-cloudflare-zone-lifecycle-token-v2\0",
+        }
+    }
+
+    fn maximum_encoded_len(self) -> usize {
+        match self {
+            Self::DnsChange => 512,
+            Self::ZoneLifecycle => 1_024,
+        }
+    }
+
+    fn maximum_decoded_len(self) -> usize {
+        self.maximum_encoded_len().saturating_mul(3) / 4
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MutationVerificationKey {
+    Active,
+    Fallback,
+}
+
+struct VerifiedMutationToken<T> {
+    value: T,
+    key: MutationVerificationKey,
+}
+
+impl CloudflareMutationTokenKeyRing {
+    fn verification_key(
+        &self,
+        key: MutationVerificationKey,
+    ) -> DnsProviderResult<&CloudflareMutationTokenKey> {
+        match key {
+            MutationVerificationKey::Active => Ok(&self.active),
+            MutationVerificationKey::Fallback => self
+                .fallback
+                .as_ref()
+                .ok_or_else(|| validation("invalid_cloudflare_token_signature")),
+        }
+    }
+}
+
+fn mutation_scope_tag(key: &CloudflareMutationTokenKey, domain: &[u8], value: &[u8]) -> String {
+    let tag = HmacSha256::new_from_slice(key.0.as_ref())
+        .expect("fixed HMAC key")
+        .chain_update(b"edgion-cloudflare-mutation-scope-v2\0")
+        .chain_update(domain)
+        .chain_update(b"\0")
+        .chain_update(value)
+        .finalize()
+        .into_bytes();
+    URL_SAFE_NO_PAD.encode(tag)
+}
+
+fn sign_mutation_token<T: Serialize>(
+    value: &T,
+    key: &CloudflareMutationTokenKey,
+    domain: MutationTokenDomain,
+) -> DnsProviderResult<String> {
     let encoded =
         serde_json::to_vec(value).map_err(|_| validation("cloudflare_token_encoding_failed"))?;
     let signature = HmacSha256::new_from_slice(key.0.as_ref())
         .expect("fixed HMAC key")
+        .chain_update(domain.separator())
         .chain_update(&encoded)
         .finalize()
         .into_bytes();
     let mut authenticated = encoded;
     authenticated.extend_from_slice(&signature);
-    Ok(URL_SAFE_NO_PAD.encode(authenticated))
+    let encoded = URL_SAFE_NO_PAD.encode(authenticated);
+    if encoded.len() > domain.maximum_encoded_len() {
+        return Err(validation("cloudflare_token_encoding_failed"));
+    }
+    Ok(encoded)
 }
 
-fn verify_token<T: for<'de> Deserialize<'de>>(
+fn verify_mutation_token<T: for<'de> Deserialize<'de>>(
     value: &str,
-    key: &CloudflareCursorKey,
-) -> DnsProviderResult<T> {
+    keys: &CloudflareMutationTokenKeyRing,
+    domain: MutationTokenDomain,
+) -> DnsProviderResult<VerifiedMutationToken<T>> {
+    if value.len() > domain.maximum_encoded_len() {
+        return Err(validation("invalid_cloudflare_token"));
+    }
     let authenticated = URL_SAFE_NO_PAD
         .decode(value)
         .map_err(|_| validation("invalid_cloudflare_token"))?;
-    if authenticated.len() < 32 {
+    if authenticated.len() < 32 || authenticated.len() > domain.maximum_decoded_len() {
         return Err(validation("invalid_cloudflare_token"));
     }
     let (encoded, signature) = authenticated.split_at(authenticated.len() - 32);
+    let verified_key = if verify_mutation_token_signature(encoded, signature, &keys.active, domain)
+    {
+        MutationVerificationKey::Active
+    } else if keys.fallback.as_ref().is_some_and(|fallback| {
+        verify_mutation_token_signature(encoded, signature, fallback, domain)
+    }) {
+        MutationVerificationKey::Fallback
+    } else {
+        return Err(validation("invalid_cloudflare_token_signature"));
+    };
+    let value =
+        serde_json::from_slice(encoded).map_err(|_| validation("invalid_cloudflare_token"))?;
+    Ok(VerifiedMutationToken {
+        value,
+        key: verified_key,
+    })
+}
+
+fn verify_mutation_token_signature(
+    encoded: &[u8],
+    signature: &[u8],
+    key: &CloudflareMutationTokenKey,
+    domain: MutationTokenDomain,
+) -> bool {
     HmacSha256::new_from_slice(key.0.as_ref())
         .expect("fixed HMAC key")
+        .chain_update(domain.separator())
         .chain_update(encoded)
         .verify_slice(signature)
-        .map_err(|_| validation("invalid_cloudflare_token_signature"))?;
-    serde_json::from_slice(encoded).map_err(|_| validation("invalid_cloudflare_token"))
+        .is_ok()
 }
 
 fn aggregate_records(
@@ -1613,7 +2476,11 @@ fn cloudflare_extension(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 enum CursorScope {
-    Zones {
+    DnsZones {
+        center_scope: String,
+        external_scope: String,
+    },
+    CloudflareZones {
         center_scope: String,
         external_scope: String,
     },
@@ -1636,20 +2503,41 @@ fn cursor_scope_tag(key: &CloudflareCursorKey, domain: &[u8], value: &str) -> St
     URL_SAFE_NO_PAD.encode(tag)
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Cursor {
     version: u8,
     scope: CursorScope,
-    offset: usize,
+    offset: u64,
+    limit: u16,
+    inventory_tag: String,
+    #[serde(default)]
+    issued_at: u64,
+    #[serde(default)]
+    expires_at: u64,
 }
 
-fn decode_cursor_offset(
+#[derive(Debug, Clone, Copy)]
+enum CursorVerificationKey {
+    Active,
+    Fallback,
+}
+
+struct VerifiedCursor {
+    cursor: Cursor,
+    key: CursorVerificationKey,
+}
+
+fn decode_cursor<F>(
     request: &DnsPageRequest,
-    scope: &CursorScope,
-    key: &CloudflareCursorKey,
-) -> DnsProviderResult<usize> {
-    let offset = match request.token.as_ref() {
-        None => 0,
+    keys: &CloudflareCursorKeyRing,
+    now: u64,
+    scope: F,
+) -> DnsProviderResult<Option<VerifiedCursor>>
+where
+    F: Fn(&CloudflareCursorKey) -> CursorScope,
+{
+    let cursor = match request.token.as_ref() {
+        None => None,
         Some(token) => {
             let authenticated = URL_SAFE_NO_PAD
                 .decode(token.as_str())
@@ -1658,41 +2546,139 @@ fn decode_cursor_offset(
                 return Err(validation("invalid_cloudflare_cursor"));
             }
             let (bytes, signature) = authenticated.split_at(authenticated.len() - 32);
-            HmacSha256::new_from_slice(key.0.as_ref())
-                .expect("fixed HMAC key")
-                .chain_update(bytes)
-                .verify_slice(signature)
-                .map_err(|_| validation("invalid_cloudflare_cursor_signature"))?;
+            let (key, verification_key) = if verify_cursor_signature(bytes, signature, &keys.active)
+            {
+                (&keys.active, CursorVerificationKey::Active)
+            } else if let Some(fallback) = keys
+                .fallback
+                .as_ref()
+                .filter(|fallback| verify_cursor_signature(bytes, signature, fallback))
+            {
+                (fallback, CursorVerificationKey::Fallback)
+            } else {
+                return Err(validation("invalid_cloudflare_cursor_signature"));
+            };
             let cursor: Cursor = serde_json::from_slice(bytes)
                 .map_err(|_| validation("invalid_cloudflare_cursor"))?;
-            if cursor.version != 2 || &cursor.scope != scope {
+            if cursor.version != 4 {
+                return Err(validation("unsupported_cloudflare_cursor_version"));
+            }
+            if cursor.scope != scope(key) {
                 return Err(validation("cloudflare_cursor_scope_mismatch"));
             }
-            cursor.offset
+            if cursor.limit != request.limit {
+                return Err(validation("cloudflare_cursor_page_size_mismatch"));
+            }
+            if cursor.offset == 0 || cursor.inventory_tag.is_empty() {
+                return Err(validation("invalid_cloudflare_cursor_offset"));
+            }
+            validate_cursor_time(&cursor, keys, now)?;
+            Some(VerifiedCursor {
+                cursor,
+                key: verification_key,
+            })
         }
     };
-    Ok(offset)
+    Ok(cursor)
 }
 
-fn paginate<T>(
+fn verify_cursor_signature(bytes: &[u8], signature: &[u8], key: &CloudflareCursorKey) -> bool {
+    HmacSha256::new_from_slice(key.0.as_ref())
+        .expect("fixed HMAC key")
+        .chain_update(bytes)
+        .verify_slice(signature)
+        .is_ok()
+}
+
+fn validate_cursor_time(
+    cursor: &Cursor,
+    keys: &CloudflareCursorKeyRing,
+    now: u64,
+) -> DnsProviderResult<()> {
+    let lifetime = cursor
+        .expires_at
+        .checked_sub(cursor.issued_at)
+        .ok_or_else(|| validation("invalid_cloudflare_cursor_time"))?;
+    if lifetime == 0 || lifetime > keys.ttl_secs {
+        return Err(validation("invalid_cloudflare_cursor_time"));
+    }
+    let latest_issued_at = now
+        .checked_add(keys.clock_skew_secs)
+        .ok_or_else(|| validation("invalid_cloudflare_cursor_time"))?;
+    if cursor.issued_at > latest_issued_at {
+        return Err(validation("cloudflare_cursor_not_yet_valid"));
+    }
+    let latest_valid_at = cursor
+        .expires_at
+        .checked_add(keys.clock_skew_secs)
+        .ok_or_else(|| validation("invalid_cloudflare_cursor_time"))?;
+    if now > latest_valid_at {
+        return Err(validation("cloudflare_cursor_expired"));
+    }
+    Ok(())
+}
+
+fn paginate<T: Serialize, F>(
     items: Vec<T>,
     request: &DnsPageRequest,
-    scope: CursorScope,
-    key: &CloudflareCursorKey,
-    offset: usize,
-) -> DnsProviderResult<DnsPage<T>> {
+    scope: F,
+    keys: &CloudflareCursorKeyRing,
+    cursor: Option<VerifiedCursor>,
+    now: u64,
+) -> DnsProviderResult<DnsPage<T>>
+where
+    F: Fn(&CloudflareCursorKey) -> CursorScope,
+{
+    let verified_with_fallback = matches!(
+        cursor.as_ref().map(|cursor| cursor.key),
+        Some(CursorVerificationKey::Fallback)
+    );
+    let verification_key = match cursor.as_ref().map(|cursor| cursor.key) {
+        Some(CursorVerificationKey::Fallback) => keys
+            .fallback
+            .as_ref()
+            .ok_or_else(|| validation("cloudflare_cursor_scope_mismatch"))?,
+        Some(CursorVerificationKey::Active) | None => &keys.active,
+    };
+    let verified_inventory_tag = inventory_tag(&items, verification_key)?;
+    let offset = match cursor {
+        Some(verified) => {
+            if verified.cursor.inventory_tag != verified_inventory_tag {
+                return Err(validation("cloudflare_inventory_changed"));
+            }
+            usize::try_from(verified.cursor.offset)
+                .map_err(|_| validation("invalid_cloudflare_cursor_offset"))?
+        }
+        None => 0,
+    };
     if offset > items.len() {
         return Err(validation("invalid_cloudflare_cursor_offset"));
     }
-    let end = (offset + usize::from(request.limit)).min(items.len());
+    let end = offset
+        .checked_add(usize::from(request.limit))
+        .ok_or_else(|| validation("invalid_cloudflare_cursor_offset"))?
+        .min(items.len());
     let next = if end < items.len() {
+        let expires_at = now
+            .checked_add(keys.ttl_secs)
+            .ok_or_else(|| validation("cloudflare_cursor_encoding_failed"))?;
+        let active_inventory_tag = if verified_with_fallback {
+            inventory_tag(&items, &keys.active)?
+        } else {
+            verified_inventory_tag
+        };
         let encoded = serde_json::to_vec(&Cursor {
-            version: 2,
-            scope,
-            offset: end,
+            version: 4,
+            scope: scope(&keys.active),
+            offset: u64::try_from(end)
+                .map_err(|_| validation("cloudflare_cursor_encoding_failed"))?,
+            limit: request.limit,
+            inventory_tag: active_inventory_tag,
+            issued_at: now,
+            expires_at,
         })
         .map_err(|_| validation("cloudflare_cursor_encoding_failed"))?;
-        let signature = HmacSha256::new_from_slice(key.0.as_ref())
+        let signature = HmacSha256::new_from_slice(keys.active.0.as_ref())
             .expect("fixed HMAC key")
             .chain_update(&encoded)
             .finalize()
@@ -1710,6 +2696,65 @@ fn paginate<T>(
         items: items.into_iter().skip(offset).take(end - offset).collect(),
         next,
     })
+}
+
+fn inventory_tag<T: Serialize>(
+    items: &[T],
+    key: &CloudflareCursorKey,
+) -> DnsProviderResult<String> {
+    inventory_tag_with_limit(items, key, MAX_INVENTORY_TAG_BYTES)
+}
+
+fn inventory_tag_with_limit<T: Serialize>(
+    items: &[T],
+    key: &CloudflareCursorKey,
+    limit: usize,
+) -> DnsProviderResult<String> {
+    let mac = HmacSha256::new_from_slice(key.0.as_ref())
+        .expect("fixed HMAC key")
+        .chain_update(b"edgion-cloudflare-inventory-v3\0");
+    let mut writer = InventoryTagWriter {
+        mac,
+        bytes: 0,
+        limit,
+        exceeded: false,
+    };
+    if serde_json::to_writer(&mut writer, items).is_err() {
+        return Err(validation(if writer.exceeded {
+            "cloudflare_inventory_serialization_limit"
+        } else {
+            "cloudflare_inventory_encoding_failed"
+        }));
+    }
+    let tag = writer.mac.finalize().into_bytes();
+    Ok(URL_SAFE_NO_PAD.encode(tag))
+}
+
+struct InventoryTagWriter {
+    mac: HmacSha256,
+    bytes: usize,
+    limit: usize,
+    exceeded: bool,
+}
+
+impl Write for InventoryTagWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let Some(total) = self.bytes.checked_add(bytes.len()) else {
+            self.exceeded = true;
+            return Err(std::io::Error::other("inventory tag byte limit exceeded"));
+        };
+        if total > self.limit {
+            self.exceeded = true;
+            return Err(std::io::Error::other("inventory tag byte limit exceeded"));
+        }
+        self.mac.update(bytes);
+        self.bytes = total;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn validate_provider_page<T>(
@@ -1772,7 +2817,13 @@ fn provider_error(category: ProviderErrorCategory, code: &str) -> NormalizedProv
 
 #[cfg(test)]
 mod tests {
-    use std::{net::Ipv4Addr, sync::Mutex};
+    use std::{
+        net::Ipv4Addr,
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            Mutex,
+        },
+    };
 
     use edgion_center_core::{
         cloud_test_support::{assert_dns_provider_conformance, DnsAdapterConformanceFixture},
@@ -1792,11 +2843,51 @@ mod tests {
     const RECORD_B_ID: &str = "22222222222222222222222222222222";
     const RECORD_C_ID: &str = "33333333333333333333333333333333";
 
+    struct FixedCursorClock(AtomicU64);
+
+    impl FixedCursorClock {
+        fn new(now: u64) -> Self {
+            Self(AtomicU64::new(now))
+        }
+
+        fn set(&self, now: u64) {
+            self.0.store(now, Ordering::SeqCst);
+        }
+    }
+
+    impl CloudflareCursorClock for FixedCursorClock {
+        fn unix_seconds(&self) -> DnsProviderResult<u64> {
+            Ok(self.0.load(Ordering::SeqCst))
+        }
+    }
+
+    fn cursor_ring(
+        active: [u8; 32],
+        fallback: Option<[u8; 32]>,
+        clock: Arc<FixedCursorClock>,
+    ) -> CloudflareCursorKeyRing {
+        CloudflareCursorKeyRing::with_clock(
+            CloudflareCursorKey::new(active).unwrap(),
+            fallback.map(|key| CloudflareCursorKey::new(key).unwrap()),
+            Duration::from_secs(900),
+            Duration::from_secs(30),
+            clock,
+        )
+        .unwrap()
+    }
+
     struct FakeApi {
+        total_calls: AtomicU64,
         zones: Mutex<Vec<CloudflareZone>>,
+        create_zone_override: Mutex<Option<CloudflareZone>>,
         get_zone_override: Mutex<Option<CloudflareZone>>,
         get_zone_calls: Mutex<u64>,
         list_zone_calls: Mutex<u64>,
+        list_record_calls: Mutex<u64>,
+        delete_zone_calls: Mutex<u64>,
+        delete_zone_ack_override: Mutex<Option<String>>,
+        batch_record_calls: Mutex<u64>,
+        batch_result_override: Mutex<Option<CloudflareBatchResult>>,
         zone_total_pages: u32,
         records: Mutex<BTreeMap<String, Vec<CloudflareRecord>>>,
         dnssec: Mutex<BTreeMap<String, CloudflareDnssec>>,
@@ -1809,6 +2900,10 @@ mod tests {
             &self,
             request: &CloudflareCreateZoneRequest,
         ) -> CloudflareApiResult<CloudflareZone> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(zone) = self.create_zone_override.lock().unwrap().clone() {
+                return Ok(zone);
+            }
             let mut sequence = self.sequence.lock().unwrap();
             *sequence += 1;
             let zone = CloudflareZone {
@@ -1831,6 +2926,7 @@ mod tests {
         }
 
         async fn get_zone(&self, zone_id: &str) -> CloudflareApiResult<Option<CloudflareZone>> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
             *self.get_zone_calls.lock().unwrap() += 1;
             if let Some(zone) = self.get_zone_override.lock().unwrap().clone() {
                 return Ok(Some(zone));
@@ -1845,13 +2941,21 @@ mod tests {
         }
 
         async fn delete_zone(&self, zone_id: &str) -> CloudflareApiResult<CloudflareDeleteZoneAck> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
+            *self.delete_zone_calls.lock().unwrap() += 1;
             self.zones.lock().unwrap().retain(|zone| zone.id != zone_id);
             Ok(CloudflareDeleteZoneAck {
-                id: zone_id.to_string(),
+                id: self
+                    .delete_zone_ack_override
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| zone_id.to_string()),
             })
         }
 
         async fn get_dnssec(&self, zone_id: &str) -> CloudflareApiResult<Option<CloudflareDnssec>> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
             Ok(self.dnssec.lock().unwrap().get(zone_id).cloned())
         }
 
@@ -1860,6 +2964,7 @@ mod tests {
             zone_id: &str,
             desired: DnssecDesiredState,
         ) -> CloudflareApiResult<CloudflareDnssec> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
             let value = CloudflareDnssec {
                 status: match desired {
                     DnssecDesiredState::Enabled => CloudflareDnssecStatus::Active,
@@ -1886,6 +2991,7 @@ mod tests {
             page: u32,
             _per_page: u32,
         ) -> CloudflareApiResult<CloudflarePage<CloudflareZone>> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
             *self.list_zone_calls.lock().unwrap() += 1;
             Ok(CloudflarePage {
                 items: self
@@ -1907,6 +3013,8 @@ mod tests {
             page: u32,
             _per_page: u32,
         ) -> CloudflareApiResult<CloudflarePage<CloudflareRecord>> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
+            *self.list_record_calls.lock().unwrap() += 1;
             Ok(CloudflarePage {
                 items: self
                     .records
@@ -1925,6 +3033,8 @@ mod tests {
             zone_id: &str,
             request: &CloudflareBatchRequest,
         ) -> CloudflareApiResult<CloudflareBatchResult> {
+            self.total_calls.fetch_add(1, Ordering::SeqCst);
+            *self.batch_record_calls.lock().unwrap() += 1;
             let mut records = self.records.lock().unwrap();
             let mut candidate = records.get(zone_id).cloned().unwrap_or_default();
             let mut deleted = Vec::new();
@@ -1959,10 +3069,16 @@ mod tests {
                 posted.push(record);
             }
             records.insert(zone_id.to_string(), candidate);
-            Ok(CloudflareBatchResult {
+            let result = CloudflareBatchResult {
                 deletes: deleted,
                 posts: posted,
-            })
+            };
+            Ok(self
+                .batch_result_override
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or(result))
         }
     }
 
@@ -1970,11 +3086,11 @@ mod tests {
     async fn scoped_adapter_passes_the_complete_shared_dns_contract() {
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
         let account = account();
-        let adapter = CloudflareDnsAdapter::new(
+        let adapter = write_adapter(
             center_account.clone(),
             &account,
             Arc::new(fake_api()),
-            CloudflareCursorKey::new([7; 32]).unwrap(),
+            [7; 32],
         )
         .unwrap();
         let zones = adapter
@@ -2028,11 +3144,11 @@ mod tests {
     #[tokio::test]
     async fn lifecycle_observation_and_dnssec_receipts_are_conservative() {
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
-        let adapter = CloudflareDnsAdapter::new(
+        let adapter = write_adapter(
             center_account.clone(),
             &account(),
             Arc::new(fake_api()),
-            CloudflareCursorKey::new([9; 32]).unwrap(),
+            [9; 32],
         )
         .unwrap();
         let zone = DnsZoneRef {
@@ -2112,6 +3228,531 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sync_writer_creates_public_full_zone_with_one_provider_call() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let writer =
+            CloudflareDnsSyncWriter::new(center_account.clone(), &account(), api.clone()).unwrap();
+        let apex = AbsoluteDnsName::new("created.example").unwrap();
+
+        let observed = writer.create_zone(&apex).await.unwrap();
+
+        assert_eq!(observed.zone.provider_account_id, center_account);
+        assert_eq!(observed.zone.provider, CloudProvider::Cloudflare);
+        assert_eq!(observed.zone.apex, apex);
+        assert_eq!(observed.zone.visibility, ZoneVisibility::Public);
+        assert_eq!(observed.kind, CloudflareZoneKind::Full);
+        assert_eq!(observed.status, CloudflareZoneStatus::Pending);
+        assert_eq!(observed.name_servers, fake_nameservers());
+        assert_eq!(api.total_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn sync_writer_rejects_invalid_accounts_without_provider_io() {
+        let api = Arc::new(fake_api());
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let wrong_provider = ProviderAccountSpec {
+            provider: CloudProvider::Aws,
+            scope: Some(ProviderAccountScope::Aws {
+                account_id: "123456789012".to_string(),
+            }),
+            credential_source: CredentialSource::Ambient,
+        };
+        assert!(
+            CloudflareDnsSyncWriter::new(center_account.clone(), &wrong_provider, api.clone())
+                .is_err()
+        );
+
+        let mut invalid_native_account = account();
+        invalid_native_account.scope = Some(ProviderAccountScope::Cloudflare {
+            account_id: "not-a-cloudflare-account".to_string(),
+        });
+        assert!(
+            CloudflareDnsSyncWriter::new(center_account, &invalid_native_account, api.clone())
+                .is_err()
+        );
+        assert_eq!(api.total_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_treats_provider_response_mismatches_as_unknown_outcomes() {
+        let apex = AbsoluteDnsName::new("created.example").unwrap();
+        let valid = CloudflareZone {
+            id: "dddddddddddddddddddddddddddddddd".to_string(),
+            account_id: "0123456789abcdef0123456789abcdef".to_string(),
+            name: apex.as_str().to_string(),
+            kind: CloudflareZoneKind::Full,
+            status: CloudflareZoneStatus::Pending,
+            name_servers: fake_nameservers(),
+            modified_on: Some("created-revision".to_string()),
+        };
+        let mut mismatches = Vec::new();
+        let mut account_mismatch = valid.clone();
+        account_mismatch.account_id = "fedcba9876543210fedcba9876543210".to_string();
+        mismatches.push(account_mismatch);
+        let mut name_mismatch = valid.clone();
+        name_mismatch.name = "other.example".to_string();
+        mismatches.push(name_mismatch);
+        let mut kind_mismatch = valid.clone();
+        kind_mismatch.kind = CloudflareZoneKind::Partial;
+        mismatches.push(kind_mismatch);
+        let mut id_mismatch = valid.clone();
+        id_mismatch.id = "invalid-id".to_string();
+        mismatches.push(id_mismatch);
+        let mut nameservers_mismatch = valid;
+        nameservers_mismatch.name_servers.clear();
+        mismatches.push(nameservers_mismatch);
+
+        for mismatch in mismatches {
+            let api = Arc::new(fake_api());
+            *api.create_zone_override.lock().unwrap() = Some(mismatch);
+            let writer = CloudflareDnsSyncWriter::new(
+                CloudResourceId::new("cloudflare-main").unwrap(),
+                &account(),
+                api.clone(),
+            )
+            .unwrap();
+
+            let error = writer.create_zone(&apex).await.unwrap_err();
+
+            assert_eq!(error.category(), ProviderErrorCategory::UnknownOutcome);
+            assert_eq!(error.code(), "cloudflare_create_zone_result_mismatch");
+            assert_eq!(api.total_calls.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_writer_observes_exact_zone_and_rrset_without_mutation() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let writer =
+            CloudflareDnsSyncWriter::new(center_account.clone(), &account(), api.clone()).unwrap();
+
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(zone.zone.provider_account_id, center_account);
+        assert_eq!(zone.zone.apex.as_str(), "example.test");
+        let key = txt_record("txt.example.test", "ignored").key;
+        let record = writer
+            .observe_record_set(&zone.zone, &key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.record_set.values,
+            BTreeSet::from([txt_value("seed")])
+        );
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_deletes_one_exact_safe_zone_with_one_mutation() {
+        let api = Arc::new(fake_api());
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let zone_id = DnsZoneId::new(ZONE_B_ID).unwrap();
+        let observed = writer.observe_zone(&zone_id).await.unwrap().unwrap();
+        let revision = observed.revision.unwrap();
+
+        let guard = writer
+            .preflight_zone_delete(
+                &zone_id,
+                &AbsoluteDnsName::new("example.net").unwrap(),
+                &revision,
+            )
+            .await
+            .unwrap();
+        writer.delete_zone(guard).await.unwrap();
+
+        assert_eq!(*api.delete_zone_calls.lock().unwrap(), 1);
+        assert!(!api
+            .zones
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|zone| zone.id == ZONE_B_ID));
+    }
+
+    #[tokio::test]
+    async fn sync_writer_zone_delete_guard_cannot_cross_writer_instances() {
+        let api = Arc::new(fake_api());
+        let first = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let second = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let guard = first
+            .preflight_zone_delete(
+                &DnsZoneId::new(ZONE_B_ID).unwrap(),
+                &AbsoluteDnsName::new("example.net").unwrap(),
+                &DnsRecordRevision::new("zone-b-revision").unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let error = second.delete_zone(guard).await.unwrap_err();
+
+        assert_eq!(error.category(), ProviderErrorCategory::Validation);
+        assert_eq!(error.code(), "cloudflare_zone_delete_guard_scope_mismatch");
+        assert_eq!(*api.delete_zone_calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_zone_delete_guards_fail_before_mutation() {
+        let cases = [
+            ("wrong.example", "zone-b-revision"),
+            ("example.net", "stale-zone-revision"),
+        ];
+        for (apex, revision) in cases {
+            let api = Arc::new(fake_api());
+            let writer = CloudflareDnsSyncWriter::new(
+                CloudResourceId::new("cloudflare-main").unwrap(),
+                &account(),
+                api.clone(),
+            )
+            .unwrap();
+
+            let error = writer
+                .preflight_zone_delete(
+                    &DnsZoneId::new(ZONE_B_ID).unwrap(),
+                    &AbsoluteDnsName::new(apex).unwrap(),
+                    &DnsRecordRevision::new(revision).unwrap(),
+                )
+                .await
+                .unwrap_err();
+
+            assert_eq!(error.category(), ProviderErrorCategory::Conflict);
+            assert_eq!(*api.delete_zone_calls.lock().unwrap(), 0);
+        }
+
+        let api = Arc::new(fake_api());
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let error = writer
+            .preflight_zone_delete(
+                &DnsZoneId::new(ZONE_A_ID).unwrap(),
+                &AbsoluteDnsName::new("example.test").unwrap(),
+                &DnsRecordRevision::new("zone-a-revision").unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.category(), ProviderErrorCategory::Conflict);
+        assert_eq!(error.code(), "cloudflare_zone_not_empty");
+        assert_eq!(*api.delete_zone_calls.lock().unwrap(), 0);
+
+        let api = Arc::new(fake_api());
+        api.records.lock().unwrap().insert(
+            ZONE_B_ID.to_string(),
+            vec![CloudflareRecord {
+                id: RECORD_A_ID.to_string(),
+                name: "unexpected.example.net".to_string(),
+                ttl: 300,
+                value: DnsRecordSetValue::Soa {
+                    primary_name_server: AbsoluteDnsName::new("ns.example.net").unwrap(),
+                    responsible_mailbox: AbsoluteDnsName::new("hostmaster.example.net").unwrap(),
+                    serial: 1,
+                    refresh: 7_200,
+                    retry: 900,
+                    expire: 1_209_600,
+                    minimum: 86_400,
+                },
+                proxied: None,
+                proxiable: false,
+                flatten_cname: None,
+                ipv4_only: false,
+                ipv6_only: false,
+                private_routing: false,
+                comment: None,
+                tags: BTreeSet::new(),
+                modified_on: Some("unexpected-soa-revision".to_string()),
+            }],
+        );
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let error = writer
+            .preflight_zone_delete(
+                &DnsZoneId::new(ZONE_B_ID).unwrap(),
+                &AbsoluteDnsName::new("example.net").unwrap(),
+                &DnsRecordRevision::new("zone-b-revision").unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "cloudflare_zone_not_empty");
+        assert_eq!(*api.delete_zone_calls.lock().unwrap(), 0);
+
+        let api = Arc::new(fake_api());
+        api.dnssec.lock().unwrap().insert(
+            ZONE_B_ID.to_string(),
+            CloudflareDnssec {
+                status: CloudflareDnssecStatus::Pending,
+                ds: None,
+                modified_on: Some("dnssec-pending".to_string()),
+            },
+        );
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let error = writer
+            .preflight_zone_delete(
+                &DnsZoneId::new(ZONE_B_ID).unwrap(),
+                &AbsoluteDnsName::new("example.net").unwrap(),
+                &DnsRecordRevision::new("zone-b-revision").unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.category(), ProviderErrorCategory::Conflict);
+        assert_eq!(error.code(), "cloudflare_zone_dnssec_not_disabled");
+        assert_eq!(*api.delete_zone_calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_zone_delete_ack_mismatch_is_unknown_without_retry() {
+        let api = Arc::new(fake_api());
+        *api.delete_zone_ack_override.lock().unwrap() = Some(ZONE_A_ID.to_string());
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+
+        let guard = writer
+            .preflight_zone_delete(
+                &DnsZoneId::new(ZONE_B_ID).unwrap(),
+                &AbsoluteDnsName::new("example.net").unwrap(),
+                &DnsRecordRevision::new("zone-b-revision").unwrap(),
+            )
+            .await
+            .unwrap();
+        let error = writer.delete_zone(guard).await.unwrap_err();
+
+        assert_eq!(error.category(), ProviderErrorCategory::UnknownOutcome);
+        assert_eq!(error.code(), "cloudflare_delete_zone_result_mismatch");
+        assert_eq!(*api.delete_zone_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_dispatches_one_batch_and_returns_fresh_create_replace_delete_results() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let writer = CloudflareDnsSyncWriter::new(center_account, &account(), api.clone()).unwrap();
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+        let desired = txt_record("new.example.test", "created");
+
+        let created = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: desired.clone(),
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap();
+        let CloudflareDnsSyncRecordOutcome::Present(created) = created else {
+            panic!("create must return a present RRset")
+        };
+        assert_eq!(created.record_set, desired);
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 1);
+
+        let replacement = txt_record("new.example.test", "replaced");
+        let replaced = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Replace {
+                    previous: created.as_ref().clone(),
+                    desired: replacement.clone(),
+                    guard: edgion_center_core::DnsMutationGuard::MatchObserved {
+                        revision: created.revision.clone(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let CloudflareDnsSyncRecordOutcome::Present(replaced) = replaced else {
+            panic!("replace must return a present RRset")
+        };
+        assert_eq!(replaced.record_set, replacement);
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 2);
+
+        let deleted = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Delete {
+                    previous: replaced.as_ref().clone(),
+                    guard: edgion_center_core::DnsMutationGuard::MatchObserved {
+                        revision: replaced.revision,
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(deleted, CloudflareDnsSyncRecordOutcome::Deleted);
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_guard_conflicts_never_dispatch_a_mutation() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let writer = CloudflareDnsSyncWriter::new(center_account, &account(), api.clone()).unwrap();
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+        let existing = writer
+            .observe_record_set(&zone, &txt_record("txt.example.test", "ignored").key)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let create_error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: txt_record("txt.example.test", "duplicate"),
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(create_error.category(), ProviderErrorCategory::Conflict);
+
+        let stale_revision = DnsRecordRevision::new("sha256:stale").unwrap();
+        let mut stale = existing;
+        stale.revision = stale_revision.clone();
+        let replace_error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Replace {
+                    previous: stale,
+                    desired: txt_record("txt.example.test", "replacement"),
+                    guard: edgion_center_core::DnsMutationGuard::MatchObserved {
+                        revision: stale_revision,
+                    },
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(replace_error.category(), ProviderErrorCategory::Conflict);
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_maps_batch_response_mismatch_to_unknown_outcome() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        *api.batch_result_override.lock().unwrap() = Some(CloudflareBatchResult {
+            deletes: Vec::new(),
+            posts: Vec::new(),
+        });
+        let writer = CloudflareDnsSyncWriter::new(center_account, &account(), api.clone()).unwrap();
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+
+        let error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: txt_record("new.example.test", "value"),
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.category(), ProviderErrorCategory::UnknownOutcome);
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_rejects_zone_scope_and_reserved_record_types_before_mutation() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let writer = CloudflareDnsSyncWriter::new(center_account, &account(), api.clone()).unwrap();
+        let mut zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+        zone.visibility = ZoneVisibility::Private;
+        let error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: txt_record("new.example.test", "value"),
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.category(), ProviderErrorCategory::Validation);
+
+        zone.visibility = ZoneVisibility::Public;
+        let reserved = ProviderDnsRecordSet {
+            key: DnsRecordSetKey {
+                owner: DnsOwnerName::new("example.test").unwrap(),
+                record_type: ProviderDnsRecordType::Ns,
+                routing: DnsRoutingIdentity::Simple,
+            },
+            ttl: DnsTtl::Seconds(300),
+            values: BTreeSet::from([DnsRecordSetValue::Ns {
+                target: AbsoluteDnsName::new("ns.example.net").unwrap(),
+            }]),
+            extension: None,
+        };
+        let error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: reserved,
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.category(), ProviderErrorCategory::Validation);
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn modified_cursor_fails_authentication() {
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
         let api = Arc::new(fake_api());
@@ -2146,6 +3787,722 @@ mod tests {
             .await
             .is_err());
         assert_eq!(*api.list_zone_calls.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn cursor_key_ring_rejects_unsafe_lifetimes_and_duplicate_material() {
+        let key = || CloudflareCursorKey::new([31; 32]).unwrap();
+        assert_eq!(
+            CloudflareCursorKeyRing::new(
+                key(),
+                Some(key()),
+                Duration::from_secs(900),
+                Duration::from_secs(30),
+            )
+            .unwrap_err()
+            .code(),
+            "duplicate_cloudflare_cursor_key"
+        );
+        for (ttl, skew) in [(0, 0), (3_601, 30), (300, 300), (900, 301)] {
+            assert_eq!(
+                CloudflareCursorKeyRing::new(
+                    key(),
+                    None,
+                    Duration::from_secs(ttl),
+                    Duration::from_secs(skew),
+                )
+                .unwrap_err()
+                .code(),
+                "invalid_cloudflare_cursor_lifetime"
+            );
+        }
+        assert!(CloudflareCursorKeyRing::new(
+            key(),
+            None,
+            Duration::from_millis(900_001),
+            Duration::from_secs(30),
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn promoted_key_accepts_fallback_cursor_and_reissues_with_active() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let mut third = api.zones.lock().unwrap()[0].clone();
+        third.id = "dddddddddddddddddddddddddddddddd".to_string();
+        third.name = "third.example".to_string();
+        api.zones.lock().unwrap().push(third);
+        let old_clock = Arc::new(FixedCursorClock::new(1_000));
+        let old = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            cursor_ring([41; 32], None, old_clock),
+        )
+        .unwrap();
+        let first = old
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let old_cursor = first.next.unwrap();
+
+        let promoted_clock = Arc::new(FixedCursorClock::new(1_010));
+        let promoted = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            cursor_ring([42; 32], Some([41; 32]), promoted_clock.clone()),
+        )
+        .unwrap();
+        let second = promoted
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: Some(old_cursor.clone()),
+                },
+            )
+            .await
+            .unwrap();
+        let active_cursor = second.next.unwrap();
+
+        let active_only = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            cursor_ring([42; 32], None, promoted_clock),
+        )
+        .unwrap();
+        assert!(active_only
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: Some(active_cursor),
+                },
+            )
+            .await
+            .is_ok());
+
+        let calls_before_rejection = *api.list_zone_calls.lock().unwrap();
+        let error = active_only
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: Some(old_cursor),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_cloudflare_cursor_signature");
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), calls_before_rejection);
+    }
+
+    #[tokio::test]
+    async fn mutation_rotation_reseals_with_active_and_domains_do_not_cross() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let zone = DnsZoneRef {
+            provider_account_id: center_account.clone(),
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        let old = CloudflareDnsAdapter::new_with_cursor_and_mutation_key_rings(
+            center_account.clone(),
+            &account(),
+            Arc::new(fake_api()),
+            cursor_ring([45; 32], None, Arc::new(FixedCursorClock::new(1_000))),
+            CloudflareMutationTokenKeyRing::new(
+                CloudflareMutationTokenKey::new([55; 32]).unwrap(),
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let change = old
+            .build_receipt(
+                &zone,
+                &CloudflareBatchRequest {
+                    deletes: Vec::new(),
+                    patches: Vec::new(),
+                    puts: Vec::new(),
+                    posts: Vec::new(),
+                },
+            )
+            .unwrap();
+        let mutation = old
+            .lifecycle_receipt(
+                LifecycleMutation::Delete {
+                    zone_id: zone.zone_id.as_str().to_owned(),
+                },
+                ZoneLifecycleMutationState::Pending,
+            )
+            .unwrap();
+
+        let api = Arc::new(fake_api());
+        let promoted = CloudflareDnsAdapter::new_with_cursor_and_mutation_key_rings(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            cursor_ring(
+                [46; 32],
+                Some([45; 32]),
+                Arc::new(FixedCursorClock::new(1_010)),
+            ),
+            CloudflareMutationTokenKeyRing::new(
+                CloudflareMutationTokenKey::new([56; 32]).unwrap(),
+                Some(CloudflareMutationTokenKey::new([55; 32]).unwrap()),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let resealed_change = promoted.observe_receipt(&zone, &change.id).unwrap();
+        assert_ne!(resealed_change.id, change.id);
+        let resealed_mutation = promoted
+            .observe_mutation(&mutation.mutation_id)
+            .await
+            .unwrap();
+        assert_ne!(resealed_mutation.mutation_id, mutation.mutation_id);
+
+        let active_only = CloudflareDnsAdapter::new_with_cursor_and_mutation_key_rings(
+            center_account,
+            &account(),
+            api.clone(),
+            cursor_ring([46; 32], None, Arc::new(FixedCursorClock::new(1_010))),
+            CloudflareMutationTokenKeyRing::new(
+                CloudflareMutationTokenKey::new([56; 32]).unwrap(),
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(active_only
+            .observe_receipt(&zone, &resealed_change.id)
+            .is_ok());
+        assert!(active_only
+            .observe_mutation(&resealed_mutation.mutation_id)
+            .await
+            .is_ok());
+
+        let calls = *api.get_zone_calls.lock().unwrap();
+        let cross_lifecycle = ZoneLifecycleMutationId::new(change.id.as_str()).unwrap();
+        assert_eq!(
+            promoted
+                .observe_mutation(&cross_lifecycle)
+                .await
+                .unwrap_err()
+                .code(),
+            "cloudflare_lifecycle_mutation_not_found"
+        );
+        let cross_change = DnsChangeId::new(mutation.mutation_id.as_str()).unwrap();
+        assert_eq!(
+            promoted
+                .observe_receipt(&zone, &cross_change)
+                .unwrap_err()
+                .code(),
+            "cloudflare_change_not_found"
+        );
+        assert_eq!(*api.get_zone_calls.lock().unwrap(), calls);
+    }
+
+    #[test]
+    fn mutation_authority_rejects_duplicate_and_cursor_reused_material() {
+        assert_eq!(
+            CloudflareMutationTokenKeyRing::new(
+                CloudflareMutationTokenKey::new([60; 32]).unwrap(),
+                Some(CloudflareMutationTokenKey::new([60; 32]).unwrap()),
+            )
+            .unwrap_err()
+            .code(),
+            "duplicate_cloudflare_mutation_token_key"
+        );
+        assert!(CloudflareMutationTokenKey::new([0; 32]).is_err());
+        let error = CloudflareDnsAdapter::new_with_cursor_and_mutation_key_rings(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            Arc::new(fake_api()),
+            CloudflareCursorKey::new([61; 32]).unwrap().into(),
+            CloudflareMutationTokenKeyRing::new(
+                CloudflareMutationTokenKey::new([62; 32]).unwrap(),
+                Some(CloudflareMutationTokenKey::new([61; 32]).unwrap()),
+            )
+            .unwrap(),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.code(), "cloudflare_token_key_material_reused");
+        let debug = format!(
+            "{:?}",
+            CloudflareMutationTokenKeyRing::new(
+                CloudflareMutationTokenKey::new([63; 32]).unwrap(),
+                None,
+            )
+            .unwrap()
+        );
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("63"));
+    }
+
+    #[test]
+    fn compact_lifecycle_tokens_fit_maximum_boundaries_and_preflight() {
+        let center_account = CloudResourceId::new("x".repeat(512)).unwrap();
+        let adapter = write_adapter(
+            center_account.clone(),
+            &account(),
+            Arc::new(fake_api()),
+            [66; 32],
+        )
+        .unwrap();
+        let apex = AbsoluteDnsName::new(format!(
+            "{}.{}.{}.{}",
+            "a".repeat(63),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(61),
+        ))
+        .unwrap();
+        let mutations = [
+            LifecycleMutation::Create {
+                zone_id: ZONE_A_ID.to_string(),
+                apex,
+                request_scope: mutation_scope_tag(
+                    &adapter.mutation_token_keys().unwrap().active,
+                    b"create-idempotency",
+                    b"maximum-idempotency-scope",
+                ),
+            },
+            LifecycleMutation::Delete {
+                zone_id: ZONE_A_ID.to_string(),
+            },
+            LifecycleMutation::Dnssec {
+                zone_id: ZONE_A_ID.to_string(),
+                desired: DnssecDesiredState::Enabled,
+            },
+        ];
+        for mutation in mutations {
+            adapter.preflight_lifecycle_receipt(&mutation).unwrap();
+            let receipt = adapter
+                .lifecycle_receipt(mutation, ZoneLifecycleMutationState::Pending)
+                .unwrap();
+            assert!(receipt.mutation_id.as_str().len() <= 1_024);
+            let authenticated = URL_SAFE_NO_PAD
+                .decode(receipt.mutation_id.as_str())
+                .unwrap();
+            let payload = std::str::from_utf8(&authenticated[..authenticated.len() - 32]).unwrap();
+            assert!(!payload.contains(center_account.as_str()));
+            assert!(!payload.contains("0123456789abcdef0123456789abcdef"));
+            assert!(!payload.contains("provider_account_id"));
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_adapter_rejects_every_write_and_observe_before_provider_io() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            CloudflareCursorKey::new([64; 32]).unwrap(),
+        )
+        .unwrap();
+        let zone = DnsZoneRef {
+            provider_account_id: center_account.clone(),
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        let revision = ZoneLifecycleRevision::new("revision-1").unwrap();
+        let plan = edgion_center_core::ZoneDeletionPlan {
+            zone: zone.clone(),
+            observed_revision: revision.clone(),
+            origin: edgion_center_core::ZoneOrigin::CenterCreated,
+            management_policy: edgion_center_core::ManagementPolicy::Managed,
+            deletion_policy: edgion_center_core::DeletionPolicy::DeleteExternal,
+            non_default_record_count: 0,
+            delegation_state: DelegationState::NotApplicable,
+            dnssec_state: DnssecProviderState::Unsupported,
+            blockers: BTreeSet::new(),
+        };
+        let deletion = edgion_center_core::authorize_zone_deletion(
+            &plan,
+            edgion_center_core::ZoneDeletionApproval {
+                approved_revision: revision.clone(),
+                approved_zone: zone.clone(),
+                approved_by: "operator".to_string(),
+                approved_at: "2026-07-20T00:00:00Z".to_string(),
+                acknowledgements: BTreeSet::new(),
+            },
+        )
+        .unwrap();
+        let expected_code = "cloudflare_mutation_token_authority_required";
+        assert_eq!(
+            adapter
+                .apply_record_changes(
+                    &zone,
+                    &[DnsRecordChange::Create {
+                        record_set: txt_record("new.example.test", "value"),
+                        guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                    }],
+                    DnsGuardStrength::BestEffort,
+                )
+                .await
+                .unwrap_err()
+                .code(),
+            expected_code
+        );
+        assert_eq!(
+            adapter
+                .create_zone(&ZoneCreationRequest {
+                    provider_account_id: center_account,
+                    provider: CloudProvider::Cloudflare,
+                    apex: AbsoluteDnsName::new("created.example").unwrap(),
+                    visibility: ZoneVisibility::Public,
+                    idempotency_key: IdempotencyKey::new("create-zone-read-only").unwrap(),
+                })
+                .await
+                .unwrap_err()
+                .code(),
+            expected_code
+        );
+        assert_eq!(
+            adapter
+                .set_dnssec(&zone, DnssecDesiredState::Enabled, &revision)
+                .await
+                .unwrap_err()
+                .code(),
+            expected_code
+        );
+        assert_eq!(
+            adapter.delete_zone(&deletion).await.unwrap_err().code(),
+            expected_code
+        );
+        assert_eq!(
+            adapter
+                .observe_change(&zone, &DnsChangeId::new("opaque-change").unwrap())
+                .await
+                .unwrap_err()
+                .code(),
+            expected_code
+        );
+        assert_eq!(
+            adapter
+                .observe_mutation(
+                    &ZoneLifecycleMutationId::new("opaque-lifecycle-mutation").unwrap(),
+                )
+                .await
+                .unwrap_err()
+                .code(),
+            expected_code
+        );
+        assert_eq!(*api.get_zone_calls.lock().unwrap(), 0);
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), 0);
+        assert_eq!(api.total_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(api.zones.lock().unwrap().len(), 3);
+        assert!(api.dnssec.lock().unwrap().is_empty());
+        assert_eq!(api.records.lock().unwrap()[ZONE_A_ID].len(), 3);
+    }
+
+    #[test]
+    fn legacy_and_oversized_mutation_tokens_fail_closed() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let adapter = write_adapter(
+            center_account.clone(),
+            &account(),
+            Arc::new(fake_api()),
+            [65; 32],
+        )
+        .unwrap();
+        let zone = DnsZoneRef {
+            provider_account_id: center_account,
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        let legacy_body = serde_json::to_vec(&serde_json::json!({
+            "v": 1,
+            "c": scope_hash("cloudflare-main"),
+            "a": scope_hash("0123456789abcdef0123456789abcdef"),
+            "z": scope_hash(ZONE_A_ID),
+            "r": "legacy",
+            "g": "best_effort",
+        }))
+        .unwrap();
+        let cursor_key = CloudflareCursorKey::new([65; 32]).unwrap();
+        let signature = HmacSha256::new_from_slice(cursor_key.0.as_ref())
+            .unwrap()
+            .chain_update(&legacy_body)
+            .finalize()
+            .into_bytes();
+        let mut legacy = legacy_body;
+        legacy.extend_from_slice(&signature);
+        let legacy = DnsChangeId::new(URL_SAFE_NO_PAD.encode(legacy)).unwrap();
+        assert_eq!(
+            adapter.observe_receipt(&zone, &legacy).unwrap_err().code(),
+            "cloudflare_change_not_found"
+        );
+        let oversized = "a".repeat(513);
+        let keys = adapter.mutation_token_keys().unwrap();
+        assert_eq!(
+            verify_mutation_token::<ChangeToken>(&oversized, keys, MutationTokenDomain::DnsChange,)
+                .err()
+                .unwrap()
+                .code(),
+            "invalid_cloudflare_token"
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_future_and_v3_cursors_fail_before_provider_io() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let clock = Arc::new(FixedCursorClock::new(1_000));
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            cursor_ring([43; 32], None, clock.clone()),
+        )
+        .unwrap();
+        let first = adapter
+            .list_zones(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let cursor = first.next.unwrap();
+        let provider_calls = *api.list_zone_calls.lock().unwrap();
+
+        clock.set(1_931);
+        let expired = adapter
+            .list_zones(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: Some(cursor.clone()),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(expired.code(), "cloudflare_cursor_expired");
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), provider_calls);
+
+        clock.set(969);
+        let future = adapter
+            .list_zones(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: Some(cursor),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(future.code(), "cloudflare_cursor_not_yet_valid");
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), provider_calls);
+
+        let key = CloudflareCursorKey::new([43; 32]).unwrap();
+        let legacy = serde_json::to_vec(&serde_json::json!({
+            "version": 3,
+            "scope": CursorScope::DnsZones {
+                center_scope: cursor_scope_tag(&key, b"center-account", center_account.as_str()),
+                external_scope: cursor_scope_tag(
+                    &key,
+                    b"native-account",
+                    "0123456789abcdef0123456789abcdef",
+                ),
+            },
+            "offset": 1,
+            "limit": 1,
+            "inventory_tag": "legacy",
+        }))
+        .unwrap();
+        let signature = HmacSha256::new_from_slice(key.0.as_ref())
+            .unwrap()
+            .chain_update(&legacy)
+            .finalize()
+            .into_bytes();
+        let mut authenticated = legacy;
+        authenticated.extend_from_slice(&signature);
+        let legacy = DnsPageToken::new(URL_SAFE_NO_PAD.encode(authenticated)).unwrap();
+        clock.set(1_000);
+        let unsupported = adapter
+            .list_zones(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: Some(legacy),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(unsupported.code(), "unsupported_cloudflare_cursor_version");
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), provider_calls);
+    }
+
+    #[tokio::test]
+    async fn validated_record_cursor_uses_one_captured_time() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let clock = Arc::new(FixedCursorClock::new(1_000));
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api,
+            cursor_ring([44; 32], None, clock.clone()),
+        )
+        .unwrap();
+        let zone = DnsZoneRef {
+            provider_account_id: center_account,
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        let first = adapter
+            .list_record_sets(
+                &zone,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let request = DnsPageRequest {
+            limit: 1,
+            token: first.next,
+        };
+        clock.set(1_930);
+        let validated = adapter
+            .validate_record_inventory_cursor(&zone.zone_id, &request)
+            .unwrap();
+        clock.set(10_000);
+        let second = adapter
+            .list_record_sets_with_validated_cursor(&zone, &request, validated)
+            .await
+            .unwrap();
+        assert_eq!(second.items.len(), 1);
+        let next: Cursor = {
+            let authenticated = URL_SAFE_NO_PAD
+                .decode(second.next.unwrap().as_str())
+                .unwrap();
+            serde_json::from_slice(&authenticated[..authenticated.len() - 32]).unwrap()
+        };
+        assert_eq!(next.issued_at, 1_930);
+        assert_eq!(next.expires_at, 2_830);
+    }
+
+    #[tokio::test]
+    async fn validated_record_cursor_rejects_cross_adapter_proofs_before_provider_io() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let zone = DnsZoneRef {
+            provider_account_id: center_account.clone(),
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        let clock = Arc::new(FixedCursorClock::new(1_000));
+        let issuer = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            Arc::new(fake_api()),
+            cursor_ring([51; 32], None, clock.clone()),
+        )
+        .unwrap();
+        let first = issuer
+            .list_record_sets(
+                &zone,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let request = DnsPageRequest {
+            limit: 1,
+            token: first.next,
+        };
+        let verifier = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            Arc::new(fake_api()),
+            cursor_ring([52; 32], Some([51; 32]), clock.clone()),
+        )
+        .unwrap();
+
+        for (active, fallback) in [
+            ([52; 32], None),
+            ([52; 32], Some([53; 32])),
+            ([54; 32], Some([51; 32])),
+        ] {
+            let validated = verifier
+                .validate_record_inventory_cursor(&zone.zone_id, &request)
+                .unwrap();
+            let target_api = Arc::new(fake_api());
+            let target = CloudflareDnsAdapter::new(
+                center_account.clone(),
+                &account(),
+                target_api.clone(),
+                cursor_ring(active, fallback, clock.clone()),
+            )
+            .unwrap();
+            let error = target
+                .list_record_sets_with_validated_cursor(&zone, &request, validated)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), "cloudflare_cursor_scope_mismatch");
+            assert_eq!(*target_api.list_record_calls.lock().unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn cursor_time_accepts_exact_skew_boundaries_and_rejects_invalid_arithmetic() {
+        let keys = cursor_ring([55; 32], None, Arc::new(FixedCursorClock::new(1_000)));
+        let cursor = |issued_at, expires_at| Cursor {
+            version: 4,
+            scope: CursorScope::DnsZones {
+                center_scope: "center".to_string(),
+                external_scope: "external".to_string(),
+            },
+            offset: 1,
+            limit: 1,
+            inventory_tag: "inventory".to_string(),
+            issued_at,
+            expires_at,
+        };
+
+        assert!(validate_cursor_time(&cursor(1_030, 1_930), &keys, 1_000).is_ok());
+        assert!(validate_cursor_time(&cursor(1_000, 1_900), &keys, 1_930).is_ok());
+
+        for (value, now) in [
+            (cursor(1_001, 1_000), 1_000),
+            (cursor(1_000, 1_901), 1_000),
+            (cursor(u64::MAX - 1, u64::MAX), u64::MAX - 30),
+            (cursor(1, 2), u64::MAX - 29),
+        ] {
+            assert_eq!(
+                validate_cursor_time(&value, &keys, now).unwrap_err().code(),
+                "invalid_cloudflare_cursor_time"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2202,11 +4559,16 @@ mod tests {
         let zone_payload = std::str::from_utf8(&zone_bytes[..zone_bytes.len() - 32]).unwrap();
         assert!(!zone_payload.contains(center_account.as_str()));
         assert!(!zone_payload.contains(native_account));
+        assert!(!zone_payload.contains(ZONE_A_ID));
+        assert!(!zone_payload.contains(ZONE_B_ID));
         assert!(!zone_payload.contains(&scope_hash(center_account.as_str())));
         assert!(!zone_payload.contains(&scope_hash(native_account)));
         let zone_cursor: Cursor = serde_json::from_str(zone_payload).unwrap();
-        assert_eq!(zone_cursor.version, 2);
-        assert!(matches!(zone_cursor.scope, CursorScope::Zones { .. }));
+        assert_eq!(zone_cursor.version, 4);
+        assert_eq!(zone_cursor.limit, 1);
+        assert!(!zone_cursor.inventory_tag.is_empty());
+        assert_eq!(zone_cursor.expires_at - zone_cursor.issued_at, 900);
+        assert!(matches!(zone_cursor.scope, CursorScope::DnsZones { .. }));
 
         let zone = zone_page.items.into_iter().next().unwrap().zone;
         let record_page = adapter
@@ -2229,8 +4591,218 @@ mod tests {
         assert!(!record_payload.contains(&scope_hash(native_account)));
         assert!(!record_payload.contains(&scope_hash(zone.zone_id.as_str())));
         let record_cursor: Cursor = serde_json::from_str(record_payload).unwrap();
-        assert_eq!(record_cursor.version, 2);
+        assert_eq!(record_cursor.version, 4);
+        assert_eq!(record_cursor.limit, 1);
+        assert!(!record_cursor.inventory_tag.is_empty());
+        assert_eq!(record_cursor.expires_at - record_cursor.issued_at, 900);
         assert!(matches!(record_cursor.scope, CursorScope::Records { .. }));
+    }
+
+    #[tokio::test]
+    async fn unchanged_inventory_continuation_returns_the_next_stable_slice() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            CloudflareCursorKey::new([18; 32]).unwrap(),
+        )
+        .unwrap();
+
+        let first = adapter
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let second = adapter
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: first.next,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(first.items.len(), 1);
+        assert_eq!(second.items.len(), 1);
+        assert_ne!(first.items[0].zone.zone_id, second.items[0].zone.zone_id);
+        assert!(second.next.is_none());
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), 2);
+    }
+
+    #[test]
+    fn inventory_tag_streams_with_a_strict_serialized_byte_limit() {
+        let key = CloudflareCursorKey::new([22; 32]).unwrap();
+        let error = inventory_tag_with_limit(&["bounded-value"], &key, 2).unwrap_err();
+        assert_eq!(error.code(), "cloudflare_inventory_serialization_limit");
+
+        let tag = inventory_tag_with_limit(&["bounded-value"], &key, 1_024).unwrap();
+        assert_eq!(URL_SAFE_NO_PAD.decode(tag).unwrap().len(), 32);
+    }
+
+    #[tokio::test]
+    async fn zone_inventory_insert_delete_update_and_same_count_replace_require_restart() {
+        async fn assert_changed(mut mutate: impl FnMut(&mut Vec<CloudflareZone>)) {
+            let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+            let api = Arc::new(fake_api());
+            let adapter = CloudflareDnsAdapter::new(
+                center_account.clone(),
+                &account(),
+                api.clone(),
+                CloudflareCursorKey::new([19; 32]).unwrap(),
+            )
+            .unwrap();
+            let first = adapter
+                .list_zone_inventory(
+                    &center_account,
+                    &DnsPageRequest {
+                        limit: 1,
+                        token: None,
+                    },
+                )
+                .await
+                .unwrap();
+            mutate(&mut api.zones.lock().unwrap());
+
+            let error = adapter
+                .list_zone_inventory(
+                    &center_account,
+                    &DnsPageRequest {
+                        limit: 1,
+                        token: first.next,
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), "cloudflare_inventory_changed");
+        }
+
+        assert_changed(|zones| {
+            let mut inserted = zones[0].clone();
+            inserted.id = "dddddddddddddddddddddddddddddddd".to_string();
+            inserted.name = "inserted.example".to_string();
+            zones.push(inserted);
+        })
+        .await;
+        assert_changed(|zones| {
+            zones.remove(0);
+        })
+        .await;
+        assert_changed(|zones| zones[0].modified_on = Some("updated-revision".to_string())).await;
+        assert_changed(|zones| {
+            zones.remove(0);
+            let mut replacement = zones[0].clone();
+            replacement.id = "dddddddddddddddddddddddddddddddd".to_string();
+            replacement.name = "replacement.example".to_string();
+            zones.push(replacement);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn record_inventory_change_requires_restart() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            CloudflareCursorKey::new([20; 32]).unwrap(),
+        )
+        .unwrap();
+        let zone = DnsZoneRef {
+            provider_account_id: center_account,
+            provider: CloudProvider::Cloudflare,
+            zone_id: DnsZoneId::new(ZONE_A_ID).unwrap(),
+            apex: AbsoluteDnsName::new("example.test").unwrap(),
+            visibility: ZoneVisibility::Public,
+        };
+        let first = adapter
+            .list_record_sets(
+                &zone,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        api.records.lock().unwrap().get_mut(ZONE_A_ID).unwrap()[0].modified_on =
+            Some("updated-record-revision".to_string());
+
+        let error = adapter
+            .list_record_sets(
+                &zone,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: first.next,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "cloudflare_inventory_changed");
+    }
+
+    #[tokio::test]
+    async fn page_size_and_cross_method_mismatches_reject_before_provider_io() {
+        let center_account = CloudResourceId::new("cloudflare-main").unwrap();
+        let api = Arc::new(fake_api());
+        let adapter = CloudflareDnsAdapter::new(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            CloudflareCursorKey::new([21; 32]).unwrap(),
+        )
+        .unwrap();
+        let first = adapter
+            .list_zones(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let cursor = first.next.unwrap();
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), 1);
+
+        let page_size_error = adapter
+            .list_zones(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 2,
+                    token: Some(cursor.clone()),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            page_size_error.code(),
+            "cloudflare_cursor_page_size_mismatch"
+        );
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), 1);
+
+        let method_error = adapter
+            .list_zone_inventory(
+                &center_account,
+                &DnsPageRequest {
+                    limit: 1,
+                    token: Some(cursor),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(method_error.code(), "cloudflare_cursor_scope_mismatch");
+        assert_eq!(*api.list_zone_calls.lock().unwrap(), 1);
     }
 
     #[tokio::test]
@@ -2512,13 +5084,8 @@ mod tests {
         )
         .unwrap();
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
-        let adapter = CloudflareDnsAdapter::new(
-            center_account.clone(),
-            &account(),
-            Arc::new(api),
-            CloudflareCursorKey::new([12; 32]).unwrap(),
-        )
-        .unwrap();
+        let adapter =
+            write_adapter(center_account.clone(), &account(), Arc::new(api), [12; 32]).unwrap();
         let zone = DnsZoneRef {
             provider_account_id: center_account,
             provider: CloudProvider::Cloudflare,
@@ -2612,13 +5179,8 @@ mod tests {
         )
         .unwrap();
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
-        let adapter = CloudflareDnsAdapter::new(
-            center_account.clone(),
-            &account(),
-            Arc::new(api),
-            CloudflareCursorKey::new([14; 32]).unwrap(),
-        )
-        .unwrap();
+        let adapter =
+            write_adapter(center_account.clone(), &account(), Arc::new(api), [14; 32]).unwrap();
         let zone = DnsZoneRef {
             provider_account_id: center_account,
             provider: CloudProvider::Cloudflare,
@@ -2647,11 +5209,11 @@ mod tests {
     #[test]
     fn signed_receipts_are_zone_bound_and_tamper_evident() {
         let center_account = CloudResourceId::new("cloudflare-main").unwrap();
-        let adapter = CloudflareDnsAdapter::new(
+        let adapter = write_adapter(
             center_account.clone(),
             &account(),
             Arc::new(fake_api()),
-            CloudflareCursorKey::new([13; 32]).unwrap(),
+            [13; 32],
         )
         .unwrap();
         let zone = DnsZoneRef {
@@ -2684,11 +5246,11 @@ mod tests {
     #[test]
     fn signed_receipt_fits_with_a_maximum_length_center_account_id() {
         let center_account = CloudResourceId::new("x".repeat(512)).unwrap();
-        let adapter = CloudflareDnsAdapter::new(
+        let adapter = write_adapter(
             center_account.clone(),
             &account(),
             Arc::new(fake_api()),
-            CloudflareCursorKey::new([15; 32]).unwrap(),
+            [15; 32],
         )
         .unwrap();
         let zone = DnsZoneRef {
@@ -2819,6 +5381,21 @@ mod tests {
         }
     }
 
+    fn write_adapter(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn CloudflareApi>,
+        cursor_key: [u8; 32],
+    ) -> Result<CloudflareDnsAdapter, NormalizedProviderError> {
+        CloudflareDnsAdapter::new_with_cursor_and_mutation_key_rings(
+            center_account_id,
+            account,
+            api,
+            CloudflareCursorKey::new(cursor_key)?.into(),
+            CloudflareMutationTokenKeyRing::new(CloudflareMutationTokenKey::new([250; 32])?, None)?,
+        )
+    }
+
     fn fake_api() -> FakeApi {
         let zones = vec![
             CloudflareZone {
@@ -2888,10 +5465,17 @@ mod tests {
             ],
         )]);
         FakeApi {
+            total_calls: AtomicU64::new(0),
             zones: Mutex::new(zones),
+            create_zone_override: Mutex::new(None),
             get_zone_override: Mutex::new(None),
             get_zone_calls: Mutex::new(0),
             list_zone_calls: Mutex::new(0),
+            list_record_calls: Mutex::new(0),
+            delete_zone_calls: Mutex::new(0),
+            delete_zone_ack_override: Mutex::new(None),
+            batch_record_calls: Mutex::new(0),
+            batch_result_override: Mutex::new(None),
             zone_total_pages: 1,
             records: Mutex::new(records),
             dnssec: Mutex::new(BTreeMap::new()),
