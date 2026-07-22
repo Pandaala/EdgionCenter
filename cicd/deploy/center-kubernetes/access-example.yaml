@@ -123,3 +123,35 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: edgion-center-provider-account-writer
+---
+# Example least-privilege Cloudflare remote-control caller. Replace the account, Zone ID,
+# record type, and subject with the exact binding used by your automation.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-cloudflare-dns-remote-writer
+rules:
+  # Read the exact RRset first to obtain the current revision used by the guarded remote PUT.
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/cloudflare/dns/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/record-sets/A
+    verbs: [get]
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/cloudflare/dns/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/record-sets/A/remote-control
+    verbs: [put]
+  - nonResourceURLs:
+      - /edgion-center-authz/permissions/cloudflare-dns:read
+      - /edgion-center-authz/permissions/cloudflare-dns:remote-write
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-cloudflare-dns-remote-writer
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-dns-automation
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-cloudflare-dns-remote-writer

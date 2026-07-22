@@ -38,6 +38,9 @@ pub const CLOUDFLARE_DNS_READ: &str = "cloudflare-dns:read";
 /// High-trust mutation access across every configured Cloudflare account.
 /// This permission is not scoped to one ProviderAccount.
 pub const CLOUDFLARE_DNS_WRITE: &str = "cloudflare-dns:write";
+/// Dedicated authority for writing an authenticated caller marker with an RRset mutation.
+/// It does not imply ordinary Cloudflare DNS mutation access.
+pub const CLOUDFLARE_DNS_REMOTE_WRITE: &str = "cloudflare-dns:remote-write";
 pub const PROVIDER_ACCOUNTS_READ: &str = "provider-accounts:read";
 pub const PROVIDER_ACCOUNTS_WRITE: &str = "provider-accounts:write";
 pub const PROVIDER_CREDENTIALS_USE: &str = "provider-credentials:use";
@@ -60,6 +63,7 @@ pub fn all_keys() -> &'static [&'static str] {
         ROLES_MANAGE,
         CLOUDFLARE_DNS_READ,
         CLOUDFLARE_DNS_WRITE,
+        CLOUDFLARE_DNS_REMOTE_WRITE,
         PROVIDER_ACCOUNTS_READ,
         PROVIDER_ACCOUNTS_WRITE,
         PROVIDER_CREDENTIALS_USE,
@@ -119,7 +123,11 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         },
         PermissionGroup {
             group: "Cloudflare DNS",
-            keys: vec![CLOUDFLARE_DNS_READ, CLOUDFLARE_DNS_WRITE],
+            keys: vec![
+                CLOUDFLARE_DNS_READ,
+                CLOUDFLARE_DNS_WRITE,
+                CLOUDFLARE_DNS_REMOTE_WRITE,
+            ],
         },
         PermissionGroup {
             group: "Provider Accounts",
@@ -170,6 +178,10 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     // HTTP proxy — any method forwards to a controller.
     if path.starts_with("/api/v1/proxy/") {
         return Some(PROXY_ACCESS);
+    }
+
+    if is_cloudflare_remote_control_path(path) {
+        return (method == Method::PUT).then_some(CLOUDFLARE_DNS_REMOTE_WRITE);
     }
 
     if under_segment(path, "/api/v1/center/cloudflare/dns") {
@@ -288,6 +300,18 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     None
 }
 
+fn is_cloudflare_remote_control_path(path: &str) -> bool {
+    let Some(suffix) = path.strip_prefix("/api/v1/center/cloudflare/dns/accounts/") else {
+        return false;
+    };
+    let segments = suffix.split('/').collect::<Vec<_>>();
+    segments.len() == 6
+        && segments.iter().all(|segment| !segment.is_empty())
+        && segments[1] == "zones"
+        && segments[3] == "record-sets"
+        && segments[5] == "remote-control"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +427,10 @@ mod tests {
             (
                 Method::DELETE,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A",
+            ),
+            (
+                Method::PUT,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A/remote-control",
             ),
             (Method::GET, "/api/v1/center/cloud/provider-accounts"),
             (Method::POST, "/api/v1/center/cloud/provider-accounts"),
@@ -607,6 +635,27 @@ mod tests {
             route_permission(
                 &Method::POST,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones"
+            ),
+            Some(CLOUDFLARE_DNS_WRITE)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::PUT,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A/remote-control"
+            ),
+            Some(CLOUDFLARE_DNS_REMOTE_WRITE)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::POST,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A/remote-control"
+            ),
+            None
+        );
+        assert_eq!(
+            route_permission(
+                &Method::PUT,
+                "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A/remote-control/extra"
             ),
             Some(CLOUDFLARE_DNS_WRITE)
         );

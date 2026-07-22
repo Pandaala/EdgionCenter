@@ -41,6 +41,7 @@
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets → Cloudflare RRset inventory
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → Cloudflare RRset detail
 //!   PUT  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → create/replace one Cloudflare RRset
+//!   PUT  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}/remote-control → create/replace one remotely marked Cloudflare RRset
 //!   DELETE /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → delete one Cloudflare RRset
 //!   GET  /api/v1/center/cloud/provider-capabilities/accounts/{account_id} → sanitized capability snapshot
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
@@ -394,6 +395,10 @@ pub fn router(mut state: ApiState) -> Router {
                 "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}",
                 axum::routing::put(cloudflare_dns::put_record_set)
                     .delete(cloudflare_dns::delete_record_set),
+            )
+            .route(
+                "/api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}/remote-control",
+                axum::routing::put(cloudflare_dns::put_remote_record_set),
             )
             .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
         app = app.merge(cloudflare_dns_write_routes);

@@ -76,6 +76,14 @@ Zone and complete canonical RRset before one Cloudflare batch and observes the r
 SOA and apex delegation NS changes remain unavailable. Guard conflicts issue no mutation, and
 Center performs no automatic retry when a dispatched result is unknown.
 
+Automation that needs a visible remote-control provenance hint uses the dedicated
+`PUT .../record-sets/{record_type}/remote-control?owner=...` route and the independent
+`cloudflare-dns:remote-write` permission. Center derives an opaque caller alias from validated
+authentication claims and writes its reserved tag in the same record batch. Requests cannot
+choose that alias or submit any case-insensitive `edgion-center-` tag. Ordinary guarded PUT
+removes an earlier remote marker and returns the RRset to `manual` control. The marker is a display
+hint only; it is not provider-resource ownership or authorization evidence.
+
 Pagination cursors bind the page size and a keyed tag of the complete canonical inventory. When
 Cloudflare data changes between pages, Center returns `409 pagination_restart_required`; clients
 restart from the first page rather than combining different inventory versions. Continuations

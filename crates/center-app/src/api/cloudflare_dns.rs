@@ -15,7 +15,7 @@ use axum::{
     extract::{rejection::JsonRejection, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use edgion_center_core::{
@@ -26,15 +26,23 @@ use edgion_center_core::{
     ProviderDnsRecordType, ZoneVisibility,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::ApiState;
-use crate::common::api::ApiResponse;
+use crate::common::{
+    api::ApiResponse,
+    unified_auth::{AuthProvider, UnifiedAuthClaims},
+};
 
 const DEFAULT_PAGE_LIMIT: u16 = 50;
 const MAX_PAGE_LIMIT: u16 = 100;
 const MAX_NAMESERVERS: usize = 20;
 const CLOUDFLARE_ZONE_ID_LEN: usize = 32;
 const CLOUDFLARE_RECORD_ID_LEN: usize = 32;
+const RESERVED_TAG_PREFIX: &str = "edgion-center-";
+const REMOTE_CONTROL_TAG_NAME: &str = "edgion-center-remote";
+const REMOTE_CALLER_ALIAS_LEN: usize = 43;
+const REMOTE_CALLER_ALIAS_DOMAIN: &[u8] = b"edgion-center/cloudflare-dns/remote-caller-alias/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -404,6 +412,7 @@ pub struct CloudflareRecordSetDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
     pub tags: Vec<String>,
+    pub control: CloudflareRecordControlDto,
     pub provider_object_ids: Vec<DnsRecordObjectId>,
     pub revision: DnsRecordRevision,
 }
@@ -434,6 +443,19 @@ impl CloudflareRecordSetDto {
         if tags.len() != self.tags.len() {
             return Err(CoreError::Conflict(
                 "Cloudflare RRset contains duplicate tags".to_string(),
+            ));
+        }
+        if tags
+            .iter()
+            .any(|tag| is_reserved_cloudflare_record_tag(tag))
+            || matches!(
+                &self.control,
+                CloudflareRecordControlDto::Remote { caller_alias }
+                    if !valid_remote_caller_alias(caller_alias)
+            )
+        {
+            return Err(CoreError::Conflict(
+                "Cloudflare RRset control projection is invalid".to_string(),
             ));
         }
         let object_ids = self
@@ -512,6 +534,72 @@ impl CloudflareRecordSetDto {
             && &self.zone_id == zone_id
             && key.is_none_or(|key| self.owner == key.owner && self.record_type == key.record_type)
     }
+}
+
+/// Sanitized provenance projected from Cloudflare record tags. It is informational only and is
+/// never authorization or ownership evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum CloudflareRecordControlDto {
+    Manual,
+    Remote { caller_alias: String },
+    InvalidRemoteMarker,
+}
+
+/// Remove Center-reserved tags from a provider observation and project the bounded remote-control
+/// marker. Malformed or conflicting reserved tags are never echoed to the caller.
+pub fn split_cloudflare_record_tags(
+    raw: BTreeSet<String>,
+) -> CoreResult<(Vec<String>, CloudflareRecordControlDto)> {
+    let mut tags = Vec::with_capacity(raw.len());
+    let mut remote_alias = None;
+    let mut invalid_marker = false;
+    for tag in raw {
+        let Some((name, value)) = tag.split_once(':') else {
+            if is_reserved_cloudflare_record_tag(&tag) {
+                invalid_marker = true;
+            } else {
+                tags.push(tag);
+            }
+            continue;
+        };
+        if !name.to_ascii_lowercase().starts_with(RESERVED_TAG_PREFIX) {
+            tags.push(tag);
+            continue;
+        }
+        if name != REMOTE_CONTROL_TAG_NAME
+            || !valid_remote_caller_alias(value)
+            || remote_alias.replace(value.to_string()).is_some()
+        {
+            invalid_marker = true;
+        }
+    }
+    let control = if invalid_marker {
+        CloudflareRecordControlDto::InvalidRemoteMarker
+    } else if let Some(caller_alias) = remote_alias {
+        CloudflareRecordControlDto::Remote { caller_alias }
+    } else {
+        CloudflareRecordControlDto::Manual
+    };
+    Ok((tags, control))
+}
+
+fn is_reserved_cloudflare_record_tag(tag: &str) -> bool {
+    tag.split_once(':')
+        .map_or(tag, |(name, _)| name)
+        .to_ascii_lowercase()
+        .starts_with(RESERVED_TAG_PREFIX)
+}
+
+fn valid_remote_caller_alias(value: &str) -> bool {
+    value.len() == REMOTE_CALLER_ALIAS_LEN
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -661,6 +749,27 @@ pub struct CloudflareRecordSetPutRequest {
 
 impl CloudflareRecordSetPutRequest {
     pub fn record_set(&self, key: &CloudflareRecordSetKey) -> CoreResult<ProviderDnsRecordSet> {
+        self.record_set_with_remote_alias(key, None)
+    }
+
+    pub fn remote_record_set(
+        &self,
+        key: &CloudflareRecordSetKey,
+        caller_alias: &str,
+    ) -> CoreResult<ProviderDnsRecordSet> {
+        if !valid_remote_caller_alias(caller_alias) {
+            return Err(CoreError::Conflict(
+                "Cloudflare remote caller alias is invalid".to_string(),
+            ));
+        }
+        self.record_set_with_remote_alias(key, Some(caller_alias))
+    }
+
+    fn record_set_with_remote_alias(
+        &self,
+        key: &CloudflareRecordSetKey,
+        remote_caller_alias: Option<&str>,
+    ) -> CoreResult<ProviderDnsRecordSet> {
         if key.record_type == CloudflareRecordType::Soa {
             return Err(CoreError::Conflict(
                 "SOA changes require the zone lifecycle contract".to_string(),
@@ -737,7 +846,12 @@ impl CloudflareRecordSetPutRequest {
             ));
         }
         let tags = self.tags.iter().cloned().collect::<BTreeSet<_>>();
-        if tags.len() != self.tags.len() || tags.len() > 20 {
+        let max_user_tags = if remote_caller_alias.is_some() {
+            19
+        } else {
+            20
+        };
+        if tags.len() != self.tags.len() || tags.len() > max_user_tags {
             return Err(CoreError::Conflict(
                 "Cloudflare DNS record tags are invalid".to_string(),
             ));
@@ -761,11 +875,16 @@ impl CloudflareRecordSetPutRequest {
                     character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
                 })
                 || !tag_names.insert(name.to_ascii_lowercase())
+                || is_reserved_cloudflare_record_tag(tag)
             {
                 return Err(CoreError::Conflict(
                     "Cloudflare DNS record tags are invalid".to_string(),
                 ));
             }
+        }
+        let mut tags = tags;
+        if let Some(caller_alias) = remote_caller_alias {
+            tags.insert(format!("{REMOTE_CONTROL_TAG_NAME}:{caller_alias}"));
         }
         let has_metadata = self.comment.is_some() || !tags.is_empty();
         let extension = if proxy_capable
@@ -788,6 +907,41 @@ impl CloudflareRecordSetPutRequest {
             extension,
         })
     }
+}
+
+/// Derive a stable, opaque Cloudflare remote-caller alias from validated authentication identity.
+/// Raw provider, issuer, and subject values never cross the Cloudflare tag boundary.
+pub fn derive_cloudflare_remote_caller_alias(claims: &UnifiedAuthClaims) -> CoreResult<String> {
+    let (provider, issuer) = match claims.provider {
+        AuthProvider::Oidc => (
+            "oidc",
+            claims.iss.as_deref().ok_or_else(|| {
+                CoreError::Conflict("validated authentication issuer is unavailable".to_string())
+            })?,
+        ),
+        AuthProvider::Local => ("local", "edgion-center-local"),
+    };
+    let subject = claims.sub.as_deref().ok_or_else(|| {
+        CoreError::Conflict("validated authentication subject is unavailable".to_string())
+    })?;
+    if issuer.is_empty()
+        || issuer.len() > 2_048
+        || issuer.chars().any(char::is_control)
+        || subject.is_empty()
+        || subject.len() > 255
+        || subject.chars().any(char::is_control)
+    {
+        return Err(CoreError::Conflict(
+            "validated authentication identity is invalid".to_string(),
+        ));
+    }
+    let mut digest = Sha256::new();
+    digest.update(REMOTE_CALLER_ALIAS_DOMAIN);
+    for value in [provider.as_bytes(), issuer.as_bytes(), subject.as_bytes()] {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value);
+    }
+    Ok(URL_SAFE_NO_PAD.encode(digest.finalize()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -817,6 +971,15 @@ pub trait CloudflareDnsWriteAdminService: Send + Sync {
         zone_id: &DnsZoneId,
         key: &CloudflareRecordSetKey,
         request: &CloudflareRecordSetPutRequest,
+    ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError>;
+
+    async fn put_remote_record_set(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        key: &CloudflareRecordSetKey,
+        request: &CloudflareRecordSetPutRequest,
+        caller_alias: &str,
     ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError>;
 
     async fn delete_record_set(
@@ -1052,6 +1215,80 @@ pub async fn put_record_set(
                 || result.comment != request.comment
                 || result.tags.iter().cloned().collect::<BTreeSet<_>>()
                     != request.tags.iter().cloned().collect::<BTreeSet<_>>()
+                || result.control != CloudflareRecordControlDto::Manual
+            {
+                return map_service_error(CloudflareDnsAdminError::UnknownOutcome);
+            }
+            Json(ApiResponse::ok_body(result)).into_response()
+        }
+        Err(error) => map_service_error(error),
+    }
+}
+
+pub async fn put_remote_record_set(
+    State(state): State<ApiState>,
+    claims: Option<Extension<UnifiedAuthClaims>>,
+    Path((account_id, zone_id, record_type)): Path<(String, String, String)>,
+    Query(query): Query<CloudflareRecordDetailQuery>,
+    body: Result<Json<CloudflareRecordSetPutRequest>, JsonRejection>,
+) -> Response {
+    let Extension(claims) = match claims {
+        Some(value) => value,
+        None => return error_response(StatusCode::UNAUTHORIZED, "authentication_required"),
+    };
+    let caller_alias = match derive_cloudflare_remote_caller_alias(&claims) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::UNAUTHORIZED, "invalid_identity"),
+    };
+    let (account_id, zone_id, key) =
+        match parse_record_identity(account_id, zone_id, record_type, query.owner) {
+            Ok(value) => value,
+            Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
+        };
+    let Json(request) = match body {
+        Ok(value) => value,
+        Err(rejection) => return json_rejection_response(rejection),
+    };
+    let desired = match request.remote_record_set(&key, &caller_alias) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_request"),
+    };
+    if request
+        .guard
+        .expected_revision()
+        .is_some_and(|revision| revision.validate().is_err())
+    {
+        return error_response(StatusCode::BAD_REQUEST, "invalid_request");
+    }
+    let service = match state.cloudflare_dns_write_admin.as_deref() {
+        Some(value) => value,
+        None => return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable"),
+    };
+    match service
+        .put_remote_record_set(&account_id, &zone_id, &key, &request, &caller_alias)
+        .await
+    {
+        Ok(result) => {
+            let result_values = result
+                .values
+                .iter()
+                .map(CloudflareRecordValueDto::core)
+                .collect::<CoreResult<BTreeSet<_>>>();
+            let control_matches = matches!(
+                &result.control,
+                CloudflareRecordControlDto::Remote { caller_alias: result_alias }
+                    if result_alias == &caller_alias
+            );
+            if result.validate().is_err()
+                || !result.matches_scope(&account_id, &zone_id, Some(&key))
+                || result.ttl.core() != desired.ttl
+                || result_values.as_ref().ok() != Some(&desired.values)
+                || result.proxy != request.proxy
+                || result.cname_flattening != request.cname_flattening
+                || result.comment != request.comment
+                || result.tags.iter().cloned().collect::<BTreeSet<_>>()
+                    != request.tags.iter().cloned().collect::<BTreeSet<_>>()
+                || !control_matches
             {
                 return map_service_error(CloudflareDnsAdminError::UnknownOutcome);
             }
@@ -1296,6 +1533,7 @@ mod tests {
         last_zone_delete_request: Mutex<Option<CloudflareZoneDeleteRequest>>,
         last_record_key: Mutex<Option<CloudflareRecordSetKey>>,
         last_put_request: Mutex<Option<CloudflareRecordSetPutRequest>>,
+        last_remote_alias: Mutex<Option<String>>,
         last_delete_request: Mutex<Option<CloudflareRecordSetDeleteRequest>>,
         calls: AtomicUsize,
         record_calls: AtomicUsize,
@@ -1313,6 +1551,7 @@ mod tests {
                 last_zone_delete_request: Mutex::new(None),
                 last_record_key: Mutex::new(None),
                 last_put_request: Mutex::new(None),
+                last_remote_alias: Mutex::new(None),
                 last_delete_request: Mutex::new(None),
                 calls: AtomicUsize::new(0),
                 record_calls: AtomicUsize::new(0),
@@ -1360,6 +1599,33 @@ mod tests {
                 .unwrap()
                 .clone()
                 .unwrap_or_else(|| record(account_id.as_str(), zone_id.as_str())))
+        }
+
+        async fn put_remote_record_set(
+            &self,
+            account_id: &CloudResourceId,
+            zone_id: &DnsZoneId,
+            key: &CloudflareRecordSetKey,
+            request: &CloudflareRecordSetPutRequest,
+            caller_alias: &str,
+        ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError> {
+            self.record_calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_record_key.lock().unwrap() = Some(key.clone());
+            *self.last_put_request.lock().unwrap() = Some(request.clone());
+            *self.last_remote_alias.lock().unwrap() = Some(caller_alias.to_string());
+            if let Some(error) = self.error.lock().unwrap().take() {
+                return Err(error);
+            }
+            let response = if let Some(response) = self.record_response.lock().unwrap().clone() {
+                response
+            } else {
+                let mut response = record(account_id.as_str(), zone_id.as_str());
+                response.control = CloudflareRecordControlDto::Remote {
+                    caller_alias: caller_alias.to_string(),
+                };
+                response
+            };
+            Ok(response)
         }
 
         async fn delete_zone(
@@ -1514,6 +1780,7 @@ mod tests {
             cname_flattening: CloudflareCnameFlattening::ProviderDefault,
             comment: Some("managed by Center".to_string()),
             tags: vec!["owner:edge".to_string()],
+            control: CloudflareRecordControlDto::Manual,
             provider_object_ids: vec![
                 DnsRecordObjectId::new("abcdef0123456789abcdef0123456789").unwrap()
             ],
@@ -1539,6 +1806,7 @@ mod tests {
             cname_flattening: CloudflareCnameFlattening::ProviderDefault,
             comment: None,
             tags: Vec::new(),
+            control: CloudflareRecordControlDto::Manual,
             provider_object_ids: vec![
                 DnsRecordObjectId::new("abcdef0123456789abcdef0123456789").unwrap()
             ],
@@ -1629,6 +1897,43 @@ mod tests {
             serde_json::from_slice(&bytes).unwrap()
         };
         (status, body)
+    }
+
+    async fn json_request_with_claims(
+        app: axum::Router,
+        method: axum::http::Method,
+        uri: &str,
+        body: Body,
+        claims: UnifiedAuthClaims,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(body)
+            .unwrap();
+        request.extensions_mut().insert(claims);
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = if bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap()
+        };
+        (status, body)
+    }
+
+    fn oidc_claims(issuer: Option<&str>, subject: Option<&str>) -> UnifiedAuthClaims {
+        UnifiedAuthClaims {
+            provider: AuthProvider::Oidc,
+            sub: subject.map(str::to_string),
+            iss: issuer.map(str::to_string),
+            groups: Vec::new(),
+            claims: serde_json::json!({}),
+        }
     }
 
     #[tokio::test]
@@ -2152,6 +2457,228 @@ mod tests {
         "tags":["owner:edge"]
     }"#;
 
+    #[test]
+    fn remote_caller_alias_is_stable_and_identity_separated() {
+        let oidc = oidc_claims(Some("https://issuer.example"), Some("service-a"));
+        let first = derive_cloudflare_remote_caller_alias(&oidc).unwrap();
+        assert_eq!(first, derive_cloudflare_remote_caller_alias(&oidc).unwrap());
+        assert_eq!(first.len(), REMOTE_CALLER_ALIAS_LEN);
+        assert_ne!(
+            first,
+            derive_cloudflare_remote_caller_alias(&oidc_claims(
+                Some("https://other-issuer.example"),
+                Some("service-a")
+            ))
+            .unwrap()
+        );
+        assert_ne!(
+            first,
+            derive_cloudflare_remote_caller_alias(&oidc_claims(
+                Some("https://issuer.example"),
+                Some("service-b")
+            ))
+            .unwrap()
+        );
+        let local = UnifiedAuthClaims {
+            provider: AuthProvider::Local,
+            sub: Some("service-a".to_string()),
+            iss: None,
+            groups: Vec::new(),
+            claims: serde_json::json!({}),
+        };
+        assert_ne!(
+            first,
+            derive_cloudflare_remote_caller_alias(&local).unwrap()
+        );
+        let local_alias = derive_cloudflare_remote_caller_alias(&local).unwrap();
+        assert_eq!(
+            local_alias,
+            derive_cloudflare_remote_caller_alias(&local).unwrap()
+        );
+        let mut other_local = local.clone();
+        other_local.sub = Some("service-b".to_string());
+        assert_ne!(
+            local_alias,
+            derive_cloudflare_remote_caller_alias(&other_local).unwrap()
+        );
+        assert!(
+            derive_cloudflare_remote_caller_alias(&oidc_claims(None, Some("service-a"))).is_err()
+        );
+        assert!(derive_cloudflare_remote_caller_alias(&oidc_claims(
+            Some("https://issuer.example"),
+            None
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn record_tags_project_remote_control_without_echoing_invalid_markers() {
+        let alias = derive_cloudflare_remote_caller_alias(&oidc_claims(
+            Some("https://issuer.example"),
+            Some("service-a"),
+        ))
+        .unwrap();
+        let (tags, control) = split_cloudflare_record_tags(BTreeSet::from([
+            "owner:edge".to_string(),
+            format!("{REMOTE_CONTROL_TAG_NAME}:{alias}"),
+        ]))
+        .unwrap();
+        assert_eq!(tags, vec!["owner:edge"]);
+        assert_eq!(
+            control,
+            CloudflareRecordControlDto::Remote {
+                caller_alias: alias
+            }
+        );
+
+        let (tags, control) = split_cloudflare_record_tags(BTreeSet::from([
+            "owner:edge".to_string(),
+            "EDGION-CENTER-REMOTE:not-an-alias".to_string(),
+            "edgion-center-private:must-not-leak".to_string(),
+        ]))
+        .unwrap();
+        assert_eq!(tags, vec!["owner:edge"]);
+        assert_eq!(control, CloudflareRecordControlDto::InvalidRemoteMarker);
+    }
+
+    #[tokio::test]
+    async fn remote_record_put_requires_claims_and_forwards_only_derived_alias() {
+        let service = Arc::new(FakeWriteService::default());
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A/remote-control?owner=www.example.com"
+        );
+        let (status, body) = json_request(
+            super::super::router(state_with_write(None, false, Some(service.clone()), true)),
+            axum::http::Method::PUT,
+            &path,
+            Body::from(PUT_A_BODY),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"], "authentication_required");
+        assert_eq!(service.record_calls.load(Ordering::SeqCst), 0);
+
+        let claims = oidc_claims(Some("https://issuer.example"), Some("service-a"));
+        let expected_alias = derive_cloudflare_remote_caller_alias(&claims).unwrap();
+        let (status, body) = json_request_with_claims(
+            super::super::router(state_with_write(None, false, Some(service.clone()), true)),
+            axum::http::Method::PUT,
+            &path,
+            Body::from(PUT_A_BODY),
+            claims,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["control"]["type"], "remote");
+        assert_eq!(body["data"]["control"]["callerAlias"], expected_alias);
+        assert_eq!(
+            service.last_remote_alias.lock().unwrap().as_deref(),
+            Some(expected_alias.as_str())
+        );
+        assert!(!body.to_string().contains("issuer.example"));
+        assert!(!body.to_string().contains("service-a"));
+    }
+
+    #[tokio::test]
+    async fn remote_record_put_rejects_invalid_identity_body_control_and_reserved_tags() {
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A/remote-control?owner=www.example.com"
+        );
+        let cases = [
+            (oidc_claims(None, Some("service-a")), PUT_A_BODY.to_string()),
+            (
+                oidc_claims(Some("https://issuer.example"), None),
+                PUT_A_BODY.to_string(),
+            ),
+            (
+                UnifiedAuthClaims {
+                    provider: AuthProvider::Local,
+                    sub: None,
+                    iss: None,
+                    groups: Vec::new(),
+                    claims: serde_json::json!({}),
+                },
+                PUT_A_BODY.to_string(),
+            ),
+            (
+                oidc_claims(Some("https://issuer.example"), Some("service-a")),
+                PUT_A_BODY.replace(
+                    "\"tags\":[\"owner:edge\"]",
+                    "\"tags\":[\"edgion-center-remote:fake\"]",
+                ),
+            ),
+            (
+                oidc_claims(Some("https://issuer.example"), Some("service-a")),
+                PUT_A_BODY.replace(
+                    "\"tags\":[\"owner:edge\"]",
+                    "\"tags\":[\"owner:edge\"],\"callerAlias\":\"fake\"",
+                ),
+            ),
+            (
+                oidc_claims(Some("https://issuer.example"), Some("service-a")),
+                PUT_A_BODY.replace(
+                    "\"tags\":[\"owner:edge\"]",
+                    "\"tags\":[\"owner:edge\"],\"control\":{\"type\":\"manual\"}",
+                ),
+            ),
+        ];
+        for (claims, body) in cases {
+            let service = Arc::new(FakeWriteService::default());
+            let (status, _) = json_request_with_claims(
+                super::super::router(state_with_write(None, false, Some(service.clone()), true)),
+                axum::http::Method::PUT,
+                &path,
+                Body::from(body),
+                claims,
+            )
+            .await;
+            assert!(matches!(
+                status,
+                StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST
+            ));
+            assert_eq!(service.record_calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_record_put_fails_unknown_when_control_is_not_exact() {
+        let service = Arc::new(FakeWriteService::default());
+        *service.record_response.lock().unwrap() = Some(record("account-1", ZONE_ID));
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A/remote-control?owner=www.example.com"
+        );
+        let (status, body) = json_request_with_claims(
+            super::super::router(state_with_write(None, false, Some(service), true)),
+            axum::http::Method::PUT,
+            &path,
+            Body::from(PUT_A_BODY),
+            oidc_claims(Some("https://issuer.example"), Some("service-a")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"], "unknown_outcome");
+    }
+
+    #[tokio::test]
+    async fn remote_record_put_uses_the_bounded_write_body_limit() {
+        let service = Arc::new(FakeWriteService::default());
+        let path = format!(
+            "/api/v1/center/cloudflare/dns/accounts/account-1/zones/{ZONE_ID}/record-sets/A/remote-control?owner=www.example.com"
+        );
+        let mut body = PUT_A_BODY.as_bytes().to_vec();
+        body.resize(64 * 1024 + 1, b' ');
+        let (status, _) = json_request_with_claims(
+            super::super::router(state_with_write(None, false, Some(service.clone()), true)),
+            axum::http::Method::PUT,
+            &path,
+            Body::from(body),
+            oidc_claims(Some("https://issuer.example"), Some("service-a")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(service.record_calls.load(Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn record_put_and_delete_are_synchronous_and_path_scoped() {
         let service = Arc::new(FakeWriteService::default());
@@ -2253,6 +2780,7 @@ mod tests {
                 "\"ttl\":{\"type\":\"automatic\"}",
                 "\"ttl\":{\"type\":\"automatic\",\"seconds\":300}",
             ),
+            PUT_A_BODY.replace("owner:edge", "EDGION-CENTER-REMOTE:not-authorized"),
         ];
         for body in cases {
             let service = Arc::new(FakeWriteService::default());

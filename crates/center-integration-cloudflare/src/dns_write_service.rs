@@ -19,10 +19,10 @@ use edgion_center_adapter_credential_files::{
     CredentialPurpose, MountedCredentialResolver, ResolveCredentialRequest,
 };
 use edgion_center_app::api::cloudflare_dns::{
-    CloudflareDnsAdminError, CloudflareDnsWriteAdminService, CloudflareRecordMutationGuardDto,
-    CloudflareRecordSetDeleteRequest, CloudflareRecordSetDto, CloudflareRecordSetKey,
-    CloudflareRecordSetPutRequest, CloudflareZoneCreateRequest, CloudflareZoneDeleteRequest,
-    CloudflareZoneDto, SharedCloudflareDnsWriteAdminService,
+    CloudflareDnsAdminError, CloudflareDnsWriteAdminService, CloudflareRecordControlDto,
+    CloudflareRecordMutationGuardDto, CloudflareRecordSetDeleteRequest, CloudflareRecordSetDto,
+    CloudflareRecordSetKey, CloudflareRecordSetPutRequest, CloudflareZoneCreateRequest,
+    CloudflareZoneDeleteRequest, CloudflareZoneDto, SharedCloudflareDnsWriteAdminService,
 };
 use edgion_center_core::{
     CloudProvider, CloudResourceId, CoreError, CoreResult, CredentialSource, DnsMutationGuard,
@@ -294,6 +294,79 @@ impl CloudflareDnsWriteService {
         accounts.insert(account_id.clone(), Arc::downgrade(&semaphore));
         Ok(semaphore)
     }
+
+    async fn put_record_set_inner(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        key: &CloudflareRecordSetKey,
+        request: &CloudflareRecordSetPutRequest,
+        remote_caller_alias: Option<&str>,
+    ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError> {
+        let core_key = key.core();
+        reject_soa_record_set(&core_key)?;
+        let dispatched = Arc::new(AtomicBool::new(false));
+        let marker = dispatched.clone();
+        let result = tokio::time::timeout(self.timeout, async {
+            let account_limit = self.account_semaphore(account_id)?;
+            let _account_permit = acquire(account_limit).await?;
+            let _global_permit = acquire(self.global.clone()).await?;
+            let (writer, authority) = self.prepare(account_id, marker.clone()).await?;
+            if !self.authority_is_current(&authority).await {
+                return Err(CloudflareDnsAdminError::Unavailable);
+            }
+            let zone = observe_exact_zone(&writer, account_id, zone_id).await?;
+            reject_apex_ns_record_set(&zone, &core_key)?;
+            let desired = match remote_caller_alias {
+                Some(alias) => request.remote_record_set(key, alias),
+                None => request.record_set(key),
+            }
+            .map_err(|_| CloudflareDnsAdminError::InvalidRequest)?;
+            let previous = writer
+                .observe_record_set(&zone, &desired.key)
+                .await
+                .map_err(map_provider_error)?;
+            let change = put_change(request, desired, previous)?;
+            if !self.authority_is_current(&authority).await {
+                return Err(CloudflareDnsAdminError::Unavailable);
+            }
+            let outcome = writer.apply_record_change(&zone, &change).await;
+            if marker.load(Ordering::SeqCst) {
+                if !self.authority_is_current(&authority).await {
+                    return Err(CloudflareDnsAdminError::UnknownOutcome);
+                }
+                return match outcome {
+                    Ok(CloudflareDnsSyncRecordOutcome::Present(observed)) => {
+                        let dto = map_record(*observed)
+                            .map_err(|_| CloudflareDnsAdminError::UnknownOutcome)?;
+                        if remote_caller_alias.is_some_and(|alias| {
+                            !matches!(
+                                &dto.control,
+                                CloudflareRecordControlDto::Remote { caller_alias }
+                                    if caller_alias == alias
+                            )
+                        }) {
+                            return Err(CloudflareDnsAdminError::UnknownOutcome);
+                        }
+                        Ok(dto)
+                    }
+                    Ok(CloudflareDnsSyncRecordOutcome::Deleted) => {
+                        Err(CloudflareDnsAdminError::UnknownOutcome)
+                    }
+                    Err(error) => Err(map_provider_error(error)),
+                };
+            }
+            if !self.authority_is_current(&authority).await {
+                return Err(CloudflareDnsAdminError::Unavailable);
+            }
+            match outcome {
+                Err(error) => Err(map_provider_error(error)),
+                Ok(_) => Err(CloudflareDnsAdminError::UnknownOutcome),
+            }
+        })
+        .await;
+        classify_timeout(result, &dispatched)
+    }
 }
 
 #[async_trait]
@@ -380,56 +453,20 @@ impl CloudflareDnsWriteAdminService for CloudflareDnsWriteService {
         key: &CloudflareRecordSetKey,
         request: &CloudflareRecordSetPutRequest,
     ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError> {
-        let core_key = key.core();
-        reject_soa_record_set(&core_key)?;
-        let dispatched = Arc::new(AtomicBool::new(false));
-        let marker = dispatched.clone();
-        let result = tokio::time::timeout(self.timeout, async {
-            let account_limit = self.account_semaphore(account_id)?;
-            let _account_permit = acquire(account_limit).await?;
-            let _global_permit = acquire(self.global.clone()).await?;
-            let (writer, authority) = self.prepare(account_id, marker.clone()).await?;
-            if !self.authority_is_current(&authority).await {
-                return Err(CloudflareDnsAdminError::Unavailable);
-            }
-            let zone = observe_exact_zone(&writer, account_id, zone_id).await?;
-            reject_apex_ns_record_set(&zone, &core_key)?;
-            let desired = request
-                .record_set(key)
-                .map_err(|_| CloudflareDnsAdminError::InvalidRequest)?;
-            let previous = writer
-                .observe_record_set(&zone, &desired.key)
-                .await
-                .map_err(map_provider_error)?;
-            let change = put_change(request, desired, previous)?;
-            if !self.authority_is_current(&authority).await {
-                return Err(CloudflareDnsAdminError::Unavailable);
-            }
-            let outcome = writer.apply_record_change(&zone, &change).await;
-            if marker.load(Ordering::SeqCst) {
-                if !self.authority_is_current(&authority).await {
-                    return Err(CloudflareDnsAdminError::UnknownOutcome);
-                }
-                return match outcome {
-                    Ok(CloudflareDnsSyncRecordOutcome::Present(observed)) => {
-                        map_record(*observed).map_err(|_| CloudflareDnsAdminError::UnknownOutcome)
-                    }
-                    Ok(CloudflareDnsSyncRecordOutcome::Deleted) => {
-                        Err(CloudflareDnsAdminError::UnknownOutcome)
-                    }
-                    Err(error) => Err(map_provider_error(error)),
-                };
-            }
-            if !self.authority_is_current(&authority).await {
-                return Err(CloudflareDnsAdminError::Unavailable);
-            }
-            match outcome {
-                Err(error) => Err(map_provider_error(error)),
-                Ok(_) => Err(CloudflareDnsAdminError::UnknownOutcome),
-            }
-        })
-        .await;
-        classify_timeout(result, &dispatched)
+        self.put_record_set_inner(account_id, zone_id, key, request, None)
+            .await
+    }
+
+    async fn put_remote_record_set(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        key: &CloudflareRecordSetKey,
+        request: &CloudflareRecordSetPutRequest,
+        caller_alias: &str,
+    ) -> Result<CloudflareRecordSetDto, CloudflareDnsAdminError> {
+        self.put_record_set_inner(account_id, zone_id, key, request, Some(caller_alias))
+            .await
     }
 
     async fn delete_record_set(
@@ -743,6 +780,7 @@ mod tests {
         delay: Duration,
         delete_delay: Duration,
         batch_delay: Duration,
+        corrupt_remote_marker: AtomicBool,
         zone_present: AtomicBool,
         delete_ack_id: Mutex<String>,
         dnssec: Mutex<Option<CloudflareDnssec>>,
@@ -764,6 +802,7 @@ mod tests {
                 delay,
                 delete_delay: Duration::ZERO,
                 batch_delay: Duration::ZERO,
+                corrupt_remote_marker: AtomicBool::new(false),
                 zone_present: AtomicBool::new(true),
                 delete_ack_id: Mutex::new(ZONE_ID.into()),
                 dnssec: Mutex::new(None),
@@ -888,12 +927,19 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>();
             records.retain(|record| !request.deletes.iter().any(|delete| delete.id == record.id));
-            let posts = request
+            let mut posts = request
                 .posts
                 .iter()
                 .enumerate()
                 .map(|(index, post)| fake_record(post, batch_number * 100 + index))
                 .collect::<Vec<_>>();
+            if self.corrupt_remote_marker.load(Ordering::SeqCst) {
+                for post in &mut posts {
+                    post.tags.retain(|tag| !tag.starts_with("edgion-center-"));
+                    post.tags
+                        .insert(format!("edgion-center-remote:{}", "m".repeat(43)));
+                }
+            }
             records.extend(posts.clone());
             if let Some(store) = &self.rotate_store {
                 *store.0.lock().unwrap() = Some(account(2));
@@ -1013,6 +1059,28 @@ mod tests {
             cname_flattening: CloudflareCnameFlattening::ProviderDefault,
             comment: None,
             tags: Vec::new(),
+        }
+    }
+
+    fn remote_record_put(
+        guard: CloudflareRecordMutationGuardDto,
+        addresses: [&str; 2],
+    ) -> CloudflareRecordSetPutRequest {
+        CloudflareRecordSetPutRequest {
+            guard,
+            ttl: edgion_center_app::api::cloudflare_dns::CloudflareRecordTtlDto::Automatic,
+            values: addresses
+                .into_iter()
+                .map(|address| {
+                    edgion_center_app::api::cloudflare_dns::CloudflareRecordValueDto::A {
+                        address: address.parse().unwrap(),
+                    }
+                })
+                .collect(),
+            proxy: Some(CloudflareProxyOptions::DnsOnly),
+            cname_flattening: CloudflareCnameFlattening::ProviderDefault,
+            comment: None,
+            tags: vec!["owner:center".into()],
         }
     }
 
@@ -1489,6 +1557,242 @@ mod tests {
             .unwrap();
         assert_eq!(api.batch_calls.load(Ordering::SeqCst), 2);
         assert!(api.records.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remote_rrset_create_and_replace_use_one_batch_and_one_marker() {
+        let (_directory, resolver) = mounted().await;
+        let store = Arc::new(Store(Mutex::new(Some(account(1)))));
+        let api = Arc::new(FakeApi::new(Duration::ZERO, None));
+        let service = service(store, resolver, api.clone(), 1);
+        let account_id = CloudResourceId::new(CENTER_ACCOUNT).unwrap();
+        let zone_id = DnsZoneId::new(ZONE_ID).unwrap();
+        let key = record_key("remote.example.com");
+        let alias = "r".repeat(43);
+
+        let created = service
+            .put_remote_record_set(
+                &account_id,
+                &zone_id,
+                &key,
+                &remote_record_put(
+                    CloudflareRecordMutationGuardDto::MustNotExist,
+                    ["192.0.2.10", "192.0.2.11"],
+                ),
+                &alias,
+            )
+            .await
+            .unwrap();
+        assert_eq!(api.batch_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            created.control,
+            CloudflareRecordControlDto::Remote {
+                caller_alias: alias.clone()
+            }
+        );
+        assert_eq!(created.tags, vec!["owner:center"]);
+        let expected_marker = format!("edgion-center-remote:{alias}");
+        let records = api.records.lock().unwrap().clone();
+        assert_eq!(records.len(), 2);
+        assert!(records
+            .iter()
+            .all(|record| record.tags.contains(&expected_marker)));
+
+        let replaced = service
+            .put_remote_record_set(
+                &account_id,
+                &zone_id,
+                &key,
+                &remote_record_put(
+                    CloudflareRecordMutationGuardDto::MatchRevision {
+                        revision: created.revision,
+                    },
+                    ["192.0.2.20", "192.0.2.21"],
+                ),
+                &alias,
+            )
+            .await
+            .unwrap();
+        assert_eq!(api.batch_calls.load(Ordering::SeqCst), 2);
+        assert!(matches!(
+            replaced.control,
+            CloudflareRecordControlDto::Remote { caller_alias } if caller_alias == alias
+        ));
+        let records = api.records.lock().unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records
+            .iter()
+            .all(|record| record.tags.contains(&expected_marker)));
+    }
+
+    #[tokio::test]
+    async fn remote_rrset_stale_guard_and_scope_mismatch_do_not_dispatch() {
+        let (_directory, resolver) = mounted().await;
+        let store = Arc::new(Store(Mutex::new(Some(account(1)))));
+        let api = Arc::new(FakeApi::new(Duration::ZERO, None));
+        api.records.lock().unwrap().push(user_record());
+        let service = service(store, resolver, api.clone(), 1);
+        let account_id = CloudResourceId::new(CENTER_ACCOUNT).unwrap();
+        let zone_id = DnsZoneId::new(ZONE_ID).unwrap();
+        let alias = "s".repeat(43);
+
+        assert_eq!(
+            service
+                .put_remote_record_set(
+                    &account_id,
+                    &zone_id,
+                    &record_key("www.example.com"),
+                    &remote_record_put(
+                        CloudflareRecordMutationGuardDto::MatchRevision {
+                            revision: DnsRecordRevision::new("stale").unwrap(),
+                        },
+                        ["192.0.2.20", "192.0.2.21"],
+                    ),
+                    &alias,
+                )
+                .await,
+            Err(CloudflareDnsAdminError::Conflict)
+        );
+        assert_eq!(api.batch_calls.load(Ordering::SeqCst), 0);
+
+        assert_eq!(
+            service
+                .put_remote_record_set(
+                    &CloudResourceId::new("cf-other").unwrap(),
+                    &zone_id,
+                    &record_key("other.example.com"),
+                    &remote_record_put(
+                        CloudflareRecordMutationGuardDto::MustNotExist,
+                        ["192.0.2.20", "192.0.2.21"],
+                    ),
+                    &alias,
+                )
+                .await,
+            Err(CloudflareDnsAdminError::InvalidRequest)
+        );
+        assert_eq!(api.batch_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn remote_rrset_marker_mismatch_after_dispatch_is_unknown() {
+        let (_directory, resolver) = mounted().await;
+        let store = Arc::new(Store(Mutex::new(Some(account(1)))));
+        let api = Arc::new(FakeApi::new(Duration::ZERO, None));
+        api.corrupt_remote_marker.store(true, Ordering::SeqCst);
+        let service = service(store, resolver, api.clone(), 1);
+
+        assert_eq!(
+            service
+                .put_remote_record_set(
+                    &CloudResourceId::new(CENTER_ACCOUNT).unwrap(),
+                    &DnsZoneId::new(ZONE_ID).unwrap(),
+                    &record_key("mismatch.example.com"),
+                    &remote_record_put(
+                        CloudflareRecordMutationGuardDto::MustNotExist,
+                        ["192.0.2.30", "192.0.2.31"],
+                    ),
+                    &"e".repeat(43),
+                )
+                .await,
+            Err(CloudflareDnsAdminError::UnknownOutcome)
+        );
+        assert_eq!(api.batch_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn ordinary_put_with_exact_guard_clears_remote_marker() {
+        let (_directory, resolver) = mounted().await;
+        let store = Arc::new(Store(Mutex::new(Some(account(1)))));
+        let api = Arc::new(FakeApi::new(Duration::ZERO, None));
+        let service = service(store, resolver, api.clone(), 1);
+        let account_id = CloudResourceId::new(CENTER_ACCOUNT).unwrap();
+        let zone_id = DnsZoneId::new(ZONE_ID).unwrap();
+        let key = record_key("manual.example.com");
+        let remote = service
+            .put_remote_record_set(
+                &account_id,
+                &zone_id,
+                &key,
+                &remote_record_put(
+                    CloudflareRecordMutationGuardDto::MustNotExist,
+                    ["192.0.2.40", "192.0.2.41"],
+                ),
+                &"c".repeat(43),
+            )
+            .await
+            .unwrap();
+
+        let manual = service
+            .put_record_set(
+                &account_id,
+                &zone_id,
+                &key,
+                &remote_record_put(
+                    CloudflareRecordMutationGuardDto::MatchRevision {
+                        revision: remote.revision,
+                    },
+                    ["192.0.2.50", "192.0.2.51"],
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(manual.control, CloudflareRecordControlDto::Manual);
+        assert!(api.records.lock().unwrap().iter().all(|record| record
+            .tags
+            .iter()
+            .all(|tag| !tag.starts_with("edgion-center-"))));
+    }
+
+    #[tokio::test]
+    async fn remote_rrset_preserves_authority_and_concurrency_guards() {
+        let (_directory, resolver) = mounted().await;
+        let store = Arc::new(Store(Mutex::new(Some(account(1)))));
+        let api = Arc::new(FakeApi::new(Duration::ZERO, Some(store.clone())));
+        let authority_service = service(store, resolver, api.clone(), 1);
+        assert_eq!(
+            authority_service
+                .put_remote_record_set(
+                    &CloudResourceId::new(CENTER_ACCOUNT).unwrap(),
+                    &DnsZoneId::new(ZONE_ID).unwrap(),
+                    &record_key("authority.example.com"),
+                    &remote_record_put(
+                        CloudflareRecordMutationGuardDto::MustNotExist,
+                        ["192.0.2.60", "192.0.2.61"],
+                    ),
+                    &"a".repeat(43),
+                )
+                .await,
+            Err(CloudflareDnsAdminError::UnknownOutcome)
+        );
+        assert_eq!(api.batch_calls.load(Ordering::SeqCst), 1);
+
+        let (_directory, resolver) = mounted().await;
+        let store = Arc::new(Store(Mutex::new(Some(account(1)))));
+        let mut delayed = FakeApi::new(Duration::ZERO, None);
+        delayed.batch_delay = Duration::from_millis(20);
+        let api = Arc::new(delayed);
+        let service = service(store, resolver, api.clone(), 1);
+        let account_id = CloudResourceId::new(CENTER_ACCOUNT).unwrap();
+        let zone_id = DnsZoneId::new(ZONE_ID).unwrap();
+        let first_key = record_key("remote-one.example.com");
+        let second_key = record_key("remote-two.example.com");
+        let first = remote_record_put(
+            CloudflareRecordMutationGuardDto::MustNotExist,
+            ["192.0.2.70", "192.0.2.71"],
+        );
+        let second = remote_record_put(
+            CloudflareRecordMutationGuardDto::MustNotExist,
+            ["192.0.2.80", "192.0.2.81"],
+        );
+        let alias = "q".repeat(43);
+        let (first, second) = tokio::join!(
+            service.put_remote_record_set(&account_id, &zone_id, &first_key, &first, &alias),
+            service.put_remote_record_set(&account_id, &zone_id, &second_key, &second, &alias),
+        );
+        first.unwrap();
+        second.unwrap();
+        assert_eq!(api.batch_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(api.peak.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

@@ -2887,7 +2887,9 @@ mod tests {
         delete_zone_calls: Mutex<u64>,
         delete_zone_ack_override: Mutex<Option<String>>,
         batch_record_calls: Mutex<u64>,
+        batch_requests: Mutex<Vec<CloudflareBatchRequest>>,
         batch_result_override: Mutex<Option<CloudflareBatchResult>>,
+        stored_post_tags_override: Mutex<Option<BTreeSet<String>>>,
         zone_total_pages: u32,
         records: Mutex<BTreeMap<String, Vec<CloudflareRecord>>>,
         dnssec: Mutex<BTreeMap<String, CloudflareDnssec>>,
@@ -3035,6 +3037,7 @@ mod tests {
         ) -> CloudflareApiResult<CloudflareBatchResult> {
             self.total_calls.fetch_add(1, Ordering::SeqCst);
             *self.batch_record_calls.lock().unwrap() += 1;
+            self.batch_requests.lock().unwrap().push(request.clone());
             let mut records = self.records.lock().unwrap();
             let mut candidate = records.get(zone_id).cloned().unwrap_or_default();
             let mut deleted = Vec::new();
@@ -3065,7 +3068,11 @@ mod tests {
                 let id = format!("{:032x}", *sequence);
                 drop(sequence);
                 let record = fake_record_from_post(id, post)?;
-                candidate.push(record.clone());
+                let mut stored_record = record.clone();
+                if let Some(tags) = self.stored_post_tags_override.lock().unwrap().as_ref() {
+                    stored_record.tags.clone_from(tags);
+                }
+                candidate.push(stored_record);
                 posted.push(record);
             }
             records.insert(zone_id.to_string(), candidate);
@@ -3619,6 +3626,215 @@ mod tests {
             .unwrap();
         assert_eq!(deleted, CloudflareDnsSyncRecordOutcome::Deleted);
         assert_eq!(*api.batch_record_calls.lock().unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_preserves_remote_marker_on_every_multivalue_batch_post() {
+        let api = Arc::new(fake_api());
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+        let marker = "edgion-center-remote:oidc-example-subject";
+        let desired = tagged_txt_record(
+            "remote.example.test",
+            &["primary", "secondary"],
+            BTreeSet::from([marker.to_string(), "owner:platform".to_string()]),
+        );
+
+        let outcome = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: desired.clone(),
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap();
+
+        let CloudflareDnsSyncRecordOutcome::Present(observed) = outcome else {
+            panic!("create must return a present RRset")
+        };
+        assert_eq!(observed.record_set, desired);
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 1);
+        let requests = api.batch_requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].posts.len(), 2);
+        assert!(requests[0]
+            .posts
+            .iter()
+            .all(|post| post.tags.contains(marker) && post.tags.contains("owner:platform")));
+    }
+
+    #[tokio::test]
+    async fn sync_writer_marker_changes_revision_and_stale_guard_never_dispatches() {
+        let api = Arc::new(fake_api());
+        let marker = "edgion-center-remote:oidc-original";
+        api.records
+            .lock()
+            .unwrap()
+            .get_mut(ZONE_A_ID)
+            .unwrap()
+            .iter_mut()
+            .find(|record| record.id == RECORD_B_ID)
+            .unwrap()
+            .tags
+            .insert(marker.to_string());
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+        let key = txt_record("txt.example.test", "unused").key;
+        let previous = writer
+            .observe_record_set(&zone, &key)
+            .await
+            .unwrap()
+            .unwrap();
+
+        {
+            let mut records = api.records.lock().unwrap();
+            let record = records
+                .get_mut(ZONE_A_ID)
+                .unwrap()
+                .iter_mut()
+                .find(|record| record.id == RECORD_B_ID)
+                .unwrap();
+            record.tags.clear();
+            record
+                .tags
+                .insert("edgion-center-remote:oidc-external-change".to_string());
+        }
+        let changed = writer
+            .observe_record_set(&zone, &key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(previous.revision, changed.revision);
+
+        let error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Replace {
+                    previous: previous.clone(),
+                    desired: tagged_txt_record(
+                        "txt.example.test",
+                        &["replacement"],
+                        BTreeSet::from([marker.to_string()]),
+                    ),
+                    guard: edgion_center_core::DnsMutationGuard::MatchObserved {
+                        revision: previous.revision,
+                    },
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.category(), ProviderErrorCategory::Conflict);
+        assert_eq!(error.code(), "cloudflare_replace_guard_conflict");
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 0);
+        assert!(api.batch_requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_writer_maps_batch_result_marker_loss_to_unknown_outcome() {
+        let api = Arc::new(fake_api());
+        let desired = tagged_txt_record(
+            "remote-result.example.test",
+            &["value"],
+            BTreeSet::from(["edgion-center-remote:oidc-subject".to_string()]),
+        );
+        let post = render_record_set(&desired).unwrap().remove(0);
+        let mut provider_result =
+            fake_record_from_post("44444444444444444444444444444444".to_string(), &post).unwrap();
+        provider_result.tags.clear();
+        *api.batch_result_override.lock().unwrap() = Some(CloudflareBatchResult {
+            deletes: Vec::new(),
+            posts: vec![provider_result],
+        });
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+
+        let error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: desired,
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.category(), ProviderErrorCategory::UnknownOutcome);
+        assert_eq!(error.code(), "cloudflare_batch_post_result_mismatch");
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn sync_writer_maps_post_observation_marker_change_to_unknown_outcome() {
+        let api = Arc::new(fake_api());
+        *api.stored_post_tags_override.lock().unwrap() = Some(BTreeSet::from([
+            "edgion-center-remote:oidc-external-change".to_string(),
+        ]));
+        let desired = tagged_txt_record(
+            "remote-observe.example.test",
+            &["value"],
+            BTreeSet::from(["edgion-center-remote:oidc-subject".to_string()]),
+        );
+        let writer = CloudflareDnsSyncWriter::new(
+            CloudResourceId::new("cloudflare-main").unwrap(),
+            &account(),
+            api.clone(),
+        )
+        .unwrap();
+        let zone = writer
+            .observe_zone(&DnsZoneId::new(ZONE_A_ID).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .zone;
+
+        let error = writer
+            .apply_record_change(
+                &zone,
+                &DnsRecordChange::Create {
+                    record_set: desired,
+                    guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.category(), ProviderErrorCategory::UnknownOutcome);
+        assert_eq!(error.code(), "cloudflare_record_post_observation_mismatch");
+        assert_eq!(*api.batch_record_calls.lock().unwrap(), 1);
     }
 
     #[tokio::test]
@@ -5475,7 +5691,9 @@ mod tests {
             delete_zone_calls: Mutex::new(0),
             delete_zone_ack_override: Mutex::new(None),
             batch_record_calls: Mutex::new(0),
+            batch_requests: Mutex::new(Vec::new()),
             batch_result_override: Mutex::new(None),
+            stored_post_tags_override: Mutex::new(None),
             zone_total_pages: 1,
             records: Mutex::new(records),
             dnssec: Mutex::new(BTreeMap::new()),
@@ -5580,6 +5798,28 @@ mod tests {
             ttl: DnsTtl::Seconds(300),
             values: BTreeSet::from([txt_value(value)]),
             extension: None,
+        }
+    }
+
+    fn tagged_txt_record(
+        owner: &str,
+        values: &[&str],
+        tags: BTreeSet<String>,
+    ) -> ProviderDnsRecordSet {
+        ProviderDnsRecordSet {
+            key: DnsRecordSetKey {
+                owner: DnsOwnerName::new(owner).unwrap(),
+                record_type: ProviderDnsRecordType::Txt,
+                routing: DnsRoutingIdentity::Simple,
+            },
+            ttl: DnsTtl::Seconds(300),
+            values: values.iter().map(|value| txt_value(value)).collect(),
+            extension: Some(DnsRecordExtension::Cloudflare {
+                proxy: None,
+                cname_flattening: CloudflareCnameFlattening::ProviderDefault,
+                comment: None,
+                tags,
+            }),
         }
     }
 }

@@ -4,9 +4,9 @@ use edgion_center_adapter_cloudflare::{
     ObservedCloudflareZone,
 };
 use edgion_center_app::api::cloudflare_dns::{
-    CloudflareDnsAdminError, CloudflareOctetsDto, CloudflareRecordSetDto, CloudflareRecordTtlDto,
-    CloudflareRecordType, CloudflareRecordValueDto, CloudflareZoneDto, CloudflareZoneKind,
-    CloudflareZoneStatus,
+    split_cloudflare_record_tags, CloudflareDnsAdminError, CloudflareOctetsDto,
+    CloudflareRecordSetDto, CloudflareRecordTtlDto, CloudflareRecordType, CloudflareRecordValueDto,
+    CloudflareZoneDto, CloudflareZoneKind, CloudflareZoneStatus,
 };
 use edgion_center_core::{
     CloudProvider, CloudflareCnameFlattening, CloudflareProxyOptions, DnsRecordExtension,
@@ -81,6 +81,8 @@ pub(crate) fn map_record(
         .map(map_record_value)
         .collect::<Result<Vec<_>, _>>()?;
     let extension = map_extension(observed.record_set.extension)?;
+    let (tags, control) =
+        split_cloudflare_record_tags(extension.tags).map_err(|_| invalid_observation())?;
 
     Ok(CloudflareRecordSetDto {
         provider_account_id: observed.zone.provider_account_id,
@@ -94,7 +96,8 @@ pub(crate) fn map_record(
         proxy: extension.proxy,
         cname_flattening: extension.cname_flattening,
         comment: extension.comment,
-        tags: extension.tags,
+        tags,
+        control,
         provider_object_ids: observed.provider_object_ids.into_iter().collect(),
         revision: observed.revision,
     })
@@ -216,7 +219,7 @@ struct MappedExtension {
     proxy: Option<CloudflareProxyOptions>,
     cname_flattening: CloudflareCnameFlattening,
     comment: Option<String>,
-    tags: Vec<String>,
+    tags: std::collections::BTreeSet<String>,
 }
 
 fn map_extension(
@@ -232,13 +235,13 @@ fn map_extension(
             proxy,
             cname_flattening,
             comment,
-            tags: tags.into_iter().collect(),
+            tags,
         }),
         None => Ok(MappedExtension {
             proxy: None,
             cname_flattening: CloudflareCnameFlattening::ProviderDefault,
             comment: None,
-            tags: Vec::new(),
+            tags: std::collections::BTreeSet::new(),
         }),
         Some(
             DnsRecordExtension::Route53 { .. }
@@ -274,8 +277,8 @@ mod tests {
         CloudflareZoneKind, CloudflareZoneStatus, ObservedCloudflareZone,
     };
     use edgion_center_app::api::cloudflare_dns::{
-        CloudflareDnsAdminError, CloudflareRecordTtlDto, CloudflareRecordType,
-        CloudflareRecordValueDto, CloudflareZoneKind as DtoZoneKind,
+        CloudflareDnsAdminError, CloudflareRecordControlDto, CloudflareRecordTtlDto,
+        CloudflareRecordType, CloudflareRecordValueDto, CloudflareZoneKind as DtoZoneKind,
     };
     use edgion_center_core::{
         AbsoluteDnsName, CaaTag, CloudProvider, CloudResourceId, CloudflareCnameFlattening,
@@ -404,6 +407,7 @@ mod tests {
         assert_eq!(dto.ttl, CloudflareRecordTtlDto::Seconds(300));
         assert_eq!(dto.comment.as_deref(), Some("managed record"));
         assert_eq!(dto.tags, vec!["owner:center", "team:edge"]);
+        assert_eq!(dto.control, CloudflareRecordControlDto::Manual);
         match &dto.values[0] {
             CloudflareRecordValueDto::Txt { segments } => {
                 assert_eq!(
@@ -435,6 +439,69 @@ mod tests {
                 assert_eq!(URL_SAFE_NO_PAD.decode(&value.base64).unwrap(), [0xff, b'x']);
             }
             value => panic!("unexpected value: {value:?}"),
+        }
+    }
+
+    #[test]
+    fn projects_remote_control_markers_without_leaking_reserved_tags() {
+        let alias = "a".repeat(43);
+        let extension = |tags| DnsRecordExtension::Cloudflare {
+            proxy: None,
+            cname_flattening: CloudflareCnameFlattening::ProviderDefault,
+            comment: None,
+            tags,
+        };
+
+        let remote = map_record(observed_record(
+            ProviderDnsRecordType::Txt,
+            BTreeSet::from([DnsRecordSetValue::Txt {
+                value: DnsTxtValue::new(vec![DnsCharacterString::new(b"remote".to_vec()).unwrap()])
+                    .unwrap(),
+            }]),
+            DnsTtl::Seconds(300),
+            Some(extension(BTreeSet::from([
+                "owner:center".to_string(),
+                format!("edgion-center-remote:{alias}"),
+            ]))),
+        ))
+        .unwrap();
+        assert_eq!(remote.tags, vec!["owner:center"]);
+        assert_eq!(
+            remote.control,
+            CloudflareRecordControlDto::Remote {
+                caller_alias: alias
+            }
+        );
+
+        for reserved in [
+            "edgion-center-remote:short",
+            "edgion-center-unknown:opaque-provider-value",
+        ] {
+            let invalid = map_record(observed_record(
+                ProviderDnsRecordType::Txt,
+                BTreeSet::from([DnsRecordSetValue::Txt {
+                    value: DnsTxtValue::new(vec![
+                        DnsCharacterString::new(b"invalid".to_vec()).unwrap()
+                    ])
+                    .unwrap(),
+                }]),
+                DnsTtl::Seconds(300),
+                Some(extension(BTreeSet::from([
+                    "owner:center".to_string(),
+                    reserved.to_string(),
+                ]))),
+            ))
+            .unwrap();
+            assert_eq!(invalid.tags, vec!["owner:center"]);
+            assert_eq!(
+                invalid.control,
+                CloudflareRecordControlDto::InvalidRemoteMarker
+            );
+            assert!(invalid.tags.iter().all(|tag| tag != reserved));
+            assert!(invalid
+                .tags
+                .iter()
+                .all(|tag| !tag.contains("opaque-provider-value")));
         }
     }
 

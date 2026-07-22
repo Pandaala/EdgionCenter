@@ -280,7 +280,7 @@ mod tests {
         body::to_bytes,
         http::Request,
         middleware,
-        routing::{delete, get, post},
+        routing::{delete, get, post, put},
         Router,
     };
     use edgion_center_core::{AllowAllAuthorizer, CoreError, CoreResult, Decision};
@@ -462,6 +462,31 @@ mod tests {
             actions[1].request_path.as_deref(),
             Some("/permissions/provider-credentials:use")
         );
+    }
+
+    #[tokio::test]
+    async fn cloudflare_remote_route_uses_only_remote_write_permission() {
+        let authorizer = Arc::new(CapturingAuthorizer {
+            principals: Mutex::new(Vec::new()),
+            actions: Mutex::new(Vec::new()),
+        });
+        let path = "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A/remote-control";
+        let inner = Router::new().route(path, put(|| async { "ok" }));
+        let app = app_with(authorizer.clone(), inner);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let actions = authorizer.actions.lock().unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].permission, catalog::CLOUDFLARE_DNS_REMOTE_WRITE);
     }
 
     #[tokio::test]
