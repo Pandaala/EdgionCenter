@@ -105,34 +105,8 @@ pub enum DnsCapability {
     AtomicChanges,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CertificateCapability {
-    ProviderManagedPublicEdge,
-    OriginCertificates,
-    ImportedCertificates,
-    Wildcards,
-    AutomaticRenewal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EdgeCapability {
-    HttpProxy,
-    TlsTermination,
-    CustomHostnames,
-    OriginOverride,
-    GlobalLoadBalancing,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HealthCheckCapability {
-    Http,
-    Https,
-    Tcp,
-}
-
+/// Provider-neutral WAF capabilities. Provider-specific rule expressions and
+/// protected-target identifiers remain outside the core contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WafCapability {
@@ -142,23 +116,33 @@ pub enum WafCapability {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CacheCapability {
-    CacheRules,
-    PurgeAll,
-    PurgeByUrl,
-    TieredCache,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "family", content = "name", rename_all = "snake_case")]
 pub enum ProviderCapability {
     Dns(DnsCapability),
-    Certificate(CertificateCapability),
-    Edge(EdgeCapability),
-    HealthCheck(HealthCheckCapability),
     Waf(WafCapability),
-    Cache(CacheCapability),
+}
+
+/// Identifies persisted snapshots that advertise retired capability families.
+/// Stores treat these payloads as unavailable during upgrade rather than
+/// re-exposing their retired variants through the current API.
+pub fn is_retired_capability_snapshot_json(value: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(value) else {
+        return false;
+    };
+    contains_retired_capability_family(&value)
+}
+
+fn contains_retired_capability_family(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(values) => {
+            matches!(
+                values.get("family").and_then(serde_json::Value::as_str),
+                Some("certificate" | "edge" | "health_check" | "cache")
+            ) || values.values().any(contains_retired_capability_family)
+        }
+        serde_json::Value::Array(values) => values.iter().any(contains_retired_capability_family),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1486,11 +1470,11 @@ mod tests {
             resource_kind: CloudResourceKind::ManagedZone,
             resource: resource.clone(),
         };
-        let edge = CapabilityScope::Resource {
-            resource_kind: CloudResourceKind::EdgeApplication,
+        let record_set = CapabilityScope::Resource {
+            resource_kind: CloudResourceKind::DnsRecordSet,
             resource,
         };
-        assert_ne!(zone, edge);
+        assert_ne!(zone, record_set);
 
         let error = SanitizedCapabilityCode::new(" leaked-value\n")
             .unwrap_err()
@@ -1556,7 +1540,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_total_serialized_size_is_bounded_for_all_persistence_modes() {
+    fn retained_capability_snapshot_fits_the_shared_persistence_budget() {
         let capabilities = [
             ProviderCapability::Dns(DnsCapability::PublicZones),
             ProviderCapability::Dns(DnsCapability::PrivateZones),
@@ -1568,26 +1552,9 @@ mod tests {
             ProviderCapability::Dns(DnsCapability::GeolocationRouting),
             ProviderCapability::Dns(DnsCapability::FailoverRouting),
             ProviderCapability::Dns(DnsCapability::AtomicChanges),
-            ProviderCapability::Certificate(CertificateCapability::ProviderManagedPublicEdge),
-            ProviderCapability::Certificate(CertificateCapability::OriginCertificates),
-            ProviderCapability::Certificate(CertificateCapability::ImportedCertificates),
-            ProviderCapability::Certificate(CertificateCapability::Wildcards),
-            ProviderCapability::Certificate(CertificateCapability::AutomaticRenewal),
-            ProviderCapability::Edge(EdgeCapability::HttpProxy),
-            ProviderCapability::Edge(EdgeCapability::TlsTermination),
-            ProviderCapability::Edge(EdgeCapability::CustomHostnames),
-            ProviderCapability::Edge(EdgeCapability::OriginOverride),
-            ProviderCapability::Edge(EdgeCapability::GlobalLoadBalancing),
-            ProviderCapability::HealthCheck(HealthCheckCapability::Http),
-            ProviderCapability::HealthCheck(HealthCheckCapability::Https),
-            ProviderCapability::HealthCheck(HealthCheckCapability::Tcp),
             ProviderCapability::Waf(WafCapability::ManagedRules),
             ProviderCapability::Waf(WafCapability::CustomRules),
             ProviderCapability::Waf(WafCapability::RateLimiting),
-            ProviderCapability::Cache(CacheCapability::CacheRules),
-            ProviderCapability::Cache(CacheCapability::PurgeAll),
-            ProviderCapability::Cache(CacheCapability::PurgeByUrl),
-            ProviderCapability::Cache(CacheCapability::TieredCache),
         ];
         let message = SanitizedCapabilityMessage::new("x".repeat(MAX_DIAGNOSTIC_MESSAGE_LEN))
             .expect("maximum diagnostic message");
@@ -1637,6 +1604,20 @@ mod tests {
                 issues: Vec::new(),
             },
         );
-        assert!(matches!(result, Err(CoreError::Conflict(_))));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn retired_capability_snapshot_detection_is_narrow() {
+        assert!(is_retired_capability_snapshot_json(
+            r#"{"observations":[{"capability":{"family":"edge","name":"http_proxy"}}]}"#
+        ));
+        assert!(is_retired_capability_snapshot_json(
+            r#"{"capability":{"family":"certificate","name":"managed"}}"#
+        ));
+        assert!(!is_retired_capability_snapshot_json(
+            r#"{"observations":[{"capability":{"family":"dns","name":"record_sets"}},{"capability":{"family":"waf","name":"managed_rules"}}]}"#
+        ));
+        assert!(!is_retired_capability_snapshot_json("not-json"));
     }
 }

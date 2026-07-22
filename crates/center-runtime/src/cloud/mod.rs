@@ -2,7 +2,6 @@
 
 mod capability_discovery;
 mod credential_inspection;
-mod worker;
 
 pub use capability_discovery::{
     CapabilityClock, CapabilityDiscovererResolver, CapabilityDiscoveryService, CapabilityJitter,
@@ -13,4 +12,3 @@ pub use credential_inspection::{
     CredentialInspectionAuthority, CredentialInspectionPolicy, CredentialInspectionService,
     CredentialInspectorResolver,
 };
-pub use worker::{CloudOperationExecutor, ReconcileWorker, WorkerRun};

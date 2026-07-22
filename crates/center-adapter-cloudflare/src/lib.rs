@@ -4,8 +4,6 @@
 //! Edgion resources. Composition roots inject a credential-owning API client.
 
 mod http;
-pub mod load_balancing;
-pub mod origin_rules;
 
 pub use http::{
     CloudflareApiToken, CloudflareCredentialProbe, CloudflareHttpApi, CloudflareTokenStatus,

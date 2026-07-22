@@ -2,21 +2,11 @@
 
 ## Product boundary
 
-Cloud integration is an independent EdgionCenter capability for managing the public entry
-infrastructure in front of applications. Its delivery boundary includes provider accounts,
-DNS zones and records, bounded Cloudflare and CloudFront edge applications, and origin pools. It is not a
-general-purpose cloud console and it does not depend on Edgion Controllers, Gateway API
-resources, RegionRoute, or the federation wire contract.
-
-Certificate lifecycle management is not part of Center delivery. Existing certificate model
-types remain for compatibility, but Center does not issue, import, upload, renew, rotate, or delete
-certificates or private keys. Edgion and cert-manager retain internal certificate ownership;
-CloudFront or other external edge resources may consume only an owner-supplied certificate
-reference plus fresh compatibility evidence.
-
-Future features may connect a `DomainBinding` to an Edgion region or route, but that is a
-separate integration layer. Provider adapters and the base cloud domain must remain useful
-without Edgion being installed.
+Cloud integration is an independent EdgionCenter capability for provider accounts, DNS zones,
+DNS records, DNS verification, and bounded WAF capability discovery. Provider DNS and WAF
+surfaces remain provider-specific; Center does not provide a unified exposure, edge, origin,
+certificate, health-check, or cache control plane. It does not depend on Edgion Controllers,
+Gateway API resources, RegionRoute, or the federation wire contract.
 
 ## Dependency boundary
 
@@ -26,8 +16,8 @@ without Edgion being installed.
                          +------------+-------------+
                                       |
                          +------------v-------------+
-                         | cloud reconciliation     |
-                         | planning and operations  |
+                         | provider-specific direct |
+                         | call services            |
                          +------------+-------------+
                                       |
                +----------------------+----------------------+
@@ -46,7 +36,7 @@ without Edgion being installed.
 ```
 
 `center-core` contains provider-neutral intent, validated identifiers, lifecycle policy,
-status Conditions, and resource relationships. It must not depend on cloud SDKs, HTTP,
+status Conditions, and retained resource references. It must not depend on cloud SDKs, HTTP,
 SQLx, or Kubernetes libraries. Vendor SDKs belong in separate adapter crates. SQL and
 Kubernetes persistence remain separate compositions as required by the existing Center
 architecture.
@@ -60,10 +50,6 @@ Every cloud resource has common metadata, a typed spec, and common observed stat
 | `ProviderAccount` | Selects a provider and references credentials without containing secret material. |
 | `ManagedZone` | Represents an imported or Center-created authoritative DNS zone. |
 | `DNSRecordSet` | Expresses one DNS owner name and record type with one or more values. |
-| `DomainBinding` | Declares that a public hostname is exposed through DNS, an optional edge application, and an origin pool; an external certificate reference may be attached as evidence. |
-| `CertificateBinding` | Compatibility model only; it is not a delivered Center certificate-management surface. |
-| `EdgeApplication` | Represents the provider edge/CDN application serving domains and forwarding to an origin pool. |
-| `OriginPool` | Describes independently addressable origins and portable active health checks. |
 
 The first model deliberately has no Gateway, HTTPRoute, RegionRoute, cluster, or Controller
 reference. Provider-specific configuration is also not accepted as arbitrary JSON or a
@@ -75,21 +61,22 @@ it becomes a typed extension.
 - `CloudResourceId` is a Center-owned stable identifier, independent of a provider ID.
 - `ProviderResourceRef` records the external provider identifier only in observed status.
 - `owner` is an administrative owner/team label, not proof of provider-resource ownership.
-- `Managed` resources may be reconciled after an explicit create or adoption workflow.
+- `Managed` provider-account and DNS resources may be changed only through an explicit,
+  provider-specific direct-call API.
 - `ObserveOnly` resources can be inventoried and compared but never mutated.
 - `DeletionPolicy::Retain` is the default. `DeleteExternal` must be an explicit choice and
   remains subject to ownership proof, impact planning, and authorization.
 - Resource references are typed by `CloudResourceKind`; adapters must reject dangling or
   wrong-kind references before provider mutation.
 
-Provider ownership markers and adoption are designed in CLD-05. The base model does not
-claim that a Center record alone proves ownership of an external object.
+The base model does not claim that a Center record or provider marker alone proves ownership of
+an external object. Each mutation API must establish its own exact authority and revision guard.
 
 ## Status contract
 
-Observed status uses generation-aware Conditions. At minimum, later reconcilers can publish
-`Accepted`, `CredentialsValid`, `DNSReady`, external TLS compatibility, `OriginHealthy`,
-`Programmed`, and `DriftDetected`. Unknown and stale observations must not be interpreted as
+Observed status uses generation-aware Conditions. Retained services can publish
+`Accepted`, `CredentialsValid`, `DNSReady`, `WafReady`, `Programmed`, and `DriftDetected`.
+Unknown and stale observations must not be interpreted as
 success. Provider errors are summarized into stable reason codes; raw payloads and secrets
 must not be stored in status.
 
@@ -117,8 +104,8 @@ metadata and `ProviderAccountSpec`, but never generation or observed status. A s
 generation one on create, increments it only through exact-generation compare-and-swap, and lists
 accounts with exact-byte keyset ordering. Persisted adapters must run the shared conformance suite
 and revalidate the complete stored shape on read. The first persistence slice is deliberately
-`Retain`-only and has no delete operation: deletion remains unavailable until desired-resource
-references and nonterminal cloud operations can be checked atomically. Credential sources remain
+`Retain`-only and has no delete operation: account deletion remains unavailable until retained
+provider-resource references can be checked safely. Credential sources remain
 bounded references or provider identity selectors; resolved secret material is never persisted.
 
 Standalone persists ProviderAccount desired state as an exact binary account ID, a signed positive
@@ -258,8 +245,9 @@ adds no Kubernetes Secret permission.
 ## Provider capability contract
 
 Provider capabilities are independent snapshots, not booleans embedded in `ProviderAccount`
-status. A closed `ProviderCapability` family identifies portable DNS, certificate, edge,
-health-check, WAF, and cache behavior. Each `CapabilityRequirement` also names an action
+status. A closed `ProviderCapability` family identifies portable DNS and WAF behavior. WAF
+capabilities cover only managed rules, custom rules, and rate limiting; provider expressions and
+protected-target references stay provider-specific. Each `CapabilityRequirement` also names an action
 (`Observe`, `Create`, `Update`, `Delete`, or `Execute`) so a read-only credential is not mistaken
 for write access and delete is not unnecessarily blocked by create quota.
 
@@ -303,42 +291,14 @@ scope mismatch, credential rotation, and blocking partial-discovery issues produ
 indeterminate result and cannot authorize a plan. The dashboard may use the same result to
 explain disabled controls, but the future server-side planner remains authoritative.
 
-## Reconciliation and operations
+## Provider mutations
 
-Cloud mutations are represented by durable `CloudOperation` records rather than being
-performed in an Admin API request. An operation targets one resource generation and contains
-ordered, independently idempotent apply steps. Compensation steps are rejected until a separate
-activation and reverse-order state machine is defined. The provider-neutral store
-contract deduplicates operation requests, serializes mutations per resource, and atomically
-claims work with a holder, fencing token, monotonically increasing fencing epoch, and lease
-expiry. Every state write must present the exact current lease, preventing a stale replica from
-committing after ownership has moved.
-
-Claim and dispatch are separate durable transitions. Before a provider call, the store marks
-the step `Running`, increments its attempt, and assigns an execution token. Completion must
-match both that dispatch fence and the current operation lease. The generic runtime worker
-advances at most one step per claim. Provider adapters return a
-normalized success, permanent failure, scheduled retry, or unknown outcome. A delayed retry
-blocks later steps, and operation deadlines are checked before dispatch. The store calculates a
-relative execution budget in its own time domain after reserving a completion margin. Each
-provider call is bounded by that budget; long-running provider jobs must be modeled as a short
-submit step followed by idempotent observation steps. Timeout, transport ambiguity after
-dispatch, or an executor failure becomes `UnknownOutcome`. It is never blindly replayed: a
-later observation or explicit operator decision must establish whether the external mutation
-took effect.
-
-The contracts live in `center-core`, while the worker lives in `center-runtime`; neither layer
-depends on a cloud SDK or Edgion resource. CLD-34 now provides a SQL operation store for
-standalone mode and an `EdgionCloudOperation` CRD plus per-resource Lease store for Kubernetes
-mode. SQL uses transactional/CAS updates and a database queue order. Kubernetes uses ordered
-resourceVersion CAS, exact resource and dispatch fences, monotonic Lease observation, and
-conservative recovery of an abandoned `Running` step to `UnknownOutcome`.
-
-The stores are not yet composed into either binary because there is no Admin API, planner, or
-provider executor to submit safe work. Kubernetes CRD-plus-Lease updates are compensating
-two-object transitions rather than a cross-object transaction. Real MySQL and two-replica
-Kubernetes conformance testing remain prerequisites for enabling provider mutations. There is
-still no cloud dashboard menu.
+Retained provider-specific APIs make bounded synchronous direct calls. They keep their own
+admission, deadlines, concurrency controls, audit records, exact receipts or tokens, and
+`UnknownOutcome` handling. Center has no generic cloud-operation contract, durable operation
+store, background worker, shared desired-resource reconciler, or operation CRD. Provider APIs
+must not blindly replay an ambiguous external mutation; a later observation or explicit operator
+decision establishes its outcome.
 
 ## Status and provider errors
 
@@ -350,11 +310,12 @@ time.
 
 Provider adapters normalize sanitized failures into authentication, authorization, quota,
 conflict, validation, not-found, transient, throttled, or unknown-outcome categories. The core maps
-those categories to the durable `OperationError` projection and validates again before conversion.
+those categories to the retained sanitized direct-call `OperationError` projection and validates
+again before conversion.
 Raw provider bodies, headers, and credential material must not enter either model. Correlation IDs
 and bounded time-ordered cloud events exist as core contracts; persistence, retention, API, and
-end-to-end linkage between Center correlation IDs, operation IDs, and provider request IDs remain
-future work. Consumers must evaluate the requested condition at the exact desired generation and
+end-to-end linkage between Center correlation IDs and provider request IDs remain future work.
+Consumers must evaluate the requested condition at the exact desired generation and
 must not treat the top-level observed generation alone as readiness.
 
 ## DNS provider contract
@@ -628,7 +589,11 @@ answer. DNSSEC validation reserves bounded logical operations and is also constr
 resolver's single attempt, per-lookup timeout, and the verifier's total deadline; Hickory's internal
 DNSKEY/DS exchanges are not individually exported as propagation-query metrics.
 
-## Origin routing and health contract
+## Historical origin and general-edge design (retired)
+
+The remainder of this section records the removed CLD-23 through CLD-26 design for historical
+context only. `OriginPool`, Cloudflare Origin Rules, and Cloudflare Load Balancing are not compiled,
+exported, composed, or part of the current product. New work must not depend on these contracts.
 
 `OriginPool` is an independent public-infrastructure resource. It does not contain Controller,
 cluster, Edgion Region, Gateway, HTTPRoute, or RegionRoute references. A future integration resource
@@ -687,7 +652,13 @@ response. Provider write ambiguity is `UnknownOutcome`, never an automatic retry
 quota, region, and steering limitations are capability evidence; an unknown create quota cannot be
 treated as spare capacity.
 
-## CloudFront exposure contract
+## Historical general CloudFront design (retired)
+
+The detailed material below records the removed broad CloudFront planner. The retained adapter is
+read-only Distribution inventory plus a private raw-wire round-trip seam. CLD-28F will separately
+add a fixed one-origin API Distribution lifecycle, and CLD-29A will add an exact `WebACLId`
+association write set. Ordered behaviors, origin groups, failover, ACM/domain orchestration,
+invalidations, and general CDN management are not current contracts.
 
 CloudFront is modeled as a distribution rather than a DNS zone. Route 53 owns hosted zones and
 alias RRsets; a distribution owns its provider domain, origins, origin groups, ordered cache
@@ -844,7 +815,10 @@ provider visibility delay and never authorizes a new CallerReference. Plans alwa
 quota, operation-binding, and executor authority; no CreateInvalidation transport exists in this
 slice.
 
-## Lifecycle examples
+## Historical lifecycle examples (retired)
+
+The examples below describe the removed unified exposure model and are non-normative. Current DNS
+and future WAF workflows use their provider-specific APIs and menus directly.
 
 ### Import and observe a DNS zone
 

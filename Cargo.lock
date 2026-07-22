@@ -292,32 +292,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-sdk-acm"
-version = "1.108.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "142f21db8d4143af128e54dcb26b4f7504dacfe5874646ff8856d3323fd62698"
-dependencies = [
- "arc-swap",
- "aws-credential-types",
- "aws-runtime",
- "aws-smithy-async",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-observability",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-schema",
- "aws-smithy-types",
- "aws-types",
- "bytes",
- "fastrand",
- "http 0.2.12",
- "http 1.4.2",
- "regex-lite",
- "tracing",
-]
-
-[[package]]
 name = "aws-sdk-cloudfront"
 version = "1.124.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1554,20 +1528,14 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-credential-types",
- "aws-sdk-acm",
  "aws-sdk-cloudfront",
  "aws-sdk-sts",
- "aws-smithy-async",
- "aws-smithy-types",
  "edgion-center-core",
  "hmac 0.12.1",
- "http-body-util",
  "serde",
- "serde_json",
  "sha2 0.10.9",
  "tokio",
  "url",
- "wiremock",
  "xmlparser",
  "zeroize",
 ]

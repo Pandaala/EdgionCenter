@@ -51,3 +51,8 @@ mandatory even when a NetworkPolicy also limits access to Center Pods.
 The Pod intentionally stays unready when the Secret is absent or the proxy
 cannot initialize. API-only clients may bypass the browser proxy only through a
 separately secured internal path and must supply a valid bearer token directly.
+
+The active Kustomization no longer installs `EdgionCloudOperation`; current binaries neither
+watch nor write that CRD. Applying this manifest update does not delete an already-installed CRD
+or its objects. Operators may retain those historical objects, or plan a separate, explicitly
+approved cluster cleanup after verifying no older Center binary remains in service.

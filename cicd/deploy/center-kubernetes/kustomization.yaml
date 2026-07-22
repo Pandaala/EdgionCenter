@@ -4,7 +4,6 @@ namespace: edgion-system
 resources:
   - namespace.yaml
   - crd.yaml
-  - cloud-operation-crd.yaml
   - cloud-capability-snapshot-crd.yaml
   - provider-account-crd.yaml
   - service-account.yaml

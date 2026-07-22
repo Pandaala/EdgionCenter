@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CloudResource, CloudResourceId, CloudResourceMetadata, CloudResourceStatus, DeletionPolicy,
-    ManagementPolicy, ProviderAccount, ProviderAccountSpec,
+    validate_provider_account, CloudResourceId, CloudResourceMetadata, CloudResourceStatus,
+    DeletionPolicy, ManagementPolicy, ProviderAccount, ProviderAccountSpec,
 };
 use crate::{CoreError, CoreResult};
 
@@ -239,7 +239,7 @@ pub fn validate_stored_provider_account(account: &ProviderAccount) -> CoreResult
         ));
     }
     ProviderAccountDesired::from_account(account).validate()?;
-    CloudResource::ProviderAccount(account.clone()).validate()
+    validate_provider_account(account)
 }
 
 #[async_trait::async_trait]

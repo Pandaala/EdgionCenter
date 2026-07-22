@@ -5,8 +5,6 @@
 
 mod cloud_capability_crd;
 mod cloud_capability_store;
-mod cloud_operation_crd;
-mod cloud_operation_store;
 mod controller_directory;
 mod crd;
 mod lease;
@@ -23,10 +21,6 @@ pub use cloud_capability_crd::{
 pub use cloud_capability_store::{
     capability_snapshot_resource_name, KubernetesCapabilitySnapshotStore,
 };
-pub use cloud_operation_crd::{
-    EdgionCloudOperation, EdgionCloudOperationSpec, EdgionCloudOperationStatus,
-};
-pub use cloud_operation_store::{cloud_operation_resource_name, KubernetesOperationStore};
 pub use controller_directory::{controller_resource_name, KubernetesControllerDirectory};
 pub use crd::{
     EdgionController, EdgionControllerPhase, EdgionControllerSpec, EdgionControllerStatus,

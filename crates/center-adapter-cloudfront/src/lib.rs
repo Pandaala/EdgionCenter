@@ -7,33 +7,19 @@ use edgion_center_core::{
 };
 
 mod api;
-mod authority;
 mod aws_sdk;
-mod behaviors;
-mod catalog;
-mod domains;
-mod invalidations;
 mod model;
-mod mutations;
-mod origins;
+// CLD-28F/29A consume this private safety seam when guarded writes are added.
+#[allow(dead_code)]
 mod wire_fidelity;
 
 pub use api::*;
-pub use authority::*;
 pub use aws_sdk::*;
-pub use behaviors::*;
-pub use catalog::*;
-pub use domains::*;
-pub use invalidations::*;
 pub use model::*;
-pub use mutations::*;
-pub use origins::*;
 
 const DISTRIBUTION_PAGE_SIZE: u16 = 100;
-const POLICY_PAGE_SIZE: u16 = 100;
 const MAX_PROVIDER_PAGES: usize = 10_000;
 const MAX_DISTRIBUTIONS: usize = 100_000;
-const MAX_POLICIES: usize = 10_000;
 const MAX_FRESHNESS_WINDOW_MS: i64 = 5 * 60 * 1_000;
 const INVENTORY_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -45,20 +31,6 @@ pub struct CloudFrontInventoryAdapter {
     account_generation: u64,
     credential_revision: String,
     api: Arc<dyn CloudFrontApi>,
-}
-
-/// Non-deserializable handle proving that inventory came from this adapter's live read path.
-pub struct CloudFrontPlanningInventory(CloudFrontInventory);
-
-impl CloudFrontPlanningInventory {
-    pub fn inventory(&self) -> &CloudFrontInventory {
-        &self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn inventory_mut(&mut self) -> &mut CloudFrontInventory {
-        &mut self.0
-    }
 }
 
 impl CloudFrontInventoryAdapter {
@@ -128,94 +100,6 @@ impl CloudFrontInventoryAdapter {
         )
         .await
         .map_err(|_| validation("cloudfront_inventory_deadline_exceeded"))?
-    }
-
-    pub async fn planning_inventory(
-        &self,
-        observation_token: impl Into<String>,
-        observed_at_unix_ms: i64,
-        valid_until_unix_ms: i64,
-    ) -> CloudFrontApiResult<CloudFrontPlanningInventory> {
-        self.inventory(observation_token, observed_at_unix_ms, valid_until_unix_ms)
-            .await
-            .map(CloudFrontPlanningInventory)
-    }
-
-    pub async fn planning_policy_inventory(
-        &self,
-        observation_token: impl Into<String>,
-        observed_at_unix_ms: i64,
-        valid_until_unix_ms: i64,
-    ) -> CloudFrontApiResult<CloudFrontPolicyPlanningInventory> {
-        if valid_until_unix_ms.saturating_sub(observed_at_unix_ms) > MAX_FRESHNESS_WINDOW_MS {
-            return Err(validation("cloudfront_observation_freshness_limit"));
-        }
-        let authority = CloudFrontObservationAuthority::new(
-            self.provider_account_id.clone(),
-            self.aws_account_id.clone(),
-            self.partition,
-            self.account_generation,
-            self.credential_revision.clone(),
-            observation_token.into(),
-            observed_at_unix_ms,
-            valid_until_unix_ms,
-        )?;
-        let policies = tokio::time::timeout(INVENTORY_TIMEOUT, self.list_all_policies())
-            .await
-            .map_err(|_| validation("cloudfront_policy_inventory_deadline_exceeded"))??;
-        CloudFrontPolicyPlanningInventory::new(authority, policies)
-    }
-
-    async fn list_all_policies(&self) -> CloudFrontApiResult<Vec<CloudFrontPolicySummary>> {
-        let mut policies = Vec::new();
-        let mut identities = BTreeSet::new();
-        for kind in [
-            CloudFrontPolicyKind::Cache,
-            CloudFrontPolicyKind::OriginRequest,
-            CloudFrontPolicyKind::ResponseHeaders,
-        ] {
-            for scope in [
-                CloudFrontPolicyScope::AwsManaged,
-                CloudFrontPolicyScope::AccountCustom,
-            ] {
-                let mut marker = None::<String>;
-                let mut seen_markers = BTreeSet::new();
-                let mut complete = false;
-                for _ in 0..MAX_PROVIDER_PAGES {
-                    let page = self
-                        .api
-                        .list_policies(kind, scope, marker.as_deref(), POLICY_PAGE_SIZE)
-                        .await?;
-                    for policy in page.items {
-                        if policy.kind != kind
-                            || policy.scope != scope
-                            || !identities.insert((policy.kind, policy.id.clone()))
-                        {
-                            return Err(validation("duplicate_cloudfront_policy_observation"));
-                        }
-                        policies.push(policy);
-                        if policies.len() > MAX_POLICIES {
-                            return Err(validation("cloudfront_policy_inventory_limit"));
-                        }
-                    }
-                    let Some(next_marker) = page.next_marker else {
-                        complete = true;
-                        break;
-                    };
-                    validate_policy_cursor(&next_marker)?;
-                    if marker.as_deref() == Some(next_marker.as_str())
-                        || !seen_markers.insert(next_marker.clone())
-                    {
-                        return Err(validation("cloudfront_policy_pagination_loop"));
-                    }
-                    marker = Some(next_marker);
-                }
-                if !complete {
-                    return Err(validation("cloudfront_policy_pagination_limit"));
-                }
-            }
-        }
-        Ok(policies)
     }
 
     async fn inventory_within_deadline(
@@ -325,17 +209,10 @@ impl CloudFrontInventoryAdapter {
         {
             return Err(validation("cloudfront_summary_detail_identity_mismatch"));
         }
-        let changed_since_summary = detail.summary.status != listed.status
+        let _changed_since_summary = detail.summary.status != listed.status
             || detail.summary.enabled != listed.enabled
             || detail.summary.last_modified_unix_seconds != listed.last_modified_unix_seconds;
-        let mutation_eligibility = mutation_eligibility(&detail);
-        Ok(CloudFrontDetailObservation::Complete(Box::new(
-            ObservedCloudFrontDistributionDetail {
-                detail,
-                mutation_eligibility,
-                changed_since_summary,
-            },
-        )))
+        Ok(CloudFrontDetailObservation::Complete(Box::new(detail)))
     }
 
     async fn observe_ownership(&self, arn: &str) -> CloudFrontOwnershipHint {
@@ -376,23 +253,9 @@ fn validate_provider_cursor(value: &str) -> CloudFrontApiResult<()> {
     Ok(())
 }
 
-fn validate_policy_cursor(value: &str) -> CloudFrontApiResult<()> {
-    if value.is_empty()
-        || value.len() > 1024
-        || value.trim() != value
-        || value.chars().any(char::is_control)
-    {
-        return Err(validation("invalid_cloudfront_policy_marker"));
-    }
-    Ok(())
-}
-
 fn is_sanitized_tag_key(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value.trim() == value
         && !value.chars().any(char::is_control)
 }
-
-#[cfg(test)]
-mod tests;

@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use edgion_center_core::{
-    validate_write, CapabilityDiscoveryFence, CapabilitySnapshotKey, CapabilitySnapshotStore,
-    CapabilityStoreWrite, CloudResourceId, CoreError, CoreResult, DiscoveryToken,
-    ProviderCapabilitySnapshot,
+    is_retired_capability_snapshot_json, validate_write, CapabilityDiscoveryFence,
+    CapabilitySnapshotKey, CapabilitySnapshotStore, CapabilityStoreWrite, CloudResourceId,
+    CoreError, CoreResult, DiscoveryToken, ProviderCapabilitySnapshot,
 };
 use kube::{api::PostParams, Api, Client};
 use sha2::{Digest, Sha256};
@@ -183,9 +183,15 @@ impl KubernetesCapabilitySnapshotStore {
         let Some(value) = status.snapshot_json.as_ref() else {
             return Ok(None);
         };
-        let snapshot: ProviderCapabilitySnapshot = serde_json::from_str(value).map_err(|_| {
-            CoreError::Conflict("capability snapshot CRD contains an invalid payload".to_string())
-        })?;
+        let snapshot: ProviderCapabilitySnapshot = match serde_json::from_str(value) {
+            Ok(snapshot) => snapshot,
+            Err(_) if is_retired_capability_snapshot_json(value) => return Ok(None),
+            Err(_) => {
+                return Err(CoreError::Conflict(
+                    "capability snapshot CRD contains an invalid payload".to_string(),
+                ))
+            }
+        };
         validate_write(key, &snapshot.fence.clone(), &snapshot)?;
         Ok(Some(snapshot))
     }
@@ -641,6 +647,31 @@ mod tests {
         assert_roundtrip_and_fencing(&store, "kube-a").await;
         assert_scope_isolation(&store, "kube-b").await;
         assert_exact_revision_invalidation(&store, "kube-c").await;
+    }
+
+    #[test]
+    fn retired_snapshots_are_unavailable_but_malformed_snapshots_fail() {
+        let key = CapabilitySnapshotKey {
+            provider_account_id: CloudResourceId::new("legacy-account").unwrap(),
+            scope: CapabilityScope::Account,
+        };
+        let status = |snapshot_json: &str| EdgionProviderCapabilitySnapshotStatus {
+            last_discovery_epoch: 0,
+            authority: None,
+            snapshot_json: Some(snapshot_json.to_string()),
+        };
+
+        assert_eq!(
+            KubernetesCapabilitySnapshotStore::snapshot(
+                &key,
+                &status(
+                    r#"{"observations":[{"capability":{"family":"health_check","name":"active"}}]}"#,
+                ),
+            )
+            .unwrap(),
+            None
+        );
+        assert!(KubernetesCapabilitySnapshotStore::snapshot(&key, &status("not-json")).is_err());
     }
 
     #[tokio::test]

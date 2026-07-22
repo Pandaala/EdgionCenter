@@ -221,34 +221,20 @@ fn error_chain_contains<T: Error + 'static>(error: &(dyn Error + 'static)) -> bo
     false
 }
 
-/// Private, short-lived evidence that this exact observed configuration round-trips through the
-/// pinned SDK and that the desired wire changes only the root `Enabled` scalar.
-pub(crate) struct CloudFrontWireFidelityEvidence {
-    desired_wire: CloudFrontSensitiveWireBytes,
-}
-
-impl CloudFrontWireFidelityEvidence {
-    pub(crate) fn desired_wire(&self) -> &[u8] {
-        self.desired_wire.as_slice()
-    }
-}
-
-pub(crate) async fn admit_enablement_wire_fidelity(
+/// Proves that the exact current provider document round-trips through the pinned SDK without
+/// lossy reordering, omission, or normalization.
+pub(crate) async fn assert_sdk_config_round_trip(
     client: &aws_sdk_cloudfront::Client,
     distribution_id: &str,
     etag: &str,
     observed_wire: &CloudFrontSensitiveWireBytes,
     current: &DistributionConfig,
-    desired: &DistributionConfig,
-) -> CloudFrontApiResult<CloudFrontWireFidelityEvidence> {
+) -> CloudFrontApiResult<()> {
     let current_wire =
         serialize_without_transmit(client, distribution_id, etag, current.clone()).await?;
     compare_documents(observed_wire.as_slice(), current_wire.as_slice())?;
 
-    let desired_wire =
-        serialize_without_transmit(client, distribution_id, etag, desired.clone()).await?;
-    validate_root_enabled_only(current_wire.as_slice(), desired_wire.as_slice())?;
-    Ok(CloudFrontWireFidelityEvidence { desired_wire })
+    Ok(())
 }
 
 #[derive(PartialEq, Eq)]
@@ -486,36 +472,6 @@ fn compare_documents(observed: &[u8], serialized: &[u8]) -> CloudFrontApiResult<
     Ok(())
 }
 
-fn validate_root_enabled_only(current: &[u8], desired: &[u8]) -> CloudFrontApiResult<()> {
-    let current = parse_document(current)?;
-    let desired = parse_document(desired)?;
-    if current.name != desired.name
-        || current.text != desired.text
-        || current.children.len() != desired.children.len()
-    {
-        return Err(validation("cloudfront_wire_write_set_mismatch"));
-    }
-    let mut root_enabled = 0usize;
-    for (current, desired) in current.children.iter().zip(&desired.children) {
-        if current.name == "Enabled" && desired.name == "Enabled" {
-            root_enabled += 1;
-            if !current.children.is_empty()
-                || !desired.children.is_empty()
-                || !matches!(current.text.as_str(), "true" | "false")
-                || !matches!(desired.text.as_str(), "true" | "false")
-            {
-                return Err(validation("cloudfront_wire_enabled_invalid"));
-            }
-        } else if current != desired {
-            return Err(validation("cloudfront_wire_write_set_mismatch"));
-        }
-    }
-    if root_enabled != 1 {
-        return Err(validation("cloudfront_wire_enabled_ambiguous"));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,24 +543,6 @@ mod tests {
         for value in [spoof.as_bytes(), dtd.as_bytes(), cdata.as_bytes()] {
             assert!(parse_document(value).is_err());
         }
-    }
-
-    #[test]
-    fn desired_wire_may_change_only_the_direct_root_enabled() {
-        let current =
-            document("<Logging><Enabled>false</Enabled></Logging><Enabled>true</Enabled>");
-        let desired =
-            document("<Logging><Enabled>false</Enabled></Logging><Enabled>false</Enabled>");
-        assert!(validate_root_enabled_only(current.as_bytes(), desired.as_bytes()).is_ok());
-
-        let nested_changed =
-            document("<Logging><Enabled>true</Enabled></Logging><Enabled>false</Enabled>");
-        assert_eq!(
-            validate_root_enabled_only(current.as_bytes(), nested_changed.as_bytes())
-                .expect_err("nested change")
-                .code(),
-            "cloudfront_wire_write_set_mismatch"
-        );
     }
 
     #[tokio::test]

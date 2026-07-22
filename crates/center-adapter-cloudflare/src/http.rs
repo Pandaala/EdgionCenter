@@ -210,6 +210,8 @@ impl CloudflareHttpApi {
         decode_response(response, self.token.expose(), RequestKind::Read).await
     }
 
+    // Retained as the bounded transport seam for CLD-27 Cloudflare WAF.
+    #[allow(dead_code)]
     pub(crate) async fn read_result<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -292,6 +294,8 @@ impl CloudflareHttpApi {
         decode_response(response, self.token.expose(), RequestKind::Mutation).await
     }
 
+    // Retained as the single-attempt transport seam for CLD-27 Cloudflare WAF.
+    #[allow(dead_code)]
     pub(crate) async fn mutation_result<T: DeserializeOwned>(
         &self,
         method: reqwest::Method,
@@ -305,6 +309,8 @@ impl CloudflareHttpApi {
     /// Transport ambiguity is retryable read evidence, not a mutation with an
     /// unknown external outcome (for example Cloudflare Request Trace with
     /// `skip_response=true`).
+    // Retained as the action transport seam for CLD-27 Cloudflare WAF.
+    #[allow(dead_code)]
     pub(crate) async fn execute_result<T: DeserializeOwned>(
         &self,
         path: &str,

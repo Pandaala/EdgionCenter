@@ -100,15 +100,15 @@ pub async fn assert_scope_isolation(store: &dyn CapabilitySnapshotStore, prefix:
             resource: resource.clone(),
         },
     };
-    let edge = CapabilitySnapshotKey {
+    let record_set = CapabilitySnapshotKey {
         provider_account_id: account.provider_account_id.clone(),
         scope: CapabilityScope::Resource {
-            resource_kind: CloudResourceKind::EdgeApplication,
+            resource_kind: CloudResourceKind::DnsRecordSet,
             resource,
         },
     };
 
-    let keys = [&account, &region, &other, &zone, &edge];
+    let keys = [&account, &region, &other, &zone, &record_set];
     let mut expected = Vec::new();
     for (index, key) in keys.into_iter().enumerate() {
         let fence = store

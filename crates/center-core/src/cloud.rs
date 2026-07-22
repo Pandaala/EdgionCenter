@@ -3,7 +3,7 @@
 //! These types deliberately do not reference Edgion Controllers, Gateway API
 //! resources, provider SDKs, persistence frameworks, or arbitrary vendor JSON.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
@@ -14,12 +14,11 @@ mod capabilities;
 #[cfg(feature = "test-support")]
 mod capability_store_conformance;
 mod credentials;
+mod direct_call;
 mod dns;
 #[cfg(feature = "test-support")]
 mod dns_provider_conformance;
 mod dns_verification;
-mod operations;
-mod origin;
 #[cfg(feature = "test-support")]
 mod provider_account_store_conformance;
 mod provider_accounts;
@@ -28,21 +27,22 @@ mod status;
 mod zone_lifecycle;
 
 pub use capabilities::{
-    validate_write, CacheCapability, CapabilityAction, CapabilityDecision,
+    is_retired_capability_snapshot_json, validate_write, CapabilityAction, CapabilityDecision,
     CapabilityDecisionOutcome, CapabilityDimension, CapabilityDimensionObservation,
     CapabilityDiscoveryFence, CapabilityDiscoveryIssue, CapabilityDiscoveryReport,
     CapabilityDiscoveryRequest, CapabilityDiscoveryState, CapabilityEvaluationContext,
     CapabilityEvidence, CapabilityGateBlocker, CapabilityGateReason, CapabilityIssueScope,
     CapabilityIssueSeverity, CapabilityObservation, CapabilityReason, CapabilityRequirement,
     CapabilityScope, CapabilitySnapshotKey, CapabilitySnapshotStore, CapabilityStoreWrite,
-    CertificateCapability, DiscoveryToken, DnsCapability, EdgeCapability, HealthCheckCapability,
-    ProviderCapability, ProviderCapabilityDiscoverer, ProviderCapabilitySnapshot, ProviderRegion,
-    SanitizedCapabilityCode, SanitizedCapabilityMessage, TriState, WafCapability,
+    DiscoveryToken, DnsCapability, ProviderCapability, ProviderCapabilityDiscoverer,
+    ProviderCapabilitySnapshot, ProviderRegion, SanitizedCapabilityCode,
+    SanitizedCapabilityMessage, TriState, WafCapability,
 };
 pub use credentials::{
     CredentialInspection, CredentialInspector, CredentialIssue, CredentialIssueKind,
     CredentialSource, CredentialState, ProviderIdentity,
 };
+pub use direct_call::{IdempotencyKey, OperationError, OperationErrorKind};
 pub use dns::{
     validate_dns_changes, AbsoluteDnsName, CaaTag, CloudflareCnameFlattening,
     CloudflareProxyOptions, DnsBatchAtomicity, DnsChangeId, DnsChangeReceipt, DnsChangeState,
@@ -65,21 +65,6 @@ pub use dns_verification::{
     DnssecEvidenceSource, DnssecValidationState, DnssecVerificationEvidence,
     DnssecVerificationExpectation, NameserverCheck, RecursiveResolverCheck, ResolverProfileId,
     ResolverProfileRef, ResolverProfileRevision, SanitizedDnsFailureCode,
-};
-pub use operations::{
-    ClaimedOperation, CloudOperation, CloudOperationAction, CloudOperationPhase,
-    CloudOperationStep, CloudOperationStepPhase, CloudOperationStepPurpose, DispatchPolicy,
-    DispatchedStep, EnqueueOperationResult, IdempotencyKey, LeaseUpdate, NewCloudOperation,
-    NewCloudOperationStep, OperationError, OperationErrorKind, OperationId, OperationLease,
-    OperationStore, StepCompletion, UnknownOutcomeResolution,
-};
-pub use origin::{
-    evaluate_origin_probe, select_origin_tier, HealthCheckExpectedResponse, HealthCheckMethod,
-    HealthCheckSourceRegion, HealthCheckSourceScope, HealthCheckSpec, OriginAddress,
-    OriginDrainState, OriginEndpoint, OriginEndpointName, OriginFailoverMode,
-    OriginHealthObservation, OriginHealthObserver, OriginHealthRequest, OriginHealthSource,
-    OriginHealthState, OriginHealthTransitionPolicy, OriginPoolCapabilities, OriginProbeSample,
-    OriginProtocol, OriginRequestHeaders, OriginSelection, OriginTlsMode,
 };
 pub use provider_accounts::{
     provider_account_from_desired, validate_stored_provider_account, ProviderAccountCreateResult,
@@ -226,10 +211,6 @@ pub enum CloudResourceKind {
     ProviderAccount,
     ManagedZone,
     DnsRecordSet,
-    DomainBinding,
-    CertificateBinding,
-    EdgeApplication,
-    OriginPool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,8 +286,7 @@ pub enum CloudConditionType {
     Accepted,
     CredentialsValid,
     DnsReady,
-    CertificateReady,
-    OriginHealthy,
+    WafReady,
     Programmed,
     DriftDetected,
 }
@@ -457,366 +437,18 @@ pub struct DnsRecordSetSpec {
 
 resource!(DnsRecordSet, DnsRecordSetSpec);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DomainBindingSpec {
-    pub hostname: DomainName,
-    pub zone_ref: CloudResourceRef,
-    pub certificate_ref: Option<CloudResourceRef>,
-    pub edge_application_ref: Option<CloudResourceRef>,
-    pub origin_pool_ref: Option<CloudResourceRef>,
-}
-
-resource!(DomainBinding, DomainBindingSpec);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CertificateName {
-    pub domain: DomainName,
-    pub wildcard: bool,
-}
-
-impl CertificateName {
-    pub fn new(value: impl Into<String>) -> CoreResult<Self> {
-        let value = value.into();
-        let (wildcard, domain) = match value.strip_prefix("*.") {
-            Some(domain) => (true, domain.to_string()),
-            None => (false, value),
-        };
-        Ok(Self {
-            domain: DomainName::new(domain)?,
-            wildcard,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CertificatePurpose {
-    PublicEdge,
-    OriginOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CertificateManagement {
-    ProviderManaged,
-    Acme,
-    Imported,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CertificateBindingSpec {
-    pub provider_account_ref: Option<CloudResourceRef>,
-    #[serde(default)]
-    pub names: Vec<CertificateName>,
-    pub purpose: CertificatePurpose,
-    pub management: CertificateManagement,
-    pub deployment_target_ref: Option<CloudResourceRef>,
-}
-
-resource!(CertificateBinding, CertificateBindingSpec);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EdgeApplicationSpec {
-    pub provider_account_ref: CloudResourceRef,
-    #[serde(default)]
-    pub domains: Vec<DomainName>,
-    pub origin_pool_ref: CloudResourceRef,
-}
-
-resource!(EdgeApplication, EdgeApplicationSpec);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OriginPoolSpec {
-    pub provider_account_ref: Option<CloudResourceRef>,
-    #[serde(default)]
-    pub endpoints: Vec<OriginEndpoint>,
-    pub health_check: Option<HealthCheckSpec>,
-    #[serde(default)]
-    pub failover_mode: OriginFailoverMode,
-    #[serde(default = "default_minimum_healthy")]
-    pub minimum_healthy: u16,
-}
-
-const fn default_minimum_healthy() -> u16 {
-    1
-}
-
-resource!(OriginPool, OriginPoolSpec);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "resource", rename_all = "snake_case")]
-pub enum CloudResource {
-    ProviderAccount(ProviderAccount),
-    ManagedZone(ManagedZone),
-    DnsRecordSet(DnsRecordSet),
-    DomainBinding(DomainBinding),
-    CertificateBinding(CertificateBinding),
-    EdgeApplication(EdgeApplication),
-    OriginPool(OriginPool),
-}
-
-impl CloudResource {
-    pub fn kind(&self) -> CloudResourceKind {
-        match self {
-            Self::ProviderAccount(_) => CloudResourceKind::ProviderAccount,
-            Self::ManagedZone(_) => CloudResourceKind::ManagedZone,
-            Self::DnsRecordSet(_) => CloudResourceKind::DnsRecordSet,
-            Self::DomainBinding(_) => CloudResourceKind::DomainBinding,
-            Self::CertificateBinding(_) => CloudResourceKind::CertificateBinding,
-            Self::EdgeApplication(_) => CloudResourceKind::EdgeApplication,
-            Self::OriginPool(_) => CloudResourceKind::OriginPool,
-        }
-    }
-
-    pub fn metadata(&self) -> &CloudResourceMetadata {
-        match self {
-            Self::ProviderAccount(resource) => &resource.metadata,
-            Self::ManagedZone(resource) => &resource.metadata,
-            Self::DnsRecordSet(resource) => &resource.metadata,
-            Self::DomainBinding(resource) => &resource.metadata,
-            Self::CertificateBinding(resource) => &resource.metadata,
-            Self::EdgeApplication(resource) => &resource.metadata,
-            Self::OriginPool(resource) => &resource.metadata,
-        }
-    }
-
-    pub fn status(&self) -> &CloudResourceStatus {
-        match self {
-            Self::ProviderAccount(resource) => &resource.status,
-            Self::ManagedZone(resource) => &resource.status,
-            Self::DnsRecordSet(resource) => &resource.status,
-            Self::DomainBinding(resource) => &resource.status,
-            Self::CertificateBinding(resource) => &resource.status,
-            Self::EdgeApplication(resource) => &resource.status,
-            Self::OriginPool(resource) => &resource.status,
-        }
-    }
-
-    pub fn validate(&self) -> CoreResult<()> {
-        let metadata = self.metadata();
-        if metadata.display_name.trim().is_empty() || metadata.generation == 0 {
-            return Err(CoreError::Conflict(format!(
-                "cloud resource {} has invalid metadata",
-                metadata.id
-            )));
-        }
-        self.status().validate(metadata.generation)?;
-
-        match self {
-            Self::ProviderAccount(resource) => resource.spec.validate(),
-            Self::ManagedZone(resource) => require_kind(
-                &resource.spec.provider_account_ref,
-                CloudResourceKind::ProviderAccount,
-                &metadata.id,
-            ),
-            Self::DnsRecordSet(resource) => {
-                require_kind(
-                    &resource.spec.zone_ref,
-                    CloudResourceKind::ManagedZone,
-                    &metadata.id,
-                )?;
-                if resource.spec.values.is_empty() || resource.spec.ttl_seconds == Some(0) {
-                    return Err(CoreError::Conflict(format!(
-                        "DNS record set {} must have values and a positive TTL",
-                        metadata.id
-                    )));
-                }
-                Ok(())
-            }
-            Self::DomainBinding(resource) => {
-                require_kind(
-                    &resource.spec.zone_ref,
-                    CloudResourceKind::ManagedZone,
-                    &metadata.id,
-                )?;
-                require_optional_kind(
-                    resource.spec.certificate_ref.as_ref(),
-                    CloudResourceKind::CertificateBinding,
-                    &metadata.id,
-                )?;
-                require_optional_kind(
-                    resource.spec.edge_application_ref.as_ref(),
-                    CloudResourceKind::EdgeApplication,
-                    &metadata.id,
-                )?;
-                require_optional_kind(
-                    resource.spec.origin_pool_ref.as_ref(),
-                    CloudResourceKind::OriginPool,
-                    &metadata.id,
-                )
-            }
-            Self::CertificateBinding(resource) => {
-                require_optional_kind(
-                    resource.spec.provider_account_ref.as_ref(),
-                    CloudResourceKind::ProviderAccount,
-                    &metadata.id,
-                )?;
-                require_optional_kind(
-                    resource.spec.deployment_target_ref.as_ref(),
-                    CloudResourceKind::EdgeApplication,
-                    &metadata.id,
-                )?;
-                if resource.spec.names.is_empty() {
-                    return Err(CoreError::Conflict(format!(
-                        "certificate binding {} must contain at least one name",
-                        metadata.id
-                    )));
-                }
-                Ok(())
-            }
-            Self::EdgeApplication(resource) => {
-                require_kind(
-                    &resource.spec.provider_account_ref,
-                    CloudResourceKind::ProviderAccount,
-                    &metadata.id,
-                )?;
-                require_kind(
-                    &resource.spec.origin_pool_ref,
-                    CloudResourceKind::OriginPool,
-                    &metadata.id,
-                )
-            }
-            Self::OriginPool(resource) => {
-                require_optional_kind(
-                    resource.spec.provider_account_ref.as_ref(),
-                    CloudResourceKind::ProviderAccount,
-                    &metadata.id,
-                )?;
-                resource.spec.validate().map_err(|error| {
-                    CoreError::Conflict(format!("origin pool {} is invalid: {error}", metadata.id))
-                })
-            }
-        }
-    }
-
-    fn references(&self) -> Vec<&CloudResourceRef> {
-        match self {
-            Self::ProviderAccount(_) => Vec::new(),
-            Self::ManagedZone(resource) => vec![&resource.spec.provider_account_ref],
-            Self::DnsRecordSet(resource) => vec![&resource.spec.zone_ref],
-            Self::DomainBinding(resource) => {
-                let mut references = vec![&resource.spec.zone_ref];
-                references.extend(resource.spec.certificate_ref.iter());
-                references.extend(resource.spec.edge_application_ref.iter());
-                references.extend(resource.spec.origin_pool_ref.iter());
-                references
-            }
-            Self::CertificateBinding(resource) => {
-                let mut references = Vec::new();
-                references.extend(resource.spec.provider_account_ref.iter());
-                references.extend(resource.spec.deployment_target_ref.iter());
-                references
-            }
-            Self::EdgeApplication(resource) => vec![
-                &resource.spec.provider_account_ref,
-                &resource.spec.origin_pool_ref,
-            ],
-            Self::OriginPool(resource) => resource.spec.provider_account_ref.iter().collect(),
-        }
-    }
-}
-
-fn require_optional_kind(
-    reference: Option<&CloudResourceRef>,
-    expected: CloudResourceKind,
-    source: &CloudResourceId,
-) -> CoreResult<()> {
-    match reference {
-        Some(reference) => require_kind(reference, expected, source),
-        None => Ok(()),
-    }
-}
-
-fn require_kind(
-    reference: &CloudResourceRef,
-    expected: CloudResourceKind,
-    source: &CloudResourceId,
-) -> CoreResult<()> {
-    if reference.kind != expected {
+/// Validates the persisted ProviderAccount envelope without routing it through
+/// a retired, unified desired-resource aggregate.
+pub(crate) fn validate_provider_account(account: &ProviderAccount) -> CoreResult<()> {
+    let metadata = &account.metadata;
+    if metadata.display_name.trim().is_empty() || metadata.generation == 0 {
         return Err(CoreError::Conflict(format!(
-            "cloud resource {source} requires a {expected:?} reference, got {:?}",
-            reference.kind
+            "provider account {} has invalid metadata",
+            metadata.id
         )));
     }
-    Ok(())
-}
-
-/// A validated in-memory resource graph used by planners and contract tests.
-#[derive(Debug, Clone, Default)]
-pub struct CloudResourceSet {
-    resources: BTreeMap<CloudResourceId, CloudResource>,
-}
-
-impl CloudResourceSet {
-    pub fn new(resources: impl IntoIterator<Item = CloudResource>) -> CoreResult<Self> {
-        let mut set = Self::default();
-        for resource in resources {
-            resource.validate()?;
-            let id = resource.metadata().id.clone();
-            if set.resources.insert(id.clone(), resource).is_some() {
-                return Err(CoreError::Conflict(format!(
-                    "duplicate cloud resource id {id}"
-                )));
-            }
-        }
-        set.validate_references()?;
-        Ok(set)
-    }
-
-    pub fn get(&self, id: &CloudResourceId) -> Option<&CloudResource> {
-        self.resources.get(id)
-    }
-
-    pub fn len(&self) -> usize {
-        self.resources.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.resources.is_empty()
-    }
-
-    pub fn reverse_references(&self, id: &CloudResourceId) -> BTreeSet<CloudResourceId> {
-        self.resources
-            .values()
-            .filter(|resource| {
-                resource
-                    .references()
-                    .iter()
-                    .any(|reference| &reference.id == id)
-            })
-            .map(|resource| resource.metadata().id.clone())
-            .collect()
-    }
-
-    pub fn validate_references(&self) -> CoreResult<()> {
-        for resource in self.resources.values() {
-            for reference in resource.references() {
-                let target = self.resources.get(&reference.id).ok_or_else(|| {
-                    CoreError::NotFound(format!(
-                        "cloud resource {} references missing {}",
-                        resource.metadata().id,
-                        reference.id
-                    ))
-                })?;
-                let actual = target.kind();
-                if actual != reference.kind {
-                    return Err(CoreError::Conflict(format!(
-                        "cloud resource {} expects {:?} reference {}, found {:?}",
-                        resource.metadata().id,
-                        reference.kind,
-                        reference.id,
-                        actual
-                    )));
-                }
-            }
-        }
-        Ok(())
-    }
+    account.status.validate(metadata.generation)?;
+    account.spec.validate()
 }
 
 #[cfg(test)]
@@ -835,12 +467,8 @@ mod tests {
         }
     }
 
-    fn reference(kind: CloudResourceKind, id: &str) -> CloudResourceRef {
-        CloudResourceRef::new(kind, CloudResourceId::new(id).unwrap())
-    }
-
-    fn provider_account() -> CloudResource {
-        CloudResource::ProviderAccount(ProviderAccount {
+    fn provider_account() -> ProviderAccount {
+        ProviderAccount {
             metadata: metadata("provider-main"),
             spec: ProviderAccountSpec {
                 provider: CloudProvider::Cloudflare,
@@ -852,28 +480,11 @@ mod tests {
                 },
             },
             status: CloudResourceStatus::default(),
-        })
-    }
-
-    fn zone() -> CloudResource {
-        CloudResource::ManagedZone(ManagedZone {
-            metadata: metadata("zone-example"),
-            spec: ManagedZoneSpec {
-                provider_account_ref: reference(
-                    CloudResourceKind::ProviderAccount,
-                    "provider-main",
-                ),
-                name: DomainName::new("Example.COM.").unwrap(),
-                visibility: ZoneVisibility::Public,
-                origin: ZoneOrigin::Imported,
-                dnssec: DnssecDesiredState::Disabled,
-            },
-            status: CloudResourceStatus::default(),
-        })
+        }
     }
 
     #[test]
-    fn domain_names_are_canonical_and_wildcards_are_explicit() {
+    fn domain_names_are_canonical() {
         assert_eq!(
             DomainName::new("API.Example.COM.").unwrap().as_str(),
             "api.example.com"
@@ -887,10 +498,6 @@ mod tests {
                 .as_str(),
             "_acme-challenge.example.com"
         );
-
-        let wildcard = CertificateName::new("*.Example.com").unwrap();
-        assert!(wildcard.wildcard);
-        assert_eq!(wildcard.domain.as_str(), "example.com");
     }
 
     #[test]
@@ -925,49 +532,21 @@ mod tests {
     }
 
     #[test]
-    fn resource_graph_validates_reference_kind_and_presence() {
-        let valid = CloudResourceSet::new([provider_account(), zone()]).unwrap();
-        assert_eq!(valid.len(), 2);
-        assert_eq!(
-            valid.reverse_references(&CloudResourceId::new("provider-main").unwrap()),
-            BTreeSet::from([CloudResourceId::new("zone-example").unwrap()])
-        );
-
-        let missing = CloudResourceSet::new([zone()]).unwrap_err();
-        assert!(matches!(missing, CoreError::NotFound(_)));
-
-        let mut wrong = match zone() {
-            CloudResource::ManagedZone(zone) => zone,
-            _ => unreachable!(),
-        };
-        wrong.spec.provider_account_ref.kind = CloudResourceKind::OriginPool;
-        let error = CloudResourceSet::new([provider_account(), CloudResource::ManagedZone(wrong)])
-            .unwrap_err();
-        assert!(matches!(error, CoreError::Conflict(_)));
-    }
-
-    #[test]
-    fn semantic_reference_kinds_are_enforced_before_graph_lookup() {
-        let mut wrong = match zone() {
-            CloudResource::ManagedZone(zone) => zone,
-            _ => unreachable!(),
-        };
-        wrong.spec.provider_account_ref = reference(CloudResourceKind::OriginPool, "origin-main");
-        let error = CloudResourceSet::new([CloudResource::ManagedZone(wrong)]).unwrap_err();
-        assert!(matches!(error, CoreError::Conflict(_)));
-    }
-
-    #[test]
-    fn duplicate_resource_ids_are_rejected() {
-        let error = CloudResourceSet::new([provider_account(), provider_account()]).unwrap_err();
-        assert!(matches!(error, CoreError::Conflict(_)));
+    fn provider_account_is_validated_without_a_resource_aggregate() {
+        assert!(validate_provider_account(&provider_account()).is_ok());
+        let mut invalid = provider_account();
+        invalid.metadata.generation = 0;
+        assert!(matches!(
+            validate_provider_account(&invalid),
+            Err(CoreError::Conflict(_))
+        ));
     }
 
     #[test]
     fn serialized_provider_account_contains_only_a_credential_reference() {
         let json = serde_json::to_value(provider_account()).unwrap();
         assert_eq!(
-            json["resource"]["spec"]["credentialSource"]["credentialRef"],
+            json["spec"]["credentialSource"]["credentialRef"],
             "secret/cloudflare-main"
         );
         assert!(json.to_string().find("token").is_none());

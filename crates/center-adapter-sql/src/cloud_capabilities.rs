@@ -1,9 +1,9 @@
 //! Capability snapshot persistence for standalone SQLite and MySQL deployments.
 
 use edgion_center_core::{
-    validate_write, CapabilityDiscoveryFence, CapabilityScope, CapabilitySnapshotKey,
-    CapabilitySnapshotStore, CapabilityStoreWrite, CoreError, CoreResult, DiscoveryToken,
-    ProviderCapabilitySnapshot,
+    is_retired_capability_snapshot_json, validate_write, CapabilityDiscoveryFence, CapabilityScope,
+    CapabilitySnapshotKey, CapabilitySnapshotStore, CapabilityStoreWrite, CoreError, CoreResult,
+    DiscoveryToken, ProviderCapabilitySnapshot,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -76,7 +76,7 @@ fn decode_snapshot(
     key: &CapabilitySnapshotKey,
     scope_json: String,
     snapshot_json: String,
-) -> CoreResult<ProviderCapabilitySnapshot> {
+) -> CoreResult<Option<ProviderCapabilitySnapshot>> {
     let stored_scope: CapabilityScope = serde_json::from_str(&scope_json)
         .map_err(|error| CoreError::Adapter(format!("invalid stored capability scope: {error}")))?;
     if stored_scope != key.scope {
@@ -84,10 +84,15 @@ fn decode_snapshot(
             "stored capability scope does not match its key".to_string(),
         ));
     }
-    let snapshot: ProviderCapabilitySnapshot =
-        serde_json::from_str(&snapshot_json).map_err(|error| {
-            CoreError::Adapter(format!("invalid stored capability snapshot: {error}"))
-        })?;
+    let snapshot: ProviderCapabilitySnapshot = match serde_json::from_str(&snapshot_json) {
+        Ok(snapshot) => snapshot,
+        Err(_) if is_retired_capability_snapshot_json(&snapshot_json) => return Ok(None),
+        Err(error) => {
+            return Err(CoreError::Adapter(format!(
+                "invalid stored capability snapshot: {error}"
+            )))
+        }
+    };
     // Refresh authority and committed snapshot are intentionally separate. While a refresh is
     // in flight, readers may still evaluate the previous snapshot's own generation and TTL.
     validate_write(key, &snapshot.fence, &snapshot).map_err(|error| {
@@ -95,7 +100,7 @@ fn decode_snapshot(
             "stored capability snapshot authority is invalid: {error}"
         ))
     })?;
-    Ok(snapshot)
+    Ok(Some(snapshot))
 }
 
 impl Store {
@@ -128,7 +133,6 @@ impl Store {
                     row.try_get("scope_json").map_err(sql_error)?,
                     snapshot_json,
                 )
-                .map(Some)
             }
             Pool::Mysql(pool) => {
                 let Some(row) = sqlx::query(sql)
@@ -151,7 +155,6 @@ impl Store {
                     row.try_get("scope_json").map_err(sql_error)?,
                     snapshot_json,
                 )
-                .map(Some)
             }
         }
     }
@@ -504,6 +507,22 @@ mod tests {
     async fn sqlite_capability_snapshot_conformance() {
         let store = Store::open_in_memory().await.unwrap();
         run_conformance(&store, "sqlite").await;
+    }
+
+    #[test]
+    fn retired_snapshots_are_unavailable_but_malformed_snapshots_fail() {
+        let key = CapabilitySnapshotKey {
+            provider_account_id: CloudResourceId::new("legacy-account").unwrap(),
+            scope: CapabilityScope::Account,
+        };
+        let scope_json = serde_json::to_string(&key.scope).unwrap();
+        let retired = r#"{"observations":[{"capability":{"family":"cache","name":"purge"}}]}"#;
+
+        assert_eq!(
+            decode_snapshot(&key, scope_json.clone(), retired.to_string()).unwrap(),
+            None
+        );
+        assert!(decode_snapshot(&key, scope_json, "not-json".to_string()).is_err());
     }
 
     #[tokio::test]
