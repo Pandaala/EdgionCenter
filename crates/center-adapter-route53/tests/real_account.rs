@@ -11,7 +11,8 @@ use std::{
 
 use edgion_center_adapter_route53::{
     AwsRoute53Api, Route53Api, Route53ChangeAction, Route53ChangeBatch, Route53ChangeInfo,
-    Route53CursorKey, Route53DnsAdapter, Route53RecordChange, Route53RecordSet,
+    Route53CursorKey, Route53DnsAdapter, Route53MutationReceiptKey, Route53RecordChange,
+    Route53RecordSet,
 };
 use edgion_center_core::{
     AbsoluteDnsName, CloudProvider, CloudResourceId, CredentialSource, DnsChangeReceipt,
@@ -129,11 +130,12 @@ async fn disposable_public_zone_create_read_and_cleanup() {
         }),
         credential_source: CredentialSource::Ambient,
     };
-    let adapter = Route53DnsAdapter::new(
+    let adapter = Route53DnsAdapter::new_with_record_write_key(
         center_account_id.clone(),
         &account,
         api.clone(),
         Route53CursorKey::new([0x53; 32]).unwrap(),
+        Route53MutationReceiptKey::new([0x54; 32]).unwrap(),
     )
     .unwrap_or_else(|error| panic!("AWS account safety binding failed: {error:?}"));
     let zone = DnsZoneRef {

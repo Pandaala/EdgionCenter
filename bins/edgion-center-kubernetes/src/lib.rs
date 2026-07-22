@@ -232,9 +232,15 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
     let route53_dns_admin = edgion_center_integration_route53::compose_dns_admin(
         &config.route53_dns_read,
         Some(provider_account_store.clone()),
-        mounted_credential_resolver,
+        mounted_credential_resolver.clone(),
     )
     .map_err(|error| anyhow::anyhow!("Invalid Route 53 DNS read config: {error}"))?;
+    let route53_dns_write_admin = edgion_center_integration_route53::compose_dns_write_admin(
+        &config.route53_dns_write,
+        Some(provider_account_store.clone()),
+        mounted_credential_resolver,
+    )
+    .map_err(|error| anyhow::anyhow!("Invalid Route 53 DNS write config: {error}"))?;
     platform_health_check(
         directory.as_ref(),
         coordinator.as_ref(),
@@ -341,6 +347,7 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         cloudflare_dns_admin: cloudflare_dns_admin.clone(),
         cloudflare_dns_write_admin: cloudflare_dns_write_admin.clone(),
         route53_dns_admin: route53_dns_admin.clone(),
+        route53_dns_write_admin: route53_dns_write_admin.clone(),
         provider_account_store: Some(provider_account_store),
         capability_snapshot_store: Some(capability_snapshot_store),
         credential_inspection_service: credential_inspection_service.clone(),
@@ -358,6 +365,7 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
             capabilities.cloudflare_dns_read = cloudflare_dns_admin.is_some();
             capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
             capabilities.route53_dns_read = route53_dns_admin.is_some();
+            capabilities.route53_dns_write = route53_dns_write_admin.is_some();
             capabilities
         },
     };

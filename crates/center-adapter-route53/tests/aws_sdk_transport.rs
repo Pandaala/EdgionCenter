@@ -100,7 +100,7 @@ async fn inherited_global_endpoint_override_is_rejected_before_credentials_or_ne
         .err()
         .expect("global endpoint override must fail before client construction");
     assert_eq!(error.category(), ProviderErrorCategory::Validation);
-    assert_eq!(error.code(), "inherited_aws_endpoint_override_forbidden");
+    assert_eq!(error.code(), "configured_aws_endpoint_override_forbidden");
 }
 
 #[tokio::test]
@@ -152,7 +152,6 @@ async fn refreshable_assume_role_credentials_feed_the_verified_transport() {
             "route53-assume-role-test",
         ))
         .region(Region::new("us-east-1"))
-        .endpoint_url(server.uri())
         .time_source(time.clone())
         .load()
         .await;
@@ -161,10 +160,11 @@ async fn refreshable_assume_role_credentials_feed_the_verified_transport() {
         "edgion-route53",
     )
     .unwrap();
-    let assumed = AwsRoute53SdkConfigFactory::assume_role(
+    let assumed = AwsRoute53SdkConfigFactory::assume_role_with_sts_endpoint_for_test(
         &base,
         &spec,
         Some("tenant/route53:canary".to_string()),
+        &server.uri(),
     )
     .await
     .unwrap();
@@ -172,8 +172,19 @@ async fn refreshable_assume_role_credentials_feed_the_verified_transport() {
     assert!(!debug.contains("base-secret-key"));
     assert!(!debug.contains("tenant/route53:canary"));
 
+    // The AssumeRole provider was intentionally bootstrapped against the mock endpoint, while
+    // production Route 53 construction rejects every inherited endpoint override. Recompose only
+    // the refreshable credential provider and non-endpoint SDK settings, then inject loopback
+    // endpoints through the explicit hermetic transport seam below.
+    let transport_config = aws_config::SdkConfig::builder()
+        .behavior_version(BehaviorVersion::latest())
+        .credentials_provider(assumed.credentials_provider().unwrap().clone())
+        .region(Region::new("us-east-1"))
+        .time_source(time.clone())
+        .build();
+
     let transport = AwsRoute53Api::with_options(
-        &assumed,
+        &transport_config,
         AwsRoute53ApiOptions {
             route53_endpoint_url: Some(server.uri()),
             sts_endpoint_url: Some(server.uri()),

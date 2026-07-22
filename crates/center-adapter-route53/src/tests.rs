@@ -342,6 +342,129 @@ async fn scoped_route53_adapter_passes_complete_shared_contract() {
 }
 
 #[tokio::test]
+async fn complete_record_snapshot_traverses_provider_pagination_once() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let fake = Arc::new(fake_api());
+    let adapter = adapter(center_account.clone(), fake.clone());
+    let zone = observed_zone(&center_account, "ZPRIMARY", "example.test").zone;
+
+    let records = adapter.observe_all_record_sets(&zone).await.unwrap();
+
+    assert_eq!(records.len(), primary_raw_records().len());
+    assert!(records
+        .windows(2)
+        .all(|pair| pair[0].record_set.key < pair[1].record_set.key));
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("records:ZPRIMARY:"))
+            .count(),
+        primary_raw_records().len()
+    );
+    assert_eq!(
+        calls.iter().filter(|call| *call == "get:ZPRIMARY").count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn direct_zone_observation_uses_one_get_and_no_inventory_scan() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let fake = Arc::new(fake_api());
+    let adapter = adapter(center_account.clone(), fake.clone());
+
+    let observed = adapter
+        .observe_zone_by_id(&center_account, &DnsZoneId::new("ZPRIMARY").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(observed.zone.zone_id.as_str(), "ZPRIMARY");
+    assert_eq!(observed.zone.visibility, ZoneVisibility::Public);
+    assert_eq!(fake.calls.lock().unwrap().as_slice(), ["get:ZPRIMARY"]);
+}
+
+#[test]
+fn receipt_scope_preflight_rejects_tamper_and_wrong_scope_without_provider_io() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let zone_id = DnsZoneId::new("ZPRIMARY").unwrap();
+    let token = ChangeToken {
+        version: 1,
+        center_scope: scope_hash(center_account.as_str()),
+        external_scope: scope_hash(AWS_ACCOUNT_ID),
+        zone_scope: scope_hash(zone_id.as_str()),
+        provider_change_id: "C123".to_string(),
+        request_digest: "digest".to_string(),
+        submitted_at_unix_seconds: 1,
+        guard: DnsGuardStrength::Atomic,
+    };
+    let receipt =
+        DnsChangeId::new(sign_token(&token, &[17; 32], TokenDomain::MutationReceipt).unwrap())
+            .unwrap();
+    let verifier = Route53MutationReceiptVerifier::new(
+        center_account.clone(),
+        &account(),
+        Route53MutationReceiptKey::new([17; 32]).unwrap(),
+    )
+    .unwrap();
+
+    verifier
+        .validate_scope(&center_account, &zone_id, &receipt)
+        .unwrap();
+    assert_eq!(
+        verifier
+            .validate_scope(
+                &CloudResourceId::new("route53-other").unwrap(),
+                &zone_id,
+                &receipt,
+            )
+            .unwrap_err()
+            .code(),
+        "route53_change_not_found"
+    );
+    assert_eq!(
+        verifier
+            .validate_scope(
+                &center_account,
+                &DnsZoneId::new("ZSECONDARY").unwrap(),
+                &receipt,
+            )
+            .unwrap_err()
+            .code(),
+        "route53_change_not_found"
+    );
+    let mut tampered = receipt.as_str().as_bytes().to_vec();
+    let last = tampered.last_mut().unwrap();
+    *last = if *last == b'A' { b'B' } else { b'A' };
+    let tampered = DnsChangeId::new(String::from_utf8(tampered).unwrap()).unwrap();
+    assert_eq!(
+        verifier
+            .validate_scope(&center_account, &zone_id, &tampered)
+            .unwrap_err()
+            .code(),
+        "route53_change_not_found"
+    );
+
+    let mut non_aws = account();
+    non_aws.provider = CloudProvider::GoogleCloud;
+    non_aws.scope = Some(ProviderAccountScope::GoogleCloud {
+        project_id: "project-a".to_string(),
+    });
+    assert_eq!(
+        Route53MutationReceiptVerifier::new(
+            center_account,
+            &non_aws,
+            Route53MutationReceiptKey::new([18; 32]).unwrap(),
+        )
+        .err()
+        .unwrap()
+        .code(),
+        "route53_provider_required"
+    );
+}
+
+#[tokio::test]
 async fn replace_uses_exact_fresh_raw_delete_then_one_create() {
     let center_account = CloudResourceId::new("route53-main").unwrap();
     let fake = Arc::new(fake_api());
@@ -449,6 +572,174 @@ async fn exact_delete_rejects_a_race_after_fresh_inventory_without_partial_apply
     assert!(records["ZPRIMARY"]
         .iter()
         .all(|record| record.name != "must-not-commit.example.test."));
+}
+
+#[tokio::test]
+async fn resultant_inventory_conflicts_fail_before_provider_dispatch() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let zone = observed_zone(&center_account, "ZPRIMARY", "example.test").zone;
+
+    let weighted_api = fake_api();
+    weighted_api.records.lock().unwrap().insert(
+        "ZPRIMARY".to_string(),
+        (0..100)
+            .map(|index| {
+                weighted_record(
+                    &format!("member-{index:03}"),
+                    1,
+                    &format!("192.0.2.{}", index + 1),
+                )
+            })
+            .collect(),
+    );
+    let weighted_api = Arc::new(weighted_api);
+    let weighted_adapter = adapter(center_account.clone(), weighted_api.clone());
+    let weighted_desired =
+        model::map_record_set(&zone, weighted_record("member-100", 1, "192.0.2.201"))
+            .unwrap()
+            .0;
+    let error = weighted_adapter
+        .apply_record_changes(
+            &zone,
+            &[DnsRecordChange::Create {
+                record_set: weighted_desired,
+                guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+            }],
+            DnsGuardStrength::Atomic,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "route53_resultant_weighted_limit");
+    assert!(weighted_api.writes.lock().unwrap().is_empty());
+
+    let failover_api = fake_api();
+    let mut primary = ordinary_record("failover.example.test.", "A", 60, &["192.0.2.10"]);
+    primary.set_identifier = Some("primary-a".to_string());
+    primary.failover = Some("PRIMARY".to_string());
+    failover_api
+        .records
+        .lock()
+        .unwrap()
+        .insert("ZPRIMARY".to_string(), vec![primary]);
+    let failover_api = Arc::new(failover_api);
+    let failover_adapter = adapter(center_account.clone(), failover_api.clone());
+    let mut duplicate_primary = ordinary_record("failover.example.test.", "A", 60, &["192.0.2.11"]);
+    duplicate_primary.set_identifier = Some("primary-b".to_string());
+    duplicate_primary.failover = Some("PRIMARY".to_string());
+    let failover_desired = model::map_record_set(&zone, duplicate_primary).unwrap().0;
+    let error = failover_adapter
+        .apply_record_changes(
+            &zone,
+            &[DnsRecordChange::Create {
+                record_set: failover_desired,
+                guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+            }],
+            DnsGuardStrength::Atomic,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "route53_resultant_selector_conflict");
+    assert!(failover_api.writes.lock().unwrap().is_empty());
+
+    let cname_api = fake_api();
+    cname_api.records.lock().unwrap().insert(
+        "ZPRIMARY".to_string(),
+        vec![ordinary_record(
+            "conflict.example.test.",
+            "A",
+            60,
+            &["192.0.2.20"],
+        )],
+    );
+    let cname_api = Arc::new(cname_api);
+    let cname_adapter = adapter(center_account, cname_api.clone());
+    let cname_desired = model::map_record_set(
+        &zone,
+        ordinary_record(
+            "conflict.example.test.",
+            "CNAME",
+            60,
+            &["target.example.net."],
+        ),
+    )
+    .unwrap()
+    .0;
+    let error = cname_adapter
+        .apply_record_changes(
+            &zone,
+            &[DnsRecordChange::Create {
+                record_set: cname_desired,
+                guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+            }],
+            DnsGuardStrength::Atomic,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "route53_resultant_cname_conflict");
+    assert!(cname_api.writes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn replace_preserves_routing_alias_and_health_check_shape_before_dispatch() {
+    let mut weighted = weighted_record("member-a", 10, "192.0.2.30");
+    let mut failover = weighted.clone();
+    failover.weight = None;
+    failover.failover = Some("PRIMARY".to_string());
+    assert_replace_shape_conflict(weighted, failover).await;
+
+    let alias = primary_raw_records()
+        .into_iter()
+        .find(|record| record.alias_target.is_some())
+        .unwrap();
+    let ordinary = ordinary_record("alias.example.test.", "A", 60, &["192.0.2.31"]);
+    assert_replace_shape_conflict(alias, ordinary).await;
+
+    weighted = ordinary_record("health.example.test.", "A", 60, &["192.0.2.32"]);
+    weighted.health_check_id = Some("health-check-a".to_string());
+    let mut changed_health = weighted.clone();
+    changed_health.health_check_id = Some("health-check-b".to_string());
+    assert_replace_shape_conflict(weighted, changed_health).await;
+}
+
+async fn assert_replace_shape_conflict(
+    previous_raw: Route53RecordSet,
+    desired_raw: Route53RecordSet,
+) {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let zone = observed_zone(&center_account, "ZPRIMARY", "example.test").zone;
+    let fake = fake_api();
+    fake.records
+        .lock()
+        .unwrap()
+        .insert("ZPRIMARY".to_string(), vec![previous_raw.clone()]);
+    let fake = Arc::new(fake);
+    let adapter = adapter(center_account, fake.clone());
+    let (previous_record_set, previous_revision) =
+        model::map_record_set(&zone, previous_raw).unwrap();
+    let previous = ObservedDnsRecordSet {
+        zone: zone.clone(),
+        record_set: previous_record_set,
+        provider_object_ids: BTreeSet::new(),
+        revision: previous_revision.clone(),
+    };
+    let desired = model::map_record_set(&zone, desired_raw).unwrap().0;
+
+    let error = adapter
+        .apply_record_changes(
+            &zone,
+            &[DnsRecordChange::Replace {
+                previous,
+                desired,
+                guard: edgion_center_core::DnsMutationGuard::MatchObserved {
+                    revision: previous_revision,
+                },
+            }],
+            DnsGuardStrength::Atomic,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "route53_replace_shape_conflict");
+    assert!(fake.writes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -602,11 +893,13 @@ async fn receipts_are_tamper_key_account_and_version_bound_before_get_change() {
         .is_err());
     assert_eq!(get_calls(), 0);
 
-    let wrong_key = Route53DnsAdapter::new(
+    let wrong_key = Route53DnsAdapter::new_with_write_keys(
         center_account.clone(),
         &account(),
         fake.clone(),
-        Route53CursorKey::new([8; 32]).unwrap(),
+        Route53CursorKey::new([7; 32]).unwrap(),
+        Route53MutationReceiptKey::new([18; 32]).unwrap(),
+        Route53LifecycleTokenKey::new([27; 32]).unwrap(),
     )
     .unwrap();
     assert!(wrong_key.observe_change(&zone, &receipt.id).await.is_err());
@@ -624,14 +917,19 @@ async fn receipts_are_tamper_key_account_and_version_bound_before_get_change() {
         .is_err());
     assert_eq!(get_calls(), 0);
 
-    let mut token: ChangeToken = verify_token(
-        receipt.id.as_str(),
-        &Route53CursorKey::new([7; 32]).unwrap(),
-    )
-    .unwrap();
+    let mut token: ChangeToken =
+        verify_token(receipt.id.as_str(), &[17; 32], TokenDomain::MutationReceipt).unwrap();
+    let cross_domain =
+        DnsChangeId::new(sign_token(&token, &[17; 32], TokenDomain::Lifecycle).unwrap()).unwrap();
+    assert!(primary_adapter
+        .observe_change(&zone, &cross_domain)
+        .await
+        .is_err());
+    assert_eq!(get_calls(), 0);
+
     token.version = 2;
     let unknown_version =
-        DnsChangeId::new(sign_token(&token, &Route53CursorKey::new([7; 32]).unwrap()).unwrap())
+        DnsChangeId::new(sign_token(&token, &[17; 32], TokenDomain::MutationReceipt).unwrap())
             .unwrap();
     assert!(primary_adapter
         .observe_change(&zone, &unknown_version)
@@ -1570,13 +1868,69 @@ async fn lifecycle_delete_rechecks_revision_and_safe_provider_state() {
 }
 
 fn adapter(center_account: CloudResourceId, api: Arc<FakeApi>) -> Route53DnsAdapter {
-    Route53DnsAdapter::new(
+    Route53DnsAdapter::new_with_write_keys(
         center_account,
         &account(),
         api,
         Route53CursorKey::new([7; 32]).unwrap(),
+        Route53MutationReceiptKey::new([17; 32]).unwrap(),
+        Route53LifecycleTokenKey::new([27; 32]).unwrap(),
     )
     .unwrap()
+}
+
+#[test]
+fn write_constructors_reject_cross_purpose_key_reuse() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let api = Arc::new(fake_api());
+    let error = Route53DnsAdapter::new_with_record_write_key(
+        center_account.clone(),
+        &account(),
+        api.clone(),
+        Route53CursorKey::new([9; 32]).unwrap(),
+        Route53MutationReceiptKey::new([9; 32]).unwrap(),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.code(), "route53_signing_key_reuse");
+
+    for (cursor, mutation, lifecycle) in [
+        ([9; 32], [9; 32], [29; 32]),
+        ([9; 32], [19; 32], [9; 32]),
+        ([9; 32], [19; 32], [19; 32]),
+    ] {
+        let error = Route53DnsAdapter::new_with_write_keys(
+            center_account.clone(),
+            &account(),
+            api.clone(),
+            Route53CursorKey::new(cursor).unwrap(),
+            Route53MutationReceiptKey::new(mutation).unwrap(),
+            Route53LifecycleTokenKey::new(lifecycle).unwrap(),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error.code(), "route53_signing_key_reuse");
+    }
+    assert!(api.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn record_write_constructor_does_not_grant_lifecycle_authority() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let fake = Arc::new(fake_api());
+    let adapter = Route53DnsAdapter::new_with_record_write_key(
+        center_account,
+        &account(),
+        fake.clone(),
+        Route53CursorKey::new([7; 32]).unwrap(),
+        Route53MutationReceiptKey::new([17; 32]).unwrap(),
+    )
+    .unwrap();
+    let mutation_id = ZoneLifecycleMutationId::new("opaque-lifecycle-token").unwrap();
+    let error = adapter.observe_mutation(&mutation_id).await.unwrap_err();
+    assert_eq!(error.code(), "route53_mutation_authority_unavailable");
+    assert!(fake.calls.lock().unwrap().is_empty());
+    assert!(fake.writes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

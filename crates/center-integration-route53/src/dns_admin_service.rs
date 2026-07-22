@@ -31,7 +31,6 @@ const MAX_GLOBAL_CONCURRENCY: usize = 32;
 const DEFAULT_ACCOUNT_CONCURRENCY: usize = 2;
 const MAX_ACCOUNT_CONCURRENCY: usize = 4;
 const MAX_TRACKED_ACCOUNTS: usize = 1_024;
-const MAX_ZONE_LOOKUP_PAGES: usize = 35;
 
 /// Strict, independently default-off switch for Route 53 DNS inventory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,13 +82,13 @@ impl Default for Route53DnsReadConfig {
 }
 
 #[async_trait]
-trait ApiFactory: Send + Sync {
+pub(crate) trait ApiFactory: Send + Sync {
     async fn build(
         &self,
     ) -> Result<Arc<dyn Route53Api>, edgion_center_core::NormalizedProviderError>;
 }
 
-struct ProductionApiFactory;
+pub(crate) struct ProductionApiFactory;
 
 #[async_trait]
 impl ApiFactory for ProductionApiFactory {
@@ -383,44 +382,19 @@ fn validate_page(
     Ok(())
 }
 
-async fn observe_exact_zone(
+pub(crate) async fn observe_exact_zone(
     adapter: &Route53DnsAdapter,
     account_id: &CloudResourceId,
     zone_id: &DnsZoneId,
 ) -> Result<ObservedDnsZone, Route53DnsAdminError> {
-    let mut token = None;
-    for _ in 0..MAX_ZONE_LOOKUP_PAGES {
-        let page = adapter
-            .list_zones(
-                account_id,
-                &DnsPageRequest {
-                    limit: MAX_ROUTE53_PAGE_LIMIT,
-                    token,
-                },
-            )
-            .await
-            .map_err(map_provider_error)?;
-        if let Some(zone) = page
-            .items
-            .into_iter()
-            .find(|zone| &zone.zone.zone_id == zone_id)
-        {
-            if &zone.zone.provider_account_id != account_id
-                || zone.zone.provider != CloudProvider::Aws
-            {
-                return Err(Route53DnsAdminError::InvalidProviderObservation);
-            }
-            return Ok(zone);
-        }
-        let Some(next) = page.next else {
-            return Err(Route53DnsAdminError::NotFound);
-        };
-        token = Some(next);
-    }
-    Err(Route53DnsAdminError::InvalidProviderObservation)
+    adapter
+        .observe_zone_by_id(account_id, zone_id)
+        .await
+        .map_err(map_provider_error)?
+        .ok_or(Route53DnsAdminError::NotFound)
 }
 
-fn map_provider_error(error: NormalizedProviderError) -> Route53DnsAdminError {
+pub(crate) fn map_provider_error(error: NormalizedProviderError) -> Route53DnsAdminError {
     if error.code() == "route53_inventory_changed" {
         return Route53DnsAdminError::RestartRequired;
     }

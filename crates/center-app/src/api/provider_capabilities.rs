@@ -523,6 +523,7 @@ mod tests {
             cloudflare_dns_admin: None,
             cloudflare_dns_write_admin: None,
             route53_dns_admin: None,
+            route53_dns_write_admin: None,
             provider_account_store: account_store
                 .clone()
                 .map(|store| store as Arc<dyn edgion_center_core::ProviderAccountStore>),

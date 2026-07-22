@@ -185,3 +185,36 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: edgion-center-route53-dns-reader
+---
+# Example least-privilege Route 53 RRset writer, narrowed to one account, zone, and record type.
+# This role intentionally has no hosted-zone lifecycle or zone-wide change-batch authority. The
+# read permission is separate and is needed for revision guards and change receipt observation;
+# route53-dns:write does not imply it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-route53-dns-writer
+rules:
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z0123456789ABCDEF/record-sets/A
+    verbs: [get, put, delete]
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z0123456789ABCDEF/changes/*
+    verbs: [get]
+  - nonResourceURLs:
+      - /edgion-center-authz/permissions/route53-dns:read
+      - /edgion-center-authz/permissions/route53-dns:write
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-route53-dns-writer
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-route53-writers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-route53-dns-writer

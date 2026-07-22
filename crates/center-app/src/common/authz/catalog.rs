@@ -44,6 +44,9 @@ pub const CLOUDFLARE_DNS_REMOTE_WRITE: &str = "cloudflare-dns:remote-write";
 /// High-trust Route 53 inventory access across every configured AWS ProviderAccount.
 /// Kubernetes authorization may additionally narrow this to exact non-resource paths.
 pub const ROUTE53_DNS_READ: &str = "route53-dns:read";
+/// High-trust Route 53 RRset mutation access across every configured AWS ProviderAccount.
+/// It does not imply inventory reads or hosted-zone lifecycle authority.
+pub const ROUTE53_DNS_WRITE: &str = "route53-dns:write";
 pub const PROVIDER_ACCOUNTS_READ: &str = "provider-accounts:read";
 pub const PROVIDER_ACCOUNTS_WRITE: &str = "provider-accounts:write";
 pub const PROVIDER_CREDENTIALS_USE: &str = "provider-credentials:use";
@@ -68,6 +71,7 @@ pub fn all_keys() -> &'static [&'static str] {
         CLOUDFLARE_DNS_WRITE,
         CLOUDFLARE_DNS_REMOTE_WRITE,
         ROUTE53_DNS_READ,
+        ROUTE53_DNS_WRITE,
         PROVIDER_ACCOUNTS_READ,
         PROVIDER_ACCOUNTS_WRITE,
         PROVIDER_CREDENTIALS_USE,
@@ -135,7 +139,7 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         },
         PermissionGroup {
             group: "Route 53 DNS",
-            keys: vec![ROUTE53_DNS_READ],
+            keys: vec![ROUTE53_DNS_READ, ROUTE53_DNS_WRITE],
         },
         PermissionGroup {
             group: "Provider Accounts",
@@ -202,8 +206,16 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         };
     }
 
-    if is_route53_dns_read_path(path) {
-        return (method == Method::GET).then_some(ROUTE53_DNS_READ);
+    if let Some(route) = route53_dns_route(path) {
+        return match (route, method) {
+            (Route53DnsRoute::Read, &Method::GET) => Some(ROUTE53_DNS_READ),
+            (Route53DnsRoute::RecordDetail, &Method::GET) => Some(ROUTE53_DNS_READ),
+            (Route53DnsRoute::RecordDetail, &Method::PUT | &Method::DELETE) => {
+                Some(ROUTE53_DNS_WRITE)
+            }
+            (Route53DnsRoute::ChangeBatch, &Method::POST) => Some(ROUTE53_DNS_WRITE),
+            _ => None,
+        };
     }
 
     if let Some(suffix) = path.strip_prefix("/api/v1/center/cloud/provider-capabilities/accounts/")
@@ -324,21 +336,28 @@ fn is_cloudflare_remote_control_path(path: &str) -> bool {
         && segments[5] == "remote-control"
 }
 
-fn is_route53_dns_read_path(path: &str) -> bool {
-    let Some(suffix) = path.strip_prefix("/api/v1/center/aws/route53/accounts/") else {
-        return false;
-    };
+#[derive(Clone, Copy)]
+enum Route53DnsRoute {
+    Read,
+    RecordDetail,
+    ChangeBatch,
+}
+
+fn route53_dns_route(path: &str) -> Option<Route53DnsRoute> {
+    let suffix = path.strip_prefix("/api/v1/center/aws/route53/accounts/")?;
     let segments = suffix.split('/').collect::<Vec<_>>();
     if segments.iter().any(|segment| segment.is_empty()) {
-        return false;
+        return None;
     }
-    matches!(
-        segments.as_slice(),
+    match segments.as_slice() {
         [_, "hosted-zones"]
-            | [_, "hosted-zones", _]
-            | [_, "hosted-zones", _, "record-sets"]
-            | [_, "hosted-zones", _, "record-sets", _]
-    )
+        | [_, "hosted-zones", _]
+        | [_, "hosted-zones", _, "record-sets"]
+        | [_, "hosted-zones", _, "changes", _] => Some(Route53DnsRoute::Read),
+        [_, "hosted-zones", _, "record-sets", _] => Some(Route53DnsRoute::RecordDetail),
+        [_, "hosted-zones", _, "change-batches"] => Some(Route53DnsRoute::ChangeBatch),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -476,6 +495,22 @@ mod tests {
             (
                 Method::GET,
                 "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A",
+            ),
+            (
+                Method::PUT,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A",
+            ),
+            (
+                Method::DELETE,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A",
+            ),
+            (
+                Method::POST,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/change-batches",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/changes/C123",
             ),
             (Method::GET, "/api/v1/center/cloud/provider-accounts"),
             (Method::POST, "/api/v1/center/cloud/provider-accounts"),
@@ -691,17 +726,52 @@ mod tests {
         ] {
             assert_eq!(route_permission(&Method::GET, path), Some(ROUTE53_DNS_READ));
             assert_eq!(route_permission(&Method::HEAD, path), None);
-            assert_eq!(route_permission(&Method::POST, path), None);
         }
+        let record_path =
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A";
+        assert_eq!(
+            route_permission(&Method::PUT, record_path),
+            Some(ROUTE53_DNS_WRITE)
+        );
+        assert_eq!(
+            route_permission(&Method::DELETE, record_path),
+            Some(ROUTE53_DNS_WRITE)
+        );
+        assert_eq!(route_permission(&Method::HEAD, record_path), None);
+        assert_eq!(route_permission(&Method::POST, record_path), None);
+        assert_eq!(route_permission(&Method::PATCH, record_path), None);
+        let batch_path =
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/change-batches";
+        assert_eq!(
+            route_permission(&Method::POST, batch_path),
+            Some(ROUTE53_DNS_WRITE)
+        );
+        assert_eq!(route_permission(&Method::GET, batch_path), None);
+        assert_eq!(route_permission(&Method::PUT, batch_path), None);
+        assert_eq!(route_permission(&Method::DELETE, batch_path), None);
+        let change_path =
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/changes/C123";
+        assert_eq!(
+            route_permission(&Method::GET, change_path),
+            Some(ROUTE53_DNS_READ)
+        );
+        assert_eq!(route_permission(&Method::HEAD, change_path), None);
+        assert_eq!(route_permission(&Method::POST, change_path), None);
         for path in [
             "/api/v1/center/aws/route53/accounts",
             "/api/v1/center/aws/route53/accounts/aws-main",
             "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A/extra",
-            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/changes/C123",
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/change-batches/extra",
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/changes/C123/extra",
             "/api/v1/center/aws/route53/accounts//hosted-zones",
         ] {
             assert_eq!(route_permission(&Method::GET, path), None);
+            assert_eq!(route_permission(&Method::POST, path), None);
         }
+        let zone_path = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123";
+        assert_eq!(route_permission(&Method::POST, zone_path), None);
+        assert_eq!(route_permission(&Method::PUT, zone_path), None);
+        assert_eq!(route_permission(&Method::DELETE, zone_path), None);
         assert_eq!(
             route_permission(
                 &Method::PUT,

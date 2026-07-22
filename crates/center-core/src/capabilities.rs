@@ -23,6 +23,8 @@ pub struct CenterCapabilities {
     pub cloudflare_dns_write: bool,
     /// AWS Route 53-specific, read-only hosted-zone and RRset inventory Admin API.
     pub route53_dns_read: bool,
+    /// AWS Route 53-specific, synchronous revision-guarded RRset write Admin API.
+    pub route53_dns_write: bool,
     /// Provider-neutral, secret-free ProviderAccount desired-state Admin API.
     pub provider_account_admin: bool,
     /// Read-only, sanitized ProviderAccount capability snapshot Admin API.
@@ -45,6 +47,7 @@ impl CenterCapabilities {
                 cloudflare_dns_read: false,
                 cloudflare_dns_write: false,
                 route53_dns_read: false,
+                route53_dns_write: false,
                 provider_account_admin: false,
                 provider_capability_read: false,
                 provider_credential_inspection: false,
@@ -60,6 +63,7 @@ impl CenterCapabilities {
                 cloudflare_dns_read: false,
                 cloudflare_dns_write: false,
                 route53_dns_read: false,
+                route53_dns_write: false,
                 provider_account_admin: false,
                 provider_capability_read: false,
                 provider_credential_inspection: false,
@@ -92,6 +96,7 @@ impl CenterCapabilities {
             cloudflare_dns_read,
             cloudflare_dns_write: false,
             route53_dns_read: false,
+            route53_dns_write: false,
             provider_account_admin,
             provider_capability_read,
             provider_credential_inspection,
@@ -114,6 +119,7 @@ mod tests {
         assert!(!standalone.cloudflare_dns_read && !kubernetes.cloudflare_dns_read);
         assert!(!standalone.cloudflare_dns_write && !kubernetes.cloudflare_dns_write);
         assert!(!standalone.route53_dns_read && !kubernetes.route53_dns_read);
+        assert!(!standalone.route53_dns_write && !kubernetes.route53_dns_write);
         assert!(!standalone.provider_account_admin && !kubernetes.provider_account_admin);
         assert!(!standalone.provider_capability_read && !kubernetes.provider_capability_read);
         assert!(

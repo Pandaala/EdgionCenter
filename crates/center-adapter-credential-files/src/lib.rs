@@ -40,6 +40,7 @@ pub enum CredentialPurpose {
     CloudflareDnsCursorHmac,
     CloudflareDnsMutationTokenHmac,
     Route53DnsCursorHmac,
+    Route53DnsMutationReceiptHmac,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,7 +310,11 @@ impl MountedCredentialResolver {
                     CredentialPurpose::CloudflareApiToken
                         | CredentialPurpose::CloudflareDnsCursorHmac
                         | CredentialPurpose::CloudflareDnsMutationTokenHmac
-                ) | (CloudProvider::Aws, CredentialPurpose::Route53DnsCursorHmac)
+                ) | (
+                    CloudProvider::Aws,
+                    CredentialPurpose::Route53DnsCursorHmac
+                        | CredentialPurpose::Route53DnsMutationReceiptHmac
+                )
             );
             if binding.credential_ref.len() > MAX_IDENTITY_BYTES
                 || binding.provider_account_id.len() > MAX_IDENTITY_BYTES
@@ -585,6 +590,7 @@ fn purpose_tag(purpose: CredentialPurpose) -> &'static str {
         CredentialPurpose::CloudflareDnsCursorHmac => "cloudflare_dns_cursor_hmac",
         CredentialPurpose::CloudflareDnsMutationTokenHmac => "cloudflare_dns_mutation_token_hmac",
         CredentialPurpose::Route53DnsCursorHmac => "route53_dns_cursor_hmac",
+        CredentialPurpose::Route53DnsMutationReceiptHmac => "route53_dns_mutation_receipt_hmac",
     }
 }
 
@@ -977,17 +983,29 @@ mod tests {
         tokio::fs::write(dir.path().join("route53.key"), [9_u8; 32])
             .await
             .unwrap();
+        tokio::fs::write(dir.path().join("route53-mutation.key"), [10_u8; 32])
+            .await
+            .unwrap();
         let route53 = MountedCredentialConfig {
             enabled: true,
             root_directory: Some(dir.path().to_string_lossy().into_owned()),
             revision_key_file: Some("revision.key".into()),
-            bindings: vec![MountedCredentialBinding {
-                credential_ref: "aws/route53-cursor".into(),
-                provider_account_id: "aws-main".into(),
-                provider: CloudProvider::Aws,
-                purpose: CredentialPurpose::Route53DnsCursorHmac,
-                file: "route53.key".into(),
-            }],
+            bindings: vec![
+                MountedCredentialBinding {
+                    credential_ref: "aws/route53-cursor".into(),
+                    provider_account_id: "aws-main".into(),
+                    provider: CloudProvider::Aws,
+                    purpose: CredentialPurpose::Route53DnsCursorHmac,
+                    file: "route53.key".into(),
+                },
+                MountedCredentialBinding {
+                    credential_ref: "aws/route53-mutation".into(),
+                    provider_account_id: "aws-main".into(),
+                    provider: CloudProvider::Aws,
+                    purpose: CredentialPurpose::Route53DnsMutationReceiptHmac,
+                    file: "route53-mutation.key".into(),
+                },
+            ],
         };
         let resolver = MountedCredentialResolver::from_config(&route53)
             .await
@@ -1005,6 +1023,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resolved.with_bytes(|bytes| bytes.to_vec()), vec![9_u8; 32]);
+        let mutation_reference = CredentialRef::new("aws/route53-mutation").unwrap();
+        let mutation = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &CloudProvider::Aws,
+                purpose: CredentialPurpose::Route53DnsMutationReceiptHmac,
+                credential_ref: &mutation_reference,
+            })
+            .await
+            .unwrap();
+        assert_eq!(mutation.with_bytes(|bytes| bytes.to_vec()), vec![10_u8; 32]);
+        assert_eq!(
+            resolver
+                .resolve(ResolveCredentialRequest {
+                    provider_account_id: &account,
+                    provider: &CloudProvider::Aws,
+                    purpose: CredentialPurpose::Route53DnsMutationReceiptHmac,
+                    credential_ref: &reference,
+                })
+                .await
+                .unwrap_err(),
+            CredentialResolutionError::ScopeMismatch
+        );
 
         let mut wrong_provider = route53;
         wrong_provider.bindings[0].provider = CloudProvider::Cloudflare;

@@ -336,6 +336,19 @@ mod tests {
         }
     }
 
+    struct Route53WriteOnlyAuthz;
+
+    #[async_trait::async_trait]
+    impl Authorizer for Route53WriteOnlyAuthz {
+        async fn authorize(&self, _p: &Principal, action: &Action) -> CoreResult<Decision> {
+            if action.permission == catalog::ROUTE53_DNS_WRITE {
+                Ok(Decision::allow())
+            } else {
+                Ok(Decision::deny("Route 53 write permission required"))
+            }
+        }
+    }
+
     /// Inject a `UnifiedAuthClaims` (simulating unified_auth) before authz runs.
     fn claims_injecting_layer_with_groups(router: Router, groups: Vec<String>) -> Router {
         router.layer(middleware::from_fn(
@@ -503,31 +516,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn route53_read_authorization_is_limited_to_exact_get_paths() {
-        let path = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A";
-        let extra =
-            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A/extra";
+    async fn route53_read_authorization_does_not_grant_exact_record_writes() {
+        let record = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A";
+        let batch = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/change-batches";
+        let change =
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/changes/opaque-receipt";
         let inner = Router::new()
-            .route(path, get(|| async { "ok" }).post(|| async { "no" }))
-            .route(extra, get(|| async { "no" }));
+            .route(
+                record,
+                get(|| async { "ok" })
+                    .put(|| async { "no" })
+                    .delete(|| async { "no" }),
+            )
+            .route(batch, post(|| async { "no" }))
+            .route(change, get(|| async { "ok" }));
         let app = app_with(Arc::new(Route53ReadOnlyAuthz), inner);
 
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(axum::http::Method::GET)
-                    .uri(path)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        for path in [record, change] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(axum::http::Method::GET)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
 
         for (method, denied_path) in [
-            (axum::http::Method::POST, path),
-            (axum::http::Method::GET, extra),
+            (axum::http::Method::PUT, record),
+            (axum::http::Method::DELETE, record),
+            (axum::http::Method::POST, batch),
         ] {
             let response = app
                 .clone()
@@ -541,6 +564,75 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    #[tokio::test]
+    async fn route53_write_authorization_is_exact_and_does_not_imply_reads_or_zone_lifecycle() {
+        let record = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A";
+        let batch = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/change-batches";
+        let change =
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/changes/opaque-receipt";
+        let zone = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123";
+        let extra =
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A/extra";
+        let inner = Router::new()
+            .route(
+                record,
+                get(|| async { "no" })
+                    .put(|| async { "ok" })
+                    .delete(|| async { "ok" }),
+            )
+            .route(batch, post(|| async { "ok" }))
+            .route(change, get(|| async { "no" }))
+            .route(
+                zone,
+                post(|| async { "no" })
+                    .put(|| async { "no" })
+                    .delete(|| async { "no" }),
+            )
+            .route(extra, put(|| async { "no" }));
+        let app = app_with(Arc::new(Route53WriteOnlyAuthz), inner);
+
+        for (method, path) in [
+            (axum::http::Method::PUT, record),
+            (axum::http::Method::DELETE, record),
+            (axum::http::Method::POST, batch),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+
+        for (method, path) in [
+            (axum::http::Method::GET, record),
+            (axum::http::Method::GET, change),
+            (axum::http::Method::POST, zone),
+            (axum::http::Method::PUT, zone),
+            (axum::http::Method::DELETE, zone),
+            (axum::http::Method::PUT, extra),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
         }
     }
 

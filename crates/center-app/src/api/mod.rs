@@ -122,6 +122,8 @@ pub struct ApiState {
     pub cloudflare_dns_write_admin: Option<cloudflare_dns::SharedCloudflareDnsWriteAdminService>,
     /// Optional SDK-free Route 53 DNS read service.
     pub route53_dns_admin: Option<route53_dns::SharedRoute53DnsAdminService>,
+    /// Optional SDK-free Route 53 synchronous RRset write service.
+    pub route53_dns_write_admin: Option<route53_dns::SharedRoute53DnsWriteAdminService>,
     /// Optional secret-free provider account desired-state store.
     pub provider_account_store: Option<Arc<dyn edgion_center_core::ProviderAccountStore>>,
     /// Optional capability snapshot store. Admin handlers only perform exact-key reads.
@@ -236,6 +238,7 @@ pub fn router(mut state: ApiState) -> Router {
     state.capabilities.cloudflare_dns_read &= state.cloudflare_dns_admin.is_some();
     state.capabilities.cloudflare_dns_write &= state.cloudflare_dns_write_admin.is_some();
     state.capabilities.route53_dns_read &= state.route53_dns_admin.is_some();
+    state.capabilities.route53_dns_write &= state.route53_dns_write_admin.is_some();
     state.capabilities.provider_account_admin &= state.provider_account_store.is_some();
     state.capabilities.provider_capability_read &=
         state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
@@ -429,6 +432,24 @@ pub fn router(mut state: ApiState) -> Router {
                 "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/record-sets/{record_type}",
                 get(route53_dns::get_record_set),
             );
+    }
+    if capabilities.route53_dns_write && state.route53_dns_write_admin.is_some() {
+        let route53_write_routes = Router::new()
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/record-sets/{record_type}",
+                axum::routing::put(route53_dns::put_record_set)
+                    .delete(route53_dns::delete_record_set),
+            )
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/change-batches",
+                post(route53_dns::apply_change_batch),
+            )
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/changes/{receipt}",
+                get(route53_dns::get_change),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024));
+        app = app.merge(route53_write_routes);
     }
     if capabilities.provider_account_admin && state.provider_account_store.is_some() {
         let provider_account_routes = Router::new()
@@ -930,6 +951,53 @@ mod tests {
         }
     }
 
+    struct UnavailableRoute53DnsWrite;
+
+    #[async_trait::async_trait]
+    impl route53_dns::Route53DnsWriteAdminService for UnavailableRoute53DnsWrite {
+        async fn put_record_set(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &route53_dns::Route53RecordSetKey,
+            _: &route53_dns::Route53RecordSetPutRequest,
+        ) -> Result<route53_dns::Route53ChangeReceiptDto, route53_dns::Route53DnsAdminError>
+        {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn delete_record_set(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &route53_dns::Route53RecordSetKey,
+            _: &route53_dns::Route53RecordSetDeleteRequest,
+        ) -> Result<route53_dns::Route53ChangeReceiptDto, route53_dns::Route53DnsAdminError>
+        {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn apply_change_batch(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &route53_dns::Route53RecordChangeBatchRequest,
+        ) -> Result<route53_dns::Route53ChangeReceiptDto, route53_dns::Route53DnsAdminError>
+        {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn get_change(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &edgion_center_core::DnsChangeId,
+        ) -> Result<route53_dns::Route53ChangeReceiptDto, route53_dns::Route53DnsAdminError>
+        {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+    }
+
     #[test]
     fn proxy_request_headers_drop_credentials_and_hop_by_hop_metadata() {
         let headers = HeaderMap::from_iter([
@@ -1081,6 +1149,7 @@ mod tests {
             cloudflare_dns_admin: None,
             cloudflare_dns_write_admin: None,
             route53_dns_admin: None,
+            route53_dns_write_admin: None,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,
@@ -1263,6 +1332,113 @@ mod tests {
             .unwrap();
         let json = body_json(server_info).await;
         assert_eq!(json["data"]["capabilities"]["route53DnsRead"], true);
+    }
+
+    #[tokio::test]
+    async fn route53_write_capability_and_service_jointly_control_routes() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z0123456789ABCDEF/record-sets/A?owner=www.example.com";
+        let body = r#"{"guard":{"type":"must_not_exist"},"desired":{"ttl":{"type":"seconds","seconds":60},"values":[{"type":"A","address":"192.0.2.1"}],"aliasTarget":null,"routingPolicy":null,"healthCheckId":null}}"#;
+        let mut absent = state_with_authz_mode(AuthzMode::AllowAll, false);
+        absent.capabilities.route53_dns_write = true;
+        let response = router(absent)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut present = state_with_authz_mode(AuthzMode::AllowAll, false);
+        present.capabilities.route53_dns_write = true;
+        present.route53_dns_write_admin = Some(Arc::new(UnavailableRoute53DnsWrite));
+        let app = router(present);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let json = body_json(
+            app.oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/server-info")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(json["data"]["capabilities"]["route53DnsWrite"], true);
+    }
+
+    #[tokio::test]
+    async fn route53_read_and_write_methods_merge_on_the_record_detail_path() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z0123456789ABCDEF/record-sets/A?owner=www.example.com";
+        let mut state = state_with_authz_mode(AuthzMode::AllowAll, false);
+        state.capabilities.route53_dns_read = true;
+        state.capabilities.route53_dns_write = true;
+        state.route53_dns_admin = Some(Arc::new(UnavailableRoute53Dns));
+        state.route53_dns_write_admin = Some(Arc::new(UnavailableRoute53DnsWrite));
+        let app = router(state);
+
+        let get = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(get.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let put = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"guard":{"type":"must_not_exist"},"desired":{"ttl":{"type":"seconds","seconds":60},"values":[{"type":"A","address":"192.0.2.1"}],"aliasTarget":null,"routingPolicy":null,"healthCheckId":null}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(put.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let json = body_json(
+            app.oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/server-info")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(json["data"]["capabilities"]["route53DnsRead"], true);
+        assert_eq!(json["data"]["capabilities"]["route53DnsWrite"], true);
     }
 
     #[tokio::test]

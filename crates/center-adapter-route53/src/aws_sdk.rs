@@ -103,6 +103,31 @@ impl AwsRoute53SdkConfigFactory {
         external_id: Option<String>,
     ) -> Route53ApiResult<SdkConfig> {
         reject_configured_endpoints(base_config)?;
+        Self::assume_role_inner(base_config, spec, external_id).await
+    }
+
+    /// Hermetic loopback-only seam for exercising refreshable AssumeRole credentials.
+    /// Production composition must use [`Self::assume_role`].
+    pub async fn assume_role_with_sts_endpoint_for_test(
+        base_config: &SdkConfig,
+        spec: &AwsAssumeRoleSpec,
+        external_id: Option<String>,
+        sts_endpoint_url: &str,
+    ) -> Route53ApiResult<SdkConfig> {
+        reject_configured_endpoints(base_config)?;
+        validate_endpoint(Some(sts_endpoint_url))?;
+        let test_config = base_config
+            .to_builder()
+            .endpoint_url(sts_endpoint_url)
+            .build();
+        Self::assume_role_inner(&test_config, spec, external_id).await
+    }
+
+    async fn assume_role_inner(
+        base_config: &SdkConfig,
+        spec: &AwsAssumeRoleSpec,
+        external_id: Option<String>,
+    ) -> Route53ApiResult<SdkConfig> {
         if external_id
             .as_deref()
             .is_some_and(|value| !is_valid_external_id(value))

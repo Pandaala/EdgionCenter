@@ -6,7 +6,7 @@ use edgion_center_app::common::{
 use edgion_center_integration_cloudflare::{
     CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
 };
-use edgion_center_integration_route53::Route53DnsReadConfig;
+use edgion_center_integration_route53::{Route53DnsReadConfig, Route53DnsWriteConfig};
 use edgion_center_runtime::federation::config::CenterSyncConfig;
 use serde::{Deserialize, Serialize};
 
@@ -115,6 +115,8 @@ pub struct KubernetesCenterConfig {
     pub cloudflare_dns_write: CloudflareDnsWriteConfig,
     /// Account-bound, read-only Route 53 DNS inventory. Disabled by default.
     pub route53_dns_read: Route53DnsReadConfig,
+    /// Account-bound synchronous Route 53 RRset writes. Disabled by default.
+    pub route53_dns_write: Route53DnsWriteConfig,
 }
 
 impl Default for KubernetesCenterConfig {
@@ -134,6 +136,7 @@ impl Default for KubernetesCenterConfig {
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
             cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
             route53_dns_read: Route53DnsReadConfig::default(),
+            route53_dns_write: Route53DnsWriteConfig::default(),
         }
     }
 }
@@ -341,6 +344,24 @@ mod tests {
         );
         assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
             "route53_dns_read:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn route53_dns_write_is_default_off_and_strict() {
+        assert!(!KubernetesCenterConfig::default().route53_dns_write.enabled);
+        let config: KubernetesCenterConfig = serde_yaml::from_str(
+            "route53_dns_write:\n  enabled: true\n  cursor_key_ref: aws/route53-dns-cursor\n  mutation_receipt_key_ref: aws/route53-dns-mutation\n  operation_timeout_secs: 60\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
+        )
+        .unwrap();
+        assert!(config.route53_dns_write.enabled);
+        assert_eq!(
+            config.route53_dns_write.mutation_receipt_key_ref.as_deref(),
+            Some("aws/route53-dns-mutation")
+        );
+        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
+            "route53_dns_write:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
         )
         .is_err());
     }

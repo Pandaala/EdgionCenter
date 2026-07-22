@@ -551,6 +551,23 @@ Because Route 53 offers no RRset tag and Kubernetes audit is not revision-querya
 only `external_or_manual`; audit history is never presented as ownership state and no marker TXT or
 Center metadata store is introduced.
 
+The independent `route53_dns_write` slice adds synchronous guarded RRset mutation without making
+the read surface or hosted-zone lifecycle implicit. It requires a `Managed` Ambient AWS account
+and resolves two distinct Center-local authorities: the inventory cursor key and an RRset mutation
+receipt key. A record-only adapter constructor cannot create/delete zones or operate DNSSEC.
+Individual routes take owner, type, and optional set identifier from the URL and accept only a
+guard plus provider-safe desired state; the zone-wide batch route uses explicit create, replace,
+and delete actions and rejects duplicate identities. Before its one atomic Route 53 dispatch, the
+adapter re-observes exact raw RRsets, checks revisions, validates the complete resultant affected
+groups, and prevents replacement from implicitly changing routing family, Alias shape, or the
+health-check reference. Timeout or authority change after possible dispatch returns
+`unknown_outcome`; there is no automatic retry. Opaque receipts are HMAC-bound to both accounts and
+the zone and are authenticated locally before AWS client construction or STS I/O. Observation
+reports only Route 53 `PENDING` or `INSYNC`; authoritative convergence is
+always `not_checked` in this slice. The mutation key is single-active: operators do not switch its
+active binding until all receipts issued under it have settled or their observation window has
+ended; retaining an unreferenced old file does not provide fallback verification.
+
 The Cloud DNS adapter follows the same independent boundary and binds every provider request,
 Center cursor, and change receipt to the configured Google Cloud project and managed-zone ID. It
 supports public and private authoritative zones while forwarding, peering, reverse-lookup, and

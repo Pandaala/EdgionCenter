@@ -34,7 +34,8 @@ use edgion_center_core::{
     DnsRecordObjectId, DnsRecordSetKey, DnsZoneId, DnsZoneRef, DnssecDesiredState, DnssecDsRecord,
     DnssecExternalAction, DnssecObservation, DnssecProviderState, NormalizedProviderError,
     ObservedDnsRecordSet, ObservedDnsZone, ProviderAccountScope, ProviderAccountSpec,
-    ProviderErrorCategory, ZoneCreationRequest, ZoneDeletionRequest, ZoneLifecycleMutationId,
+    ProviderDnsRecordSet, ProviderDnsRecordType, ProviderErrorCategory, Route53GeoLocation,
+    Route53RoutingPolicy, ZoneCreationRequest, ZoneDeletionRequest, ZoneLifecycleMutationId,
     ZoneLifecycleMutationReceipt, ZoneLifecycleMutationState, ZoneLifecycleObservation,
     ZoneLifecycleProvider, ZoneLifecycleProviderResult, ZoneLifecycleRevision, ZoneVisibility,
 };
@@ -73,12 +74,146 @@ impl Drop for Route53CursorKey {
     }
 }
 
+/// Stable composition-provided key for authenticated RRset mutation receipts.
+pub struct Route53MutationReceiptKey([u8; 32]);
+
+impl Route53MutationReceiptKey {
+    pub fn new(value: [u8; 32]) -> Result<Self> {
+        if value.iter().all(|byte| *byte == 0) {
+            return Err(validation("weak_route53_mutation_receipt_key"));
+        }
+        Ok(Self(value))
+    }
+}
+
+impl Drop for Route53MutationReceiptKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+/// Closed-purpose, no-I/O verifier for Route 53 RRset mutation receipts.
+///
+/// The verifier owns its key, is intentionally neither cloneable nor serializable, and never
+/// exposes the authenticated provider change identity.
+pub struct Route53MutationReceiptVerifier {
+    center_account_id: CloudResourceId,
+    aws_account_id: String,
+    key: Route53MutationReceiptKey,
+}
+
+impl Route53MutationReceiptVerifier {
+    pub fn new(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        key: Route53MutationReceiptKey,
+    ) -> Result<Self> {
+        center_account_id
+            .validate()
+            .map_err(|_| validation("invalid_center_account_id"))?;
+        account
+            .validate()
+            .map_err(|_| validation("invalid_provider_account"))?;
+        if account.provider != CloudProvider::Aws {
+            return Err(validation("route53_provider_required"));
+        }
+        let ProviderAccountScope::Aws { account_id } = account
+            .scope
+            .as_ref()
+            .ok_or_else(|| validation("route53_account_scope_required"))?
+        else {
+            return Err(validation("route53_account_scope_mismatch"));
+        };
+        Ok(Self {
+            center_account_id,
+            aws_account_id: account_id.clone(),
+            key,
+        })
+    }
+
+    pub fn validate_scope(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        change_id: &DnsChangeId,
+    ) -> DnsProviderResult<()> {
+        self.decode_scope(account_id, zone_id, change_id)
+            .map(|_| ())
+    }
+
+    fn decode_scope(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        change_id: &DnsChangeId,
+    ) -> DnsProviderResult<ChangeToken> {
+        account_id
+            .validate()
+            .map_err(|_| not_found("route53_change_not_found"))?;
+        zone_id
+            .validate()
+            .map_err(|_| not_found("route53_change_not_found"))?;
+        change_id
+            .validate()
+            .map_err(|_| not_found("route53_change_not_found"))?;
+        let token: ChangeToken = verify_token(
+            change_id.as_str(),
+            &self.key.0,
+            TokenDomain::MutationReceipt,
+        )
+        .map_err(|_| not_found("route53_change_not_found"))?;
+        if token.version != 1
+            || account_id != &self.center_account_id
+            || normalize_zone_id(zone_id.as_str()).ok().as_deref() != Some(zone_id.as_str())
+            || token.center_scope != scope_hash(account_id.as_str())
+            || token.external_scope != scope_hash(&self.aws_account_id)
+            || token.zone_scope != scope_hash(zone_id.as_str())
+            || token.guard != DnsGuardStrength::Atomic
+            || normalize_change_id(&token.provider_change_id)
+                .ok()
+                .as_deref()
+                != Some(token.provider_change_id.as_str())
+        {
+            return Err(not_found("route53_change_not_found"));
+        }
+        Ok(token)
+    }
+
+    fn matches(&self, center_account_id: &CloudResourceId, account: &ProviderAccountSpec) -> bool {
+        account.provider == CloudProvider::Aws
+            && &self.center_account_id == center_account_id
+            && matches!(
+                account.scope.as_ref(),
+                Some(ProviderAccountScope::Aws { account_id }) if account_id == &self.aws_account_id
+            )
+    }
+}
+
+/// Stable composition-provided key for authenticated hosted-zone lifecycle tokens.
+pub struct Route53LifecycleTokenKey([u8; 32]);
+
+impl Route53LifecycleTokenKey {
+    pub fn new(value: [u8; 32]) -> Result<Self> {
+        if value.iter().all(|byte| *byte == 0) {
+            return Err(validation("weak_route53_lifecycle_token_key"));
+        }
+        Ok(Self(value))
+    }
+}
+
+impl Drop for Route53LifecycleTokenKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
 pub struct Route53DnsAdapter {
     center_account_id: CloudResourceId,
     aws_account_id: String,
     api: Arc<dyn Route53Api>,
     cursor_key: Route53CursorKey,
-    mutation_authority: bool,
+    mutation_receipt_verifier: Option<Route53MutationReceiptVerifier>,
+    lifecycle_token_key: Option<Route53LifecycleTokenKey>,
 }
 
 impl Route53DnsAdapter {
@@ -88,19 +223,97 @@ impl Route53DnsAdapter {
         api: Arc<dyn Route53Api>,
         cursor_key: Route53CursorKey,
     ) -> Result<Self> {
-        Self::new_inner(center_account_id, account, api, cursor_key, true)
+        Self::new_inner(center_account_id, account, api, cursor_key, None, None)
     }
 
-    /// Construct an inventory-only adapter. Every record or zone mutation and every mutation
-    /// receipt observation fails before provider dispatch, so a cursor-only key never becomes a
-    /// mutation authority through this composition.
+    /// Backward-compatible explicit name for the inventory-only constructor.
     pub fn new_read_only(
         center_account_id: CloudResourceId,
         account: &ProviderAccountSpec,
         api: Arc<dyn Route53Api>,
         cursor_key: Route53CursorKey,
     ) -> Result<Self> {
-        Self::new_inner(center_account_id, account, api, cursor_key, false)
+        Self::new(center_account_id, account, api, cursor_key)
+    }
+
+    /// Construct a write-capable adapter with three distinct closed-purpose keys.
+    pub fn new_with_write_keys(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn Route53Api>,
+        cursor_key: Route53CursorKey,
+        mutation_receipt_key: Route53MutationReceiptKey,
+        lifecycle_token_key: Route53LifecycleTokenKey,
+    ) -> Result<Self> {
+        if cursor_key.0 == mutation_receipt_key.0
+            || cursor_key.0 == lifecycle_token_key.0
+            || mutation_receipt_key.0 == lifecycle_token_key.0
+        {
+            return Err(validation("route53_signing_key_reuse"));
+        }
+        let mutation_receipt_verifier = Route53MutationReceiptVerifier::new(
+            center_account_id.clone(),
+            account,
+            mutation_receipt_key,
+        )?;
+        Self::new_inner(
+            center_account_id,
+            account,
+            api,
+            cursor_key,
+            Some(mutation_receipt_verifier),
+            Some(lifecycle_token_key),
+        )
+    }
+
+    /// Construct an adapter that can mutate RRsets but has no hosted-zone lifecycle authority.
+    pub fn new_with_record_write_key(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn Route53Api>,
+        cursor_key: Route53CursorKey,
+        mutation_receipt_key: Route53MutationReceiptKey,
+    ) -> Result<Self> {
+        if cursor_key.0 == mutation_receipt_key.0 {
+            return Err(validation("route53_signing_key_reuse"));
+        }
+        let mutation_receipt_verifier = Route53MutationReceiptVerifier::new(
+            center_account_id.clone(),
+            account,
+            mutation_receipt_key,
+        )?;
+        Self::new_with_record_write_verifier(
+            center_account_id,
+            account,
+            api,
+            cursor_key,
+            mutation_receipt_verifier,
+        )
+    }
+
+    /// Construct an RRset writer from a receipt verifier that may have authenticated a request
+    /// before the provider API client was created.
+    pub fn new_with_record_write_verifier(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn Route53Api>,
+        cursor_key: Route53CursorKey,
+        mutation_receipt_verifier: Route53MutationReceiptVerifier,
+    ) -> Result<Self> {
+        if cursor_key.0 == mutation_receipt_verifier.key.0 {
+            return Err(validation("route53_signing_key_reuse"));
+        }
+        if !mutation_receipt_verifier.matches(&center_account_id, account) {
+            return Err(validation("route53_mutation_receipt_scope_mismatch"));
+        }
+        Self::new_inner(
+            center_account_id,
+            account,
+            api,
+            cursor_key,
+            Some(mutation_receipt_verifier),
+            None,
+        )
     }
 
     fn new_inner(
@@ -108,7 +321,8 @@ impl Route53DnsAdapter {
         account: &ProviderAccountSpec,
         api: Arc<dyn Route53Api>,
         cursor_key: Route53CursorKey,
-        mutation_authority: bool,
+        mutation_receipt_verifier: Option<Route53MutationReceiptVerifier>,
+        lifecycle_token_key: Option<Route53LifecycleTokenKey>,
     ) -> Result<Self> {
         center_account_id
             .validate()
@@ -134,16 +348,21 @@ impl Route53DnsAdapter {
             aws_account_id: account_id.clone(),
             api,
             cursor_key,
-            mutation_authority,
+            mutation_receipt_verifier,
+            lifecycle_token_key,
         })
     }
 
-    fn require_mutation_authority(&self) -> Result<()> {
-        if self.mutation_authority {
-            Ok(())
-        } else {
-            Err(validation("route53_mutation_authority_unavailable"))
-        }
+    fn mutation_receipt_verifier(&self) -> Result<&Route53MutationReceiptVerifier> {
+        self.mutation_receipt_verifier
+            .as_ref()
+            .ok_or_else(|| validation("route53_mutation_authority_unavailable"))
+    }
+
+    fn lifecycle_token_key(&self) -> Result<&Route53LifecycleTokenKey> {
+        self.lifecycle_token_key
+            .as_ref()
+            .ok_or_else(|| validation("route53_mutation_authority_unavailable"))
     }
 
     async fn all_zones(&self) -> DnsProviderResult<Vec<ObservedDnsZone>> {
@@ -245,6 +464,63 @@ impl Route53DnsAdapter {
             .collect())
     }
 
+    /// Observe one complete, bounded Route 53 RRset snapshot.
+    ///
+    /// This provider-specific operation performs exactly one pass over the provider's
+    /// pagination and retains the same identity, duplicate, loop, and 100,000-record
+    /// validation enforced by the regular inventory implementation. It intentionally
+    /// does not expose the raw Route 53 representation.
+    pub async fn observe_all_record_sets(
+        &self,
+        zone: &DnsZoneRef,
+    ) -> DnsProviderResult<Vec<ObservedDnsRecordSet>> {
+        self.all_records(zone).await
+    }
+
+    /// Observe one public hosted zone directly by its provider identity.
+    ///
+    /// This avoids rebuilding the account's complete zone inventory when a caller
+    /// already owns the exact Center account and Route 53 hosted-zone identifiers.
+    pub async fn observe_zone_by_id(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+    ) -> DnsProviderResult<Option<ObservedDnsZone>> {
+        account_id
+            .validate()
+            .map_err(|_| validation("invalid_account"))?;
+        zone_id
+            .validate()
+            .map_err(|_| validation("invalid_route53_zone_id"))?;
+        if account_id != &self.center_account_id
+            || normalize_zone_id(zone_id.as_str())? != zone_id.as_str()
+        {
+            return Err(validation("route53_zone_scope_mismatch"));
+        }
+        let Some(raw_zone) = self.api.get_hosted_zone(zone_id.as_str()).await? else {
+            return Ok(None);
+        };
+        let observed = self.map_zone(raw_zone)?;
+        if observed.zone.provider_account_id != *account_id || observed.zone.zone_id != *zone_id {
+            return Err(validation("route53_zone_identity_mismatch"));
+        }
+        Ok(Some(observed))
+    }
+
+    /// Authenticate a mutation receipt's Center-account and hosted-zone scope without I/O.
+    ///
+    /// The provider change identity remains private to the adapter and is only consumed by
+    /// [`DnsProvider::observe_change`] after the caller has obtained the authoritative zone.
+    pub fn validate_change_receipt_scope(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        change_id: &DnsChangeId,
+    ) -> DnsProviderResult<()> {
+        self.mutation_receipt_verifier()?
+            .validate_scope(account_id, zone_id, change_id)
+    }
+
     fn map_zone(&self, zone: Route53HostedZone) -> DnsProviderResult<ObservedDnsZone> {
         if zone.private_zone {
             return Err(validation("route53_private_zone_unsupported"));
@@ -307,8 +583,12 @@ impl Route53DnsAdapter {
             submitted_at_unix_seconds,
             guard: DnsGuardStrength::Atomic,
         };
-        let id = DnsChangeId::new(sign_token(&token, &self.cursor_key)?)
-            .map_err(|_| unknown_outcome("route53_receipt_encoding_failed"))?;
+        let id = DnsChangeId::new(sign_token(
+            &token,
+            &self.mutation_receipt_verifier()?.key.0,
+            TokenDomain::MutationReceipt,
+        )?)
+        .map_err(|_| unknown_outcome("route53_receipt_encoding_failed"))?;
         change_receipt(id, status, DnsGuardStrength::Atomic)
             .map_err(|_| unknown_outcome("invalid_route53_change_status"))
     }
@@ -318,24 +598,12 @@ impl Route53DnsAdapter {
         zone: &DnsZoneRef,
         change_id: &DnsChangeId,
     ) -> DnsProviderResult<ChangeToken> {
-        change_id
-            .validate()
-            .map_err(|_| not_found("route53_change_not_found"))?;
-        let token: ChangeToken = verify_token(change_id.as_str(), &self.cursor_key)
-            .map_err(|_| not_found("route53_change_not_found"))?;
-        if token.version != 1
-            || token.center_scope != scope_hash(self.center_account_id.as_str())
-            || token.external_scope != scope_hash(&self.aws_account_id)
-            || token.zone_scope != scope_hash(zone.zone_id.as_str())
-            || token.guard != DnsGuardStrength::Atomic
-            || normalize_change_id(&token.provider_change_id)
-                .ok()
-                .as_deref()
-                != Some(token.provider_change_id.as_str())
-        {
-            return Err(not_found("route53_change_not_found"));
-        }
-        Ok(token)
+        self.validate_zone_ref(zone)?;
+        self.mutation_receipt_verifier()?.decode_scope(
+            &zone.provider_account_id,
+            &zone.zone_id,
+            change_id,
+        )
     }
 
     fn validate_lifecycle_zone_ref(&self, zone: &DnsZoneRef) -> Result<()> {
@@ -461,8 +729,12 @@ impl Route53DnsAdapter {
             submitted_at_unix_seconds: change.submitted_at_unix_seconds,
             operation,
         };
-        let mutation_id = ZoneLifecycleMutationId::new(sign_token(&token, &self.cursor_key)?)
-            .map_err(|_| unknown_outcome("route53_lifecycle_receipt_encoding_failed"))?;
+        let mutation_id = ZoneLifecycleMutationId::new(sign_token(
+            &token,
+            &self.lifecycle_token_key()?.0,
+            TokenDomain::Lifecycle,
+        )?)
+        .map_err(|_| unknown_outcome("route53_lifecycle_receipt_encoding_failed"))?;
         lifecycle_change_receipt(mutation_id, &change.status)
     }
 
@@ -479,8 +751,12 @@ impl Route53DnsAdapter {
             submitted_at_unix_seconds: 0,
             operation: LifecycleOperation::Create,
         };
-        let mutation_id = ZoneLifecycleMutationId::new(sign_token(&token, &self.cursor_key)?)
-            .map_err(|_| unknown_outcome("route53_lifecycle_receipt_encoding_failed"))?;
+        let mutation_id = ZoneLifecycleMutationId::new(sign_token(
+            &token,
+            &self.lifecycle_token_key()?.0,
+            TokenDomain::Lifecycle,
+        )?)
+        .map_err(|_| unknown_outcome("route53_lifecycle_receipt_encoding_failed"))?;
         Ok(ZoneLifecycleMutationReceipt {
             mutation_id,
             state: ZoneLifecycleMutationState::Succeeded,
@@ -589,7 +865,7 @@ impl DnsProvider for Route53DnsAdapter {
         changes: &[DnsRecordChange],
         minimum_guard: DnsGuardStrength,
     ) -> DnsProviderResult<DnsChangeReceipt> {
-        self.require_mutation_authority()?;
+        self.mutation_receipt_verifier()?;
         self.validate_zone_ref(zone)?;
         validate_dns_changes(zone, changes).map_err(|_| validation("invalid_dns_changes"))?;
         let current = self.all_records_with_raw(zone).await?;
@@ -630,7 +906,7 @@ impl DnsProvider for Route53DnsAdapter {
         zone: &DnsZoneRef,
         change_id: &DnsChangeId,
     ) -> DnsProviderResult<DnsChangeReceipt> {
-        self.require_mutation_authority()?;
+        self.mutation_receipt_verifier()?;
         self.validate_zone_ref(zone)?;
         let token = self.decode_change_receipt(zone, change_id)?;
         let result = self
@@ -658,7 +934,7 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         &self,
         request: &ZoneCreationRequest,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
-        self.require_mutation_authority()?;
+        self.lifecycle_token_key()?;
         if request.provider != CloudProvider::Aws
             || request.provider_account_id != self.center_account_id
         {
@@ -712,7 +988,7 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         desired: DnssecDesiredState,
         expected_revision: &ZoneLifecycleRevision,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
-        self.require_mutation_authority()?;
+        self.lifecycle_token_key()?;
         let observed = self
             .observe_lifecycle_inner(zone)
             .await?
@@ -767,7 +1043,7 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         &self,
         request: &ZoneDeletionRequest,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
-        self.require_mutation_authority()?;
+        self.lifecycle_token_key()?;
         if &request.approval().approved_revision != request.revision()
             || &request.approval().approved_zone != request.zone()
             || request.approval().approved_by.trim().is_empty()
@@ -806,9 +1082,12 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         &self,
         mutation_id: &ZoneLifecycleMutationId,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
-        self.require_mutation_authority()?;
-        let token: LifecycleMutationToken = verify_token(mutation_id.as_str(), &self.cursor_key)
-            .map_err(|_| not_found("route53_lifecycle_mutation_not_found"))?;
+        let token: LifecycleMutationToken = verify_token(
+            mutation_id.as_str(),
+            &self.lifecycle_token_key()?.0,
+            TokenDomain::Lifecycle,
+        )
+        .map_err(|_| not_found("route53_lifecycle_mutation_not_found"))?;
         if token.version != 1
             || token.center_scope != scope_hash(self.center_account_id.as_str())
             || token.account_scope != scope_hash(&self.aws_account_id)
@@ -851,8 +1130,17 @@ fn plan_change_batch(
         .into_iter()
         .map(|(observed, raw)| (observed.record_set.key.clone(), (observed, raw)))
         .collect::<BTreeMap<_, _>>();
+    let mut resultant = current
+        .iter()
+        .map(|(key, (observed, _))| (key.clone(), observed.record_set.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut affected_owners = BTreeSet::new();
+    let mut affected_groups = BTreeSet::new();
     let mut request = Vec::new();
     for change in changes {
+        let key = change_key(change);
+        affected_owners.insert(key.owner.clone());
+        affected_groups.insert((key.owner.clone(), key.record_type));
         match change {
             DnsRecordChange::Create { record_set, .. } => {
                 if current.contains_key(&record_set.key) {
@@ -862,6 +1150,7 @@ fn plan_change_batch(
                     action: Route53ChangeAction::Create,
                     record_set: model::render_record_set(zone, record_set)?,
                 });
+                resultant.insert(record_set.key.clone(), record_set.clone());
             }
             DnsRecordChange::Replace {
                 previous, desired, ..
@@ -872,6 +1161,7 @@ fn plan_change_batch(
                 if !same_route53_observation(observed, previous) {
                     return Err(conflict("route53_replace_guard_conflict"));
                 }
+                validate_replace_shape(&previous.record_set, desired)?;
                 if previous.record_set == *desired {
                     return Err(validation("route53_noop_replace"));
                 }
@@ -883,6 +1173,7 @@ fn plan_change_batch(
                     action: Route53ChangeAction::Create,
                     record_set: model::render_record_set(zone, desired)?,
                 });
+                resultant.insert(desired.key.clone(), desired.clone());
             }
             DnsRecordChange::Delete { previous, .. } => {
                 let (observed, raw) = current
@@ -895,14 +1186,156 @@ fn plan_change_batch(
                     action: Route53ChangeAction::Delete,
                     record_set: raw.clone(),
                 });
+                resultant.remove(&previous.record_set.key);
             }
         }
     }
+    validate_resultant_inventory(&resultant, &affected_owners, &affected_groups)?;
     if request.is_empty() || request.len() > MAX_PROVIDER_CHANGE_ACTIONS {
         return Err(validation("route53_change_action_limit"));
     }
     validate_change_request(&request)?;
     Ok(request)
+}
+
+fn validate_replace_shape(
+    previous: &ProviderDnsRecordSet,
+    desired: &ProviderDnsRecordSet,
+) -> DnsProviderResult<()> {
+    let previous_alias = route53_alias_and_health(previous);
+    let desired_alias = route53_alias_and_health(desired);
+    if resultant_routing_family(previous) != resultant_routing_family(desired)
+        || previous_alias.0 != desired_alias.0
+        || previous_alias.1 != desired_alias.1
+    {
+        return Err(conflict("route53_replace_shape_conflict"));
+    }
+    Ok(())
+}
+
+fn route53_alias_and_health(
+    record: &ProviderDnsRecordSet,
+) -> (bool, Option<&edgion_center_core::Route53HealthCheckId>) {
+    match record.extension.as_ref() {
+        Some(edgion_center_core::DnsRecordExtension::Route53 {
+            alias_target,
+            health_check_id,
+            ..
+        }) => (alias_target.is_some(), health_check_id.as_ref()),
+        _ => (false, None),
+    }
+}
+
+fn change_key(change: &DnsRecordChange) -> &DnsRecordSetKey {
+    match change {
+        DnsRecordChange::Create { record_set, .. } => &record_set.key,
+        DnsRecordChange::Replace { desired, .. } => &desired.key,
+        DnsRecordChange::Delete { previous, .. } => &previous.record_set.key,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResultantRoutingFamily {
+    Simple,
+    Weighted,
+    Failover,
+    Latency,
+    Geolocation,
+    Multivalue,
+}
+
+fn validate_resultant_inventory(
+    resultant: &BTreeMap<DnsRecordSetKey, ProviderDnsRecordSet>,
+    affected_owners: &BTreeSet<edgion_center_core::DnsOwnerName>,
+    affected_groups: &BTreeSet<(edgion_center_core::DnsOwnerName, ProviderDnsRecordType)>,
+) -> DnsProviderResult<()> {
+    for owner in affected_owners {
+        let mut has_cname = false;
+        let mut has_other = false;
+        for record in resultant
+            .values()
+            .filter(|record| &record.key.owner == owner)
+        {
+            if record.key.record_type == ProviderDnsRecordType::Cname {
+                has_cname = true;
+            } else {
+                has_other = true;
+            }
+        }
+        if has_cname && has_other {
+            return Err(conflict("route53_resultant_cname_conflict"));
+        }
+    }
+
+    for (owner, record_type) in affected_groups {
+        let members = resultant
+            .values()
+            .filter(|record| &record.key.owner == owner && record.key.record_type == *record_type)
+            .collect::<Vec<_>>();
+        let Some(first) = members.first() else {
+            continue;
+        };
+        let family = resultant_routing_family(first);
+        let mut ttl = None;
+        let mut selectors = BTreeSet::new();
+        for member in &members {
+            if resultant_routing_family(member) != family {
+                return Err(conflict("route53_resultant_routing_family_conflict"));
+            }
+            if let edgion_center_core::DnsTtl::Seconds(value) = member.ttl {
+                if ttl.replace(value).is_some_and(|existing| existing != value) {
+                    return Err(conflict("route53_resultant_ttl_conflict"));
+                }
+            }
+            if let Some(selector) = resultant_selector(member) {
+                if !selectors.insert(selector) {
+                    return Err(conflict("route53_resultant_selector_conflict"));
+                }
+            }
+        }
+        if family == ResultantRoutingFamily::Weighted && members.len() > 100 {
+            return Err(conflict("route53_resultant_weighted_limit"));
+        }
+    }
+    Ok(())
+}
+
+fn resultant_routing_family(record: &ProviderDnsRecordSet) -> ResultantRoutingFamily {
+    let Some(edgion_center_core::DnsRecordExtension::Route53 {
+        routing_policy: Some(policy),
+        ..
+    }) = record.extension.as_ref()
+    else {
+        return ResultantRoutingFamily::Simple;
+    };
+    match policy {
+        Route53RoutingPolicy::Weighted { .. } => ResultantRoutingFamily::Weighted,
+        Route53RoutingPolicy::Failover { .. } => ResultantRoutingFamily::Failover,
+        Route53RoutingPolicy::Latency { .. } => ResultantRoutingFamily::Latency,
+        Route53RoutingPolicy::Geolocation { .. } => ResultantRoutingFamily::Geolocation,
+        Route53RoutingPolicy::Multivalue => ResultantRoutingFamily::Multivalue,
+    }
+}
+
+fn resultant_selector(record: &ProviderDnsRecordSet) -> Option<String> {
+    let Some(edgion_center_core::DnsRecordExtension::Route53 {
+        routing_policy: Some(policy),
+        ..
+    }) = record.extension.as_ref()
+    else {
+        return None;
+    };
+    match policy {
+        Route53RoutingPolicy::Failover { role } => Some(format!("failover:{role:?}")),
+        Route53RoutingPolicy::Latency { region } => Some(format!("latency:{region}")),
+        Route53RoutingPolicy::Geolocation { location } => Some(match location {
+            Route53GeoLocation::Default => "geo:default".to_string(),
+            Route53GeoLocation::Continent { code } => format!("geo:continent:{code}"),
+            Route53GeoLocation::Country { code } => format!("geo:country:{code}"),
+            Route53GeoLocation::UsSubdivision { code } => format!("geo:us:{code}"),
+        }),
+        Route53RoutingPolicy::Weighted { .. } | Route53RoutingPolicy::Multivalue => None,
+    }
 }
 
 fn validate_change_request(request: &[Route53RecordChange]) -> DnsProviderResult<()> {
@@ -1003,6 +1436,23 @@ struct LifecycleMutationToken {
     operation: LifecycleOperation,
 }
 
+#[derive(Clone, Copy)]
+enum TokenDomain {
+    InventoryCursor,
+    MutationReceipt,
+    Lifecycle,
+}
+
+impl TokenDomain {
+    fn separator(self) -> &'static [u8] {
+        match self {
+            Self::InventoryCursor => b"edgion-center/route53/inventory-cursor/v1\0",
+            Self::MutationReceipt => b"edgion-center/route53/mutation-receipt/v1\0",
+            Self::Lifecycle => b"edgion-center/route53/lifecycle-token/v1\0",
+        }
+    }
+}
+
 fn paginate<T: Clone + Serialize>(
     items: Vec<T>,
     page: &DnsPageRequest,
@@ -1012,8 +1462,9 @@ fn paginate<T: Clone + Serialize>(
     let inventory_digest = canonical_inventory_digest(&items)?;
     let offset = match page.token.as_ref() {
         Some(token) => {
-            let decoded: CursorToken = verify_token(token.as_str(), key)
-                .map_err(|_| validation("invalid_route53_page_token"))?;
+            let decoded: CursorToken =
+                verify_token(token.as_str(), &key.0, TokenDomain::InventoryCursor)
+                    .map_err(|_| validation("invalid_route53_page_token"))?;
             if decoded.version != 1 || decoded.scope != scope || decoded.offset >= items.len() {
                 return Err(validation("invalid_route53_page_token"));
             }
@@ -1036,7 +1487,8 @@ fn paginate<T: Clone + Serialize>(
                     offset: end,
                     inventory_digest,
                 },
-                key,
+                &key.0,
+                TokenDomain::InventoryCursor,
             )?)
             .map_err(|_| validation("route53_page_token_encoding_failed"))?,
         )
@@ -1262,11 +1714,16 @@ fn change_receipt(
     Ok(receipt)
 }
 
-fn sign_token<T: Serialize>(value: &T, key: &Route53CursorKey) -> DnsProviderResult<String> {
+fn sign_token<T: Serialize>(
+    value: &T,
+    key: &[u8; 32],
+    domain: TokenDomain,
+) -> DnsProviderResult<String> {
     let encoded =
         serde_json::to_vec(value).map_err(|_| validation("route53_token_encoding_failed"))?;
-    let signature = HmacSha256::new_from_slice(&key.0)
+    let signature = HmacSha256::new_from_slice(key)
         .expect("fixed HMAC key")
+        .chain_update(domain.separator())
         .chain_update(&encoded)
         .finalize()
         .into_bytes();
@@ -1275,7 +1732,11 @@ fn sign_token<T: Serialize>(value: &T, key: &Route53CursorKey) -> DnsProviderRes
     Ok(URL_SAFE_NO_PAD.encode(authenticated))
 }
 
-fn verify_token<T: DeserializeOwned>(value: &str, key: &Route53CursorKey) -> Result<T> {
+fn verify_token<T: DeserializeOwned>(
+    value: &str,
+    key: &[u8; 32],
+    domain: TokenDomain,
+) -> Result<T> {
     let authenticated = URL_SAFE_NO_PAD
         .decode(value)
         .map_err(|_| validation("invalid_route53_token"))?;
@@ -1283,8 +1744,9 @@ fn verify_token<T: DeserializeOwned>(value: &str, key: &Route53CursorKey) -> Res
         return Err(validation("invalid_route53_token"));
     }
     let (encoded, signature) = authenticated.split_at(authenticated.len() - 32);
-    HmacSha256::new_from_slice(&key.0)
+    HmacSha256::new_from_slice(key)
         .expect("fixed HMAC key")
+        .chain_update(domain.separator())
         .chain_update(encoded)
         .verify_slice(signature)
         .map_err(|_| validation("invalid_route53_token"))?;

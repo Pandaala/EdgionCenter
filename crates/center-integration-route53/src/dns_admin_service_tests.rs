@@ -400,7 +400,9 @@ async fn ambient_account_lists_zones_and_preserves_route53_record_metadata() {
             ..
         })
     )));
-    assert_eq!(api.calls.load(Ordering::SeqCst), 4);
+    // Exact zone reads now use direct GetHostedZone; only the zone and RRset inventories
+    // contribute to this list-call counter.
+    assert_eq!(api.calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

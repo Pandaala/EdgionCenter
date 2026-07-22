@@ -175,9 +175,15 @@ impl EdgionCenterCli {
         let route53_dns_admin = edgion_center_integration_route53::compose_dns_admin(
             &config.route53_dns_read,
             provider_account_store.clone(),
-            mounted_credential_resolver,
+            mounted_credential_resolver.clone(),
         )
         .map_err(|error| anyhow::anyhow!("Invalid Route 53 DNS read config: {error}"))?;
+        let route53_dns_write_admin = edgion_center_integration_route53::compose_dns_write_admin(
+            &config.route53_dns_write,
+            provider_account_store.clone(),
+            mounted_credential_resolver,
+        )
+        .map_err(|error| anyhow::anyhow!("Invalid Route 53 DNS write config: {error}"))?;
 
         // Audit sink: spawn the background writer only when a Store exists and
         // audit is enabled. When the DB is disabled but audit is on, log a WARN
@@ -310,6 +316,7 @@ impl EdgionCenterCli {
             cloudflare_dns_admin: cloudflare_dns_admin.clone(),
             cloudflare_dns_write_admin: cloudflare_dns_write_admin.clone(),
             route53_dns_admin: route53_dns_admin.clone(),
+            route53_dns_write_admin: route53_dns_write_admin.clone(),
             provider_account_store,
             capability_snapshot_store: db
                 .clone()
@@ -339,6 +346,7 @@ impl EdgionCenterCli {
                 );
                 capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
                 capabilities.route53_dns_read = route53_dns_admin.is_some();
+                capabilities.route53_dns_write = route53_dns_write_admin.is_some();
                 capabilities
             },
         };

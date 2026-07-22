@@ -19,11 +19,15 @@ spec:
               chmod 0700 /credentials/private &&
               cp /source/revision.key /credentials/private/.revision.key.tmp &&
               cp /source/route53-dns-cursor.key /credentials/private/.route53-dns-cursor.key.tmp &&
+              cp /source/route53-dns-mutation.key /credentials/private/.route53-dns-mutation.key.tmp &&
               chmod 0400 /credentials/private/.revision.key.tmp
-              /credentials/private/.route53-dns-cursor.key.tmp &&
+              /credentials/private/.route53-dns-cursor.key.tmp
+              /credentials/private/.route53-dns-mutation.key.tmp &&
               mv -f /credentials/private/.revision.key.tmp /credentials/private/revision.key &&
               mv -f /credentials/private/.route53-dns-cursor.key.tmp
-              /credentials/private/route53-dns-cursor.key
+              /credentials/private/route53-dns-cursor.key &&
+              mv -f /credentials/private/.route53-dns-mutation.key.tmp
+              /credentials/private/route53-dns-mutation.key
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

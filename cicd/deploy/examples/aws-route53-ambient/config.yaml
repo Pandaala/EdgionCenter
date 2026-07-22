@@ -46,9 +46,21 @@ data:
           provider: aws
           purpose: route53_dns_cursor_hmac
           file: route53-dns-cursor.key
+        - credential_ref: aws/route53-dns-mutation
+          provider_account_id: aws-main
+          provider: aws
+          purpose: route53_dns_mutation_receipt_hmac
+          file: route53-dns-mutation.key
     route53_dns_read:
       enabled: true
       cursor_key_ref: aws/route53-dns-cursor
       operation_timeout_secs: 60
       global_concurrency: 8
       per_account_concurrency: 2
+    route53_dns_write:
+      enabled: true
+      cursor_key_ref: aws/route53-dns-cursor
+      mutation_receipt_key_ref: aws/route53-dns-mutation
+      operation_timeout_secs: 60
+      global_concurrency: 4
+      per_account_concurrency: 1
