@@ -1,0 +1,22 @@
+[package]
+name = "edgion-center-integration-route53"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish = false
+description = "Route 53 Admin API composition for Edgion Center"
+
+[dependencies]
+async-trait.workspace = true
+edgion-center-adapter-credential-files = { path = "../center-adapter-credential-files" }
+edgion-center-adapter-route53 = { path = "../center-adapter-route53" }
+edgion-center-app = { path = "../center-app", default-features = false }
+edgion-center-core = { path = "../center-core" }
+serde.workspace = true
+tokio = { version = "1.49", features = ["sync", "time"] }
+
+[dev-dependencies]
+edgion-center-core = { path = "../center-core", features = ["test-support"] }
+serde_yaml = "0.9"
+tempfile = "3"
+

@@ -186,6 +186,7 @@ mod tests {
             audit_reader: audit_reader.clone(),
             cloudflare_dns_admin: None,
             cloudflare_dns_write_admin: None,
+            route53_dns_admin: None,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,

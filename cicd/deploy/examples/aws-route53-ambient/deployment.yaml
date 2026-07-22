@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgion-center
+spec:
+  template:
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: stage-route53-local-keys
+          image: ghcr.io/edgion/edgion-center-kubernetes:latest
+          command: [/bin/sh, -ec]
+          args:
+            - >-
+              umask 077 &&
+              mkdir -p /credentials/private &&
+              chmod 0700 /credentials/private &&
+              cp /source/revision.key /credentials/private/.revision.key.tmp &&
+              cp /source/route53-dns-cursor.key /credentials/private/.route53-dns-cursor.key.tmp &&
+              chmod 0400 /credentials/private/.revision.key.tmp
+              /credentials/private/.route53-dns-cursor.key.tmp &&
+              mv -f /credentials/private/.revision.key.tmp /credentials/private/revision.key &&
+              mv -f /credentials/private/.route53-dns-cursor.key.tmp
+              /credentials/private/route53-dns-cursor.key
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: route53-local-keys-source
+              mountPath: /source
+              readOnly: true
+            - name: route53-local-keys
+              mountPath: /credentials
+      containers:
+        - name: center
+          volumeMounts:
+            - name: route53-local-keys
+              mountPath: /var/run/edgion-center/route53-local-keys
+              readOnly: true
+      volumes:
+        - name: route53-local-keys-source
+          secret:
+            secretName: edgion-center-route53-local-keys
+            defaultMode: 0440
+        - name: route53-local-keys
+          emptyDir:
+            medium: Memory

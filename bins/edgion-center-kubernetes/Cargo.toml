@@ -20,6 +20,7 @@ edgion-center-app = { path = "../../crates/center-app", default-features = false
 edgion-center-adapter-kubernetes = { path = "../../crates/center-adapter-kubernetes" }
 edgion-center-adapter-credential-files = { path = "../../crates/center-adapter-credential-files" }
 edgion-center-integration-cloudflare = { path = "../../crates/center-integration-cloudflare" }
+edgion-center-integration-route53 = { path = "../../crates/center-integration-route53" }
 anyhow = "1.0"
 axum = { version = "0.8.8", features = ["macros", "ws"] }
 clap = { version = "4.5", features = ["derive", "env"] }

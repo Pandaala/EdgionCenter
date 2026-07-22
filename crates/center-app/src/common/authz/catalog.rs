@@ -41,6 +41,9 @@ pub const CLOUDFLARE_DNS_WRITE: &str = "cloudflare-dns:write";
 /// Dedicated authority for writing an authenticated caller marker with an RRset mutation.
 /// It does not imply ordinary Cloudflare DNS mutation access.
 pub const CLOUDFLARE_DNS_REMOTE_WRITE: &str = "cloudflare-dns:remote-write";
+/// High-trust Route 53 inventory access across every configured AWS ProviderAccount.
+/// Kubernetes authorization may additionally narrow this to exact non-resource paths.
+pub const ROUTE53_DNS_READ: &str = "route53-dns:read";
 pub const PROVIDER_ACCOUNTS_READ: &str = "provider-accounts:read";
 pub const PROVIDER_ACCOUNTS_WRITE: &str = "provider-accounts:write";
 pub const PROVIDER_CREDENTIALS_USE: &str = "provider-credentials:use";
@@ -64,6 +67,7 @@ pub fn all_keys() -> &'static [&'static str] {
         CLOUDFLARE_DNS_READ,
         CLOUDFLARE_DNS_WRITE,
         CLOUDFLARE_DNS_REMOTE_WRITE,
+        ROUTE53_DNS_READ,
         PROVIDER_ACCOUNTS_READ,
         PROVIDER_ACCOUNTS_WRITE,
         PROVIDER_CREDENTIALS_USE,
@@ -130,6 +134,10 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
             ],
         },
         PermissionGroup {
+            group: "Route 53 DNS",
+            keys: vec![ROUTE53_DNS_READ],
+        },
+        PermissionGroup {
             group: "Provider Accounts",
             keys: vec![PROVIDER_ACCOUNTS_READ, PROVIDER_ACCOUNTS_WRITE],
         },
@@ -192,6 +200,10 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
             }
             _ => None,
         };
+    }
+
+    if is_route53_dns_read_path(path) {
+        return (method == Method::GET).then_some(ROUTE53_DNS_READ);
     }
 
     if let Some(suffix) = path.strip_prefix("/api/v1/center/cloud/provider-capabilities/accounts/")
@@ -310,6 +322,23 @@ fn is_cloudflare_remote_control_path(path: &str) -> bool {
         && segments[1] == "zones"
         && segments[3] == "record-sets"
         && segments[5] == "remote-control"
+}
+
+fn is_route53_dns_read_path(path: &str) -> bool {
+    let Some(suffix) = path.strip_prefix("/api/v1/center/aws/route53/accounts/") else {
+        return false;
+    };
+    let segments = suffix.split('/').collect::<Vec<_>>();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return false;
+    }
+    matches!(
+        segments.as_slice(),
+        [_, "hosted-zones"]
+            | [_, "hosted-zones", _]
+            | [_, "hosted-zones", _, "record-sets"]
+            | [_, "hosted-zones", _, "record-sets", _]
+    )
 }
 
 #[cfg(test)]
@@ -431,6 +460,22 @@ mod tests {
             (
                 Method::PUT,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A/remote-control",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A",
             ),
             (Method::GET, "/api/v1/center/cloud/provider-accounts"),
             (Method::POST, "/api/v1/center/cloud/provider-accounts"),
@@ -638,6 +683,25 @@ mod tests {
             ),
             Some(CLOUDFLARE_DNS_WRITE)
         );
+        for path in [
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones",
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123",
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets",
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A",
+        ] {
+            assert_eq!(route_permission(&Method::GET, path), Some(ROUTE53_DNS_READ));
+            assert_eq!(route_permission(&Method::HEAD, path), None);
+            assert_eq!(route_permission(&Method::POST, path), None);
+        }
+        for path in [
+            "/api/v1/center/aws/route53/accounts",
+            "/api/v1/center/aws/route53/accounts/aws-main",
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A/extra",
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/changes/C123",
+            "/api/v1/center/aws/route53/accounts//hosted-zones",
+        ] {
+            assert_eq!(route_permission(&Method::GET, path), None);
+        }
         assert_eq!(
             route_permission(
                 &Method::PUT,

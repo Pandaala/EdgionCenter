@@ -1853,6 +1853,7 @@ mod tests {
             audit_reader: None,
             cloudflare_dns_admin: service,
             cloudflare_dns_write_admin: write_service,
+            route53_dns_admin: None,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,

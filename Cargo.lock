@@ -1653,6 +1653,7 @@ dependencies = [
  "aws-sdk-route53",
  "aws-sdk-sts",
  "aws-smithy-async",
+ "aws-types",
  "base64 0.22.1",
  "edgion-center-core",
  "hmac 0.12.1",
@@ -1761,6 +1762,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "edgion-center-integration-route53"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "edgion-center-adapter-credential-files",
+ "edgion-center-adapter-route53",
+ "edgion-center-app",
+ "edgion-center-core",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "edgion-center-kubernetes"
 version = "0.1.0"
 dependencies = [
@@ -1773,6 +1789,7 @@ dependencies = [
  "edgion-center-app",
  "edgion-center-core",
  "edgion-center-integration-cloudflare",
+ "edgion-center-integration-route53",
  "edgion-center-runtime",
  "kube",
  "parking_lot",
@@ -1828,6 +1845,7 @@ dependencies = [
  "edgion-center-app",
  "edgion-center-core",
  "edgion-center-integration-cloudflare",
+ "edgion-center-integration-route53",
  "edgion-center-runtime",
  "futures",
  "http 1.4.2",

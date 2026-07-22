@@ -155,3 +155,33 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: edgion-center-cloudflare-dns-remote-writer
+---
+# Example least-privilege Route 53 inventory reader. Replace the account and Zone ID with the
+# exact ProviderAccount binding exposed to this group.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edgion-center-route53-dns-reader
+rules:
+  - nonResourceURLs:
+      - /edgion-center-authz/api/v1/center/aws/route53/accounts/aws-main/hosted-zones
+      - /edgion-center-authz/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z0123456789ABCDEF
+      - /edgion-center-authz/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z0123456789ABCDEF/record-sets
+      - /edgion-center-authz/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z0123456789ABCDEF/record-sets/A
+    verbs: [get]
+  - nonResourceURLs:
+      - /edgion-center-authz/permissions/route53-dns:read
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edgion-center-route53-dns-reader
+subjects:
+  - kind: Group
+    name: oidc:34:https://issuer.example/realms/main:group:edgion-route53-readers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edgion-center-route53-dns-reader

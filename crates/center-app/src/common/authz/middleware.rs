@@ -323,6 +323,19 @@ mod tests {
         }
     }
 
+    struct Route53ReadOnlyAuthz;
+
+    #[async_trait::async_trait]
+    impl Authorizer for Route53ReadOnlyAuthz {
+        async fn authorize(&self, _p: &Principal, action: &Action) -> CoreResult<Decision> {
+            if action.permission == catalog::ROUTE53_DNS_READ {
+                Ok(Decision::allow())
+            } else {
+                Ok(Decision::deny("Route 53 read permission required"))
+            }
+        }
+    }
+
     /// Inject a `UnifiedAuthClaims` (simulating unified_auth) before authz runs.
     fn claims_injecting_layer_with_groups(router: Router, groups: Vec<String>) -> Router {
         router.layer(middleware::from_fn(
@@ -487,6 +500,48 @@ mod tests {
         let actions = authorizer.actions.lock().unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].permission, catalog::CLOUDFLARE_DNS_REMOTE_WRITE);
+    }
+
+    #[tokio::test]
+    async fn route53_read_authorization_is_limited_to_exact_get_paths() {
+        let path = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A";
+        let extra =
+            "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones/Z123/record-sets/A/extra";
+        let inner = Router::new()
+            .route(path, get(|| async { "ok" }).post(|| async { "no" }))
+            .route(extra, get(|| async { "no" }));
+        let app = app_with(Arc::new(Route53ReadOnlyAuthz), inner);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::GET)
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        for (method, denied_path) in [
+            (axum::http::Method::POST, path),
+            (axum::http::Method::GET, extra),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(denied_path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        }
     }
 
     #[tokio::test]

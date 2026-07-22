@@ -43,6 +43,10 @@
 //!   PUT  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → create/replace one Cloudflare RRset
 //!   PUT  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}/remote-control → create/replace one remotely marked Cloudflare RRset
 //!   DELETE /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → delete one Cloudflare RRset
+//!   GET  /api/v1/center/aws/route53/accounts/{account_id}/hosted-zones → Route 53 public hosted-zone inventory
+//!   GET  /api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id} → Route 53 hosted-zone detail
+//!   GET  /api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/record-sets → Route 53 RRset inventory
+//!   GET  /api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/record-sets/{record_type} → Route 53 RRset detail
 //!   GET  /api/v1/center/cloud/provider-capabilities/accounts/{account_id} → sanitized capability snapshot
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
 
@@ -86,6 +90,7 @@ pub mod provider_capabilities;
 pub mod provider_credential_inspections;
 mod region_route_handlers;
 mod roles;
+pub mod route53_dns;
 #[cfg(feature = "password-auth")]
 mod users;
 pub mod web;
@@ -115,6 +120,8 @@ pub struct ApiState {
     pub cloudflare_dns_admin: Option<cloudflare_dns::SharedCloudflareDnsAdminService>,
     /// Optional SDK-free Cloudflare DNS synchronous write service.
     pub cloudflare_dns_write_admin: Option<cloudflare_dns::SharedCloudflareDnsWriteAdminService>,
+    /// Optional SDK-free Route 53 DNS read service.
+    pub route53_dns_admin: Option<route53_dns::SharedRoute53DnsAdminService>,
     /// Optional secret-free provider account desired-state store.
     pub provider_account_store: Option<Arc<dyn edgion_center_core::ProviderAccountStore>>,
     /// Optional capability snapshot store. Admin handlers only perform exact-key reads.
@@ -228,6 +235,7 @@ pub fn router(mut state: ApiState) -> Router {
     // report the same surface when a composition is incomplete.
     state.capabilities.cloudflare_dns_read &= state.cloudflare_dns_admin.is_some();
     state.capabilities.cloudflare_dns_write &= state.cloudflare_dns_write_admin.is_some();
+    state.capabilities.route53_dns_read &= state.route53_dns_admin.is_some();
     state.capabilities.provider_account_admin &= state.provider_account_store.is_some();
     state.capabilities.provider_capability_read &=
         state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
@@ -402,6 +410,25 @@ pub fn router(mut state: ApiState) -> Router {
             )
             .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
         app = app.merge(cloudflare_dns_write_routes);
+    }
+    if capabilities.route53_dns_read && state.route53_dns_admin.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones",
+                get(route53_dns::list_zones),
+            )
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}",
+                get(route53_dns::get_zone),
+            )
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/record-sets",
+                get(route53_dns::list_record_sets),
+            )
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/record-sets/{record_type}",
+                get(route53_dns::get_record_set),
+            );
     }
     if capabilities.provider_account_admin && state.provider_account_store.is_some() {
         let provider_account_routes = Router::new()
@@ -864,6 +891,45 @@ mod tests {
         SessionId,
     };
 
+    struct UnavailableRoute53Dns;
+
+    #[async_trait::async_trait]
+    impl route53_dns::Route53DnsAdminService for UnavailableRoute53Dns {
+        async fn list_zones(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &route53_dns::Route53ZonePageRequest,
+        ) -> Result<route53_dns::Route53ZonePageDto, route53_dns::Route53DnsAdminError> {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn get_zone(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+        ) -> Result<route53_dns::Route53ZoneDto, route53_dns::Route53DnsAdminError> {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn list_record_sets(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &route53_dns::Route53RecordPageRequest,
+        ) -> Result<route53_dns::Route53RecordPageDto, route53_dns::Route53DnsAdminError> {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn get_record_set(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &route53_dns::Route53RecordSetKey,
+        ) -> Result<route53_dns::Route53RecordSetDto, route53_dns::Route53DnsAdminError> {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+    }
+
     #[test]
     fn proxy_request_headers_drop_credentials_and_hop_by_hop_metadata() {
         let headers = HeaderMap::from_iter([
@@ -1014,6 +1080,7 @@ mod tests {
             audit_reader: None,
             cloudflare_dns_admin: None,
             cloudflare_dns_write_admin: None,
+            route53_dns_admin: None,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,
@@ -1150,6 +1217,52 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn route53_capability_and_service_jointly_control_route_mounting() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones";
+        let mut absent = state_with_authz_mode(AuthzMode::AllowAll, false);
+        absent.capabilities.route53_dns_read = true;
+        let response = router(absent)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut present = state_with_authz_mode(AuthzMode::AllowAll, false);
+        present.capabilities.route53_dns_read = true;
+        present.route53_dns_admin = Some(Arc::new(UnavailableRoute53Dns));
+        let app = router(present);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let server_info = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/server-info")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_json(server_info).await;
+        assert_eq!(json["data"]["capabilities"]["route53DnsRead"], true);
     }
 
     #[tokio::test]

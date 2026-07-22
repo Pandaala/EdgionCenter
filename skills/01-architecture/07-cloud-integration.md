@@ -526,14 +526,30 @@ authoritative servers. ResourceRecord element and presentation-value size quotas
 before dispatch. The AWS SDK transport verifies the caller account through STS, gives reads bounded
 retries and timeouts, and disables automatic mutation retries. Ambiguous post-dispatch failures or
 malformed success are `UnknownOutcome`; explicit 4xx rejections keep their normalized category.
-Endpoint overrides are loopback-only test seams. Real-account tests and binary composition remain
-separate from default hermetic CI. The SDK-config factory can load the AWS ambient chain or wrap an
+Endpoint overrides are loopback-only test seams. Real-account tests remain separate from default
+hermetic CI. The SDK-config factory can load the AWS ambient chain or wrap an
 externally resolved base configuration in a refreshable AssumeRole provider; it validates all
 non-secret role parameters, rejects inherited global endpoint overrides, redacts provider debug
 output, and never resolves or persists Center secret references. A resolved external ID remains only
 inside the in-memory AWS refresh provider. An ignored live-account suite uses an operator-provided
 disposable public zone and performs exact create/replace/delete cleanup plus a deterministic stale
-exact-batch race. Binary composition remains a separate follow-up slice.
+exact-batch race.
+
+The first production Route 53 composition is the independent
+`center-integration-route53` read slice. Its strict `route53_dns_read` switch is default-off and
+mounts only AWS-specific hosted-zone and RRset list/get routes. It accepts an exact AWS
+ProviderAccount with `CredentialSource::Ambient`; standalone uses the standard AWS chain and
+Kubernetes uses IRSA or EKS Pod Identity. Every constructed client verifies its twelve-digit
+account through STS before Route 53 reads. Static keys, explicit federation, AssumeRole, endpoint
+overrides, writes, and lifecycle mutations are not part of this slice. A closed-purpose,
+account-scoped `route53_dns_cursor_hmac` mounted key signs inventory cursors. One operation timeout
+covers store access, per-account/global admission, local key resolution, SDK/STS construction,
+provider reads, and exact account/key authority rechecks. Malformed cursors fail as invalid input;
+an inventory-digest change returns restart-required. Alias targets, routing policy, set identifier,
+health-check reference, values, TTL, and revision remain in the validated Route 53 record model.
+Because Route 53 offers no RRset tag and Kubernetes audit is not revision-queryable, reads report
+only `external_or_manual`; audit history is never presented as ownership state and no marker TXT or
+Center metadata store is introduced.
 
 The Cloud DNS adapter follows the same independent boundary and binds every provider request,
 Center cursor, and change receipt to the configured Google Cloud project and managed-zone ID. It

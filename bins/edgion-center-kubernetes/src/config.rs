@@ -6,6 +6,7 @@ use edgion_center_app::common::{
 use edgion_center_integration_cloudflare::{
     CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
 };
+use edgion_center_integration_route53::Route53DnsReadConfig;
 use edgion_center_runtime::federation::config::CenterSyncConfig;
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +113,8 @@ pub struct KubernetesCenterConfig {
     pub cloudflare_dns_read: CloudflareDnsReadConfig,
     /// Account-bound synchronous Cloudflare DNS writes. Disabled by default.
     pub cloudflare_dns_write: CloudflareDnsWriteConfig,
+    /// Account-bound, read-only Route 53 DNS inventory. Disabled by default.
+    pub route53_dns_read: Route53DnsReadConfig,
 }
 
 impl Default for KubernetesCenterConfig {
@@ -130,6 +133,7 @@ impl Default for KubernetesCenterConfig {
             cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
             cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
+            route53_dns_read: Route53DnsReadConfig::default(),
         }
     }
 }
@@ -321,6 +325,24 @@ mod tests {
         assert_eq!(config.cloudflare_dns_write.operation_timeout_secs, 30);
         assert_eq!(config.cloudflare_dns_write.global_concurrency, 4);
         assert_eq!(config.cloudflare_dns_write.per_account_concurrency, 1);
+    }
+
+    #[test]
+    fn route53_dns_read_is_default_off_and_strict() {
+        assert!(!KubernetesCenterConfig::default().route53_dns_read.enabled);
+        let config: KubernetesCenterConfig = serde_yaml::from_str(
+            "route53_dns_read:\n  enabled: true\n  cursor_key_ref: aws/route53-dns-cursor\n  operation_timeout_secs: 60\n  global_concurrency: 8\n  per_account_concurrency: 2\n",
+        )
+        .unwrap();
+        assert!(config.route53_dns_read.enabled);
+        assert_eq!(
+            config.route53_dns_read.cursor_key_ref.as_deref(),
+            Some("aws/route53-dns-cursor")
+        );
+        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
+            "route53_dns_read:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
+        )
+        .is_err());
     }
 
     #[test]

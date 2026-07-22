@@ -1266,7 +1266,7 @@ fn local_cursor_fails_closed_when_inventory_changes() {
         &key,
     )
     .unwrap_err();
-    assert_eq!(error.code(), "invalid_route53_page_token");
+    assert_eq!(error.code(), "route53_inventory_changed");
 }
 
 #[test]
@@ -1577,6 +1577,43 @@ fn adapter(center_account: CloudResourceId, api: Arc<FakeApi>) -> Route53DnsAdap
         Route53CursorKey::new([7; 32]).unwrap(),
     )
     .unwrap()
+}
+
+#[tokio::test]
+async fn read_only_adapter_rejects_mutation_before_provider_dispatch() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let fake = Arc::new(fake_api());
+    let adapter = Route53DnsAdapter::new_read_only(
+        center_account.clone(),
+        &account(),
+        fake.clone(),
+        Route53CursorKey::new([7; 32]).unwrap(),
+    )
+    .unwrap();
+    let zone = observed_zone(&center_account, "ZPRIMARY", "example.test").zone;
+    assert!(adapter
+        .list_record_sets(
+            &zone,
+            &DnsPageRequest {
+                limit: 10,
+                token: None,
+            },
+        )
+        .await
+        .is_ok());
+    let error = adapter
+        .apply_record_changes(
+            &zone,
+            &[DnsRecordChange::Create {
+                record_set: txt_record("blocked.example.test", "value"),
+                guard: edgion_center_core::DnsMutationGuard::MustNotExist,
+            }],
+            DnsGuardStrength::BestEffort,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "route53_mutation_authority_unavailable");
+    assert!(fake.writes.lock().unwrap().is_empty());
 }
 
 fn account() -> ProviderAccountSpec {

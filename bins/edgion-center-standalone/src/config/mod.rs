@@ -5,6 +5,7 @@ use edgion_center_adapter_credential_files::MountedCredentialConfig;
 use edgion_center_integration_cloudflare::{
     CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
 };
+use edgion_center_integration_route53::Route53DnsReadConfig;
 use serde::{Deserialize, Serialize};
 
 pub use edgion_center_adapter_sql::DatabaseConfig;
@@ -129,6 +130,9 @@ pub struct CenterConfig {
     /// Account-bound synchronous Cloudflare DNS writes. Disabled by default.
     #[serde(default)]
     pub cloudflare_dns_write: CloudflareDnsWriteConfig,
+    /// Account-bound, read-only Route 53 DNS inventory. Disabled by default.
+    #[serde(default)]
+    pub route53_dns_read: Route53DnsReadConfig,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -150,6 +154,7 @@ impl Default for CenterConfig {
             cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
             cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
+            route53_dns_read: Route53DnsReadConfig::default(),
         }
     }
 }
@@ -320,6 +325,23 @@ mod tests {
         assert_eq!(config.cloudflare_dns_write.operation_timeout_secs, 30);
         assert_eq!(config.cloudflare_dns_write.global_concurrency, 4);
         assert_eq!(config.cloudflare_dns_write.per_account_concurrency, 1);
+    }
+
+    #[test]
+    fn route53_dns_read_is_default_off_and_strict() {
+        assert!(!CenterConfig::default().route53_dns_read.enabled);
+        let config = parse_via_production(
+            "route53_dns_read:\n  enabled: true\n  cursor_key_ref: aws/route53-dns-cursor\n  operation_timeout_secs: 60\n  global_concurrency: 8\n  per_account_concurrency: 2\n",
+        );
+        assert!(config.route53_dns_read.enabled);
+        assert_eq!(
+            config.route53_dns_read.cursor_key_ref.as_deref(),
+            Some("aws/route53-dns-cursor")
+        );
+        assert!(serde_yaml::from_str::<CenterConfig>(
+            "route53_dns_read:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
+        )
+        .is_err());
     }
 
     #[test]

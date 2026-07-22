@@ -78,6 +78,7 @@ pub struct Route53DnsAdapter {
     aws_account_id: String,
     api: Arc<dyn Route53Api>,
     cursor_key: Route53CursorKey,
+    mutation_authority: bool,
 }
 
 impl Route53DnsAdapter {
@@ -86,6 +87,28 @@ impl Route53DnsAdapter {
         account: &ProviderAccountSpec,
         api: Arc<dyn Route53Api>,
         cursor_key: Route53CursorKey,
+    ) -> Result<Self> {
+        Self::new_inner(center_account_id, account, api, cursor_key, true)
+    }
+
+    /// Construct an inventory-only adapter. Every record or zone mutation and every mutation
+    /// receipt observation fails before provider dispatch, so a cursor-only key never becomes a
+    /// mutation authority through this composition.
+    pub fn new_read_only(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn Route53Api>,
+        cursor_key: Route53CursorKey,
+    ) -> Result<Self> {
+        Self::new_inner(center_account_id, account, api, cursor_key, false)
+    }
+
+    fn new_inner(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn Route53Api>,
+        cursor_key: Route53CursorKey,
+        mutation_authority: bool,
     ) -> Result<Self> {
         center_account_id
             .validate()
@@ -111,7 +134,16 @@ impl Route53DnsAdapter {
             aws_account_id: account_id.clone(),
             api,
             cursor_key,
+            mutation_authority,
         })
+    }
+
+    fn require_mutation_authority(&self) -> Result<()> {
+        if self.mutation_authority {
+            Ok(())
+        } else {
+            Err(validation("route53_mutation_authority_unavailable"))
+        }
     }
 
     async fn all_zones(&self) -> DnsProviderResult<Vec<ObservedDnsZone>> {
@@ -557,6 +589,7 @@ impl DnsProvider for Route53DnsAdapter {
         changes: &[DnsRecordChange],
         minimum_guard: DnsGuardStrength,
     ) -> DnsProviderResult<DnsChangeReceipt> {
+        self.require_mutation_authority()?;
         self.validate_zone_ref(zone)?;
         validate_dns_changes(zone, changes).map_err(|_| validation("invalid_dns_changes"))?;
         let current = self.all_records_with_raw(zone).await?;
@@ -597,6 +630,7 @@ impl DnsProvider for Route53DnsAdapter {
         zone: &DnsZoneRef,
         change_id: &DnsChangeId,
     ) -> DnsProviderResult<DnsChangeReceipt> {
+        self.require_mutation_authority()?;
         self.validate_zone_ref(zone)?;
         let token = self.decode_change_receipt(zone, change_id)?;
         let result = self
@@ -624,6 +658,7 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         &self,
         request: &ZoneCreationRequest,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        self.require_mutation_authority()?;
         if request.provider != CloudProvider::Aws
             || request.provider_account_id != self.center_account_id
         {
@@ -677,6 +712,7 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         desired: DnssecDesiredState,
         expected_revision: &ZoneLifecycleRevision,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        self.require_mutation_authority()?;
         let observed = self
             .observe_lifecycle_inner(zone)
             .await?
@@ -731,6 +767,7 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         &self,
         request: &ZoneDeletionRequest,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        self.require_mutation_authority()?;
         if &request.approval().approved_revision != request.revision()
             || &request.approval().approved_zone != request.zone()
             || request.approval().approved_by.trim().is_empty()
@@ -769,6 +806,7 @@ impl ZoneLifecycleProvider for Route53DnsAdapter {
         &self,
         mutation_id: &ZoneLifecycleMutationId,
     ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        self.require_mutation_authority()?;
         let token: LifecycleMutationToken = verify_token(mutation_id.as_str(), &self.cursor_key)
             .map_err(|_| not_found("route53_lifecycle_mutation_not_found"))?;
         if token.version != 1
@@ -976,12 +1014,11 @@ fn paginate<T: Clone + Serialize>(
         Some(token) => {
             let decoded: CursorToken = verify_token(token.as_str(), key)
                 .map_err(|_| validation("invalid_route53_page_token"))?;
-            if decoded.version != 1
-                || decoded.scope != scope
-                || decoded.inventory_digest != inventory_digest
-                || decoded.offset >= items.len()
-            {
+            if decoded.version != 1 || decoded.scope != scope || decoded.offset >= items.len() {
                 return Err(validation("invalid_route53_page_token"));
+            }
+            if decoded.inventory_digest != inventory_digest {
+                return Err(validation("route53_inventory_changed"));
             }
             decoded.offset
         }

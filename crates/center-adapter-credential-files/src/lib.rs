@@ -39,6 +39,7 @@ pub enum CredentialPurpose {
     CloudflareApiToken,
     CloudflareDnsCursorHmac,
     CloudflareDnsMutationTokenHmac,
+    Route53DnsCursorHmac,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -301,15 +302,18 @@ impl MountedCredentialResolver {
         let mut bindings = Vec::with_capacity(config.bindings.len());
         let mut identities = BTreeSet::new();
         for binding in &config.bindings {
-            if binding.credential_ref.len() > MAX_IDENTITY_BYTES
-                || binding.provider_account_id.len() > MAX_IDENTITY_BYTES
-                || binding.provider != CloudProvider::Cloudflare
-                || !matches!(
-                    binding.purpose,
+            let valid_provider_purpose = matches!(
+                (&binding.provider, binding.purpose),
+                (
+                    CloudProvider::Cloudflare,
                     CredentialPurpose::CloudflareApiToken
                         | CredentialPurpose::CloudflareDnsCursorHmac
                         | CredentialPurpose::CloudflareDnsMutationTokenHmac
-                )
+                ) | (CloudProvider::Aws, CredentialPurpose::Route53DnsCursorHmac)
+            );
+            if binding.credential_ref.len() > MAX_IDENTITY_BYTES
+                || binding.provider_account_id.len() > MAX_IDENTITY_BYTES
+                || !valid_provider_purpose
             {
                 return Err(CredentialConfigError::InvalidBinding);
             }
@@ -580,6 +584,7 @@ fn purpose_tag(purpose: CredentialPurpose) -> &'static str {
         CredentialPurpose::CloudflareApiToken => "cloudflare_api_token",
         CredentialPurpose::CloudflareDnsCursorHmac => "cloudflare_dns_cursor_hmac",
         CredentialPurpose::CloudflareDnsMutationTokenHmac => "cloudflare_dns_mutation_token_hmac",
+        CredentialPurpose::Route53DnsCursorHmac => "route53_dns_cursor_hmac",
     }
 }
 
@@ -960,6 +965,54 @@ mod tests {
                 .await
                 .unwrap_err(),
             CredentialResolutionError::RevisionKeyConflict
+        );
+    }
+
+    #[tokio::test]
+    async fn route53_cursor_hmac_is_aws_scoped_and_domain_separated() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("revision.key"), [7_u8; 32])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("route53.key"), [9_u8; 32])
+            .await
+            .unwrap();
+        let route53 = MountedCredentialConfig {
+            enabled: true,
+            root_directory: Some(dir.path().to_string_lossy().into_owned()),
+            revision_key_file: Some("revision.key".into()),
+            bindings: vec![MountedCredentialBinding {
+                credential_ref: "aws/route53-cursor".into(),
+                provider_account_id: "aws-main".into(),
+                provider: CloudProvider::Aws,
+                purpose: CredentialPurpose::Route53DnsCursorHmac,
+                file: "route53.key".into(),
+            }],
+        };
+        let resolver = MountedCredentialResolver::from_config(&route53)
+            .await
+            .unwrap()
+            .unwrap();
+        let account = CloudResourceId::new("aws-main").unwrap();
+        let reference = CredentialRef::new("aws/route53-cursor").unwrap();
+        let resolved = resolver
+            .resolve(ResolveCredentialRequest {
+                provider_account_id: &account,
+                provider: &CloudProvider::Aws,
+                purpose: CredentialPurpose::Route53DnsCursorHmac,
+                credential_ref: &reference,
+            })
+            .await
+            .unwrap();
+        assert_eq!(resolved.with_bytes(|bytes| bytes.to_vec()), vec![9_u8; 32]);
+
+        let mut wrong_provider = route53;
+        wrong_provider.bindings[0].provider = CloudProvider::Cloudflare;
+        assert_eq!(
+            MountedCredentialResolver::from_config(&wrong_provider)
+                .await
+                .unwrap_err(),
+            CredentialConfigError::InvalidBinding
         );
     }
 

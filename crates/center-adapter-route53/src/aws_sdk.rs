@@ -11,6 +11,7 @@ use aws_sdk_route53::{
         RrType,
     },
 };
+use aws_types::service_config::ServiceConfigKey;
 use edgion_center_core::{NormalizedProviderError, ProviderErrorCategory};
 
 use crate::{
@@ -91,9 +92,7 @@ impl AwsRoute53SdkConfigFactory {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .load()
             .await;
-        if config.endpoint_url().is_some() {
-            return Err(validation("ambient_aws_endpoint_override_forbidden"));
-        }
+        reject_configured_endpoints(&config)?;
         Ok(config)
     }
 
@@ -103,7 +102,7 @@ impl AwsRoute53SdkConfigFactory {
         spec: &AwsAssumeRoleSpec,
         external_id: Option<String>,
     ) -> Route53ApiResult<SdkConfig> {
-        validate_endpoint(base_config.endpoint_url())?;
+        reject_configured_endpoints(base_config)?;
         if external_id
             .as_deref()
             .is_some_and(|value| !is_valid_external_id(value))
@@ -156,9 +155,7 @@ impl AwsRoute53Api {
         sdk_config: &SdkConfig,
         options: AwsRoute53ApiOptions,
     ) -> Route53ApiResult<Self> {
-        if sdk_config.endpoint_url().is_some() {
-            return Err(validation("inherited_aws_endpoint_override_forbidden"));
-        }
+        reject_configured_endpoints(sdk_config)?;
         validate_endpoint(options.route53_endpoint_url.as_deref())?;
         validate_endpoint(options.sts_endpoint_url.as_deref())?;
         let timeout = TimeoutConfig::builder()
@@ -204,6 +201,33 @@ impl AwsRoute53Api {
             mutation_client: aws_sdk_route53::Client::from_conf(mutation_config.build()),
         })
     }
+}
+
+/// Reject global and service-specific endpoint configuration inherited from environment or shared
+/// profiles. Generated service builders resolve `AWS_ENDPOINT_URL_STS`,
+/// `AWS_ENDPOINT_URL_ROUTE_53`, and profile `services` blocks through `SdkConfig::service_config`,
+/// so checking only `SdkConfig::endpoint_url` is insufficient.
+fn reject_configured_endpoints(config: &SdkConfig) -> Route53ApiResult<()> {
+    if config.endpoint_url().is_some()
+        || configured_service_endpoint(config, "STS")
+        || configured_service_endpoint(config, "Route 53")
+    {
+        return Err(validation("configured_aws_endpoint_override_forbidden"));
+    }
+    Ok(())
+}
+
+fn configured_service_endpoint(config: &SdkConfig, service_id: &'static str) -> bool {
+    let Some(provider) = config.service_config() else {
+        return false;
+    };
+    let key = ServiceConfigKey::builder()
+        .service_id(service_id)
+        .env("AWS_ENDPOINT_URL")
+        .profile("endpoint_url")
+        .build()
+        .expect("static AWS service endpoint key is valid");
+    provider.load_config(key).is_some()
 }
 
 #[async_trait]
@@ -813,6 +837,26 @@ fn provider_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_types::service_config::LoadServiceConfig;
+
+    #[derive(Debug)]
+    struct ConfiguredServiceEndpoint;
+
+    impl LoadServiceConfig for ConfiguredServiceEndpoint {
+        fn load_config(&self, key: ServiceConfigKey<'_>) -> Option<String> {
+            (key.env() == "AWS_ENDPOINT_URL")
+                .then(|| "https://attacker.example.invalid".to_string())
+        }
+    }
+
+    #[test]
+    fn inherited_service_specific_endpoints_fail_closed() {
+        let config = SdkConfig::builder()
+            .service_config(ConfiguredServiceEndpoint)
+            .build();
+        let error = reject_configured_endpoints(&config).unwrap_err();
+        assert_eq!(error.code(), "configured_aws_endpoint_override_forbidden");
+    }
 
     #[test]
     fn endpoint_override_allows_https_and_loopback_http() {
