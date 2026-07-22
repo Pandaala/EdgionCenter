@@ -24,8 +24,9 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::{
     CloudflareApi, CloudflareApiResult, CloudflareBatchRequest, CloudflareBatchResult,
     CloudflareCreateZoneRequest, CloudflareDeleteZoneAck, CloudflareDnssec, CloudflareDnssecDs,
-    CloudflareDnssecStatus, CloudflarePage, CloudflareRecord, CloudflareZone, CloudflareZoneKind,
-    CloudflareZoneStatus,
+    CloudflareDnssecStatus, CloudflarePage, CloudflareRecord, CloudflareWafApi, CloudflareWafPhase,
+    CloudflareWafRulePayload, CloudflareWafRulePosition, CloudflareWafRuleset, CloudflareZone,
+    CloudflareZoneKind, CloudflareZoneStatus,
 };
 
 const DEFAULT_API_BASE: &str = "https://api.cloudflare.com/client/v4/";
@@ -532,6 +533,122 @@ impl CloudflareApi for CloudflareHttpApi {
             .collect::<Result<_, _>>()
             .map_err(|_| unknown("cloudflare_batch_post_result_invalid", None))?;
         Ok(CloudflareBatchResult { deletes, posts })
+    }
+}
+
+#[async_trait]
+impl CloudflareWafApi for CloudflareHttpApi {
+    async fn get_zone_waf_entrypoint(
+        &self,
+        zone_id: &str,
+        phase: CloudflareWafPhase,
+    ) -> CloudflareApiResult<Option<CloudflareWafRuleset>> {
+        validate_identifier(zone_id, "invalid_cloudflare_zone_id")?;
+        let path = format!(
+            "zones/{zone_id}/rulesets/phases/{}/entrypoint",
+            phase.provider_name()
+        );
+        match self.read_result(&path, &[]).await {
+            Ok(result) => Ok(Some(result)),
+            Err(error) if error.category() == ProviderErrorCategory::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn create_zone_waf_entrypoint(
+        &self,
+        zone_id: &str,
+        phase: CloudflareWafPhase,
+        rule: &CloudflareWafRulePayload,
+    ) -> CloudflareApiResult<CloudflareWafRuleset> {
+        validate_identifier(zone_id, "invalid_cloudflare_zone_id")?;
+        let body = serde_json::json!({
+            "name": "edgion-center-waf",
+            "description": "Center-owned Cloudflare WAF entry point",
+            "kind": "zone",
+            "phase": phase.provider_name(),
+            "rules": [rule.to_json()],
+        });
+        self.mutation_result(
+            reqwest::Method::POST,
+            &format!("zones/{zone_id}/rulesets"),
+            Some(&body),
+        )
+        .await
+    }
+
+    async fn create_zone_waf_rule(
+        &self,
+        zone_id: &str,
+        ruleset_id: &str,
+        rule: &CloudflareWafRulePayload,
+    ) -> CloudflareApiResult<CloudflareWafRuleset> {
+        validate_identifier(zone_id, "invalid_cloudflare_zone_id")?;
+        validate_identifier(ruleset_id, "invalid_cloudflare_waf_ruleset_id")?;
+        let body = rule.to_json();
+        self.mutation_result(
+            reqwest::Method::POST,
+            &format!("zones/{zone_id}/rulesets/{ruleset_id}/rules"),
+            Some(&body),
+        )
+        .await
+    }
+
+    async fn update_zone_waf_rule(
+        &self,
+        zone_id: &str,
+        ruleset_id: &str,
+        rule_id: &str,
+        rule: &CloudflareWafRulePayload,
+    ) -> CloudflareApiResult<CloudflareWafRuleset> {
+        validate_identifier(zone_id, "invalid_cloudflare_zone_id")?;
+        validate_identifier(ruleset_id, "invalid_cloudflare_waf_ruleset_id")?;
+        validate_identifier(rule_id, "invalid_cloudflare_waf_rule_id")?;
+        // Cloudflare's PATCH rule endpoint takes the complete rule definition
+        // at the request-body top level, not under a `rule` wrapper.
+        let body = rule.to_json();
+        self.mutation_result(
+            reqwest::Method::PATCH,
+            &format!("zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id}"),
+            Some(&body),
+        )
+        .await
+    }
+
+    async fn reorder_zone_waf_rule(
+        &self,
+        zone_id: &str,
+        ruleset_id: &str,
+        rule_id: &str,
+        position: &CloudflareWafRulePosition,
+    ) -> CloudflareApiResult<CloudflareWafRuleset> {
+        validate_identifier(zone_id, "invalid_cloudflare_zone_id")?;
+        validate_identifier(ruleset_id, "invalid_cloudflare_waf_ruleset_id")?;
+        validate_identifier(rule_id, "invalid_cloudflare_waf_rule_id")?;
+        let body = serde_json::json!({ "position": position.to_json() });
+        self.mutation_result(
+            reqwest::Method::PATCH,
+            &format!("zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id}"),
+            Some(&body),
+        )
+        .await
+    }
+
+    async fn delete_zone_waf_rule(
+        &self,
+        zone_id: &str,
+        ruleset_id: &str,
+        rule_id: &str,
+    ) -> CloudflareApiResult<CloudflareWafRuleset> {
+        validate_identifier(zone_id, "invalid_cloudflare_zone_id")?;
+        validate_identifier(ruleset_id, "invalid_cloudflare_waf_ruleset_id")?;
+        validate_identifier(rule_id, "invalid_cloudflare_waf_rule_id")?;
+        self.mutation_result(
+            reqwest::Method::DELETE,
+            &format!("zones/{zone_id}/rulesets/{ruleset_id}/rules/{rule_id}"),
+            None,
+        )
+        .await
     }
 }
 
@@ -1812,5 +1929,63 @@ mod tests {
         }
         let too_long = format!("\"{}\"", "x".repeat(256));
         assert!(txt_value(&too_long).is_err());
+    }
+
+    #[tokio::test]
+    async fn waf_rule_patch_uses_the_top_level_rule_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path(format!(
+                "/client/v4/zones/{ZONE_ID}/rulesets/{ACCOUNT_ID}/rules/{ZONE_ID}"
+            )))
+            .and(body_json(serde_json::json!({
+                "ref": "test-provider-reference",
+                "description": "Block API abuse",
+                "expression": "http.request.uri.path starts_with \"/api\"",
+                "action": "block",
+                "enabled": true
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "errors": [],
+                "messages": [],
+                "result": {
+                    "id": ACCOUNT_ID,
+                    "version": "2",
+                    "phase": "http_request_firewall_custom",
+                    "rules": [{
+                        "id": ZONE_ID,
+                        "version": "2",
+                        "ref": "test-provider-reference",
+                        "action": "block",
+                        "enabled": true
+                    }]
+                }
+            })))
+            .mount(&server)
+            .await;
+        let spec = crate::CloudflareWafRuleSpec::Custom(crate::CloudflareWafCustomRuleSpec {
+            reference: crate::CloudflareWafRuleRef::new("api-block").unwrap(),
+            description: "Block API abuse".to_string(),
+            expression: crate::CloudflareWafExpression::new(
+                "http.request.uri.path starts_with \"/api\"",
+            )
+            .unwrap(),
+            action: crate::CloudflareWafAction::Block,
+            enabled: true,
+            position: None,
+            weakening_intent: None,
+        });
+        let ruleset = api(&server)
+            .await
+            .update_zone_waf_rule(
+                ZONE_ID,
+                ACCOUNT_ID,
+                ZONE_ID,
+                &spec.to_payload(false, "test-provider-reference".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ruleset.version, "2");
     }
 }

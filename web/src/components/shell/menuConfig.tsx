@@ -14,10 +14,11 @@ import {
   AuditOutlined,
   UserOutlined,
   TeamOutlined,
+  CloudOutlined,
 } from '@ant-design/icons'
 
 export type AppMode = 'center' | 'controller'
-export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin'
+export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin' | 'providerAccountAdmin' | 'providerCapabilityRead' | 'providerCredentialInspection' | 'cloudflareDnsRead' | 'cloudflareDnsWrite' | 'cloudflareWafRead' | 'cloudflareWafWrite'
 
 export interface MenuLeaf {
   kind: 'item'
@@ -27,6 +28,8 @@ export interface MenuLeaf {
   icon?: ReactNode
   /** Permission key the caller must hold for this item to be visible. */
   requiredPermission?: string
+  /** Additional permission keys; all declared keys are required. */
+  requiredPermissions?: string[]
   /** Requires an actually resolved backend capability. */
   requiredCapability?: CenterCapability
 }
@@ -136,6 +139,16 @@ export const centerMenu: MenuSection[] = [
         path: '/global-connection-ip-restrictions', icon: <SafetyOutlined />, requiredPermission: 'ip-restrictions:read' },
       { kind: 'item', key: 'center-federation-diagnostics', labelKey: 'center.nav.federationDiagnostics',
         path: '/federation-diagnostics', icon: <ApartmentOutlined />, requiredPermission: 'server:read' },
+      { kind: 'item', key: 'center-cloud-accounts', labelKey: 'cloud.nav.accounts',
+        path: '/cloud/provider-accounts', icon: <CloudOutlined />, requiredPermission: 'provider-accounts:read', requiredCapability: 'providerAccountAdmin' },
+      {
+        kind: 'group',
+        labelKey: 'cloud.nav.cloudflare',
+        children: [
+          { kind: 'item', key: 'center-cloudflare-dns', labelKey: 'cloud.nav.cloudflareDns', path: '/cloud/cloudflare/dns', icon: <CloudOutlined />, requiredPermissions: ['cloudflare-dns:read', 'provider-accounts:read'], requiredCapability: 'cloudflareDnsRead' },
+          { kind: 'item', key: 'center-cloudflare-waf', labelKey: 'cloud.nav.cloudflareWaf', path: '/cloud/cloudflare/waf', icon: <SafetyOutlined />, requiredPermissions: ['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read'], requiredCapability: 'cloudflareWafRead' },
+        ],
+      },
       { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',
         path: '/admin', icon: <SettingOutlined />, requiredPermission: 'controllers:read', requiredCapability: 'controllerHistory' },
       { kind: 'item', key: 'center-audit', labelKey: 'center.nav.audit',
@@ -166,10 +179,11 @@ export interface MenuGateContext {
  * unaffected.
  */
 export const isMenuItemVisible = (
-  item: { requiredPermission?: string; requiredCapability?: CenterCapability },
+  item: { requiredPermission?: string; requiredPermissions?: string[]; requiredCapability?: CenterCapability },
   ctx: MenuGateContext,
 ): boolean => {
   if (item.requiredCapability && ctx.capabilities[item.requiredCapability] !== true) return false
   if (item.requiredPermission && !ctx.permissions.includes(item.requiredPermission)) return false
+  if (item.requiredPermissions?.some((permission) => !ctx.permissions.includes(permission))) return false
   return true
 }

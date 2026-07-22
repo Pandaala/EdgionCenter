@@ -5,6 +5,7 @@ use edgion_center_app::common::{
 };
 use edgion_center_integration_cloudflare::{
     CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
+    CloudflareWafConfig,
 };
 use edgion_center_integration_route53::{Route53DnsReadConfig, Route53DnsWriteConfig};
 use edgion_center_runtime::federation::config::CenterSyncConfig;
@@ -113,6 +114,8 @@ pub struct KubernetesCenterConfig {
     pub cloudflare_dns_read: CloudflareDnsReadConfig,
     /// Account-bound synchronous Cloudflare DNS writes. Disabled by default.
     pub cloudflare_dns_write: CloudflareDnsWriteConfig,
+    /// Account-bound Cloudflare Zone WAF reads and writes. Both routes are disabled by default.
+    pub cloudflare_waf: CloudflareWafConfig,
     /// Account-bound, read-only Route 53 DNS inventory. Disabled by default.
     pub route53_dns_read: Route53DnsReadConfig,
     /// Account-bound synchronous Route 53 RRset writes. Disabled by default.
@@ -135,6 +138,7 @@ impl Default for KubernetesCenterConfig {
             cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
             cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
+            cloudflare_waf: CloudflareWafConfig::default(),
             route53_dns_read: Route53DnsReadConfig::default(),
             route53_dns_write: Route53DnsWriteConfig::default(),
         }
@@ -261,6 +265,10 @@ mod tests {
             "cloudflare_dns_read:\n  enabledd: true\n"
         )
         .is_err());
+        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
+            "cloudflare_waf:\n  read_enabledd: true\n"
+        )
+        .is_err());
     }
 
     #[test]
@@ -328,6 +336,19 @@ mod tests {
         assert_eq!(config.cloudflare_dns_write.operation_timeout_secs, 30);
         assert_eq!(config.cloudflare_dns_write.global_concurrency, 4);
         assert_eq!(config.cloudflare_dns_write.per_account_concurrency, 1);
+    }
+
+    #[test]
+    fn cloudflare_waf_routes_are_independently_default_off_and_strict() {
+        let default = KubernetesCenterConfig::default();
+        assert!(!default.cloudflare_waf.read_enabled);
+        assert!(!default.cloudflare_waf.write_enabled);
+        let config: KubernetesCenterConfig = serde_yaml::from_str(
+            "cloudflare_waf:\n  read_enabled: true\n  write_enabled: false\n  operation_timeout_secs: 30\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
+        )
+        .unwrap();
+        assert!(config.cloudflare_waf.read_enabled);
+        assert!(!config.cloudflare_waf.write_enabled);
     }
 
     #[test]

@@ -125,6 +125,13 @@ export interface CenterCapabilities {
   nativeRbac: boolean
   leaderElection: boolean
   passwordLogin: boolean
+  providerAccountAdmin?: boolean
+  providerCapabilityRead?: boolean
+  providerCredentialInspection?: boolean
+  cloudflareDnsRead?: boolean
+  cloudflareDnsWrite?: boolean
+  cloudflareWafRead?: boolean
+  cloudflareWafWrite?: boolean
 }
 
 export const systemApi = {

@@ -21,6 +21,10 @@ pub struct CenterCapabilities {
     pub cloudflare_dns_read: bool,
     /// Cloudflare-specific, synchronous DNS zone write Admin API.
     pub cloudflare_dns_write: bool,
+    /// Cloudflare-specific, read-only Zone WAF inventory Admin API.
+    pub cloudflare_waf_read: bool,
+    /// Cloudflare-specific, synchronous Zone WAF mutation Admin API.
+    pub cloudflare_waf_write: bool,
     /// AWS Route 53-specific, read-only hosted-zone and RRset inventory Admin API.
     pub route53_dns_read: bool,
     /// AWS Route 53-specific, synchronous revision-guarded RRset write Admin API.
@@ -46,6 +50,8 @@ impl CenterCapabilities {
                 password_login: true,
                 cloudflare_dns_read: false,
                 cloudflare_dns_write: false,
+                cloudflare_waf_read: false,
+                cloudflare_waf_write: false,
                 route53_dns_read: false,
                 route53_dns_write: false,
                 provider_account_admin: false,
@@ -62,6 +68,8 @@ impl CenterCapabilities {
                 password_login: false,
                 cloudflare_dns_read: false,
                 cloudflare_dns_write: false,
+                cloudflare_waf_read: false,
+                cloudflare_waf_write: false,
                 route53_dns_read: false,
                 route53_dns_write: false,
                 provider_account_admin: false,
@@ -95,6 +103,8 @@ impl CenterCapabilities {
             password_login,
             cloudflare_dns_read,
             cloudflare_dns_write: false,
+            cloudflare_waf_read: false,
+            cloudflare_waf_write: false,
             route53_dns_read: false,
             route53_dns_write: false,
             provider_account_admin,
@@ -118,6 +128,8 @@ mod tests {
         assert!(kubernetes.native_rbac && kubernetes.leader_election);
         assert!(!standalone.cloudflare_dns_read && !kubernetes.cloudflare_dns_read);
         assert!(!standalone.cloudflare_dns_write && !kubernetes.cloudflare_dns_write);
+        assert!(!standalone.cloudflare_waf_read && !kubernetes.cloudflare_waf_read);
+        assert!(!standalone.cloudflare_waf_write && !kubernetes.cloudflare_waf_write);
         assert!(!standalone.route53_dns_read && !kubernetes.route53_dns_read);
         assert!(!standalone.route53_dns_write && !kubernetes.route53_dns_write);
         assert!(!standalone.provider_account_admin && !kubernetes.provider_account_admin);

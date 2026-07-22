@@ -144,6 +144,19 @@ database:
 #   global_concurrency: 4
 #   per_account_concurrency: 1
 
+# Cloudflare Zone WAF inventory and mutations are independently default-off, and reuse only the
+# API-token binding of the exact target ProviderAccount. The service constructs no client and makes
+# no provider request at startup. A mutation is a single synchronous attempt: an ambiguous result
+# is reported as unknown_outcome and must be resolved by reading the Zone WAF inventory.
+# cloudflare_waf:
+#   read_enabled: true
+#   write_enabled: true
+#   ownership_key_ref: cloudflare/waf-owner-a
+#   ownership_fallback_key_ref: cloudflare/waf-owner-b
+#   operation_timeout_secs: 30
+#   global_concurrency: 4
+#   per_account_concurrency: 1
+
 # ============================================================================
 # Audit log (`audit:`)
 # ============================================================================

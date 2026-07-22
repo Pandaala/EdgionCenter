@@ -81,4 +81,25 @@ describe('isMenuItemVisible', () => {
     expect(isMenuItemVisible(restrictions, ctx([]))).toBe(false)
     expect(isMenuItemVisible(restrictions, ctx(['ip-restrictions:read']))).toBe(true)
   })
+
+  it('requires both DNS inventory and provider-account read authority for Cloudflare DNS', () => {
+    const cloudflare = centerMenu[0].children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
+    expect(cloudflare?.kind).toBe('group')
+    if (cloudflare?.kind !== 'group') throw new Error('Cloudflare group is missing')
+    const dns = cloudflare.children[0]
+    expect(isMenuItemVisible(dns, ctx(['cloudflare-dns:read'], { cloudflareDnsRead: true }))).toBe(false)
+    expect(isMenuItemVisible(dns, ctx(['provider-accounts:read'], { cloudflareDnsRead: true }))).toBe(false)
+    expect(isMenuItemVisible(dns, ctx(['cloudflare-dns:read', 'provider-accounts:read'], { cloudflareDnsRead: true }))).toBe(true)
+  })
+
+  it('requires WAF, DNS Zone inventory, and provider-account authority for Cloudflare WAF', () => {
+    const cloudflare = centerMenu[0].children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
+    expect(cloudflare?.kind).toBe('group')
+    if (cloudflare?.kind !== 'group') throw new Error('Cloudflare group is missing')
+    const waf = cloudflare.children.find((item) => item.key === 'center-cloudflare-waf')
+    expect(waf).toBeDefined()
+    expect(isMenuItemVisible(waf!, ctx(['cloudflare-waf:read', 'cloudflare-dns:read'], { cloudflareWafRead: true }))).toBe(false)
+    expect(isMenuItemVisible(waf!, ctx(['cloudflare-waf:read', 'provider-accounts:read'], { cloudflareWafRead: true }))).toBe(false)
+    expect(isMenuItemVisible(waf!, ctx(['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read'], { cloudflareWafRead: true }))).toBe(true)
+  })
 })

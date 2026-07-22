@@ -1,8 +1,8 @@
 # Cloudflare mounted credential example
 
 This non-default overlay enables the local mounted-file resolver, Cloudflare credential
-inspection, read-only DNS inventory, and synchronous DNS writes. The base deployment and its RBAC
-remain unchanged:
+inspection, read-only DNS inventory, synchronous DNS writes, and Zone WAF inventory/mutations.
+The base deployment and its RBAC remain unchanged:
 Kubernetes mounts one explicitly named Secret through the kubelet, and Center receives no
 permission to get, list, or watch Secret objects.
 
@@ -16,21 +16,26 @@ Create exact-byte files locally and create the Secret in the deployment namespac
 head -c 32 /dev/urandom > revision.key
 head -c 32 /dev/urandom > cloudflare-dns-cursor-a.key
 head -c 32 /dev/urandom > cloudflare-dns-cursor-b.key
+head -c 32 /dev/urandom > cloudflare-waf-owner-a.key
+head -c 32 /dev/urandom > cloudflare-waf-owner-b.key
 printf %s "$CLOUDFLARE_API_TOKEN" > cloudflare-api-token
 kubectl -n edgion-system create secret generic edgion-center-cloudflare-credentials \
   --from-file=revision.key \
   --from-file=cloudflare-dns-cursor-a.key \
   --from-file=cloudflare-dns-cursor-b.key \
+  --from-file=cloudflare-waf-owner-a.key \
+  --from-file=cloudflare-waf-owner-b.key \
   --from-file=cloudflare-api-token
 ```
 
-The revision and DNS cursor keys must each contain exactly 32 non-zero bytes. Both cursor keys must
-be different from one another, the revision key, and the API token. Every completed rollout stage
+The revision, DNS cursor, and WAF ownership keys must each contain exactly 32 non-zero bytes. The
+two WAF ownership keys must differ from one another, both cursor keys, the revision key, and the
+API token. Every completed rollout stage
 must give all Center replicas the same exact key material and assignment; during the Stage-A to
 Stage-B rollout, both keys remain present while the active assignment intentionally differs.
 Credential material must be non-empty, no larger than 16 KiB, regular, and not group- or
 world-writable. Secret volumes are root-owned, while Center runs as UID 1000. The overlay uses
-`fsGroup: 1000` to make the four explicitly named `0440` source files readable by a non-root init
+`fsGroup: 1000` to make the six explicitly named `0440` source files readable by a non-root init
 container. That container copies them into a memory-backed `emptyDir` it owns and restricts the
 staged files to `0400`. The Center container mounts only that staging volume read-only; the resolver
 opens its private `0700` child as the directory capability. No root container, added Linux
@@ -68,6 +73,26 @@ binding already shown above. It does not resolve either cursor key or a mutation
 a durable operation, or retry a provider mutation. The per-account concurrency default is one.
 If a response is lost after Cloudflare may have accepted a request, Center returns a fixed unknown
 outcome and the caller must read the target state before deciding whether another write is safe.
+
+The `cloudflare_waf` switch independently controls its read and write routes while reusing the
+same exact ProviderAccount API-token binding. Each WAF operation has one deadline, one global and
+per-account admission slot, and fresh pre/post account and token-revision checks. WAF writes first
+observe the exact Zone and entry-point revision, preserve unowned rules, dispatch at most one
+Cloudflare Rulesets mutation, and return `unknown_outcome` if a dispatched request or authority
+check is ambiguous. The token needs the Cloudflare Zone WAF permissions appropriate to the enabled
+operations; Center performs no provider request at startup.
+
+`ownership_key_ref` is a separate active 32-byte HMAC key for WAF rule ownership. Center writes a
+versioned compact `ref` binding the Center ProviderAccount, Cloudflare Zone, WAF phase, and the
+user-visible reference; a matching prefix alone is never ownership proof. The optional
+`ownership_fallback_key_ref` verifies existing bindings during key rotation but never signs new
+rules. Existing Center-owned rules signed by either key remain readable; forged, simultaneous
+duplicate, wrong-account, wrong-zone, wrong-phase, or opaque rules are never mutable. Cloudflare
+WAF writers are trusted co-administrators: a signed reference is a bearer proof of Center origin,
+not immutable rule identity, so Center cannot detect a copy transplanted after deleting the
+original without a durable ownership registry. Rotate the key in the same three stages as the DNS
+cursor keys: add B as fallback, promote B to active with A fallback, then remove A only after all
+replicas running A are gone and operators have finished any required WAF inventory refreshes.
 
 The same write switch exposes direct provider-specific RRset PUT and DELETE on
 `.../zones/{zone_id}/record-sets/{record_type}?owner=...`. PUT uses either `must_not_exist` or an

@@ -48,6 +48,9 @@ import EdgionAcmeList from './pages/System/EdgionAcmeList'
 import TopologyPage from './pages/Topology/TopologyPage'
 import GlobalConnectionIpRestrictionList from './pages/GlobalConnectionIpRestriction/List'
 import GlobalConnectionIpRestrictionDetail from './pages/GlobalConnectionIpRestriction/Detail'
+import ProviderAccountsPage from './pages/Cloud/ProviderAccountsPage'
+import CloudflareDnsPage from './pages/Cloud/CloudflareDnsPage'
+import CloudflareWafPage from './pages/Cloud/CloudflareWafPage'
 import './App.css'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -68,6 +71,13 @@ function RequirePermission({ permission, children }: { permission: string; child
     >
       {children}
     </PermissionGate>
+  )
+}
+
+function RequirePermissions({ permissions, children }: { permissions: string[]; children: React.ReactNode }) {
+  return permissions.reduceRight<React.ReactNode>(
+    (content, permission) => <RequirePermission permission={permission}>{content}</RequirePermission>,
+    children,
   )
 }
 
@@ -131,6 +141,9 @@ function App() {
           <Route path="region-routes/cluster" element={<Navigate to="/region-routes/region" replace />} />
           <Route path="region-routes/services" element={<Navigate to="/region-routes/service" replace />} />
           <Route path="federation-diagnostics" element={<RequirePermission permission="server:read"><FederationDiagnosticsPage /></RequirePermission>} />
+          {capabilities?.providerAccountAdmin && <Route path="cloud/provider-accounts" element={<RequirePermission permission="provider-accounts:read"><ProviderAccountsPage /></RequirePermission>} />}
+          {capabilities?.cloudflareDnsRead && <Route path="cloud/cloudflare/dns" element={<RequirePermissions permissions={['cloudflare-dns:read', 'provider-accounts:read']}><CloudflareDnsPage /></RequirePermissions>} />}
+          {capabilities?.cloudflareWafRead && <Route path="cloud/cloudflare/waf" element={<RequirePermissions permissions={['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read']}><CloudflareWafPage /></RequirePermissions>} />}
           <Route
             path="global-connection-ip-restrictions"
             element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionList /></RequirePermission>}

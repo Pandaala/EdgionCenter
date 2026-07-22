@@ -41,6 +41,16 @@ pub const CLOUDFLARE_DNS_WRITE: &str = "cloudflare-dns:write";
 /// Dedicated authority for writing an authenticated caller marker with an RRset mutation.
 /// It does not imply ordinary Cloudflare DNS mutation access.
 pub const CLOUDFLARE_DNS_REMOTE_WRITE: &str = "cloudflare-dns:remote-write";
+/// Read Cloudflare Zone WAF rulesets across configured ProviderAccounts.
+pub const CLOUDFLARE_WAF_READ: &str = "cloudflare-waf:read";
+/// Create, update, enable, disable, or delete Center-owned Cloudflare WAF rules.
+pub const CLOUDFLARE_WAF_WRITE: &str = "cloudflare-waf:write";
+/// Reorder Center-owned Cloudflare WAF rules without granting other mutations.
+pub const CLOUDFLARE_WAF_ORDER: &str = "cloudflare-waf:order";
+/// Configure bounded managed-rule skips and exceptions.
+pub const CLOUDFLARE_WAF_EXCEPTION: &str = "cloudflare-waf:exception";
+/// Confirm an operation that weakens effective Cloudflare WAF protection.
+pub const CLOUDFLARE_WAF_SECURITY_WEAKEN: &str = "cloudflare-waf:security-weaken";
 /// High-trust Route 53 inventory access across every configured AWS ProviderAccount.
 /// Kubernetes authorization may additionally narrow this to exact non-resource paths.
 pub const ROUTE53_DNS_READ: &str = "route53-dns:read";
@@ -70,6 +80,11 @@ pub fn all_keys() -> &'static [&'static str] {
         CLOUDFLARE_DNS_READ,
         CLOUDFLARE_DNS_WRITE,
         CLOUDFLARE_DNS_REMOTE_WRITE,
+        CLOUDFLARE_WAF_READ,
+        CLOUDFLARE_WAF_WRITE,
+        CLOUDFLARE_WAF_ORDER,
+        CLOUDFLARE_WAF_EXCEPTION,
+        CLOUDFLARE_WAF_SECURITY_WEAKEN,
         ROUTE53_DNS_READ,
         ROUTE53_DNS_WRITE,
         PROVIDER_ACCOUNTS_READ,
@@ -135,6 +150,16 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
                 CLOUDFLARE_DNS_READ,
                 CLOUDFLARE_DNS_WRITE,
                 CLOUDFLARE_DNS_REMOTE_WRITE,
+            ],
+        },
+        PermissionGroup {
+            group: "Cloudflare WAF",
+            keys: vec![
+                CLOUDFLARE_WAF_READ,
+                CLOUDFLARE_WAF_WRITE,
+                CLOUDFLARE_WAF_ORDER,
+                CLOUDFLARE_WAF_EXCEPTION,
+                CLOUDFLARE_WAF_SECURITY_WEAKEN,
             ],
         },
         PermissionGroup {
@@ -204,6 +229,10 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
             }
             _ => None,
         };
+    }
+
+    if under_segment(path, "/api/v1/center/cloudflare/waf") {
+        return cloudflare_waf_route_permission(method, path);
     }
 
     if let Some(route) = route53_dns_route(path) {
@@ -322,6 +351,47 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     }
 
     None
+}
+
+fn cloudflare_waf_route_permission(method: &Method, path: &str) -> Option<&'static str> {
+    let suffix = path.strip_prefix("/api/v1/center/cloudflare/waf/accounts/")?;
+    let segments = suffix.split('/').collect::<Vec<_>>();
+    if segments.iter().any(|segment| segment.is_empty()) || segments.get(1) != Some(&"zones") {
+        return None;
+    }
+    let is_read = method == Method::GET || method == Method::HEAD;
+    match segments.as_slice() {
+        [_, "zones", _, "rulesets"] => is_read.then_some(CLOUDFLARE_WAF_READ),
+        [_, "zones", _, "managed-rules"]
+        | [_, "zones", _, "custom-rules"]
+        | [_, "zones", _, "rate-limits"] => {
+            if is_read {
+                Some(CLOUDFLARE_WAF_READ)
+            } else {
+                (method == Method::POST).then_some(CLOUDFLARE_WAF_WRITE)
+            }
+        }
+        [_, "zones", _, "managed-rules", "exceptions"] => {
+            (method == Method::PUT).then_some(CLOUDFLARE_WAF_EXCEPTION)
+        }
+        [_, "zones", _, "managed-rules", _, "order"]
+        | [_, "zones", _, "custom-rules", _, "order"]
+        | [_, "zones", _, "rate-limits", _, "order"] => {
+            (method == Method::PUT).then_some(CLOUDFLARE_WAF_ORDER)
+        }
+        [_, "zones", _, "managed-rules", _, "security-weaken"]
+        | [_, "zones", _, "custom-rules", _, "security-weaken"]
+        | [_, "zones", _, "rate-limits", _, "security-weaken"] => {
+            matches!(*method, Method::PUT | Method::DELETE)
+                .then_some(CLOUDFLARE_WAF_SECURITY_WEAKEN)
+        }
+        [_, "zones", _, "managed-rules", _]
+        | [_, "zones", _, "custom-rules", _]
+        | [_, "zones", _, "rate-limits", _] => {
+            (method == Method::PUT).then_some(CLOUDFLARE_WAF_WRITE)
+        }
+        _ => None,
+    }
 }
 
 fn is_cloudflare_remote_control_path(path: &str) -> bool {
@@ -479,6 +549,34 @@ mod tests {
             (
                 Method::PUT,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones/zone-1/record-sets/A/remote-control",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/rulesets",
+            ),
+            (
+                Method::PUT,
+                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/managed-rules/rule-1",
+            ),
+            (
+                Method::PUT,
+                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/managed-rules/exceptions",
+            ),
+            (
+                Method::POST,
+                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/custom-rules",
+            ),
+            (
+                Method::PUT,
+                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/custom-rules/rule-1/order",
+            ),
+            (
+                Method::DELETE,
+                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/custom-rules/rule-1/security-weaken",
+            ),
+            (
+                Method::POST,
+                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/rate-limits",
             ),
             (
                 Method::GET,
@@ -823,6 +921,43 @@ mod tests {
                 Some(CLOUDFLARE_DNS_WRITE)
             );
         }
+    }
+
+    #[test]
+    fn cloudflare_waf_routes_use_the_narrow_permission_suffixes() {
+        let base = "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/zone-1";
+        assert_eq!(
+            route_permission(&Method::GET, &format!("{base}/rulesets")),
+            Some(CLOUDFLARE_WAF_READ)
+        );
+        assert_eq!(
+            route_permission(&Method::POST, &format!("{base}/custom-rules")),
+            Some(CLOUDFLARE_WAF_WRITE)
+        );
+        assert_eq!(
+            route_permission(&Method::PUT, &format!("{base}/custom-rules/rule-1/order")),
+            Some(CLOUDFLARE_WAF_ORDER)
+        );
+        assert_eq!(
+            route_permission(&Method::PUT, &format!("{base}/managed-rules/rule-1/order")),
+            Some(CLOUDFLARE_WAF_ORDER)
+        );
+        assert_eq!(
+            route_permission(&Method::PUT, &format!("{base}/managed-rules/exceptions")),
+            Some(CLOUDFLARE_WAF_EXCEPTION)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::DELETE,
+                &format!("{base}/rate-limits/rule-1/security-weaken")
+            ),
+            Some(CLOUDFLARE_WAF_SECURITY_WEAKEN)
+        );
+        assert_eq!(
+            route_permission(&Method::DELETE, &format!("{base}/rate-limits/rule-1")),
+            None,
+            "destructive WAF changes require the dedicated security-weaken route"
+        );
     }
 
     /// `is_business_path` covers /api/v1/ except the public auth routes.

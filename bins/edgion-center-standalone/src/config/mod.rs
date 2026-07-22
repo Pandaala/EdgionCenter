@@ -4,6 +4,7 @@ use crate::common::local_auth::LocalAuthConfig;
 use edgion_center_adapter_credential_files::MountedCredentialConfig;
 use edgion_center_integration_cloudflare::{
     CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
+    CloudflareWafConfig,
 };
 use edgion_center_integration_route53::{Route53DnsReadConfig, Route53DnsWriteConfig};
 use serde::{Deserialize, Serialize};
@@ -130,6 +131,9 @@ pub struct CenterConfig {
     /// Account-bound synchronous Cloudflare DNS writes. Disabled by default.
     #[serde(default)]
     pub cloudflare_dns_write: CloudflareDnsWriteConfig,
+    /// Account-bound Cloudflare Zone WAF reads and writes. Both routes are disabled by default.
+    #[serde(default)]
+    pub cloudflare_waf: CloudflareWafConfig,
     /// Account-bound, read-only Route 53 DNS inventory. Disabled by default.
     #[serde(default)]
     pub route53_dns_read: Route53DnsReadConfig,
@@ -157,6 +161,7 @@ impl Default for CenterConfig {
             cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
             cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
+            cloudflare_waf: CloudflareWafConfig::default(),
             route53_dns_read: Route53DnsReadConfig::default(),
             route53_dns_write: Route53DnsWriteConfig::default(),
         }
@@ -329,6 +334,19 @@ mod tests {
         assert_eq!(config.cloudflare_dns_write.operation_timeout_secs, 30);
         assert_eq!(config.cloudflare_dns_write.global_concurrency, 4);
         assert_eq!(config.cloudflare_dns_write.per_account_concurrency, 1);
+    }
+
+    #[test]
+    fn cloudflare_waf_routes_are_independently_default_off_and_strict() {
+        let default = CenterConfig::default();
+        assert!(!default.cloudflare_waf.read_enabled);
+        assert!(!default.cloudflare_waf.write_enabled);
+        let config: CenterConfig = serde_yaml::from_str(
+            "cloudflare_waf:\n  read_enabled: false\n  write_enabled: true\n  operation_timeout_secs: 30\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
+        )
+        .unwrap();
+        assert!(!config.cloudflare_waf.read_enabled);
+        assert!(config.cloudflare_waf.write_enabled);
     }
 
     #[test]

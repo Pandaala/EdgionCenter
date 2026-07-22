@@ -19,7 +19,9 @@ spec:
               rm -f /credentials/private/.revision.key.tmp
               /credentials/private/.cloudflare-api-token.tmp
               /credentials/private/.cloudflare-dns-cursor-a.key.tmp
-              /credentials/private/.cloudflare-dns-cursor-b.key.tmp &&
+              /credentials/private/.cloudflare-dns-cursor-b.key.tmp
+              /credentials/private/.cloudflare-waf-owner-a.key.tmp
+              /credentials/private/.cloudflare-waf-owner-b.key.tmp &&
               cp /source/revision.key /credentials/private/.revision.key.tmp &&
               cp /source/cloudflare-api-token
               /credentials/private/.cloudflare-api-token.tmp &&
@@ -27,10 +29,16 @@ spec:
               /credentials/private/.cloudflare-dns-cursor-a.key.tmp &&
               cp /source/cloudflare-dns-cursor-b.key
               /credentials/private/.cloudflare-dns-cursor-b.key.tmp &&
+              cp /source/cloudflare-waf-owner-a.key
+              /credentials/private/.cloudflare-waf-owner-a.key.tmp &&
+              cp /source/cloudflare-waf-owner-b.key
+              /credentials/private/.cloudflare-waf-owner-b.key.tmp &&
               chmod 0400 /credentials/private/.revision.key.tmp
               /credentials/private/.cloudflare-api-token.tmp
               /credentials/private/.cloudflare-dns-cursor-a.key.tmp
-              /credentials/private/.cloudflare-dns-cursor-b.key.tmp &&
+              /credentials/private/.cloudflare-dns-cursor-b.key.tmp
+              /credentials/private/.cloudflare-waf-owner-a.key.tmp
+              /credentials/private/.cloudflare-waf-owner-b.key.tmp &&
               mv -f /credentials/private/.revision.key.tmp
               /credentials/private/revision.key &&
               mv -f /credentials/private/.cloudflare-api-token.tmp
@@ -38,7 +46,11 @@ spec:
               mv -f /credentials/private/.cloudflare-dns-cursor-a.key.tmp
               /credentials/private/cloudflare-dns-cursor-a.key &&
               mv -f /credentials/private/.cloudflare-dns-cursor-b.key.tmp
-              /credentials/private/cloudflare-dns-cursor-b.key
+              /credentials/private/cloudflare-dns-cursor-b.key &&
+              mv -f /credentials/private/.cloudflare-waf-owner-a.key.tmp
+              /credentials/private/cloudflare-waf-owner-a.key &&
+              mv -f /credentials/private/.cloudflare-waf-owner-b.key.tmp
+              /credentials/private/cloudflare-waf-owner-b.key
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

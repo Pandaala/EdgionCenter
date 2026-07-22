@@ -72,6 +72,41 @@ fn parse_target_controller(path: &str) -> Option<String> {
     Some(seg.replace('~', "/"))
 }
 
+/// Return a stable, body-independent action summary for Cloudflare WAF writes.
+///
+/// Keeping this path-derived is deliberate: WAF request bodies can contain
+/// security expressions and must never be copied into the audit stream.
+fn cloudflare_waf_action(method: &Method, path: &str) -> Option<String> {
+    const PREFIX: &str = "/api/v1/center/cloudflare/waf/";
+    if !path.starts_with(PREFIX) {
+        return None;
+    }
+
+    let resource = if path.ends_with("/security-weaken") {
+        "security_weaken"
+    } else if path.ends_with("/order") {
+        "order"
+    } else if path.ends_with("/exceptions") {
+        "managed_exception"
+    } else if path.contains("/managed-rules") {
+        "managed_rule"
+    } else if path.contains("/custom-rules") {
+        "custom_rule"
+    } else if path.contains("/rate-limits") {
+        "rate_limit"
+    } else {
+        "ruleset"
+    };
+
+    let operation = match *method {
+        Method::POST => "create",
+        Method::PUT | Method::PATCH => "update",
+        Method::DELETE => "delete",
+        _ => return None,
+    };
+    Some(format!("cloudflare_waf_{resource}_{operation}"))
+}
+
 /// Resolve `(actor, provider)` from the unified-auth claims, falling back to
 /// `<unknown>` / empty when claims are absent.
 fn actor_and_provider(req: &Request) -> (String, String) {
@@ -120,6 +155,7 @@ pub async fn audit_middleware(
         .map(|s| s.to_string());
     let (actor, provider) = actor_and_provider(&req);
     let target_controller = parse_target_controller(&path);
+    let detail = cloudflare_waf_action(&method, &path);
 
     let resp = next.run(req).await;
 
@@ -133,7 +169,7 @@ pub async fn audit_middleware(
         status: resp.status().as_u16() as i32,
         source_ip,
         request_id,
-        detail: None,
+        detail,
     };
     state.sink.record(rec);
 
@@ -149,6 +185,28 @@ mod tests {
     use axum::Router;
     use tokio::sync::mpsc;
     use tower::ServiceExt;
+
+    #[test]
+    fn waf_action_is_stable_and_contains_no_request_data() {
+        assert_eq!(
+            cloudflare_waf_action(
+                &Method::PUT,
+                "/api/v1/center/cloudflare/waf/accounts/account-1/zones/zone-1/custom-rules/rule-1/order",
+            ),
+            Some("cloudflare_waf_order_update".to_string())
+        );
+        assert_eq!(
+            cloudflare_waf_action(
+                &Method::DELETE,
+                "/api/v1/center/cloudflare/waf/accounts/account-1/zones/zone-1/rate-limits/rule-1/security-weaken",
+            ),
+            Some("cloudflare_waf_security_weaken_delete".to_string())
+        );
+        assert_eq!(
+            cloudflare_waf_action(&Method::POST, "/api/v1/center/admin/controllers"),
+            None
+        );
+    }
 
     /// Build a test app: an inner layer injects fake claims, the audit middleware
     /// sits inside it, and routes echo 200. Returns the app + the drained receiver.

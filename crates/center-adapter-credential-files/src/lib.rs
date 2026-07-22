@@ -39,6 +39,7 @@ pub enum CredentialPurpose {
     CloudflareApiToken,
     CloudflareDnsCursorHmac,
     CloudflareDnsMutationTokenHmac,
+    CloudflareWafOwnershipHmac,
     Route53DnsCursorHmac,
     Route53DnsMutationReceiptHmac,
 }
@@ -310,6 +311,7 @@ impl MountedCredentialResolver {
                     CredentialPurpose::CloudflareApiToken
                         | CredentialPurpose::CloudflareDnsCursorHmac
                         | CredentialPurpose::CloudflareDnsMutationTokenHmac
+                        | CredentialPurpose::CloudflareWafOwnershipHmac
                 ) | (
                     CloudProvider::Aws,
                     CredentialPurpose::Route53DnsCursorHmac
@@ -589,6 +591,7 @@ fn purpose_tag(purpose: CredentialPurpose) -> &'static str {
         CredentialPurpose::CloudflareApiToken => "cloudflare_api_token",
         CredentialPurpose::CloudflareDnsCursorHmac => "cloudflare_dns_cursor_hmac",
         CredentialPurpose::CloudflareDnsMutationTokenHmac => "cloudflare_dns_mutation_token_hmac",
+        CredentialPurpose::CloudflareWafOwnershipHmac => "cloudflare_waf_ownership_hmac",
         CredentialPurpose::Route53DnsCursorHmac => "route53_dns_cursor_hmac",
         CredentialPurpose::Route53DnsMutationReceiptHmac => "route53_dns_mutation_receipt_hmac",
     }

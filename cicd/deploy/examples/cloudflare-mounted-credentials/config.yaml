@@ -56,6 +56,16 @@ data:
           provider: cloudflare
           purpose: cloudflare_dns_cursor_hmac
           file: cloudflare-dns-cursor-b.key
+        - credential_ref: cloudflare/waf-owner-a
+          provider_account_id: cf-main
+          provider: cloudflare
+          purpose: cloudflare_waf_ownership_hmac
+          file: cloudflare-waf-owner-a.key
+        - credential_ref: cloudflare/waf-owner-b
+          provider_account_id: cf-main
+          provider: cloudflare
+          purpose: cloudflare_waf_ownership_hmac
+          file: cloudflare-waf-owner-b.key
     cloudflare_credential_inspection:
       enabled: true
     cloudflare_dns_read:
@@ -69,6 +79,14 @@ data:
       per_account_concurrency: 2
     cloudflare_dns_write:
       enabled: true
+      operation_timeout_secs: 30
+      global_concurrency: 4
+      per_account_concurrency: 1
+    cloudflare_waf:
+      read_enabled: true
+      write_enabled: true
+      ownership_key_ref: cloudflare/waf-owner-a
+      ownership_fallback_key_ref: cloudflare/waf-owner-b
       operation_timeout_secs: 30
       global_concurrency: 4
       per_account_concurrency: 1

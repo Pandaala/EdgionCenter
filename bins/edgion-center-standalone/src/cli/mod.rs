@@ -172,6 +172,12 @@ impl EdgionCenterCli {
                 mounted_credential_resolver.clone(),
             )
             .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS write config: {error}"))?;
+        let cloudflare_waf_admin = edgion_center_integration_cloudflare::compose_waf_admin(
+            &config.cloudflare_waf,
+            provider_account_store.clone(),
+            mounted_credential_resolver.clone(),
+        )
+        .map_err(|error| anyhow::anyhow!("Invalid Cloudflare WAF config: {error}"))?;
         let route53_dns_admin = edgion_center_integration_route53::compose_dns_admin(
             &config.route53_dns_read,
             provider_account_store.clone(),
@@ -315,6 +321,7 @@ impl EdgionCenterCli {
                 .map(|log| log as Arc<dyn edgion_center_core::AuditReader>),
             cloudflare_dns_admin: cloudflare_dns_admin.clone(),
             cloudflare_dns_write_admin: cloudflare_dns_write_admin.clone(),
+            cloudflare_waf_admin: cloudflare_waf_admin.clone(),
             route53_dns_admin: route53_dns_admin.clone(),
             route53_dns_write_admin: route53_dns_write_admin.clone(),
             provider_account_store,
@@ -345,6 +352,10 @@ impl EdgionCenterCli {
                     credential_inspection_service.is_some(),
                 );
                 capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
+                capabilities.cloudflare_waf_read =
+                    config.cloudflare_waf.read_enabled && cloudflare_waf_admin.is_some();
+                capabilities.cloudflare_waf_write =
+                    config.cloudflare_waf.write_enabled && cloudflare_waf_admin.is_some();
                 capabilities.route53_dns_read = route53_dns_admin.is_some();
                 capabilities.route53_dns_write = route53_dns_write_admin.is_some();
                 capabilities

@@ -43,6 +43,12 @@
 //!   PUT  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → create/replace one Cloudflare RRset
 //!   PUT  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type}/remote-control → create/replace one remotely marked Cloudflare RRset
 //!   DELETE /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id}/record-sets/{record_type} → delete one Cloudflare RRset
+//!   GET  /api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/rulesets → Cloudflare WAF inventory
+//!   GET  /api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/{managed-rules|custom-rules|rate-limits} → phase inventory
+//!   POST /api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/{managed-rules|custom-rules|rate-limits} → create one typed rule
+//!   PUT  /api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/managed-rules/exceptions → create one managed skip exception
+//!   PUT  /api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/{managed-rules|custom-rules|rate-limits}/{rule_id}/order → reorder one Center-owned rule
+//!   PUT|DELETE /api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/{managed-rules|custom-rules|rate-limits}/{rule_id}/security-weaken → confirmed weakening or deletion
 //!   GET  /api/v1/center/aws/route53/accounts/{account_id}/hosted-zones → Route 53 public hosted-zone inventory
 //!   GET  /api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id} → Route 53 hosted-zone detail
 //!   GET  /api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/record-sets → Route 53 RRset inventory
@@ -83,6 +89,7 @@ const PROXY_RESPONSE_HEADER_ALLOWLIST: &[&str] = &[
 
 mod audit;
 pub mod cloudflare_dns;
+pub mod cloudflare_waf;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
 pub mod provider_accounts;
@@ -120,6 +127,8 @@ pub struct ApiState {
     pub cloudflare_dns_admin: Option<cloudflare_dns::SharedCloudflareDnsAdminService>,
     /// Optional SDK-free Cloudflare DNS synchronous write service.
     pub cloudflare_dns_write_admin: Option<cloudflare_dns::SharedCloudflareDnsWriteAdminService>,
+    /// Optional SDK-free Cloudflare Zone WAF service. It is independently composed from DNS.
+    pub cloudflare_waf_admin: Option<cloudflare_waf::SharedCloudflareWafAdminService>,
     /// Optional SDK-free Route 53 DNS read service.
     pub route53_dns_admin: Option<route53_dns::SharedRoute53DnsAdminService>,
     /// Optional SDK-free Route 53 synchronous RRset write service.
@@ -237,6 +246,8 @@ pub fn router(mut state: ApiState) -> Router {
     // report the same surface when a composition is incomplete.
     state.capabilities.cloudflare_dns_read &= state.cloudflare_dns_admin.is_some();
     state.capabilities.cloudflare_dns_write &= state.cloudflare_dns_write_admin.is_some();
+    state.capabilities.cloudflare_waf_read &= state.cloudflare_waf_admin.is_some();
+    state.capabilities.cloudflare_waf_write &= state.cloudflare_waf_admin.is_some();
     state.capabilities.route53_dns_read &= state.route53_dns_admin.is_some();
     state.capabilities.route53_dns_write &= state.route53_dns_write_admin.is_some();
     state.capabilities.provider_account_admin &= state.provider_account_store.is_some();
@@ -413,6 +424,85 @@ pub fn router(mut state: ApiState) -> Router {
             )
             .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
         app = app.merge(cloudflare_dns_write_routes);
+    }
+    if capabilities.cloudflare_waf_read && state.cloudflare_waf_admin.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/rulesets",
+                get(cloudflare_waf::list_rulesets),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/managed-rules",
+                get(cloudflare_waf::list_managed_rules),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/custom-rules",
+                get(cloudflare_waf::list_custom_rules),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/rate-limits",
+                get(cloudflare_waf::list_rate_limit_rules),
+            );
+    }
+    if capabilities.cloudflare_waf_write && state.cloudflare_waf_admin.is_some() {
+        let cloudflare_waf_write_routes = Router::new()
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/managed-rules",
+                post(cloudflare_waf::create_managed_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/managed-rules/{rule_id}",
+                axum::routing::put(cloudflare_waf::update_managed_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/custom-rules",
+                post(cloudflare_waf::create_custom_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/custom-rules/{rule_id}",
+                axum::routing::put(cloudflare_waf::update_custom_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/rate-limits",
+                post(cloudflare_waf::create_rate_limit_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/rate-limits/{rule_id}",
+                axum::routing::put(cloudflare_waf::update_rate_limit_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/managed-rules/exceptions",
+                axum::routing::put(cloudflare_waf::set_managed_rule_exception),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/managed-rules/{rule_id}/security-weaken",
+                axum::routing::put(cloudflare_waf::weaken_managed_rule)
+                    .delete(cloudflare_waf::delete_managed_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/managed-rules/{rule_id}/order",
+                axum::routing::put(cloudflare_waf::order_managed_rules),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/custom-rules/{rule_id}/order",
+                axum::routing::put(cloudflare_waf::order_custom_rules),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/rate-limits/{rule_id}/order",
+                axum::routing::put(cloudflare_waf::order_rate_limit_rules),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/custom-rules/{rule_id}/security-weaken",
+                axum::routing::put(cloudflare_waf::weaken_custom_rule)
+                    .delete(cloudflare_waf::delete_custom_rule),
+            )
+            .route(
+                "/api/v1/center/cloudflare/waf/accounts/{account_id}/zones/{zone_id}/rate-limits/{rule_id}/security-weaken",
+                axum::routing::put(cloudflare_waf::weaken_rate_limit_rule)
+                    .delete(cloudflare_waf::delete_rate_limit_rule),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
+        app = app.merge(cloudflare_waf_write_routes);
     }
     if capabilities.route53_dns_read && state.route53_dns_admin.is_some() {
         app = app
@@ -998,6 +1088,32 @@ mod tests {
         }
     }
 
+    struct UnavailableCloudflareWaf;
+
+    #[async_trait::async_trait]
+    impl cloudflare_waf::CloudflareWafAdminService for UnavailableCloudflareWaf {
+        async fn read_inventory(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+        ) -> Result<
+            cloudflare_waf::CloudflareWafInventoryDto,
+            cloudflare_waf::CloudflareWafAdminError,
+        > {
+            Err(cloudflare_waf::CloudflareWafAdminError::Unavailable)
+        }
+
+        async fn mutate(
+            &self,
+            _: cloudflare_waf::CloudflareWafMutation,
+        ) -> Result<
+            cloudflare_waf::CloudflareWafMutationResult,
+            cloudflare_waf::CloudflareWafAdminError,
+        > {
+            Err(cloudflare_waf::CloudflareWafAdminError::Unavailable)
+        }
+    }
+
     #[test]
     fn proxy_request_headers_drop_credentials_and_hop_by_hop_metadata() {
         let headers = HeaderMap::from_iter([
@@ -1148,6 +1264,7 @@ mod tests {
             audit_reader: None,
             cloudflare_dns_admin: None,
             cloudflare_dns_write_admin: None,
+            cloudflare_waf_admin: None,
             route53_dns_admin: None,
             route53_dns_write_admin: None,
             provider_account_store: None,
@@ -1332,6 +1449,87 @@ mod tests {
             .unwrap();
         let json = body_json(server_info).await;
         assert_eq!(json["data"]["capabilities"]["route53DnsRead"], true);
+    }
+
+    #[tokio::test]
+    async fn cloudflare_waf_capability_and_service_jointly_control_route_mounting() {
+        use tower::ServiceExt;
+
+        let read_path = "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/rulesets";
+        let mut absent = state_with_authz_mode(AuthzMode::AllowAll, false);
+        absent.capabilities.cloudflare_waf_read = true;
+        let response = router(absent)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(read_path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut present = state_with_authz_mode(AuthzMode::AllowAll, false);
+        present.capabilities.cloudflare_waf_read = true;
+        present.cloudflare_waf_admin = Some(Arc::new(UnavailableCloudflareWaf));
+        let app = router(present);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(read_path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let server_info = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/server-info")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_json(server_info).await;
+        assert_eq!(json["data"]["capabilities"]["cloudflareWafRead"], true);
+    }
+
+    #[tokio::test]
+    async fn cloudflare_waf_write_routes_are_default_off_and_separate_from_read() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/custom-rules/rule-1/order";
+        let body = r#"{"guard":{"rulesetId":"entrypoint-1","rulesetVersion":"v1"},"position":{"type":"first"}}"#;
+        let mut state = state_with_authz_mode(AuthzMode::AllowAll, false);
+        state.capabilities.cloudflare_waf_write = true;
+        state.cloudflare_waf_admin = Some(Arc::new(UnavailableCloudflareWaf));
+        let app = router(state);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let read = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/rulesets")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(read.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
