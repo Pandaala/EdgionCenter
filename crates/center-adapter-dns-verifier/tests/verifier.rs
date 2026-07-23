@@ -398,7 +398,7 @@ fn private_request() -> DnsVerificationRequest {
         binding: DnsVerificationBinding {
             zone: DnsZoneRef {
                 provider_account_id: CloudResourceId::new("account").unwrap(),
-                provider: CloudProvider::GoogleCloud,
+                provider: CloudProvider::Aws,
                 zone_id: DnsZoneId::new("private-zone").unwrap(),
                 apex: edgion_center_core::AbsoluteDnsName::new("internal.example").unwrap(),
                 visibility: ZoneVisibility::Private,

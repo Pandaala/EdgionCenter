@@ -8,5 +8,6 @@
 //! See `metrics_api` for the recorder helpers and Axum handler.
 
 pub use edgion_center_runtime::observe::fed_metrics;
+pub mod cloud_metrics;
 pub mod metrics_api;
 pub mod system_metrics;

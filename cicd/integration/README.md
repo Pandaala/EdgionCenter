@@ -30,6 +30,22 @@ opt-in and never touches the user's current context during the default matrix.
 | Multi-replica command/proxy routing | Owner locator and internal-forwarding tests | Deployment uses two replicas and the internal mTLS Service |
 | Active-active global reads | Capability/directory API tests | Fresh replica reconstructs reads without a local federation registry |
 
+## Hermetic cloud matrix
+
+The default workspace test gate is the cloud integration gate; it needs no cloud credentials and
+must not contact the internet. Provider coverage is split deliberately:
+
+| Boundary | Hermetic coverage |
+|---|---|
+| Cloudflare DNS and WAF HTTP | Wiremock status/body/header fixtures, bounded response streaming, throttling metadata, one-shot mutation dispatch, and lost-response ambiguity |
+| Route 53 DNS and hosted-zone lifecycle | Deterministic SDK HTTP fixtures, revision and authority fencing, throttling, partial observations, mutation receipts, deletion guards, and post-dispatch failure injection |
+| CloudFront Distribution and WAF association | Fixed wire-shape capture, serialized request bounds, SDK error normalization, ETag guards, and pre/post-dispatch deadline classification |
+| AWS WAF | Deterministic adapter fakes, bounded rule/IP-set models, ownership and lock-token guards, single-attempt SDK configuration, throttling normalization, and lost-response classification |
+| Admin API | Capability-gated route mounting, exact permission inventory, request body limits, sanitized errors, and provider-independent dashboard contracts |
+
+Real-account tests remain optional verification only. They must use disposable resources and
+explicit environment opt-in; their absence does not reduce or skip the hermetic gate above.
+
 ## Real kube-apiserver matrix
 
 Use a disposable namespace in a test cluster. Install the checked-in CRD and

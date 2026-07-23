@@ -237,6 +237,114 @@ pub(crate) async fn assert_sdk_config_round_trip(
     Ok(())
 }
 
+/// Serializes both complete configurations through the pinned SDK and proves that every wire
+/// difference belongs to the caller's narrow operation-specific write set.  This deliberately
+/// compares serialized documents rather than Rust fields: CloudFront updates replace the entire
+/// document and a newly introduced SDK field must not be silently normalized or dropped.
+pub(crate) async fn assert_sdk_config_write_set(
+    client: &aws_sdk_cloudfront::Client,
+    distribution_id: &str,
+    etag: &str,
+    current: &DistributionConfig,
+    desired: &DistributionConfig,
+    allowed_leaf_paths: &[&str],
+) -> CloudFrontApiResult<()> {
+    let current_wire =
+        serialize_without_transmit(client, distribution_id, etag, current.clone()).await?;
+    let desired_wire =
+        serialize_without_transmit(client, distribution_id, etag, desired.clone()).await?;
+    let current = parse_document(current_wire.as_slice())?;
+    let desired = parse_document(desired_wire.as_slice())?;
+    if current.name != desired.name {
+        return Err(validation("cloudfront_wire_root_changed"));
+    }
+    let mut differences = Vec::new();
+    collect_leaf_differences(
+        &current,
+        &desired,
+        &current.name,
+        allowed_leaf_paths,
+        &mut differences,
+    );
+    if differences.iter().any(|path| {
+        !allowed_leaf_paths
+            .iter()
+            .any(|allowed| path == allowed || path.ends_with(allowed))
+    }) {
+        return Err(validation("cloudfront_unexpected_full_config_write_set"));
+    }
+    Ok(())
+}
+
+fn collect_leaf_differences(
+    current: &CanonicalElement,
+    desired: &CanonicalElement,
+    path: &str,
+    allowed_leaf_paths: &[&str],
+    output: &mut Vec<String>,
+) {
+    if current.name != desired.name {
+        output.push(path.to_string());
+        return;
+    }
+    if current.children.len() != desired.children.len() {
+        // CloudFront emits root optional fields by omitting the element entirely. Permit exactly
+        // one configured optional leaf addition/removal, but prove every other sibling is byte-
+        // equivalent in the canonical model. This preserves fail-closed unknown-field handling.
+        let retained_indices = |children: &[CanonicalElement]| {
+            children
+                .iter()
+                .enumerate()
+                .filter(|child| {
+                    !child.1.children.is_empty()
+                        || !allowed_leaf_paths
+                            .iter()
+                            .any(|allowed| allowed.ends_with(&format!(":{}", child.1.name)))
+                })
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>()
+        };
+        let current_retained = retained_indices(&current.children);
+        let desired_retained = retained_indices(&desired.children);
+        let current_allowed = current.children.len() - current_retained.len();
+        let desired_allowed = desired.children.len() - desired_retained.len();
+        if current_allowed <= 1
+            && desired_allowed <= 1
+            && current_retained.len() == desired_retained.len()
+            && current_retained
+                .iter()
+                .zip(&desired_retained)
+                .all(|(left, right)| current.children[*left] == desired.children[*right])
+        {
+            for (index, child) in current
+                .children
+                .iter()
+                .chain(&desired.children)
+                .enumerate()
+                .filter(|(_, child)| {
+                    child.children.is_empty()
+                        && allowed_leaf_paths
+                            .iter()
+                            .any(|allowed| allowed.ends_with(&format!(":{}", child.name)))
+                })
+            {
+                output.push(format!("{path}/{index}:{}", child.name));
+            }
+            return;
+        }
+        output.push(path.to_string());
+        return;
+    }
+    if current.children.is_empty() && current.text != desired.text {
+        output.push(path.to_string());
+        return;
+    }
+    for (index, (left, right)) in current.children.iter().zip(&desired.children).enumerate() {
+        let child_path = format!("{path}/{index}:{}", left.name);
+        collect_leaf_differences(left, right, &child_path, allowed_leaf_paths, output);
+    }
+}
+
 #[derive(PartialEq, Eq)]
 struct CanonicalElement {
     name: String,
@@ -534,6 +642,41 @@ mod tests {
     }
 
     #[test]
+    fn optional_web_acl_leaf_is_the_only_allowed_structural_difference() {
+        let without = parse_document(
+            document("<CallerReference>caller</CallerReference><Enabled>true</Enabled>").as_bytes(),
+        )
+        .expect("without Web ACL");
+        let with = parse_document(
+            document("<CallerReference>caller</CallerReference><WebACLId>arn:aws:wafv2:us-east-1:123456789012:global/webacl/a/b</WebACLId><Enabled>true</Enabled>").as_bytes(),
+        )
+        .expect("with Web ACL");
+        let mut differences = Vec::new();
+        collect_leaf_differences(
+            &without,
+            &with,
+            "DistributionConfig",
+            &[":WebACLId"],
+            &mut differences,
+        );
+        assert!(differences.iter().all(|path| path.ends_with(":WebACLId")));
+
+        let unexpected = parse_document(
+            document("<CallerReference>caller</CallerReference><Future>secret</Future><Enabled>true</Enabled>").as_bytes(),
+        )
+        .expect("unknown leaf fixture");
+        differences.clear();
+        collect_leaf_differences(
+            &without,
+            &unexpected,
+            "DistributionConfig",
+            &[":WebACLId"],
+            &mut differences,
+        );
+        assert_eq!(differences, vec!["DistributionConfig"]);
+    }
+
+    #[test]
     fn namespace_spoof_dtd_and_cdata_are_rejected() {
         let spoof = r#"<x:DistributionConfig xmlns:x="http://cloudfront.amazonaws.com/doc/2020-05-31/"><x:Enabled>true</x:Enabled></x:DistributionConfig>"#;
         let dtd = format!(
@@ -550,9 +693,16 @@ mod tests {
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .credentials_provider(Credentials::new("key", "secret", None, None, "test"))
             .region(Region::new("us-east-1"))
+            .http_client(aws_smithy_http_client::Builder::new().build_http())
             .load()
             .await;
-        let client = aws_sdk_cloudfront::Client::new(&sdk_config);
+        // The probe interceptor aborts before transmit. Use an explicit loopback HTTP endpoint so
+        // this hermetic serializer test does not initialize the host native TLS trust store.
+        let client = aws_sdk_cloudfront::Client::from_conf(
+            aws_sdk_cloudfront::config::Builder::from(&sdk_config)
+                .endpoint_url(SERIALIZER_SINK_ENDPOINT)
+                .build(),
+        );
         let config = DistributionConfig::builder()
             .caller_reference("caller-reference")
             .comment("x".repeat(MAX_MUTATION_REQUEST_BYTES))

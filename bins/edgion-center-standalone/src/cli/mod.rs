@@ -187,9 +187,28 @@ impl EdgionCenterCli {
         let route53_dns_write_admin = edgion_center_integration_route53::compose_dns_write_admin(
             &config.route53_dns_write,
             provider_account_store.clone(),
-            mounted_credential_resolver,
+            mounted_credential_resolver.clone(),
         )
         .map_err(|error| anyhow::anyhow!("Invalid Route 53 DNS write config: {error}"))?;
+        let route53_zone_lifecycle_admin =
+            edgion_center_integration_route53::compose_zone_lifecycle_admin(
+                &config.route53_zone_lifecycle,
+                provider_account_store.clone(),
+                mounted_credential_resolver.clone(),
+            )
+            .map_err(|error| anyhow::anyhow!("Invalid Route 53 zone lifecycle config: {error}"))?;
+        let cloudfront_admin = edgion_center_integration_cloudfront::compose_cloudfront_admin(
+            &config.cloudfront,
+            provider_account_store.clone(),
+            mounted_credential_resolver.clone(),
+        )
+        .map_err(|error| anyhow::anyhow!("Invalid CloudFront config: {error}"))?;
+        let aws_waf_admin = edgion_center_integration_aws_waf::compose_aws_waf_admin(
+            &config.aws_waf,
+            provider_account_store.clone(),
+            mounted_credential_resolver.clone(),
+        )
+        .map_err(|error| anyhow::anyhow!("Invalid AWS WAF config: {error}"))?;
 
         // Audit sink: spawn the background writer only when a Store exists and
         // audit is enabled. When the DB is disabled but audit is on, log a WARN
@@ -198,9 +217,11 @@ impl EdgionCenterCli {
             if config.audit.enabled {
                 match db.clone() {
                     Some(store) => {
+                        spawn_audit_retention(store.clone(), config.audit.retention_days);
                         tracing::info!(
                             component = "center",
                             log_reads = config.audit.log_reads,
+                            retention_days = config.audit.retention_days,
                             "audit logging enabled"
                         );
                         Some(Arc::new(
@@ -322,8 +343,11 @@ impl EdgionCenterCli {
             cloudflare_dns_admin: cloudflare_dns_admin.clone(),
             cloudflare_dns_write_admin: cloudflare_dns_write_admin.clone(),
             cloudflare_waf_admin: cloudflare_waf_admin.clone(),
+            aws_waf_admin: aws_waf_admin.clone(),
             route53_dns_admin: route53_dns_admin.clone(),
             route53_dns_write_admin: route53_dns_write_admin.clone(),
+            route53_zone_lifecycle_admin: route53_zone_lifecycle_admin.clone(),
+            cloudfront_admin: cloudfront_admin.clone(),
             provider_account_store,
             capability_snapshot_store: db
                 .clone()
@@ -358,6 +382,20 @@ impl EdgionCenterCli {
                     config.cloudflare_waf.write_enabled && cloudflare_waf_admin.is_some();
                 capabilities.route53_dns_read = route53_dns_admin.is_some();
                 capabilities.route53_dns_write = route53_dns_write_admin.is_some();
+                capabilities.route53_zone_lifecycle = route53_zone_lifecycle_admin.is_some();
+                capabilities.cloudfront_read =
+                    config.cloudfront.read_enabled && cloudfront_admin.is_some();
+                capabilities.cloudfront_write =
+                    config.cloudfront.write_enabled && cloudfront_admin.is_some();
+                capabilities.aws_waf_read = config.aws_waf.read_enabled && aws_waf_admin.is_some();
+                capabilities.aws_waf_write =
+                    config.aws_waf.write_enabled && aws_waf_admin.is_some();
+                capabilities.aws_waf_attach =
+                    config.aws_waf.attach_enabled && aws_waf_admin.is_some();
+                capabilities.aws_waf_detach =
+                    config.aws_waf.detach_enabled && aws_waf_admin.is_some();
+                capabilities.aws_waf_security_weaken =
+                    config.aws_waf.security_weaken_enabled && aws_waf_admin.is_some();
                 capabilities
             },
         };
@@ -621,6 +659,44 @@ impl EdgionCenterCli {
             }
         }
     }
+}
+
+fn audit_retention_cutoff(now: i64, retention_days: u32) -> Option<i64> {
+    (retention_days > 0)
+        .then(|| now.saturating_sub(i64::from(retention_days).saturating_mul(86_400)))
+}
+
+fn spawn_audit_retention(store: Arc<crate::store::Store>, retention_days: u32) {
+    if retention_days == 0 {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(86_400));
+        loop {
+            interval.tick().await;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let Some(cutoff) = audit_retention_cutoff(now, retention_days) else {
+                return;
+            };
+            match store.prune_audit(cutoff).await {
+                Ok(deleted) => tracing::info!(
+                    component = "audit",
+                    deleted,
+                    retention_days,
+                    "audit retention completed"
+                ),
+                Err(error) => tracing::warn!(
+                    component = "audit",
+                    %error,
+                    retention_days,
+                    "audit retention failed"
+                ),
+            }
+        }
+    });
 }
 
 fn resolved_password_login_capability(config: &CenterConfig, database_ready: bool) -> bool {
@@ -985,7 +1061,7 @@ async fn bootstrap_admin(store: &crate::store::Store) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_tls_cookie_warning, build_access_app, decide_transport,
+        admin_tls_cookie_warning, audit_retention_cutoff, build_access_app, decide_transport,
         resolved_password_login_capability, validate_access, validate_startup_policy,
         TransportDecision,
     };
@@ -1338,6 +1414,16 @@ mod tests {
         assert!(admin_tls_cookie_warning(true, true).is_none());
         // Safe: plain HTTP + non-Secure cookie (consistent dev setup).
         assert!(admin_tls_cookie_warning(false, false).is_none());
+    }
+
+    #[test]
+    fn audit_retention_cutoff_is_disabled_or_day_bounded() {
+        assert_eq!(audit_retention_cutoff(1_000_000, 0), None);
+        assert_eq!(
+            audit_retention_cutoff(1_000_000, 3),
+            Some(1_000_000 - 3 * 86_400)
+        );
+        assert_eq!(audit_retention_cutoff(i64::MIN, u32::MAX), Some(i64::MIN));
     }
 
     #[tokio::test]

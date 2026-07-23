@@ -49,11 +49,7 @@ pub use dns::{
     DnsCharacterString, DnsGuardStrength, DnsMutationGuard, DnsOwnerName, DnsPage, DnsPageRequest,
     DnsPageToken, DnsPropagationState, DnsProvider, DnsProviderResult, DnsRecordChange,
     DnsRecordExtension, DnsRecordObjectId, DnsRecordRevision, DnsRecordSetKey, DnsRecordSetValue,
-    DnsRoutingIdentity, DnsTtl, DnsTxtValue, DnsZoneId, DnsZoneRef, GoogleDnsGeoPolicy,
-    GoogleDnsGeoPolicyItem, GoogleDnsHealthCheckRef, GoogleDnsHealthCheckTargets,
-    GoogleDnsInternalLoadBalancerTarget, GoogleDnsIpProtocol, GoogleDnsLoadBalancerType,
-    GoogleDnsPolicyItemData, GoogleDnsRoutingPolicy, GoogleDnsRoutingPolicyKind,
-    GoogleDnsTrickleTraffic, GoogleDnsWeight, GoogleDnsWrrPolicyItem, ObservedDnsRecordSet,
+    DnsRoutingIdentity, DnsTtl, DnsTxtValue, DnsZoneId, DnsZoneRef, ObservedDnsRecordSet,
     ObservedDnsZone, ProviderDnsRecordSet, ProviderDnsRecordType, Route53AliasTarget,
     Route53FailoverRole, Route53GeoLocation, Route53HealthCheckId, Route53RoutingPolicy,
 };
@@ -231,7 +227,6 @@ impl CloudResourceRef {
 pub enum CloudProvider {
     Cloudflare,
     Aws,
-    GoogleCloud,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -350,7 +345,6 @@ impl ProviderAccountSpec {
 pub enum ProviderAccountScope {
     Cloudflare { account_id: String },
     Aws { account_id: String },
-    GoogleCloud { project_id: String },
 }
 
 impl ProviderAccountScope {
@@ -368,16 +362,6 @@ impl ProviderAccountScope {
                 provider == &CloudProvider::Aws,
                 account_id.len() == 12 && account_id.chars().all(|value| value.is_ascii_digit()),
                 "AWS account ID",
-            ),
-            Self::GoogleCloud { project_id } => (
-                provider == &CloudProvider::GoogleCloud,
-                (6..=30).contains(&project_id.len())
-                    && project_id.starts_with(|value: char| value.is_ascii_lowercase())
-                    && project_id.ends_with(|value: char| value.is_ascii_alphanumeric())
-                    && project_id.chars().all(|value| {
-                        value.is_ascii_lowercase() || value.is_ascii_digit() || value == '-'
-                    }),
-                "Google Cloud project ID",
             ),
         };
         if !matches || !valid {

@@ -6,6 +6,8 @@
 mod dns_admin;
 mod dns_admin_service;
 mod dns_write_service;
+mod zone_lifecycle_service;
 
 pub use dns_admin_service::{compose_dns_admin, Route53DnsReadConfig};
 pub use dns_write_service::{compose_dns_write_admin, Route53DnsWriteConfig};
+pub use zone_lifecycle_service::{compose_zone_lifecycle_admin, Route53ZoneLifecycleConfig};

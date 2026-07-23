@@ -73,6 +73,16 @@ binding already shown above. It does not resolve either cursor key or a mutation
 a durable operation, or retry a provider mutation. The per-account concurrency default is one.
 If a response is lost after Cloudflare may have accepted a request, Center returns a fixed unknown
 outcome and the caller must read the target state before deciding whether another write is safe.
+Optional Cloudflare outages do not affect Center readiness. Disabling all Cloudflare sections
+removes their routes and creates no Cloudflare client, request, or polling task. Graceful shutdown
+may cancel admission or a pre-dispatch request, but it never claims that an already-dispatched
+mutation was rolled back.
+
+Production Cloudflare traffic is fixed to `https://api.cloudflare.com` and uses the system WebPKI
+roots; this configuration intentionally exposes neither a provider endpoint override nor a custom
+provider CA/proxy switch. Restrict workload egress to the Cloudflare API with a
+NetworkPolicy/firewall and configure any mandatory enterprise proxy outside Center. FIPS mode is
+not claimed by this example; use a separately validated binary and crypto policy when required.
 
 The `cloudflare_waf` switch independently controls its read and write routes while reusing the
 same exact ProviderAccount API-token binding. Each WAF operation has one deadline, one global and

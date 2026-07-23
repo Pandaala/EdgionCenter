@@ -5731,7 +5731,6 @@ mod tests {
             ProviderDnsRecordType::Caa => "CAA",
             ProviderDnsRecordType::Ns => "NS",
             ProviderDnsRecordType::Soa => "SOA",
-            ProviderDnsRecordType::GoogleAlias => "ALIAS",
         }
     }
 

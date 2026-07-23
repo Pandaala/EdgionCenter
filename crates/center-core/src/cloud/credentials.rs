@@ -30,7 +30,7 @@ pub enum CredentialSource {
         audience: Option<String>,
     },
     /// Use an ambient or referenced base identity to assume/impersonate a
-    /// provider identity, such as an AWS IAM role or Google service account.
+    /// provider identity, such as an AWS IAM role.
     AssumeIdentity {
         base_credential_ref: Option<CredentialRef>,
         target_principal: String,

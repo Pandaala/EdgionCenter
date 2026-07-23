@@ -51,6 +51,21 @@ data:
           provider: aws
           purpose: route53_dns_mutation_receipt_hmac
           file: route53-dns-mutation.key
+        - credential_ref: aws/route53-zone-lifecycle
+          provider_account_id: aws-main
+          provider: aws
+          purpose: route53_zone_lifecycle_hmac
+          file: route53-zone-lifecycle.key
+        - credential_ref: aws/cloudfront-fingerprint
+          provider_account_id: aws-main
+          provider: aws
+          purpose: cloud_front_fingerprint_hmac
+          file: cloudfront-fingerprint.key
+        - credential_ref: aws/waf-owner
+          provider_account_id: aws-main
+          provider: aws
+          purpose: aws_waf_ownership_hmac
+          file: aws-waf-owner.key
     route53_dns_read:
       enabled: true
       cursor_key_ref: aws/route53-dns-cursor
@@ -61,6 +76,31 @@ data:
       enabled: true
       cursor_key_ref: aws/route53-dns-cursor
       mutation_receipt_key_ref: aws/route53-dns-mutation
+      operation_timeout_secs: 60
+      global_concurrency: 4
+      per_account_concurrency: 1
+    route53_zone_lifecycle:
+      enabled: true
+      cursor_key_ref: aws/route53-dns-cursor
+      lifecycle_token_key_ref: aws/route53-zone-lifecycle
+      operation_timeout_secs: 60
+      global_concurrency: 2
+      per_account_concurrency: 1
+    cloudfront:
+      read_enabled: true
+      write_enabled: true
+      fingerprint_key_ref: aws/cloudfront-fingerprint
+      operation_timeout_secs: 60
+      global_concurrency: 4
+      per_account_concurrency: 1
+    aws_waf:
+      read_enabled: true
+      write_enabled: true
+      attach_enabled: true
+      detach_enabled: true
+      security_weaken_enabled: false
+      ownership_hmac_key_ref: aws/waf-owner
+      account_wcu_ceiling: 1500
       operation_timeout_secs: 60
       global_concurrency: 4
       per_account_concurrency: 1

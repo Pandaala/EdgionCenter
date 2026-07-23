@@ -21,11 +21,11 @@ authority; changed generation, provider, scope, credential binding, cursor, or t
 | Secret disclosure through persistence, API, logs, diagnostics, or audit | Resolve credentials only in provider adapters. Keep `CredentialRef`, opaque revision, provider, and scope separate from material; redact token headers, raw provider bodies, expressions, private keys, and fencing values. |
 | Cross-account or confused-deputy use | Bind every request to one `ProviderAccount`, immutable provider-native scope, and expected credential purpose. Cloudflare rechecks its exact account on zone access. Provider authority never grants a human caller Center authorization. |
 | Kubernetes Secret escalation | Prefer workload identity. The default-off mounted-file resolver receives one directory capability, accepts closed purpose bindings, and needs no Kubernetes `get`, `list`, or `watch` on Secrets. Files are bounded, regular, non-empty, and fail closed on unsafe permissions or paths. |
-| Long-lived or stale authority | Prefer refreshed AWS/Google ambient or federated identities and scoped Cloudflare API Tokens. Opaque revisions fence cached clients and observations; rotation invalidates earlier authority. |
+| Long-lived or stale authority | Prefer refreshed AWS ambient or federated identities and scoped Cloudflare API Tokens. Opaque revisions fence cached clients and observations; rotation invalidates earlier authority. |
 
 Standalone aliases are resolved outside SQL business tables. Kubernetes uses projected identity or a
 namespace-scoped mounted Secret/external-secret volume; the Center business API does not read or
-return Secret data. See the checked-in [Cloudflare mounted credential example](../../cicd/deploy/examples/cloudflare-mounted-credentials/README.md), [AWS ambient identity example](../../cicd/deploy/examples/aws-route53-ambient/README.md), [Route 53 zone IAM policy](../../tasks/cloud-integration/examples/route53-zone-iam-policy.md), and [Google Cloud DNS adapter guidance](../../tasks/cloud-integration/12-google-cloud-dns-adapter.md).
+return Secret data. See the checked-in [Cloudflare mounted credential example](../../cicd/deploy/examples/cloudflare-mounted-credentials/README.md), [AWS ambient identity example](../../cicd/deploy/examples/aws-route53-ambient/README.md), and [Route 53 zone IAM policy](../../tasks/cloud-integration/examples/route53-zone-iam-policy.md).
 
 ## Network egress and SSRF boundary
 
@@ -33,8 +33,8 @@ return Secret data. See the checked-in [Cloudflare mounted credential example](.
 |---|---|---|
 | Cloudflare credential inspection, DNS, and zone WAF | Fixed HTTPS `api.cloudflare.com/client/v4`; no production endpoint override | A custom endpoint is only for tests or private compatible gateways; plain HTTP is loopback-only. Redirects are disabled, production requires TLS, sizes/timeouts are bounded, and Authorization never follows a redirect. |
 | AWS Route 53 and STS | AWS SDK-selected Route 53 and STS endpoints; inherited endpoint overrides are rejected | The only override seam is an explicitly named loopback HTTPS-or-HTTP test endpoint, validated before credential resolution or network I/O. |
-| Google Cloud DNS / Cloud Armor | No production Admin composition is installed. A later composition must use authenticated Google endpoints and reject user-configured endpoint overrides. | Adapter fakes and disposable-project tests never become production endpoint configuration. |
-| CloudFront inventory | No provider HTTP client is composed; retained code models read-only inventory/wire fidelity. | Current product has no CloudFront egress. |
+| CloudFront distribution lifecycle | AWS SDK CloudFront endpoint selected by the SDK after ambient-credential identity verification; inherited endpoint overrides are rejected. | Explicit loopback-only SDK test seams remain separate from production composition. |
+| AWS WAFv2 | Scope-specific AWS WAF endpoint selected by the SDK after STS account verification; CloudFront scope always uses `us-east-1`. | Explicit loopback-only SDK test seams; no user-configurable production endpoint. |
 | DNS propagation verification | Resolver profiles name concrete `SocketAddr` targets. Public mode permits public-unicast addresses only on port 53; private/split-horizon mode requires explicit CIDR and port allowlists. | Each UDP/TCP exchange rechecks the resolved socket immediately before connect, preventing DNS rebinding. Query count, message size, timeout, retry/backoff, nameserver-address count, and profile endpoint count are bounded. |
 
 Provider webhooks are not implemented or accepted. No external callback, signature verification,
@@ -97,3 +97,15 @@ deployment modes, which is intentionally outside this independent synchronous AP
 
 This model is enforced incrementally by provider-specific tasks; it does not create a shared
 credential service, webhook listener, DNS abstraction, dashboard menu, or Edgion coupling.
+
+AWS WAF is also provider-specific and default-off. Its composition accepts only an AWS
+`ProviderAccount` with ambient credentials, verifies the account through STS, and applies one
+typed scope to each request. Web ACL, IP-set, and regional-association mutations use fresh WAF
+lock tokens, single dispatch, operation deadlines, and post-operation authority checks. A timeout
+before dispatch is unavailable; any timeout or authority drift after possible dispatch is an
+unknown outcome requiring provider observation. AWS WAF rule ownership is not inferred from a
+name prefix: Center rules use an HMAC-protected provider rule name bound to provider account, AWS
+account, scope, immutable Web ACL name, and Center reference. Invalid, duplicate, forged, or
+transplanted proofs remain external and cannot be mutated. The ownership HMAC is a distinct
+mounted authority from AWS credentials. CloudFront attachment remains a separate minimal
+CloudFront operation rather than a shared gateway policy or Edgion integration.

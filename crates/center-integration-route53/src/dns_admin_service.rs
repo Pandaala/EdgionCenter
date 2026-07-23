@@ -395,6 +395,10 @@ pub(crate) async fn observe_exact_zone(
 }
 
 pub(crate) fn map_provider_error(error: NormalizedProviderError) -> Route53DnsAdminError {
+    edgion_center_app::common::observe::cloud_metrics::record_provider_error(
+        "aws",
+        error.category(),
+    );
     if error.code() == "route53_inventory_changed" {
         return Route53DnsAdminError::RestartRequired;
     }

@@ -525,6 +525,9 @@ mod tests {
             cloudflare_waf_admin: None,
             route53_dns_admin: None,
             route53_dns_write_admin: None,
+            route53_zone_lifecycle_admin: None,
+            cloudfront_admin: None,
+            aws_waf_admin: None,
             provider_account_store: account_store
                 .clone()
                 .map(|store| store as Arc<dyn edgion_center_core::ProviderAccountStore>),

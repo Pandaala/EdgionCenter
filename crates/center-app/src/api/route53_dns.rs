@@ -22,9 +22,11 @@ use edgion_center_core::{
     AbsoluteDnsName, CaaTag, CloudProvider, CloudResourceId, CoreError, CoreResult, DnsChangeId,
     DnsChangeReceipt, DnsChangeState, DnsCharacterString, DnsOwnerName, DnsPageToken,
     DnsPropagationState, DnsRecordExtension, DnsRecordRevision, DnsRecordSetKey, DnsRecordSetValue,
-    DnsRoutingIdentity, DnsTtl, DnsTxtValue, DnsZoneId, DnsZoneRef, ProviderDnsRecordSet,
-    ProviderDnsRecordType, Route53AliasTarget, Route53FailoverRole, Route53GeoLocation,
-    Route53HealthCheckId, Route53RoutingPolicy, ZoneVisibility,
+    DnsRoutingIdentity, DnsTtl, DnsTxtValue, DnsZoneId, DnsZoneRef, IdempotencyKey,
+    ProviderDnsRecordSet, ProviderDnsRecordType, Route53AliasTarget, Route53FailoverRole,
+    Route53GeoLocation, Route53HealthCheckId, Route53RoutingPolicy, ZoneCreationRequest,
+    ZoneLifecycleMutationReceipt, ZoneLifecycleMutationState, ZoneLifecycleObservation,
+    ZoneLifecycleRevision, ZoneVisibility,
 };
 use serde::{Deserialize, Serialize};
 
@@ -123,7 +125,6 @@ impl Route53RecordType {
             ProviderDnsRecordType::Caa => Some(Self::Caa),
             ProviderDnsRecordType::Ns => Some(Self::Ns),
             ProviderDnsRecordType::Soa => Some(Self::Soa),
-            ProviderDnsRecordType::GoogleAlias => None,
         }
     }
 }
@@ -182,22 +183,17 @@ pub struct Route53RecordPageDto {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "type",
-    content = "seconds",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Route53RecordTtlDto {
     Inherited {},
-    Seconds(u32),
+    Seconds { seconds: u32 },
 }
 
 impl Route53RecordTtlDto {
     fn core(self) -> DnsTtl {
         match self {
             Self::Inherited {} => DnsTtl::Inherited,
-            Self::Seconds(seconds) => DnsTtl::Seconds(seconds),
+            Self::Seconds { seconds } => DnsTtl::Seconds(seconds),
         }
     }
 }
@@ -454,6 +450,18 @@ impl Route53RecordSetDesiredDto {
             ));
         }
         let alias_target = self.alias_target.as_ref().map(Route53AliasTargetDto::core);
+        if alias_target.is_some()
+            && (!values.is_empty() || !matches!(self.ttl, Route53RecordTtlDto::Inherited {}))
+        {
+            return Err(CoreError::Conflict(
+                "Route 53 Alias RRsets require inherited TTL and no record values".to_string(),
+            ));
+        }
+        if alias_target.is_none() && values.is_empty() {
+            return Err(CoreError::Conflict(
+                "Route 53 non-Alias RRsets require at least one record value".to_string(),
+            ));
+        }
         let routing_policy = self
             .routing_policy
             .as_ref()
@@ -698,6 +706,121 @@ pub trait Route53DnsWriteAdminService: Send + Sync {
 }
 
 pub type SharedRoute53DnsWriteAdminService = Arc<dyn Route53DnsWriteAdminService>;
+
+/// Provider-specific public hosted-zone create request. The idempotency key is explicit so a
+/// caller can safely recover a lost response without letting Center invent a new AWS zone.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Route53ZoneCreateRequest {
+    pub apex: AbsoluteDnsName,
+    pub idempotency_key: IdempotencyKey,
+}
+
+/// Exact fresh-observation guard for the narrow hosted-zone delete surface.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Route53ZoneDeleteRequest {
+    pub apex: AbsoluteDnsName,
+    pub revision: ZoneLifecycleRevision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Route53ZoneLifecycleMutationDto {
+    pub mutation_id: edgion_center_core::ZoneLifecycleMutationId,
+    pub provider_application: Route53ZoneLifecycleApplicationDto,
+    pub authoritative_convergence: Route53AuthoritativeConvergenceDto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Route53ZoneLifecycleApplicationDto {
+    Pending,
+    Accepted,
+}
+
+impl Route53ZoneLifecycleMutationDto {
+    pub fn from_core(value: ZoneLifecycleMutationReceipt) -> CoreResult<Self> {
+        let provider_application = match value.state {
+            ZoneLifecycleMutationState::Pending => Route53ZoneLifecycleApplicationDto::Pending,
+            ZoneLifecycleMutationState::Succeeded => Route53ZoneLifecycleApplicationDto::Accepted,
+            ZoneLifecycleMutationState::Failed | ZoneLifecycleMutationState::UnknownOutcome => {
+                return Err(CoreError::Conflict(
+                    "invalid Route 53 lifecycle receipt".into(),
+                ));
+            }
+        };
+        Ok(Self {
+            mutation_id: value.mutation_id,
+            provider_application,
+            authoritative_convergence: Route53AuthoritativeConvergenceDto::NotChecked,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Route53ZoneLifecycleObservationDto {
+    pub zone: Route53ZoneDto,
+    pub revision: ZoneLifecycleRevision,
+    pub authoritative_nameservers: Vec<AbsoluteDnsName>,
+    pub delegation: edgion_center_core::DelegationObservation,
+    pub readiness: edgion_center_core::ZoneReadiness,
+    pub dnssec: edgion_center_core::DnssecObservation,
+    pub non_default_record_count: u64,
+}
+
+impl Route53ZoneLifecycleObservationDto {
+    pub fn from_core(value: ZoneLifecycleObservation) -> CoreResult<Self> {
+        value.validate()?;
+        if value.zone.provider != CloudProvider::Aws
+            || value.zone.visibility != ZoneVisibility::Public
+        {
+            return Err(CoreError::Conflict(
+                "invalid Route 53 lifecycle observation".into(),
+            ));
+        }
+        Ok(Self {
+            zone: Route53ZoneDto {
+                provider_account_id: value.zone.provider_account_id,
+                zone_id: value.zone.zone_id,
+                apex: value.zone.apex,
+                visibility: value.zone.visibility,
+            },
+            revision: value.revision,
+            authoritative_nameservers: value.authoritative_nameservers.into_iter().collect(),
+            delegation: value.delegation,
+            readiness: value.readiness,
+            dnssec: value.dnssec,
+            non_default_record_count: value.non_default_record_count,
+        })
+    }
+}
+
+#[async_trait]
+pub trait Route53ZoneLifecycleAdminService: Send + Sync {
+    async fn create_zone(
+        &self,
+        account_id: &CloudResourceId,
+        request: &ZoneCreationRequest,
+    ) -> Result<Route53ZoneLifecycleMutationDto, Route53DnsAdminError>;
+
+    async fn observe_zone(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        apex: &AbsoluteDnsName,
+    ) -> Result<Route53ZoneLifecycleObservationDto, Route53DnsAdminError>;
+
+    async fn delete_zone(
+        &self,
+        account_id: &CloudResourceId,
+        zone_id: &DnsZoneId,
+        request: &Route53ZoneDeleteRequest,
+    ) -> Result<Route53ZoneLifecycleMutationDto, Route53DnsAdminError>;
+}
+
+pub type SharedRoute53ZoneLifecycleAdminService = Arc<dyn Route53ZoneLifecycleAdminService>;
 
 impl Route53ZoneDto {
     fn validate(&self) -> CoreResult<()> {
@@ -1196,6 +1319,104 @@ pub async fn get_change(
     }
 }
 
+pub async fn create_zone(
+    State(state): State<ApiState>,
+    Path(account_id): Path<String>,
+    body: Result<Json<Route53ZoneCreateRequest>, JsonRejection>,
+) -> Response {
+    let account_id = match CloudResourceId::new(account_id) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_account_id"),
+    };
+    let Json(request) = match body {
+        Ok(value) => value,
+        Err(rejection) => return json_rejection_response(rejection),
+    };
+    let creation = ZoneCreationRequest {
+        provider_account_id: account_id.clone(),
+        provider: CloudProvider::Aws,
+        apex: request.apex,
+        visibility: ZoneVisibility::Public,
+        idempotency_key: request.idempotency_key,
+    };
+    let Some(service) = state.route53_zone_lifecycle_admin.as_deref() else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable");
+    };
+    match service.create_zone(&account_id, &creation).await {
+        Ok(result) => Json(ApiResponse::ok_body(result)).into_response(),
+        Err(error) => map_service_error(error),
+    }
+}
+
+pub async fn observe_zone_lifecycle(
+    State(state): State<ApiState>,
+    Path((account_id, zone_id)): Path<(String, String)>,
+    Query(query): Query<Route53ZoneLifecycleQuery>,
+) -> Response {
+    let account_id = match CloudResourceId::new(account_id) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_account_id"),
+    };
+    let zone_id = match parse_zone_id(zone_id) {
+        Ok(value) => value,
+        Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
+    };
+    let apex = match query
+        .apex
+        .and_then(|value| AbsoluteDnsName::new(value).ok())
+    {
+        Some(value) => value,
+        None => return error_response(StatusCode::BAD_REQUEST, "invalid_zone_apex"),
+    };
+    let Some(service) = state.route53_zone_lifecycle_admin.as_deref() else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable");
+    };
+    match service.observe_zone(&account_id, &zone_id, &apex).await {
+        Ok(result)
+            if result.zone.provider_account_id == account_id
+                && result.zone.zone_id == zone_id
+                && result.zone.apex == apex
+                && result.zone.validate().is_ok() =>
+        {
+            Json(ApiResponse::ok_body(result)).into_response()
+        }
+        Ok(_) => error_response(StatusCode::SERVICE_UNAVAILABLE, "invalid_service_response"),
+        Err(error) => map_service_error(error),
+    }
+}
+
+pub async fn delete_zone(
+    State(state): State<ApiState>,
+    Path((account_id, zone_id)): Path<(String, String)>,
+    body: Result<Json<Route53ZoneDeleteRequest>, JsonRejection>,
+) -> Response {
+    let account_id = match CloudResourceId::new(account_id) {
+        Ok(value) => value,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid_account_id"),
+    };
+    let zone_id = match parse_zone_id(zone_id) {
+        Ok(value) => value,
+        Err(code) => return error_response(StatusCode::BAD_REQUEST, code),
+    };
+    let Json(request) = match body {
+        Ok(value) => value,
+        Err(rejection) => return json_rejection_response(rejection),
+    };
+    let Some(service) = state.route53_zone_lifecycle_admin.as_deref() else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "service_unavailable");
+    };
+    match service.delete_zone(&account_id, &zone_id, &request).await {
+        Ok(result) => Json(ApiResponse::ok_body(result)).into_response(),
+        Err(error) => map_service_error(error),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Route53ZoneLifecycleQuery {
+    apex: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1252,7 +1473,6 @@ mod tests {
             serde_json::to_value(Route53RecordType::Aaaa).unwrap(),
             serde_json::json!("AAAA")
         );
-        assert!(Route53RecordType::from_core(ProviderDnsRecordType::GoogleAlias).is_none());
     }
 
     #[test]
@@ -1296,6 +1516,50 @@ mod tests {
         let txt = txt.record_set(&txt_key).unwrap();
         assert_eq!(txt.extension, None);
         assert_eq!(txt.values.len(), 1);
+    }
+
+    #[test]
+    fn alias_write_body_requires_the_native_route53_alias_shape() {
+        let key = Route53RecordSetKey {
+            owner: DnsOwnerName::new("api.example.com").unwrap(),
+            record_type: Route53RecordType::A,
+            set_identifier: None,
+        };
+        let alias: Route53RecordSetPutRequest = serde_json::from_value(serde_json::json!({
+            "guard": { "type": "must_not_exist" },
+            "desired": {
+                "ttl": { "type": "inherited" },
+                "values": [],
+                "aliasTarget": {
+                    "targetZoneId": "Z0123456789ABCDEF",
+                    "target": "dualstack.example.elb.amazonaws.com.",
+                    "evaluateTargetHealth": false
+                },
+                "routingPolicy": { "type": "weighted", "weight": 10 },
+                "healthCheckId": "12345678-1234-1234-1234-123456789012"
+            }
+        }))
+        .unwrap();
+        let record = alias.record_set(&key).unwrap();
+        assert!(record.values.is_empty());
+        assert_eq!(record.ttl, DnsTtl::Inherited);
+
+        let invalid: Route53RecordSetPutRequest = serde_json::from_value(serde_json::json!({
+            "guard": { "type": "must_not_exist" },
+            "desired": {
+                "ttl": { "type": "seconds", "seconds": 60 },
+                "values": [{ "type": "A", "address": "192.0.2.1" }],
+                "aliasTarget": {
+                    "targetZoneId": "Z0123456789ABCDEF",
+                    "target": "dualstack.example.elb.amazonaws.com.",
+                    "evaluateTargetHealth": false
+                },
+                "routingPolicy": null,
+                "healthCheckId": null
+            }
+        }))
+        .unwrap();
+        assert!(invalid.record_set(&key).is_err());
     }
 
     #[test]

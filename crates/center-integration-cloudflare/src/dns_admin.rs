@@ -145,7 +145,6 @@ fn map_record_type(
         ProviderDnsRecordType::Caa => CloudflareRecordType::Caa,
         ProviderDnsRecordType::Ns => CloudflareRecordType::Ns,
         ProviderDnsRecordType::Soa => CloudflareRecordType::Soa,
-        ProviderDnsRecordType::GoogleAlias => return Err(invalid_observation()),
     })
 }
 
@@ -243,11 +242,7 @@ fn map_extension(
             comment: None,
             tags: std::collections::BTreeSet::new(),
         }),
-        Some(
-            DnsRecordExtension::Route53 { .. }
-            | DnsRecordExtension::GoogleAlias { .. }
-            | DnsRecordExtension::GoogleCloud { .. },
-        ) => Err(invalid_observation()),
+        Some(DnsRecordExtension::Route53 { .. }) => Err(invalid_observation()),
     }
 }
 

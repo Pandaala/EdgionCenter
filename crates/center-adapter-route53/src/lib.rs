@@ -217,6 +217,11 @@ pub struct Route53DnsAdapter {
 }
 
 impl Route53DnsAdapter {
+    /// Center ProviderAccount identity bound at construction.
+    pub fn center_account_id(&self) -> &CloudResourceId {
+        &self.center_account_id
+    }
+
     pub fn new(
         center_account_id: CloudResourceId,
         account: &ProviderAccountSpec,
@@ -288,6 +293,30 @@ impl Route53DnsAdapter {
             api,
             cursor_key,
             mutation_receipt_verifier,
+        )
+    }
+
+    /// Construct an adapter with authority limited to hosted-zone lifecycle calls.
+    ///
+    /// The lifecycle token key remains distinct from the inventory cursor key. RRset mutation
+    /// authority is intentionally absent from this constructor.
+    pub fn new_with_lifecycle_key(
+        center_account_id: CloudResourceId,
+        account: &ProviderAccountSpec,
+        api: Arc<dyn Route53Api>,
+        cursor_key: Route53CursorKey,
+        lifecycle_token_key: Route53LifecycleTokenKey,
+    ) -> Result<Self> {
+        if cursor_key.0 == lifecycle_token_key.0 {
+            return Err(validation("route53_signing_key_reuse"));
+        }
+        Self::new_inner(
+            center_account_id,
+            account,
+            api,
+            cursor_key,
+            None,
+            Some(lifecycle_token_key),
         )
     }
 
@@ -791,6 +820,41 @@ impl Route53DnsAdapter {
             marker = Some(next);
         }
         Err(validation("route53_zone_pagination_limit"))
+    }
+
+    /// Deletes one public hosted zone after a fresh provider observation proves that the exact
+    /// name/revision still matches, only the Route 53 default records remain, and DNSSEC is off.
+    ///
+    /// This provider-specific direct-call seam is intentionally narrower than the generic
+    /// managed-zone deletion capability: it neither accepts imported/retained metadata nor
+    /// changes delegation or DNSSEC state.
+    pub async fn delete_zone_with_exact_guard(
+        &self,
+        zone: &DnsZoneRef,
+        expected_revision: &ZoneLifecycleRevision,
+    ) -> ZoneLifecycleProviderResult<ZoneLifecycleMutationReceipt> {
+        self.lifecycle_token_key()?;
+        if zone.visibility != ZoneVisibility::Public {
+            return Err(validation("route53_private_zone_deletion_unsupported"));
+        }
+        let observed = self
+            .observe_lifecycle_inner(zone)
+            .await?
+            .ok_or_else(|| not_found("route53_zone_not_found"))?;
+        if &observed.revision != expected_revision {
+            return Err(conflict("route53_zone_lifecycle_revision_conflict"));
+        }
+        if observed.non_default_record_count != 0
+            || !matches!(observed.dnssec.state, DnssecProviderState::Disabled)
+        {
+            return Err(conflict("route53_zone_deletion_precondition_failed"));
+        }
+        let change = self.api.delete_hosted_zone(zone.zone_id.as_str()).await?;
+        self.lifecycle_receipt(
+            Some(zone.zone_id.as_str()),
+            LifecycleOperation::Delete,
+            &change,
+        )
     }
 }
 

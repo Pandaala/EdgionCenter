@@ -3,15 +3,13 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Display,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{Ipv4Addr, Ipv6Addr},
 };
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    CloudProvider, CloudResourceId, NormalizedProviderError, ProviderRegion, ZoneVisibility,
-};
+use super::{CloudProvider, CloudResourceId, NormalizedProviderError, ZoneVisibility};
 use crate::{CoreError, CoreResult};
 
 const MAX_OPAQUE_ID_LEN: usize = 512;
@@ -38,10 +36,6 @@ pub enum ProviderDnsRecordType {
     Caa,
     Ns,
     Soa,
-    /// Provider-only Google Cloud DNS ALIAS RRSet. Adapters render this as
-    /// `ALIAS`; it is not a portable A/AAAA or CNAME record.
-    #[serde(rename = "GOOGLE_ALIAS")]
-    GoogleAlias,
 }
 
 macro_rules! opaque_id {
@@ -469,386 +463,6 @@ pub enum CloudflareCnameFlattening {
     DoNotFlatten,
 }
 
-macro_rules! google_decimal {
-    ($name:ident, $kind:literal, $validate:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[serde(try_from = "String", into = "String")]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> CoreResult<Self> {
-                let value = value.into();
-                if !$validate(&value) {
-                    return Err(CoreError::Conflict(format!("{} is invalid", $kind)));
-                }
-                Ok(Self(value))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
-            fn validate(&self) -> CoreResult<()> {
-                Self::new(self.0.clone()).map(|_| ())
-            }
-        }
-
-        impl TryFrom<String> for $name {
-            type Error = CoreError;
-
-            fn try_from(value: String) -> Result<Self, Self::Error> {
-                Self::new(value)
-            }
-        }
-
-        impl From<$name> for String {
-            fn from(value: $name) -> Self {
-                value.0
-            }
-        }
-    };
-}
-
-google_decimal!(
-    GoogleDnsWeight,
-    "Google DNS routing weight",
-    valid_google_weight
-);
-google_decimal!(
-    GoogleDnsTrickleTraffic,
-    "Google DNS trickle traffic fraction",
-    valid_google_fraction
-);
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleDnsHealthCheckRef {
-    pub project_id: String,
-    pub health_check: String,
-}
-
-impl GoogleDnsHealthCheckRef {
-    fn validate(&self) -> CoreResult<()> {
-        validate_google_project_id(&self.project_id)?;
-        validate_google_resource_name(&self.health_check, "Google DNS health check")
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GoogleDnsLoadBalancerType {
-    None,
-    GlobalL7,
-    RegionalL4,
-    RegionalL7,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GoogleDnsIpProtocol {
-    Undefined,
-    Tcp,
-    Udp,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleDnsInternalLoadBalancerTarget {
-    pub load_balancer_type: GoogleDnsLoadBalancerType,
-    pub ip_address: IpAddr,
-    pub port: u16,
-    pub ip_protocol: GoogleDnsIpProtocol,
-    pub network_project_id: String,
-    pub network: String,
-    pub project_id: String,
-    pub region: Option<ProviderRegion>,
-}
-
-impl GoogleDnsInternalLoadBalancerTarget {
-    fn validate(&self) -> CoreResult<()> {
-        if !self.ip_address.is_ipv4()
-            || self.port == 0
-            || self.load_balancer_type == GoogleDnsLoadBalancerType::None
-            || self.ip_protocol == GoogleDnsIpProtocol::Undefined
-        {
-            return Err(CoreError::Conflict(
-                "Google DNS internal load balancer target is invalid".to_string(),
-            ));
-        }
-        validate_google_project_id(&self.network_project_id)?;
-        validate_google_project_id(&self.project_id)?;
-        validate_google_resource_name(&self.network, "Google DNS network")?;
-        match (self.load_balancer_type, self.region.as_ref()) {
-            (GoogleDnsLoadBalancerType::GlobalL7, None) => Ok(()),
-            (
-                GoogleDnsLoadBalancerType::RegionalL4 | GoogleDnsLoadBalancerType::RegionalL7,
-                Some(region),
-            ) => region.validate(),
-            (GoogleDnsLoadBalancerType::None, _) => unreachable!("rejected above"),
-            _ => Err(CoreError::Conflict(
-                "Google DNS load balancer region is inconsistent with its type".to_string(),
-            )),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum GoogleDnsHealthCheckTargets {
-    ExternalEndpoints {
-        addresses: BTreeSet<IpAddr>,
-    },
-    InternalLoadBalancers {
-        targets: BTreeSet<GoogleDnsInternalLoadBalancerTarget>,
-    },
-}
-
-impl GoogleDnsHealthCheckTargets {
-    fn validate(
-        &self,
-        record_type: ProviderDnsRecordType,
-        visibility: ZoneVisibility,
-    ) -> CoreResult<()> {
-        if !matches!(
-            record_type,
-            ProviderDnsRecordType::A | ProviderDnsRecordType::Aaaa
-        ) {
-            return Err(CoreError::Conflict(
-                "Google DNS health-checked targets require A or AAAA records".to_string(),
-            ));
-        }
-        match self {
-            Self::ExternalEndpoints { addresses } => {
-                if visibility != ZoneVisibility::Public
-                    || addresses.is_empty()
-                    || addresses.iter().any(|address| {
-                        matches!(record_type, ProviderDnsRecordType::A) != address.is_ipv4()
-                    })
-                {
-                    return Err(CoreError::Conflict(
-                        "Google DNS external health-check targets are invalid".to_string(),
-                    ));
-                }
-            }
-            Self::InternalLoadBalancers { targets } => {
-                if visibility != ZoneVisibility::Private
-                    || record_type != ProviderDnsRecordType::A
-                    || targets.is_empty()
-                {
-                    return Err(CoreError::Conflict(
-                        "Google DNS internal health-check targets are invalid".to_string(),
-                    ));
-                }
-                for target in targets {
-                    target.validate()?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn requires_explicit_health_check(&self) -> bool {
-        matches!(self, Self::ExternalEndpoints { .. })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleDnsPolicyItemData {
-    #[serde(default)]
-    pub values: BTreeSet<DnsRecordSetValue>,
-    pub health_checked_targets: Option<GoogleDnsHealthCheckTargets>,
-}
-
-impl GoogleDnsPolicyItemData {
-    fn validate(&self, zone: &DnsZoneRef, record_type: ProviderDnsRecordType) -> CoreResult<()> {
-        if self.values.is_empty() && self.health_checked_targets.is_none() {
-            return Err(CoreError::Conflict(
-                "Google DNS routing item requires data or health-checked targets".to_string(),
-            ));
-        }
-        if self
-            .values
-            .iter()
-            .any(|value| value.record_type() != record_type)
-        {
-            return Err(CoreError::Conflict(
-                "Google DNS routing item value does not match its record type".to_string(),
-            ));
-        }
-        for value in &self.values {
-            value.validate()?;
-        }
-        if matches!(record_type, ProviderDnsRecordType::Cname) && self.values.len() != 1 {
-            return Err(CoreError::Conflict(
-                "Google DNS routed CNAME items require exactly one value".to_string(),
-            ));
-        }
-        if let Some(targets) = self.health_checked_targets.as_ref() {
-            targets.validate(record_type, zone.visibility)?;
-        }
-        Ok(())
-    }
-
-    fn has_health_checked_targets(&self) -> bool {
-        self.health_checked_targets.is_some()
-    }
-
-    fn requires_explicit_health_check(&self) -> bool {
-        self.health_checked_targets
-            .as_ref()
-            .is_some_and(GoogleDnsHealthCheckTargets::requires_explicit_health_check)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleDnsGeoPolicyItem {
-    pub location: ProviderRegion,
-    pub data: GoogleDnsPolicyItemData,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleDnsGeoPolicy {
-    pub items: Vec<GoogleDnsGeoPolicyItem>,
-    pub enable_fencing: bool,
-}
-
-impl GoogleDnsGeoPolicy {
-    fn validate(&self, zone: &DnsZoneRef, record_type: ProviderDnsRecordType) -> CoreResult<()> {
-        if self.items.is_empty() {
-            return Err(CoreError::Conflict(
-                "Google DNS geolocation policy requires items".to_string(),
-            ));
-        }
-        let mut locations = BTreeSet::new();
-        for item in &self.items {
-            item.location.validate()?;
-            if !locations.insert(item.location.clone()) {
-                return Err(CoreError::Conflict(
-                    "Google DNS geolocation policy contains a duplicate location".to_string(),
-                ));
-            }
-            item.data.validate(zone, record_type)?;
-        }
-        Ok(())
-    }
-
-    fn has_health_checked_targets(&self) -> bool {
-        self.items
-            .iter()
-            .any(|item| item.data.has_health_checked_targets())
-    }
-
-    fn requires_explicit_health_check(&self) -> bool {
-        self.items
-            .iter()
-            .any(|item| item.data.requires_explicit_health_check())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleDnsWrrPolicyItem {
-    pub weight: GoogleDnsWeight,
-    pub data: GoogleDnsPolicyItemData,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum GoogleDnsRoutingPolicyKind {
-    Geolocation {
-        policy: GoogleDnsGeoPolicy,
-    },
-    WeightedRoundRobin {
-        items: Vec<GoogleDnsWrrPolicyItem>,
-    },
-    PrimaryBackup {
-        primary_targets: GoogleDnsHealthCheckTargets,
-        backup_geo_targets: GoogleDnsGeoPolicy,
-        trickle_traffic: GoogleDnsTrickleTraffic,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoogleDnsRoutingPolicy {
-    pub health_check: Option<GoogleDnsHealthCheckRef>,
-    pub policy: GoogleDnsRoutingPolicyKind,
-}
-
-impl GoogleDnsRoutingPolicy {
-    fn validate(&self, zone: &DnsZoneRef, record_type: ProviderDnsRecordType) -> CoreResult<()> {
-        if !matches!(
-            record_type,
-            ProviderDnsRecordType::A
-                | ProviderDnsRecordType::Aaaa
-                | ProviderDnsRecordType::Cname
-                | ProviderDnsRecordType::Mx
-                | ProviderDnsRecordType::Srv
-                | ProviderDnsRecordType::Txt
-        ) {
-            return Err(CoreError::Conflict(
-                "Google DNS routing policy record type is unsupported".to_string(),
-            ));
-        }
-        let (has_targets, requires_explicit_health_check) = match &self.policy {
-            GoogleDnsRoutingPolicyKind::Geolocation { policy } => {
-                policy.validate(zone, record_type)?;
-                (
-                    policy.has_health_checked_targets(),
-                    policy.requires_explicit_health_check(),
-                )
-            }
-            GoogleDnsRoutingPolicyKind::WeightedRoundRobin { items } => {
-                if items.is_empty() {
-                    return Err(CoreError::Conflict(
-                        "Google DNS weighted policy requires items".to_string(),
-                    ));
-                }
-                for item in items {
-                    item.weight.validate()?;
-                    item.data.validate(zone, record_type)?;
-                }
-                (
-                    items
-                        .iter()
-                        .any(|item| item.data.has_health_checked_targets()),
-                    items
-                        .iter()
-                        .any(|item| item.data.requires_explicit_health_check()),
-                )
-            }
-            GoogleDnsRoutingPolicyKind::PrimaryBackup {
-                primary_targets,
-                backup_geo_targets,
-                trickle_traffic,
-            } => {
-                primary_targets.validate(record_type, zone.visibility)?;
-                backup_geo_targets.validate(zone, record_type)?;
-                trickle_traffic.validate()?;
-                (
-                    true,
-                    primary_targets.requires_explicit_health_check()
-                        || backup_geo_targets.requires_explicit_health_check(),
-                )
-            }
-        };
-        match (
-            has_targets,
-            requires_explicit_health_check,
-            self.health_check.as_ref(),
-        ) {
-            (_, true, Some(health_check)) => health_check.validate(),
-            (true, false, None) | (false, false, None) => Ok(()),
-            _ => Err(CoreError::Conflict(
-                "Google DNS routing health check and targets are inconsistent".to_string(),
-            )),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Route53AliasTarget {
@@ -947,12 +561,6 @@ pub enum DnsRecordExtension {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         health_check_id: Option<Route53HealthCheckId>,
     },
-    GoogleAlias {
-        target: AbsoluteDnsName,
-    },
-    GoogleCloud {
-        routing_policy: Box<GoogleDnsRoutingPolicy>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -995,8 +603,6 @@ impl ProviderDnsRecordSet {
                 ..
             })
         );
-        let google_alias = matches!(self.extension, Some(DnsRecordExtension::GoogleAlias { .. }));
-        let google_routing = matches!(self.extension, Some(DnsRecordExtension::GoogleCloud { .. }));
         if route53_alias {
             if !self.values.is_empty()
                 || self.ttl != DnsTtl::Inherited
@@ -1013,26 +619,6 @@ impl ProviderDnsRecordSet {
             {
                 return Err(CoreError::Conflict(
                     "provider alias values, type, or TTL are invalid".to_string(),
-                ));
-            }
-        } else if google_alias {
-            if !self.values.is_empty()
-                || !matches!(self.ttl, DnsTtl::Seconds(_))
-                || self.key.record_type != ProviderDnsRecordType::GoogleAlias
-            {
-                return Err(CoreError::Conflict(
-                    "Google alias requires its provider record type and an explicit TTL"
-                        .to_string(),
-                ));
-            }
-        } else if google_routing {
-            if !self.values.is_empty()
-                || !matches!(self.ttl, DnsTtl::Seconds(_))
-                || !matches!(self.key.routing, DnsRoutingIdentity::Simple)
-            {
-                return Err(CoreError::Conflict(
-                    "Google DNS routing policies require empty top-level values, a simple identity, and an explicit TTL"
-                        .to_string(),
                 ));
             }
         } else {
@@ -1206,29 +792,6 @@ impl ProviderDnsRecordSet {
                         "Route 53 failover aliases must evaluate target health".to_string(),
                     ));
                 }
-            }
-            Some(DnsRecordExtension::GoogleAlias { .. }) => {
-                if zone.provider != CloudProvider::GoogleCloud
-                    || self.key.owner.as_str() != zone.apex.as_str()
-                    || !matches!(self.key.routing, DnsRoutingIdentity::Simple)
-                    || zone.visibility != ZoneVisibility::Public
-                {
-                    return Err(CoreError::Conflict(
-                        "Google alias must be a simple public-zone apex record".to_string(),
-                    ));
-                }
-            }
-            Some(DnsRecordExtension::GoogleCloud { routing_policy }) => {
-                if zone.provider != CloudProvider::GoogleCloud
-                    || !matches!(self.key.routing, DnsRoutingIdentity::Simple)
-                    || self.key.record_type == ProviderDnsRecordType::GoogleAlias
-                {
-                    return Err(CoreError::Conflict(
-                        "Google DNS routing policy requires a Google Cloud ordinary RRset"
-                            .to_string(),
-                    ));
-                }
-                routing_policy.validate(zone, self.key.record_type)?;
             }
             None => {
                 if zone.provider == CloudProvider::Cloudflare
@@ -1410,8 +973,6 @@ pub fn validate_dns_changes(zone: &DnsZoneRef, changes: &[DnsRecordChange]) -> C
     let mut keys = BTreeSet::new();
     let mut owners_and_types = BTreeSet::new();
     let mut route53_groups = BTreeMap::new();
-    let mut google_apex_alias = false;
-    let mut google_apex_ordinary = false;
     for change in changes {
         change.validate(zone)?;
         let key = change.key();
@@ -1437,18 +998,6 @@ pub fn validate_dns_changes(zone: &DnsZoneRef, changes: &[DnsRecordChange]) -> C
             } else {
                 owners_and_types.insert((key.owner.clone(), false));
             }
-            if zone.provider == CloudProvider::GoogleCloud
-                && key.owner.as_str() == zone.apex.as_str()
-            {
-                if key.record_type == ProviderDnsRecordType::GoogleAlias {
-                    google_apex_alias = true;
-                } else if !matches!(
-                    key.record_type,
-                    ProviderDnsRecordType::Ns | ProviderDnsRecordType::Soa
-                ) {
-                    google_apex_ordinary = true;
-                }
-            }
         }
         if zone.provider == CloudProvider::Aws {
             if let Some(record_set) = change.desired_record_set() {
@@ -1462,12 +1011,6 @@ pub fn validate_dns_changes(zone: &DnsZoneRef, changes: &[DnsRecordChange]) -> C
                 "CNAME cannot coexist with another record type in one batch".to_string(),
             ));
         }
-    }
-    if google_apex_alias && google_apex_ordinary {
-        return Err(CoreError::Conflict(
-            "Google DNS ALIAS cannot coexist with another user-managed apex RRset in one batch"
-                .to_string(),
-        ));
     }
     Ok(())
 }
@@ -1788,71 +1331,6 @@ fn normalize_name(value: &str, allow_underscore: bool, allow_wildcard: bool) -> 
     Ok(normalized)
 }
 
-fn canonical_non_negative_decimal(value: &str) -> Option<(&str, Option<&str>)> {
-    if value.len() > 64 {
-        return None;
-    }
-    let (whole, fraction) = match value.split_once('.') {
-        Some((whole, fraction)) => (whole, Some(fraction)),
-        None => (value, None),
-    };
-    if whole.is_empty()
-        || !whole.bytes().all(|byte| byte.is_ascii_digit())
-        || (whole.len() > 1 && whole.starts_with('0'))
-        || fraction.is_some_and(|fraction| {
-            fraction.is_empty()
-                || !fraction.bytes().all(|byte| byte.is_ascii_digit())
-                || fraction.ends_with('0')
-        })
-    {
-        None
-    } else {
-        Some((whole, fraction))
-    }
-}
-
-fn valid_google_weight(value: &str) -> bool {
-    canonical_non_negative_decimal(value).is_some()
-}
-
-fn valid_google_fraction(value: &str) -> bool {
-    matches!(
-        canonical_non_negative_decimal(value),
-        Some(("0", _)) | Some(("1", None))
-    )
-}
-
-fn validate_google_project_id(value: &str) -> CoreResult<()> {
-    if (6..=30).contains(&value.len())
-        && value.starts_with(|character: char| character.is_ascii_lowercase())
-        && value.ends_with(|character: char| character.is_ascii_alphanumeric())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-    {
-        Ok(())
-    } else {
-        Err(CoreError::Conflict(
-            "Google Cloud project ID is invalid".to_string(),
-        ))
-    }
-}
-
-fn validate_google_resource_name(value: &str, kind: &'static str) -> CoreResult<()> {
-    if !value.is_empty()
-        && value.len() <= 63
-        && value.starts_with(|character: char| character.is_ascii_lowercase())
-        && value.ends_with(|character: char| character.is_ascii_alphanumeric())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-    {
-        Ok(())
-    } else {
-        Err(CoreError::Conflict(format!("{kind} is invalid")))
-    }
-}
-
 fn validate_text(value: &str, kind: &'static str, max_len: usize) -> CoreResult<()> {
     if value.is_empty()
         || value.len() > max_len
@@ -1910,7 +1388,7 @@ mod tests {
     }
 
     fn zone() -> DnsZoneRef {
-        zone_for(CloudProvider::GoogleCloud)
+        zone_for(CloudProvider::Aws)
     }
 
     fn a_record(values: impl IntoIterator<Item = Ipv4Addr>) -> ProviderDnsRecordSet {
@@ -2054,25 +1532,6 @@ mod tests {
             .validate(&zone_for(CloudProvider::Cloudflare))
             .is_err());
 
-        let google_alias = ProviderDnsRecordSet {
-            key: DnsRecordSetKey {
-                owner: DnsOwnerName::new("example.com").unwrap(),
-                record_type: ProviderDnsRecordType::GoogleAlias,
-                routing: DnsRoutingIdentity::Simple,
-            },
-            ttl: DnsTtl::Seconds(300),
-            values: BTreeSet::new(),
-            extension: Some(DnsRecordExtension::GoogleAlias {
-                target: AbsoluteDnsName::new("target.example.net").unwrap(),
-            }),
-        };
-        assert!(google_alias
-            .validate(&zone_for(CloudProvider::GoogleCloud))
-            .is_ok());
-        assert!(google_alias
-            .validate(&zone_for(CloudProvider::Aws))
-            .is_err());
-
         let mut routed = a_record(["192.0.2.1".parse().unwrap()]);
         routed.key.routing = DnsRoutingIdentity::Route53 {
             set_identifier: "primary".to_string(),
@@ -2086,208 +1545,6 @@ mod tests {
             health_check_id: None,
         });
         assert!(routed.validate(&zone_for(CloudProvider::Aws)).is_ok());
-    }
-
-    fn google_policy_data(
-        addresses: impl IntoIterator<Item = Ipv4Addr>,
-    ) -> GoogleDnsPolicyItemData {
-        GoogleDnsPolicyItemData {
-            values: addresses
-                .into_iter()
-                .map(|address| DnsRecordSetValue::A { address })
-                .collect(),
-            health_checked_targets: None,
-        }
-    }
-
-    fn google_routing_record(policy: GoogleDnsRoutingPolicy) -> ProviderDnsRecordSet {
-        ProviderDnsRecordSet {
-            key: DnsRecordSetKey {
-                owner: DnsOwnerName::new("routed.example.com").unwrap(),
-                record_type: ProviderDnsRecordType::A,
-                routing: DnsRoutingIdentity::Simple,
-            },
-            ttl: DnsTtl::Seconds(60),
-            values: BTreeSet::new(),
-            extension: Some(DnsRecordExtension::GoogleCloud {
-                routing_policy: Box::new(policy),
-            }),
-        }
-    }
-
-    #[test]
-    fn google_dns_decimal_types_require_canonical_bounded_values() {
-        for valid in ["0", "0.5", "1", "999.999", "1000", "1000.1"] {
-            assert!(GoogleDnsWeight::new(valid).is_ok(), "{valid}");
-        }
-        for invalid in ["", "00", "01", "1.0", ".5", "0.50", "-1"] {
-            assert!(GoogleDnsWeight::new(invalid).is_err(), "{invalid}");
-        }
-        for valid in ["0", "0.001", "1"] {
-            assert!(GoogleDnsTrickleTraffic::new(valid).is_ok(), "{valid}");
-        }
-        for invalid in ["00", "0.0", "1.0", "1.1", "2", "-0.1"] {
-            assert!(GoogleDnsTrickleTraffic::new(invalid).is_err(), "{invalid}");
-        }
-        assert!(serde_json::from_str::<GoogleDnsWeight>(r#""0.50""#).is_err());
-    }
-
-    #[test]
-    fn google_dns_geo_and_wrr_policies_are_typed_and_validated() {
-        let geo = google_routing_record(GoogleDnsRoutingPolicy {
-            health_check: None,
-            policy: GoogleDnsRoutingPolicyKind::Geolocation {
-                policy: GoogleDnsGeoPolicy {
-                    items: vec![
-                        GoogleDnsGeoPolicyItem {
-                            location: ProviderRegion::new("us-east1").unwrap(),
-                            data: google_policy_data([Ipv4Addr::new(192, 0, 2, 1)]),
-                        },
-                        GoogleDnsGeoPolicyItem {
-                            location: ProviderRegion::new("europe-west1").unwrap(),
-                            data: google_policy_data([Ipv4Addr::new(192, 0, 2, 2)]),
-                        },
-                    ],
-                    enable_fencing: false,
-                },
-            },
-        });
-        assert!(geo.validate(&zone()).is_ok());
-
-        let wrr = google_routing_record(GoogleDnsRoutingPolicy {
-            health_check: None,
-            policy: GoogleDnsRoutingPolicyKind::WeightedRoundRobin {
-                items: vec![
-                    GoogleDnsWrrPolicyItem {
-                        weight: GoogleDnsWeight::new("25").unwrap(),
-                        data: google_policy_data([Ipv4Addr::new(192, 0, 2, 3)]),
-                    },
-                    GoogleDnsWrrPolicyItem {
-                        weight: GoogleDnsWeight::new("75").unwrap(),
-                        data: google_policy_data([Ipv4Addr::new(192, 0, 2, 4)]),
-                    },
-                ],
-            },
-        });
-        assert!(wrr.validate(&zone()).is_ok());
-
-        let mut duplicate_geo = geo;
-        let Some(DnsRecordExtension::GoogleCloud { routing_policy }) =
-            duplicate_geo.extension.as_mut()
-        else {
-            unreachable!()
-        };
-        let GoogleDnsRoutingPolicyKind::Geolocation { policy } = &mut routing_policy.policy else {
-            unreachable!()
-        };
-        policy.items[1].location = policy.items[0].location.clone();
-        assert!(duplicate_geo.validate(&zone()).is_err());
-    }
-
-    #[test]
-    fn google_dns_primary_backup_models_health_checked_targets_without_floats() {
-        let primary_targets = GoogleDnsHealthCheckTargets::ExternalEndpoints {
-            addresses: BTreeSet::from(["192.0.2.10".parse().unwrap()]),
-        };
-        let record = google_routing_record(GoogleDnsRoutingPolicy {
-            health_check: Some(GoogleDnsHealthCheckRef {
-                project_id: "project-a".to_string(),
-                health_check: "dns-check-a".to_string(),
-            }),
-            policy: GoogleDnsRoutingPolicyKind::PrimaryBackup {
-                primary_targets,
-                backup_geo_targets: GoogleDnsGeoPolicy {
-                    items: vec![GoogleDnsGeoPolicyItem {
-                        location: ProviderRegion::new("us-west1").unwrap(),
-                        data: google_policy_data([Ipv4Addr::new(192, 0, 2, 20)]),
-                    }],
-                    enable_fencing: true,
-                },
-                trickle_traffic: GoogleDnsTrickleTraffic::new("0.1").unwrap(),
-            },
-        });
-        assert!(record.validate(&zone()).is_ok());
-
-        let mut missing_health_check = record.clone();
-        let Some(DnsRecordExtension::GoogleCloud { routing_policy }) =
-            missing_health_check.extension.as_mut()
-        else {
-            unreachable!()
-        };
-        routing_policy.health_check = None;
-        assert!(missing_health_check.validate(&zone()).is_err());
-        assert!(record
-            .validate(&DnsZoneRef {
-                visibility: ZoneVisibility::Private,
-                ..zone()
-            })
-            .is_err());
-    }
-
-    #[test]
-    fn google_dns_internal_load_balancer_targets_require_private_a_records() {
-        let internal_target = GoogleDnsInternalLoadBalancerTarget {
-            load_balancer_type: GoogleDnsLoadBalancerType::RegionalL4,
-            ip_address: "10.0.0.10".parse().unwrap(),
-            port: 443,
-            ip_protocol: GoogleDnsIpProtocol::Tcp,
-            network_project_id: "network-project".to_string(),
-            network: "prod-network".to_string(),
-            project_id: "service-project".to_string(),
-            region: Some(ProviderRegion::new("us-central1").unwrap()),
-        };
-        let record = google_routing_record(GoogleDnsRoutingPolicy {
-            health_check: None,
-            policy: GoogleDnsRoutingPolicyKind::WeightedRoundRobin {
-                items: vec![GoogleDnsWrrPolicyItem {
-                    weight: GoogleDnsWeight::new("100").unwrap(),
-                    data: GoogleDnsPolicyItemData {
-                        values: BTreeSet::new(),
-                        health_checked_targets: Some(
-                            GoogleDnsHealthCheckTargets::InternalLoadBalancers {
-                                targets: BTreeSet::from([internal_target]),
-                            },
-                        ),
-                    },
-                }],
-            },
-        });
-        let private_zone = DnsZoneRef {
-            visibility: ZoneVisibility::Private,
-            ..zone()
-        };
-        assert!(record.validate(&private_zone).is_ok());
-        assert!(record.validate(&zone()).is_err());
-
-        let encoded = serde_json::to_string(&record).unwrap();
-        let decoded: ProviderDnsRecordSet = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(decoded, record);
-    }
-
-    #[test]
-    fn google_alias_and_other_apex_data_cannot_be_created_in_one_batch() {
-        let google_alias = ProviderDnsRecordSet {
-            key: DnsRecordSetKey {
-                owner: DnsOwnerName::new("example.com").unwrap(),
-                record_type: ProviderDnsRecordType::GoogleAlias,
-                routing: DnsRoutingIdentity::Simple,
-            },
-            ttl: DnsTtl::Seconds(300),
-            values: BTreeSet::new(),
-            extension: Some(DnsRecordExtension::GoogleAlias {
-                target: AbsoluteDnsName::new("target.example.net").unwrap(),
-            }),
-        };
-        let mut apex_a = a_record([Ipv4Addr::new(192, 0, 2, 1)]);
-        apex_a.key.owner = DnsOwnerName::new("example.com").unwrap();
-        let create = |record_set| DnsRecordChange::Create {
-            record_set,
-            guard: DnsMutationGuard::MustNotExist,
-        };
-        assert!(
-            validate_dns_changes(&zone(), &[create(google_alias.clone()), create(apex_a)]).is_err()
-        );
-        assert!(validate_dns_changes(&zone(), &[create(google_alias)]).is_ok());
     }
 
     #[test]

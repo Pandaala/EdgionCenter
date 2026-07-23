@@ -35,11 +35,7 @@ pub(crate) fn map_record(
         || !observed.provider_object_ids.is_empty()
         || matches!(
             observed.record_set.extension.as_ref(),
-            Some(
-                DnsRecordExtension::Cloudflare { .. }
-                    | DnsRecordExtension::GoogleAlias { .. }
-                    | DnsRecordExtension::GoogleCloud { .. }
-            )
+            Some(DnsRecordExtension::Cloudflare { .. })
         )
     {
         return Err(Route53DnsAdminError::InvalidProviderObservation);

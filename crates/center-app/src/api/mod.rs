@@ -88,8 +88,10 @@ const PROXY_RESPONSE_HEADER_ALLOWLIST: &[&str] = &[
 ];
 
 mod audit;
+pub mod aws_waf;
 pub mod cloudflare_dns;
 pub mod cloudflare_waf;
+pub mod cloudfront;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
 pub mod provider_accounts;
@@ -129,10 +131,16 @@ pub struct ApiState {
     pub cloudflare_dns_write_admin: Option<cloudflare_dns::SharedCloudflareDnsWriteAdminService>,
     /// Optional SDK-free Cloudflare Zone WAF service. It is independently composed from DNS.
     pub cloudflare_waf_admin: Option<cloudflare_waf::SharedCloudflareWafAdminService>,
+    /// Optional SDK-free AWS WAFv2 service, independently composed from Route 53 and CloudFront.
+    pub aws_waf_admin: Option<aws_waf::SharedAwsWafAdminService>,
     /// Optional SDK-free Route 53 DNS read service.
     pub route53_dns_admin: Option<route53_dns::SharedRoute53DnsAdminService>,
     /// Optional SDK-free Route 53 synchronous RRset write service.
     pub route53_dns_write_admin: Option<route53_dns::SharedRoute53DnsWriteAdminService>,
+    /// Optional SDK-free Route 53 public hosted-zone lifecycle service.
+    pub route53_zone_lifecycle_admin: Option<route53_dns::SharedRoute53ZoneLifecycleAdminService>,
+    /// Optional SDK-free CloudFront Distribution inventory and fixed lifecycle service.
+    pub cloudfront_admin: Option<cloudfront::SharedCloudFrontAdminService>,
     /// Optional secret-free provider account desired-state store.
     pub provider_account_store: Option<Arc<dyn edgion_center_core::ProviderAccountStore>>,
     /// Optional capability snapshot store. Admin handlers only perform exact-key reads.
@@ -250,6 +258,14 @@ pub fn router(mut state: ApiState) -> Router {
     state.capabilities.cloudflare_waf_write &= state.cloudflare_waf_admin.is_some();
     state.capabilities.route53_dns_read &= state.route53_dns_admin.is_some();
     state.capabilities.route53_dns_write &= state.route53_dns_write_admin.is_some();
+    state.capabilities.route53_zone_lifecycle &= state.route53_zone_lifecycle_admin.is_some();
+    state.capabilities.cloudfront_read &= state.cloudfront_admin.is_some();
+    state.capabilities.cloudfront_write &= state.cloudfront_admin.is_some();
+    state.capabilities.aws_waf_read &= state.aws_waf_admin.is_some();
+    state.capabilities.aws_waf_write &= state.aws_waf_admin.is_some();
+    state.capabilities.aws_waf_attach &= state.aws_waf_admin.is_some();
+    state.capabilities.aws_waf_detach &= state.aws_waf_admin.is_some();
+    state.capabilities.aws_waf_security_weaken &= state.aws_waf_admin.is_some();
     state.capabilities.provider_account_admin &= state.provider_account_store.is_some();
     state.capabilities.provider_capability_read &=
         state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
@@ -541,6 +557,188 @@ pub fn router(mut state: ApiState) -> Router {
             .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024));
         app = app.merge(route53_write_routes);
     }
+    if capabilities.route53_zone_lifecycle && state.route53_zone_lifecycle_admin.is_some() {
+        let route53_lifecycle_routes = Router::new()
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones",
+                post(route53_dns::create_zone),
+            )
+            .route(
+                "/api/v1/center/aws/route53/accounts/{account_id}/hosted-zones/{zone_id}/lifecycle",
+                get(route53_dns::observe_zone_lifecycle).delete(route53_dns::delete_zone),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
+        app = app.merge(route53_lifecycle_routes);
+    }
+    if capabilities.cloudfront_read && state.cloudfront_admin.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions",
+                get(cloudfront::list),
+            )
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}",
+                get(cloudfront::get),
+            )
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}/observation",
+                get(cloudfront::observe),
+            );
+    }
+    if capabilities.cloudfront_write && state.cloudfront_admin.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions",
+                post(cloudfront::create),
+            )
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}/origin",
+                axum::routing::put(cloudfront::update_origin),
+            )
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}/enable",
+                post(cloudfront::enable),
+            )
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}/disable",
+                post(cloudfront::disable),
+            )
+            .route(
+                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}",
+                delete(cloudfront::delete),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(32 * 1024));
+    }
+    if capabilities.cloudfront_write
+        && capabilities.aws_waf_attach
+        && state.cloudfront_admin.is_some()
+    {
+        app = app.merge(
+            Router::new()
+                .route(
+                    "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}/web-acl",
+                    axum::routing::put(cloudfront::set_web_acl),
+                )
+                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024)),
+        );
+    }
+    if capabilities.cloudfront_write
+        && capabilities.aws_waf_detach
+        && state.cloudfront_admin.is_some()
+    {
+        app = app.merge(
+            Router::new()
+                .route(
+                    "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}/web-acl",
+                    delete(cloudfront::detach_web_acl),
+                )
+                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024)),
+        );
+    }
+    if capabilities.aws_waf_read && state.aws_waf_admin.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls",
+                get(aws_waf::list_web_acls),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}",
+                get(aws_waf::get_web_acl),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/rules",
+                get(aws_waf::list_rules),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/ip-sets",
+                get(aws_waf::list_ip_sets),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/managed-rule-groups",
+                get(aws_waf::list_managed_catalog),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/associations",
+                get(aws_waf::list_associations),
+            );
+    }
+    if capabilities.aws_waf_write && state.aws_waf_admin.is_some() {
+        let aws_waf_write_routes = Router::new()
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls",
+                post(aws_waf::create_web_acl),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/rules",
+                post(aws_waf::create_rule),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/rules/{reference}",
+                axum::routing::put(aws_waf::update_rule),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/rules/{reference}/exceptions",
+                axum::routing::put(aws_waf::managed_exception),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}",
+                axum::routing::put(aws_waf::update_web_acl),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/capacity",
+                post(aws_waf::check_capacity),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/ip-sets",
+                post(aws_waf::create_ip_set),
+            )
+            .route(
+                "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/ip-sets/{ip_set_id}",
+                axum::routing::put(aws_waf::update_ip_set),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(128 * 1024));
+        app = app.merge(aws_waf_write_routes);
+    }
+    if capabilities.aws_waf_attach && state.aws_waf_admin.is_some() {
+        app = app.merge(
+            Router::new()
+                .route(
+                    "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/associations",
+                    post(aws_waf::associate_regional_resource),
+                )
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        );
+    }
+    if capabilities.aws_waf_detach && state.aws_waf_admin.is_some() {
+        app = app.merge(
+            Router::new()
+                .route(
+                    "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/associations",
+                    delete(aws_waf::disassociate_regional_resource),
+                )
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        );
+    }
+    if capabilities.aws_waf_security_weaken && state.aws_waf_admin.is_some() {
+        app = app.merge(
+            Router::new()
+                .route(
+                    "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/rules/{reference}/security-weaken",
+                    axum::routing::put(aws_waf::security_weaken_rule)
+                        .delete(aws_waf::delete_rule),
+                )
+                .route(
+                    "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/web-acls/{web_acl_id}/security-weaken",
+                    axum::routing::put(aws_waf::security_weaken_web_acl)
+                        .delete(aws_waf::delete_web_acl),
+                )
+                .route(
+                    "/api/v1/center/aws/waf/accounts/{account_id}/scopes/{scope}/ip-sets/{ip_set_id}/security-weaken",
+                    delete(aws_waf::delete_ip_set),
+                )
+                .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)),
+        );
+    }
     if capabilities.provider_account_admin && state.provider_account_store.is_some() {
         let provider_account_routes = Router::new()
             .route(
@@ -571,7 +769,10 @@ pub fn router(mut state: ApiState) -> Router {
         );
     }
 
-    app.with_state(state)
+    app.layer(axum::middleware::from_fn(
+        crate::common::observe::cloud_metrics::cloud_metrics_middleware,
+    ))
+    .with_state(state)
 }
 
 /// Dedicated liveness/readiness router (own listener).
@@ -1004,6 +1205,115 @@ mod tests {
 
     struct UnavailableRoute53Dns;
 
+    struct UnavailableAwsWaf;
+
+    #[async_trait::async_trait]
+    impl aws_waf::AwsWafAdminService for UnavailableAwsWaf {
+        async fn list_web_acls(
+            &self,
+            _: edgion_center_core::CloudResourceId,
+            _: aws_waf::AwsWafScopeDto,
+        ) -> Result<Vec<aws_waf::AwsWafWebAclDto>, aws_waf::AwsWafAdminError> {
+            Err(aws_waf::AwsWafAdminError::Unavailable)
+        }
+
+        async fn list_ip_sets(
+            &self,
+            _: edgion_center_core::CloudResourceId,
+            _: aws_waf::AwsWafScopeDto,
+        ) -> Result<Vec<aws_waf::AwsWafIpSetDto>, aws_waf::AwsWafAdminError> {
+            Err(aws_waf::AwsWafAdminError::Unavailable)
+        }
+
+        async fn managed_catalog(
+            &self,
+            _: edgion_center_core::CloudResourceId,
+            _: aws_waf::AwsWafScopeDto,
+        ) -> Result<Vec<aws_waf::AwsWafCatalogDto>, aws_waf::AwsWafAdminError> {
+            Err(aws_waf::AwsWafAdminError::Unavailable)
+        }
+    }
+
+    struct UnavailableCloudFront;
+
+    #[async_trait::async_trait]
+    impl cloudfront::CloudFrontAdminService for UnavailableCloudFront {
+        async fn list(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+        ) -> Result<Vec<cloudfront::CloudFrontDistributionDto>, cloudfront::CloudFrontAdminError>
+        {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+
+        async fn get(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &str,
+        ) -> Result<cloudfront::CloudFrontDistributionDto, cloudfront::CloudFrontAdminError>
+        {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+
+        async fn create(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: cloudfront::CloudFrontCreateRequest,
+        ) -> Result<cloudfront::CloudFrontDistributionDto, cloudfront::CloudFrontAdminError>
+        {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+
+        async fn update_origin(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &str,
+            _: cloudfront::CloudFrontOriginUpdateRequest,
+        ) -> Result<cloudfront::CloudFrontDistributionDto, cloudfront::CloudFrontAdminError>
+        {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+
+        async fn set_enabled(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &str,
+            _: bool,
+        ) -> Result<cloudfront::CloudFrontDistributionDto, cloudfront::CloudFrontAdminError>
+        {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+
+        async fn delete(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &str,
+            _: cloudfront::CloudFrontDeleteRequest,
+        ) -> Result<(), cloudfront::CloudFrontAdminError> {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+
+        async fn set_web_acl(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &str,
+            _: cloudfront::CloudFrontWebAclRequest,
+        ) -> Result<cloudfront::CloudFrontDistributionDto, cloudfront::CloudFrontAdminError>
+        {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+
+        async fn detach_web_acl(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &str,
+            _: cloudfront::CloudFrontWebAclDetachRequest,
+        ) -> Result<cloudfront::CloudFrontDistributionDto, cloudfront::CloudFrontAdminError>
+        {
+            Err(cloudfront::CloudFrontAdminError::Unavailable)
+        }
+    }
+
     #[async_trait::async_trait]
     impl route53_dns::Route53DnsAdminService for UnavailableRoute53Dns {
         async fn list_zones(
@@ -1083,6 +1393,42 @@ mod tests {
             _: &edgion_center_core::DnsZoneId,
             _: &edgion_center_core::DnsChangeId,
         ) -> Result<route53_dns::Route53ChangeReceiptDto, route53_dns::Route53DnsAdminError>
+        {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+    }
+
+    struct UnavailableRoute53ZoneLifecycle;
+
+    #[async_trait::async_trait]
+    impl route53_dns::Route53ZoneLifecycleAdminService for UnavailableRoute53ZoneLifecycle {
+        async fn create_zone(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::ZoneCreationRequest,
+        ) -> Result<route53_dns::Route53ZoneLifecycleMutationDto, route53_dns::Route53DnsAdminError>
+        {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn observe_zone(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &edgion_center_core::AbsoluteDnsName,
+        ) -> Result<
+            route53_dns::Route53ZoneLifecycleObservationDto,
+            route53_dns::Route53DnsAdminError,
+        > {
+            Err(route53_dns::Route53DnsAdminError::Unavailable)
+        }
+
+        async fn delete_zone(
+            &self,
+            _: &edgion_center_core::CloudResourceId,
+            _: &edgion_center_core::DnsZoneId,
+            _: &route53_dns::Route53ZoneDeleteRequest,
+        ) -> Result<route53_dns::Route53ZoneLifecycleMutationDto, route53_dns::Route53DnsAdminError>
         {
             Err(route53_dns::Route53DnsAdminError::Unavailable)
         }
@@ -1267,6 +1613,9 @@ mod tests {
             cloudflare_waf_admin: None,
             route53_dns_admin: None,
             route53_dns_write_admin: None,
+            route53_zone_lifecycle_admin: None,
+            cloudfront_admin: None,
+            aws_waf_admin: None,
             provider_account_store: None,
             capability_snapshot_store: None,
             credential_inspection_service: None,
@@ -1533,6 +1882,169 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn aws_waf_independent_mutation_capabilities_mount_only_their_routes() {
+        use tower::ServiceExt;
+
+        let regional = "?region=us-east-1";
+        let attach_path = format!(
+            "/api/v1/center/aws/waf/accounts/aws-main/scopes/regional/web-acls/acl-1/associations{regional}"
+        );
+        let detach_path = format!(
+            "/api/v1/center/aws/waf/accounts/aws-main/scopes/regional/associations{regional}"
+        );
+        let weaken_path = format!(
+            "/api/v1/center/aws/waf/accounts/aws-main/scopes/regional/web-acls/acl-1/rules/rule-1/security-weaken{regional}"
+        );
+
+        let absent = router({
+            let mut state = state_with_authz_mode(AuthzMode::AllowAll, false);
+            state.capabilities.aws_waf_attach = true;
+            state
+        });
+        let response = absent
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri(&attach_path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut attach = state_with_authz_mode(AuthzMode::AllowAll, false);
+        attach.capabilities.aws_waf_attach = true;
+        attach.aws_waf_admin = Some(Arc::new(UnavailableAwsWaf));
+        let response = router(attach)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri(&attach_path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"resourceArn":"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/demo/1234567890abcdef","resourceKind":"application_load_balancer"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let mut detach = state_with_authz_mode(AuthzMode::AllowAll, false);
+        detach.capabilities.aws_waf_detach = true;
+        detach.aws_waf_admin = Some(Arc::new(UnavailableAwsWaf));
+        let response = router(detach)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::DELETE)
+                    .uri(&detach_path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"resourceArn":"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/demo/1234567890abcdef","resourceKind":"application_load_balancer","confirmation":"arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/demo/1234567890abcdef"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let mut weaken = state_with_authz_mode(AuthzMode::AllowAll, false);
+        weaken.capabilities.aws_waf_security_weaken = true;
+        weaken.aws_waf_admin = Some(Arc::new(UnavailableAwsWaf));
+        let app = router(weaken);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(&weaken_path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"lockToken":"lock-token","action":"count","confirmation":"acl-1/rule-1"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let server_info = body_json(
+            app.oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/server-info")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            server_info["data"]["capabilities"]["awsWafSecurityWeaken"],
+            true
+        );
+        assert_eq!(server_info["data"]["capabilities"]["awsWafWrite"], false);
+    }
+
+    #[tokio::test]
+    async fn cloudfront_web_acl_routes_require_the_matching_aws_waf_capability() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/aws/cloudfront/accounts/aws-main/distributions/E123ABC/web-acl";
+        let mut missing_waf_capability = state_with_authz_mode(AuthzMode::AllowAll, false);
+        missing_waf_capability.capabilities.cloudfront_write = true;
+        missing_waf_capability.cloudfront_admin = Some(Arc::new(UnavailableCloudFront));
+        let response = router(missing_waf_capability)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(r#"{"webAclId":"acl-1"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut both = state_with_authz_mode(AuthzMode::AllowAll, false);
+        both.capabilities.cloudfront_write = true;
+        both.capabilities.aws_waf_attach = true;
+        both.capabilities.aws_waf_detach = true;
+        both.cloudfront_admin = Some(Arc::new(UnavailableCloudFront));
+        both.aws_waf_admin = Some(Arc::new(UnavailableAwsWaf));
+        let app = router(both);
+
+        let attach = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(r#"{"webAclId":"acl-1"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(attach.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let detach = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::DELETE)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(r#"{"confirmation":"E123ABC"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(detach.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
     async fn route53_write_capability_and_service_jointly_control_routes() {
         use tower::ServiceExt;
 
@@ -1582,6 +2094,58 @@ mod tests {
         )
         .await;
         assert_eq!(json["data"]["capabilities"]["route53DnsWrite"], true);
+    }
+
+    #[tokio::test]
+    async fn route53_zone_lifecycle_capability_and_service_jointly_control_routes() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones";
+        let body = r#"{"apex":"example.com","idempotencyKey":"create-1"}"#;
+        let mut absent = state_with_authz_mode(AuthzMode::AllowAll, false);
+        absent.capabilities.route53_zone_lifecycle = true;
+        let response = router(absent)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut present = state_with_authz_mode(AuthzMode::AllowAll, false);
+        present.capabilities.route53_zone_lifecycle = true;
+        present.route53_zone_lifecycle_admin = Some(Arc::new(UnavailableRoute53ZoneLifecycle));
+        let app = router(present);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri(path)
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let json = body_json(
+            app.oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/v1/server-info")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(json["data"]["capabilities"]["route53ZoneLifecycle"], true);
     }
 
     #[tokio::test]

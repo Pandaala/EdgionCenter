@@ -29,6 +29,22 @@ pub struct CenterCapabilities {
     pub route53_dns_read: bool,
     /// AWS Route 53-specific, synchronous revision-guarded RRset write Admin API.
     pub route53_dns_write: bool,
+    /// AWS Route 53-specific, synchronous public hosted-zone lifecycle Admin API.
+    pub route53_zone_lifecycle: bool,
+    /// AWS CloudFront Distribution inventory Admin API.
+    pub cloudfront_read: bool,
+    /// AWS CloudFront fixed Distribution lifecycle Admin API.
+    pub cloudfront_write: bool,
+    /// AWS WAFv2 scoped inventory Admin API.
+    pub aws_waf_read: bool,
+    /// AWS WAFv2 scoped mutation Admin API.
+    pub aws_waf_write: bool,
+    /// AWS WAFv2 regional resource association Admin API.
+    pub aws_waf_attach: bool,
+    /// AWS WAFv2 regional resource disassociation Admin API.
+    pub aws_waf_detach: bool,
+    /// AWS WAFv2 explicitly-confirmed security weakening Admin API.
+    pub aws_waf_security_weaken: bool,
     /// Provider-neutral, secret-free ProviderAccount desired-state Admin API.
     pub provider_account_admin: bool,
     /// Read-only, sanitized ProviderAccount capability snapshot Admin API.
@@ -54,6 +70,14 @@ impl CenterCapabilities {
                 cloudflare_waf_write: false,
                 route53_dns_read: false,
                 route53_dns_write: false,
+                route53_zone_lifecycle: false,
+                cloudfront_read: false,
+                cloudfront_write: false,
+                aws_waf_read: false,
+                aws_waf_write: false,
+                aws_waf_attach: false,
+                aws_waf_detach: false,
+                aws_waf_security_weaken: false,
                 provider_account_admin: false,
                 provider_capability_read: false,
                 provider_credential_inspection: false,
@@ -72,6 +96,14 @@ impl CenterCapabilities {
                 cloudflare_waf_write: false,
                 route53_dns_read: false,
                 route53_dns_write: false,
+                route53_zone_lifecycle: false,
+                cloudfront_read: false,
+                cloudfront_write: false,
+                aws_waf_read: false,
+                aws_waf_write: false,
+                aws_waf_attach: false,
+                aws_waf_detach: false,
+                aws_waf_security_weaken: false,
                 provider_account_admin: false,
                 provider_capability_read: false,
                 provider_credential_inspection: false,
@@ -107,6 +139,14 @@ impl CenterCapabilities {
             cloudflare_waf_write: false,
             route53_dns_read: false,
             route53_dns_write: false,
+            route53_zone_lifecycle: false,
+            cloudfront_read: false,
+            cloudfront_write: false,
+            aws_waf_read: false,
+            aws_waf_write: false,
+            aws_waf_attach: false,
+            aws_waf_detach: false,
+            aws_waf_security_weaken: false,
             provider_account_admin,
             provider_capability_read,
             provider_credential_inspection,
@@ -132,6 +172,14 @@ mod tests {
         assert!(!standalone.cloudflare_waf_write && !kubernetes.cloudflare_waf_write);
         assert!(!standalone.route53_dns_read && !kubernetes.route53_dns_read);
         assert!(!standalone.route53_dns_write && !kubernetes.route53_dns_write);
+        assert!(!standalone.route53_zone_lifecycle && !kubernetes.route53_zone_lifecycle);
+        assert!(!standalone.cloudfront_read && !kubernetes.cloudfront_read);
+        assert!(!standalone.cloudfront_write && !kubernetes.cloudfront_write);
+        assert!(!standalone.aws_waf_read && !kubernetes.aws_waf_read);
+        assert!(!standalone.aws_waf_write && !kubernetes.aws_waf_write);
+        assert!(!standalone.aws_waf_attach && !kubernetes.aws_waf_attach);
+        assert!(!standalone.aws_waf_detach && !kubernetes.aws_waf_detach);
+        assert!(!standalone.aws_waf_security_weaken && !kubernetes.aws_waf_security_weaken);
         assert!(!standalone.provider_account_admin && !kubernetes.provider_account_admin);
         assert!(!standalone.provider_capability_read && !kubernetes.provider_capability_read);
         assert!(

@@ -287,7 +287,6 @@ fn render_record_type(value: ProviderDnsRecordType) -> crate::Result<&'static st
         ProviderDnsRecordType::Caa => Ok("CAA"),
         ProviderDnsRecordType::Ns => Ok("NS"),
         ProviderDnsRecordType::Soa => Ok("SOA"),
-        ProviderDnsRecordType::GoogleAlias => Err(validation("unsupported_route53_record_type")),
     }
 }
 
@@ -529,7 +528,6 @@ fn parse_value(
                 minimum: parse_u32(fields[6], "invalid_route53_soa_value")?,
             })
         }
-        ProviderDnsRecordType::GoogleAlias => Err(validation("unsupported_route53_record_type")),
     }
 }
 

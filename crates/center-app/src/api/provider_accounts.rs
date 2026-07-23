@@ -83,7 +83,6 @@ pub enum DeletionPolicyDto {
 pub enum CloudProviderDto {
     Cloudflare,
     Aws,
-    GoogleCloud,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -96,7 +95,6 @@ pub enum CloudProviderDto {
 pub enum ProviderAccountScopeDto {
     Cloudflare { account_id: String },
     Aws { account_id: String },
-    GoogleCloud { project_id: String },
 }
 
 /// Credential selection contains aliases and identity metadata only. There is
@@ -200,7 +198,6 @@ impl From<CloudProviderDto> for CloudProvider {
         match value {
             CloudProviderDto::Cloudflare => Self::Cloudflare,
             CloudProviderDto::Aws => Self::Aws,
-            CloudProviderDto::GoogleCloud => Self::GoogleCloud,
         }
     }
 }
@@ -210,7 +207,6 @@ impl From<CloudProvider> for CloudProviderDto {
         match value {
             CloudProvider::Cloudflare => Self::Cloudflare,
             CloudProvider::Aws => Self::Aws,
-            CloudProvider::GoogleCloud => Self::GoogleCloud,
         }
     }
 }
@@ -220,7 +216,6 @@ impl From<ProviderAccountScopeDto> for ProviderAccountScope {
         match value {
             ProviderAccountScopeDto::Cloudflare { account_id } => Self::Cloudflare { account_id },
             ProviderAccountScopeDto::Aws { account_id } => Self::Aws { account_id },
-            ProviderAccountScopeDto::GoogleCloud { project_id } => Self::GoogleCloud { project_id },
         }
     }
 }
@@ -230,7 +225,6 @@ impl From<ProviderAccountScope> for ProviderAccountScopeDto {
         match value {
             ProviderAccountScope::Cloudflare { account_id } => Self::Cloudflare { account_id },
             ProviderAccountScope::Aws { account_id } => Self::Aws { account_id },
-            ProviderAccountScope::GoogleCloud { project_id } => Self::GoogleCloud { project_id },
         }
     }
 }
@@ -645,6 +639,9 @@ mod tests {
             cloudflare_waf_admin: None,
             route53_dns_admin: None,
             route53_dns_write_admin: None,
+            route53_zone_lifecycle_admin: None,
+            cloudfront_admin: None,
+            aws_waf_admin: None,
             provider_account_store: store,
             capability_snapshot_store: None,
             credential_inspection_service: None,

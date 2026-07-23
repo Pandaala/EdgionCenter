@@ -447,9 +447,9 @@ fn receipt_scope_preflight_rejects_tamper_and_wrong_scope_without_provider_io() 
     );
 
     let mut non_aws = account();
-    non_aws.provider = CloudProvider::GoogleCloud;
-    non_aws.scope = Some(ProviderAccountScope::GoogleCloud {
-        project_id: "project-a".to_string(),
+    non_aws.provider = CloudProvider::Cloudflare;
+    non_aws.scope = Some(ProviderAccountScope::Cloudflare {
+        account_id: "0123456789abcdef0123456789abcdef".to_string(),
     });
     assert_eq!(
         Route53MutationReceiptVerifier::new(
@@ -1865,6 +1865,39 @@ async fn lifecycle_delete_rechecks_revision_and_safe_provider_state() {
         .await
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn direct_public_lifecycle_delete_requires_fresh_exact_safe_observation() {
+    let center_account = CloudResourceId::new("route53-main").unwrap();
+    let fake = Arc::new(fake_api());
+    let provider = adapter(center_account.clone(), Arc::clone(&fake));
+    let zone = observed_zone(&center_account, "ZPRIMARY", "example.test").zone;
+    let observed = provider.observe_zone(&zone).await.unwrap().unwrap();
+    assert_eq!(
+        provider
+            .delete_zone_with_exact_guard(&zone, &observed.revision)
+            .await
+            .unwrap_err()
+            .code(),
+        "route53_zone_deletion_precondition_failed"
+    );
+    fake.zones
+        .lock()
+        .unwrap()
+        .iter_mut()
+        .find(|value| normalize_zone_id(&value.id).ok().as_deref() == Some("ZPRIMARY"))
+        .unwrap()
+        .resource_record_set_count = 2;
+    let observed = provider.observe_zone(&zone).await.unwrap().unwrap();
+    assert_eq!(
+        provider
+            .delete_zone_with_exact_guard(&zone, &observed.revision)
+            .await
+            .unwrap()
+            .state,
+        ZoneLifecycleMutationState::Pending
+    );
 }
 
 fn adapter(center_account: CloudResourceId, api: Arc<FakeApi>) -> Route53DnsAdapter {

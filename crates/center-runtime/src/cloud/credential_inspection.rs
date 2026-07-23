@@ -478,7 +478,6 @@ fn configured_scope(account: &ProviderAccount) -> CoreResult<&str> {
     match account.spec.scope.as_ref() {
         Some(ProviderAccountScope::Cloudflare { account_id })
         | Some(ProviderAccountScope::Aws { account_id }) => Ok(account_id),
-        Some(ProviderAccountScope::GoogleCloud { project_id }) => Ok(project_id),
         None => Err(CoreError::Conflict(
             "credential inspection requires provider account scope".into(),
         )),

@@ -14,7 +14,7 @@ interface AccountFormValues {
   displayName: string
   owner?: string
   managementPolicy: 'managed' | 'observe_only'
-  provider: 'cloudflare' | 'aws' | 'google_cloud'
+  provider: 'cloudflare' | 'aws'
   scopeId: string
   credentialType: CredentialSource['type']
   credentialRef?: string
@@ -26,9 +26,7 @@ interface AccountFormValues {
 }
 
 function desiredFromValues(values: AccountFormValues): ProviderAccountDesired {
-  const scope = values.provider === 'google_cloud'
-    ? { provider: 'google_cloud' as const, projectId: values.scopeId }
-    : { provider: values.provider, accountId: values.scopeId } as ProviderAccountDesired['scope']
+  const scope = { provider: values.provider, accountId: values.scopeId } as ProviderAccountDesired['scope']
   const credentialSource: CredentialSource = values.credentialType === 'ambient'
     ? { type: 'ambient' }
     : values.credentialType === 'static_secret'
@@ -55,7 +53,7 @@ function formValues(account: ProviderAccount): AccountFormValues {
     owner: account.owner,
     managementPolicy: account.managementPolicy,
     provider: account.provider,
-    scopeId: 'projectId' in account.scope ? account.scope.projectId : account.scope.accountId,
+    scopeId: account.scope.accountId,
     credentialType: source.type,
     ...(source.type === 'static_secret' ? { credentialRef: source.credentialRef } : {}),
     ...(source.type === 'federated' ? { subjectTokenRef: source.subjectTokenRef, targetPrincipal: source.targetPrincipal, audience: source.audience } : {}),
@@ -148,7 +146,6 @@ export default function ProviderAccountsPage() {
     if (target) replace.mutate(values)
     else create.mutate(values)
   }
-  const provider = Form.useWatch('provider', form)
   const credentialType = Form.useWatch('credentialType', form)
   return (
     <div>
@@ -157,7 +154,7 @@ export default function ProviderAccountsPage() {
       <Table rowKey="accountId" loading={accounts.isLoading} dataSource={accounts.data?.data ?? []} pagination={{ pageSize: 20 }} columns={[
         { title: t('cloud.col.account'), dataIndex: 'accountId' },
         { title: t('cloud.col.provider'), dataIndex: 'provider', render: (value: string) => <Tag>{value}</Tag> },
-        { title: t('cloud.col.scope'), render: (_, row: ProviderAccount) => 'projectId' in row.scope ? row.scope.projectId : row.scope.accountId },
+        { title: t('cloud.col.scope'), render: (_, row: ProviderAccount) => row.scope.accountId },
         { title: t('cloud.col.generation'), dataIndex: 'generation' },
         { title: t('col.actions'), render: (_, row: ProviderAccount) => <Space><Button size="small" onClick={() => setCapabilityAccount(row)}>{t('cloud.action.capabilities')}</Button>{canWrite && <Button size="small" onClick={() => openEdit(row)}>{t('btn.edit')}</Button>}</Space> },
       ]} />
@@ -166,8 +163,8 @@ export default function ProviderAccountsPage() {
           <Form.Item name="accountId" label={t('cloud.field.accountId')} rules={[{ required: true }]}><Input disabled={target !== null} autoComplete="off" /></Form.Item>
           <Form.Item name="displayName" label={t('cloud.field.displayName')} rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
           <Form.Item name="owner" label={t('cloud.field.owner')}><Input autoComplete="off" /></Form.Item>
-          <Form.Item name="provider" label={t('cloud.field.provider')} rules={[{ required: true }]}><Select disabled={target !== null} options={['cloudflare', 'aws', 'google_cloud'].map((value) => ({ value, label: value }))} /></Form.Item>
-          <Form.Item name="scopeId" label={t(provider === 'google_cloud' ? 'cloud.field.projectId' : 'cloud.field.nativeAccountId')} rules={[{ required: true }]}><Input disabled={target !== null} autoComplete="off" /></Form.Item>
+          <Form.Item name="provider" label={t('cloud.field.provider')} rules={[{ required: true }]}><Select disabled={target !== null} options={['cloudflare', 'aws'].map((value) => ({ value, label: value }))} /></Form.Item>
+          <Form.Item name="scopeId" label={t('cloud.field.nativeAccountId')} rules={[{ required: true }]}><Input disabled={target !== null} autoComplete="off" /></Form.Item>
           <Form.Item name="managementPolicy" label={t('cloud.field.managementPolicy')}><Select options={['observe_only', 'managed'].map((value) => ({ value, label: t(`cloud.policy.${value}`) }))} /></Form.Item>
           <Form.Item name="credentialType" label={t('cloud.field.credentialType')} rules={[{ required: true }]}><Select options={['static_secret', 'ambient', 'federated', 'assume_identity'].map((value) => ({ value, label: t(`cloud.credentialType.${value}`) }))} /></Form.Item>
           {credentialType === 'static_secret' && <Form.Item name="credentialRef" label={t('cloud.field.credentialRef')} rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item>}

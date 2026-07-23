@@ -22,7 +22,7 @@ pub async fn assert_provider_account_store_conformance(
     assert_create_get_and_duplicate(store, prefix).await;
     assert_exact_generation_replacement(store, prefix).await;
     assert_concurrent_create_and_replace(store, prefix).await;
-    assert_google_credential_variants_roundtrip(store, prefix).await;
+    assert_identity_credential_variants_roundtrip(store, prefix).await;
     assert_stable_keyset_pagination(store, prefix).await;
     assert_bounds_fail_before_persistence(store, prefix).await;
 }
@@ -161,7 +161,7 @@ async fn assert_concurrent_create_and_replace(store: &dyn ProviderAccountStore, 
         ProviderAccountCreateResult::Created(_)
     ));
     let left_desired = aws_desired();
-    let right_desired = google_federated_desired();
+    let right_desired = aws_federated_desired();
     let (left, right) = join_pair(
         store.replace_if_generation(&replace_id, 1, &left_desired),
         store.replace_if_generation(&replace_id, 1, &right_desired),
@@ -197,40 +197,37 @@ async fn assert_concurrent_create_and_replace(store: &dyn ProviderAccountStore, 
     );
 }
 
-async fn assert_google_credential_variants_roundtrip(
+async fn assert_identity_credential_variants_roundtrip(
     store: &dyn ProviderAccountStore,
     prefix: &str,
 ) {
-    let id = account_id(prefix, "google-credentials");
-    let federated = google_federated_desired();
+    let id = account_id(prefix, "identity-credentials");
+    let federated = aws_federated_desired();
     let created = store
         .create(&id, &federated)
         .await
-        .expect("create Google federated account");
+        .expect("create federated account");
     let ProviderAccountCreateResult::Created(created) = created else {
-        panic!("fresh Google account was not created");
+        panic!("fresh federated account was not created");
     };
     assert_eq!(created.spec, federated.spec);
     assert_eq!(
-        store.get(&id).await.expect("get Google federated account"),
+        store.get(&id).await.expect("get federated account"),
         Some(created.as_ref().clone())
     );
 
-    let assumed = google_assumed_identity_desired();
+    let assumed = aws_assumed_identity_desired();
     let replaced = store
         .replace_if_generation(&id, 1, &assumed)
         .await
-        .expect("replace with Google assumed identity");
+        .expect("replace with assumed identity");
     let ProviderAccountReplaceResult::Stored(replaced) = replaced else {
-        panic!("Google assumed identity was not stored");
+        panic!("assumed identity was not stored");
     };
     assert_eq!(replaced.metadata.generation, 2);
     assert_eq!(replaced.spec, assumed.spec);
     assert_eq!(
-        store
-            .get(&id)
-            .await
-            .expect("get Google assumed identity account"),
+        store.get(&id).await.expect("get assumed identity account"),
         Some(*replaced)
     );
 }
@@ -371,48 +368,48 @@ fn aws_desired() -> ProviderAccountDesired {
     }
 }
 
-fn google_federated_desired() -> ProviderAccountDesired {
+fn aws_federated_desired() -> ProviderAccountDesired {
     ProviderAccountDesired {
-        display_name: "Google Cloud DNS federated".to_string(),
+        display_name: "AWS federated".to_string(),
         owner: Some("dns-platform".to_string()),
         labels: BTreeMap::from([("identity".to_string(), "federated".to_string())]),
         management_policy: ManagementPolicy::ObserveOnly,
         deletion_policy: DeletionPolicy::Retain,
         spec: ProviderAccountSpec {
-            provider: CloudProvider::GoogleCloud,
-            scope: Some(ProviderAccountScope::GoogleCloud {
-                project_id: "edgion-dns-prod".to_string(),
+            provider: CloudProvider::Aws,
+            scope: Some(ProviderAccountScope::Aws {
+                account_id: "123456789012".to_string(),
             }),
             credential_source: CredentialSource::Federated {
                 subject_token_ref: Some(
-                    CredentialRef::new("google/projected-token").expect("subject token ref"),
+                    CredentialRef::new("aws/projected-token").expect("subject token ref"),
                 ),
-                target_principal: "dns-center@edgion-dns-prod.iam.gserviceaccount.com".to_string(),
-                audience: Some("//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/center/providers/kubernetes".to_string()),
+                target_principal: "arn:aws:iam::123456789012:role/dns-center".to_string(),
+                audience: Some("sts.amazonaws.com".to_string()),
             },
         },
     }
 }
 
-fn google_assumed_identity_desired() -> ProviderAccountDesired {
+fn aws_assumed_identity_desired() -> ProviderAccountDesired {
     ProviderAccountDesired {
-        display_name: "Google Cloud DNS impersonated".to_string(),
+        display_name: "AWS assumed identity".to_string(),
         owner: Some("dns-platform".to_string()),
         labels: BTreeMap::from([("identity".to_string(), "impersonated".to_string())]),
         management_policy: ManagementPolicy::ObserveOnly,
         deletion_policy: DeletionPolicy::Retain,
         spec: ProviderAccountSpec {
-            provider: CloudProvider::GoogleCloud,
-            scope: Some(ProviderAccountScope::GoogleCloud {
-                project_id: "edgion-dns-prod".to_string(),
+            provider: CloudProvider::Aws,
+            scope: Some(ProviderAccountScope::Aws {
+                account_id: "123456789012".to_string(),
             }),
             credential_source: CredentialSource::AssumeIdentity {
                 base_credential_ref: Some(
-                    CredentialRef::new("google/base-identity").expect("base credential ref"),
+                    CredentialRef::new("aws/base-identity").expect("base credential ref"),
                 ),
-                target_principal: "dns-admin@edgion-dns-prod.iam.gserviceaccount.com".to_string(),
+                target_principal: "arn:aws:iam::123456789012:role/dns-admin".to_string(),
                 external_id_ref: Some(
-                    CredentialRef::new("google/external-id").expect("external ID ref"),
+                    CredentialRef::new("aws/external-id").expect("external ID ref"),
                 ),
             },
         },

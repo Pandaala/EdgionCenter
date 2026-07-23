@@ -42,6 +42,9 @@ pub enum CredentialPurpose {
     CloudflareWafOwnershipHmac,
     Route53DnsCursorHmac,
     Route53DnsMutationReceiptHmac,
+    Route53ZoneLifecycleHmac,
+    CloudFrontFingerprintHmac,
+    AwsWafOwnershipHmac,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,6 +319,9 @@ impl MountedCredentialResolver {
                     CloudProvider::Aws,
                     CredentialPurpose::Route53DnsCursorHmac
                         | CredentialPurpose::Route53DnsMutationReceiptHmac
+                        | CredentialPurpose::Route53ZoneLifecycleHmac
+                        | CredentialPurpose::CloudFrontFingerprintHmac
+                        | CredentialPurpose::AwsWafOwnershipHmac
                 )
             );
             if binding.credential_ref.len() > MAX_IDENTITY_BYTES
@@ -582,7 +588,6 @@ fn provider_tag(provider: &CloudProvider) -> &'static str {
     match provider {
         CloudProvider::Cloudflare => "cloudflare",
         CloudProvider::Aws => "aws",
-        CloudProvider::GoogleCloud => "google_cloud",
     }
 }
 
@@ -594,6 +599,9 @@ fn purpose_tag(purpose: CredentialPurpose) -> &'static str {
         CredentialPurpose::CloudflareWafOwnershipHmac => "cloudflare_waf_ownership_hmac",
         CredentialPurpose::Route53DnsCursorHmac => "route53_dns_cursor_hmac",
         CredentialPurpose::Route53DnsMutationReceiptHmac => "route53_dns_mutation_receipt_hmac",
+        CredentialPurpose::Route53ZoneLifecycleHmac => "route53_zone_lifecycle_hmac",
+        CredentialPurpose::CloudFrontFingerprintHmac => "cloudfront_fingerprint_hmac",
+        CredentialPurpose::AwsWafOwnershipHmac => "aws_waf_ownership_hmac",
     }
 }
 

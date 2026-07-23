@@ -5,13 +5,12 @@ import type { ApiResponse, ListResponse } from './types'
 const centerRequest = { _skipControllerProxy: true } as any
 const centerPath = (path: string) => `/api/v1/center/${path}`
 
-export type CloudProvider = 'cloudflare' | 'aws' | 'google_cloud'
+export type CloudProvider = 'cloudflare' | 'aws'
 export type ManagementPolicy = 'managed' | 'observe_only'
 
 export type ProviderAccountScope =
   | { provider: 'cloudflare'; accountId: string }
   | { provider: 'aws'; accountId: string }
-  | { provider: 'google_cloud'; projectId: string }
 
 /**
  * References select credentials owned outside the dashboard. These types

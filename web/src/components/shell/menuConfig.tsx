@@ -18,7 +18,7 @@ import {
 } from '@ant-design/icons'
 
 export type AppMode = 'center' | 'controller'
-export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin' | 'providerAccountAdmin' | 'providerCapabilityRead' | 'providerCredentialInspection' | 'cloudflareDnsRead' | 'cloudflareDnsWrite' | 'cloudflareWafRead' | 'cloudflareWafWrite'
+export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin' | 'providerAccountAdmin' | 'providerCapabilityRead' | 'providerCredentialInspection' | 'cloudflareDnsRead' | 'cloudflareDnsWrite' | 'cloudflareWafRead' | 'cloudflareWafWrite' | 'route53DnsRead' | 'route53DnsWrite' | 'route53ZoneLifecycle' | 'cloudfrontRead' | 'cloudfrontWrite' | 'awsWafRead' | 'awsWafWrite' | 'awsWafAttach' | 'awsWafDetach' | 'awsWafSecurityWeaken'
 
 export interface MenuLeaf {
   kind: 'item'
@@ -147,6 +147,15 @@ export const centerMenu: MenuSection[] = [
         children: [
           { kind: 'item', key: 'center-cloudflare-dns', labelKey: 'cloud.nav.cloudflareDns', path: '/cloud/cloudflare/dns', icon: <CloudOutlined />, requiredPermissions: ['cloudflare-dns:read', 'provider-accounts:read'], requiredCapability: 'cloudflareDnsRead' },
           { kind: 'item', key: 'center-cloudflare-waf', labelKey: 'cloud.nav.cloudflareWaf', path: '/cloud/cloudflare/waf', icon: <SafetyOutlined />, requiredPermissions: ['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read'], requiredCapability: 'cloudflareWafRead' },
+        ],
+      },
+      {
+        kind: 'group',
+        labelKey: 'cloud.nav.aws',
+        children: [
+          { kind: 'item', key: 'center-aws-route53', labelKey: 'cloud.nav.route53', path: '/cloud/aws/route53', icon: <CloudOutlined />, requiredPermissions: ['route53-dns:read', 'provider-accounts:read'], requiredCapability: 'route53DnsRead' },
+          { kind: 'item', key: 'center-aws-cloudfront', labelKey: 'cloud.nav.cloudfront', path: '/cloud/aws/cloudfront', icon: <CloudOutlined />, requiredPermissions: ['cloudfront:read', 'provider-accounts:read'], requiredCapability: 'cloudfrontRead' },
+          { kind: 'item', key: 'center-aws-waf', labelKey: 'cloud.nav.awsWaf', path: '/cloud/aws/waf', icon: <SafetyOutlined />, requiredPermissions: ['aws-waf:read', 'provider-accounts:read'], requiredCapability: 'awsWafRead' },
         ],
       },
       { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',

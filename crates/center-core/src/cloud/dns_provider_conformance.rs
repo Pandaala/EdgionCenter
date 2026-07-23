@@ -656,8 +656,7 @@ fn expect_scope_rejection<T>(result: Result<T, NormalizedProviderError>, context
 fn different_provider(provider: &CloudProvider) -> CloudProvider {
     match provider {
         CloudProvider::Cloudflare => CloudProvider::Aws,
-        CloudProvider::Aws => CloudProvider::GoogleCloud,
-        CloudProvider::GoogleCloud => CloudProvider::Cloudflare,
+        CloudProvider::Aws => CloudProvider::Cloudflare,
     }
 }
 
@@ -939,7 +938,7 @@ mod tests {
         let create = txt_record_set("create.example.test", "first");
         let replacement = txt_record_set("create.example.test", "replacement");
         DnsAdapterConformanceFixture {
-            provider: CloudProvider::GoogleCloud,
+            provider: CloudProvider::Aws,
             provider_account_id: account,
             other_account_id: CloudResourceId::new("dns-conformance-other").expect("other"),
             primary_zone: primary,
@@ -955,7 +954,7 @@ mod tests {
         ObservedDnsZone {
             zone: DnsZoneRef {
                 provider_account_id: account.clone(),
-                provider: CloudProvider::GoogleCloud,
+                provider: CloudProvider::Aws,
                 zone_id: DnsZoneId::new(id).expect("zone ID"),
                 apex: AbsoluteDnsName::new(apex).expect("apex"),
                 visibility: ZoneVisibility::Public,

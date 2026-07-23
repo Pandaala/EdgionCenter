@@ -647,6 +647,10 @@ fn validate_account(
 }
 
 fn map_provider_error(error: NormalizedProviderError) -> CloudflareDnsAdminError {
+    edgion_center_app::common::observe::cloud_metrics::record_provider_error(
+        "cloudflare",
+        error.category(),
+    );
     match error.category() {
         ProviderErrorCategory::Validation => CloudflareDnsAdminError::InvalidRequest,
         ProviderErrorCategory::NotFound => CloudflareDnsAdminError::NotFound,

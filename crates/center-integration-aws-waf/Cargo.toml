@@ -1,0 +1,19 @@
+[package]
+name = "edgion-center-integration-aws-waf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish = false
+description = "Production composition for bounded AWS WAFv2 operations"
+
+[dependencies]
+async-trait.workspace = true
+aws-config.workspace = true
+edgion-center-adapter-aws-waf = { path = "../center-adapter-aws-waf" }
+edgion-center-adapter-credential-files = { path = "../center-adapter-credential-files" }
+edgion-center-app = { path = "../center-app" }
+edgion-center-core = { path = "../center-core" }
+hmac.workspace = true
+serde.workspace = true
+sha2.workspace = true
+tokio = { version = "1.49", features = ["sync", "time"] }

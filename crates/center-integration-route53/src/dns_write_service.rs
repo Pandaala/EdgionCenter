@@ -775,6 +775,10 @@ fn validate_write_account(
 }
 
 fn map_mutation_error(error: NormalizedProviderError, dispatched: bool) -> Route53DnsAdminError {
+    edgion_center_app::common::observe::cloud_metrics::record_provider_error(
+        "aws",
+        error.category(),
+    );
     if error.code() == "route53_authority_changed_before_dispatch" {
         return Route53DnsAdminError::Unavailable;
     }
@@ -790,6 +794,10 @@ fn map_mutation_error(error: NormalizedProviderError, dispatched: bool) -> Route
 }
 
 fn map_observe_error(error: NormalizedProviderError) -> Route53DnsAdminError {
+    edgion_center_app::common::observe::cloud_metrics::record_provider_error(
+        "aws",
+        error.category(),
+    );
     match error.category() {
         ProviderErrorCategory::NotFound => Route53DnsAdminError::NotFound,
         ProviderErrorCategory::Validation => Route53DnsAdminError::InvalidRequest,
@@ -1203,7 +1211,7 @@ mod tests {
         Route53RecordSetPutRequest {
             guard: Route53RecordMutationGuardDto::MustNotExist {},
             desired: Route53RecordSetDesiredDto {
-                ttl: Route53RecordTtlDto::Seconds(60),
+                ttl: Route53RecordTtlDto::Seconds { seconds: 60 },
                 values: vec![Route53RecordValueDto::A {
                     address: "192.0.2.20".parse().unwrap(),
                 }],

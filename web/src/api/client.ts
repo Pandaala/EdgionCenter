@@ -132,6 +132,16 @@ export interface CenterCapabilities {
   cloudflareDnsWrite?: boolean
   cloudflareWafRead?: boolean
   cloudflareWafWrite?: boolean
+  route53DnsRead?: boolean
+  route53DnsWrite?: boolean
+  route53ZoneLifecycle?: boolean
+  cloudfrontRead?: boolean
+  cloudfrontWrite?: boolean
+  awsWafRead?: boolean
+  awsWafWrite?: boolean
+  awsWafAttach?: boolean
+  awsWafDetach?: boolean
+  awsWafSecurityWeaken?: boolean
 }
 
 export const systemApi = {

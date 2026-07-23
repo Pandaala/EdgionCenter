@@ -2,11 +2,13 @@
 
 ## Product boundary
 
-Cloud integration is an independent EdgionCenter capability for provider accounts, DNS zones,
-DNS records, DNS verification, and bounded WAF capability discovery. Provider DNS and WAF
-surfaces remain provider-specific; Center does not provide a unified exposure, edge, origin,
-certificate, health-check, or cache control plane. It does not depend on Edgion Controllers,
-Gateway API resources, RegionRoute, or the federation wire contract.
+Cloud integration is an independent EdgionCenter capability for provider accounts, provider DNS,
+bounded WAF administration, and a minimal CloudFront distribution lifecycle. Provider surfaces
+remain provider-specific: Route 53 is DNS, Cloudflare supplies its own DNS/WAF semantics, AWS WAF
+is separate from CloudFront, and CloudFront remains deliberately limited to distribution/origin
+and Web ACL attachment operations. Center does not provide a unified exposure, edge, origin pool,
+certificate, health-check, cache, or failover control plane. It does not depend on Edgion
+Controllers, Gateway API resources, RegionRoute, or the federation wire contract.
 
 ## Dependency boundary
 
@@ -24,7 +26,7 @@ Gateway API resources, RegionRoute, or the federation wire contract.
                |                                             |
     +----------v-----------+                    +------------v-----------+
     | center-core cloud    |                    | provider adapter crates |
-    | intent and contracts |<-------------------| Cloudflare / AWS / GCP  |
+    | intent and contracts |<-------------------| Cloudflare / AWS        |
     +----------+-----------+                    +------------------------+
                |
       +--------+---------+
@@ -158,8 +160,8 @@ not construct a discoverer or make provider requests.
 
 ### Kubernetes mode
 
-- Prefer projected ServiceAccount identity and cloud workload identity integrations. AWS and
-  Google SDKs use their ambient/web-identity chains, so no long-lived key enters a CRD.
+- Prefer projected ServiceAccount identity and cloud workload identity integrations. AWS SDKs use
+  their ambient/web-identity chains, so no long-lived key enters a CRD.
 - Static tokens such as Cloudflare API Tokens are mounted from a namespace-scoped Secret or
   external-secret CSI integration. `CredentialRef` selects the configured mount/alias; the
   business API does not read or return Secret data.
@@ -224,8 +226,10 @@ pages rather than a snapshot token, so continuation still performs a bounded res
 persistence remains deferred until measured scale or quota evidence justifies separate SQL and
 Kubernetes implementations.
 
-Cloudflare API Tokens are preferred to legacy global API keys. AWS and Google adapters must
-prefer automatically refreshed temporary credentials through the SDK provider chains.
+Cloudflare API Tokens are preferred to legacy global API keys. AWS integrations use the ambient
+SDK credential chain and verify the effective AWS account with STS before provider calls. Route
+53, CloudFront, and AWS WAF are independently composed: enabling one neither enables nor
+authorizes another.
 
 Credential inspection orchestration lives in the provider-neutral runtime. It loads the current
 ProviderAccount, resolves an inspector against that exact account authority, coalesces concurrent
@@ -321,7 +325,7 @@ must not treat the top-level observed generation alone as readiness.
 ## DNS provider contract
 
 Cloud-provider Admin APIs remain provider-specific product surfaces. There is no unified DNS menu
-or generic DNS control endpoint: Cloudflare, Route 53, and Google Cloud DNS expose their own
+or generic DNS control endpoint: Cloudflare and Route 53 expose their own
 inventory and operation routes, permissions, capabilities, and dashboard entries. A future Region
 failover workflow may call a selected provider-specific `switch-target` operation, but that caller
 does not change ownership of the provider integration.
@@ -353,12 +357,11 @@ renderers add the final dot when required. Owner names additionally allow unders
 wildcard only as the first complete label. Record data is typed, and RRset values use set semantics
 while TXT character-string segment order is preserved.
 
-Portable record values are separate from typed Cloudflare proxy, Route 53 alias, and Google alias
-extensions. Route 53 `SetIdentifier` participates in record identity; Cloudflare member record IDs
-remain observed provider-object metadata. Alias records cannot masquerade as CNAME values and have
-provider-specific identity and TTL rules: Route 53 aliases inherit TTL, while Google `ALIAS` is an
-apex-only provider record type with an explicit TTL. Cloudflare automatic TTL is explicit rather
-than portable `Seconds(1)`, and A/AAAA/CNAME records must state `DnsOnly` or `Proxied` intent.
+Portable record values are separate from typed Cloudflare proxy and Route 53 alias extensions.
+Route 53 `SetIdentifier` participates in record identity; Cloudflare member record IDs remain
+observed provider-object metadata. Alias records cannot masquerade as CNAME values. Route 53
+aliases inherit TTL. Cloudflare automatic TTL is explicit rather than portable `Seconds(1)`, and
+A/AAAA/CNAME records must state `DnsOnly` or `Proxied` intent.
 
 Zone references carry the provider account, provider kind, visibility, ID, and apex; adapters must
 compare the declared provider with the resolved provider account before any call. Route 53
@@ -529,24 +532,9 @@ always `not_checked` in this slice. The mutation key is single-active: operators
 active binding until all receipts issued under it have settled or their observation window has
 ended; retaining an unreferenced old file does not provide fallback verification.
 
-The Cloud DNS adapter follows the same independent boundary and binds every provider request,
-Center cursor, and change receipt to the configured Google Cloud project and managed-zone ID. It
-supports public and private authoritative zones while forwarding, peering, reverse-lookup, and
-Service Directory zones fail closed. Static RRsets, apex `ALIAS`, Geo, WRR, Primary/Backup, health
-checks, and internal load-balancer targets have typed representations; raw provider extensions are
-retained for exact deletion and revision hashing. DNSSEC-incompatible ALIAS and health-target shapes
-are rejected before mutation. One Cloud DNS Change carries all additions and exact deletions, so a
-server rejection cannot partially apply the collection. The REST transport uses ADC for attached
-service accounts, Workload Identity Federation, or service-account files. Safe reads use bounded
-retries; a mutation is dispatched once and any ambiguous post-dispatch failure is
-`UnknownOutcome`. Production uses the fixed HTTPS endpoint and only a loopback test seam can
-override it. Public and private capability profiles are reported separately. An ignored real-project
-test is available for a pre-provisioned disposable zone; binary and product-surface composition are
-later work.
-
 Zone lifecycle is a separate port from RRset mutation. `ManagedZone` records whether a provider
 zone was imported or Center-created and defaults to imported, observe-only, and retain. Cloudflare,
-Route 53, and Cloud DNS lifecycle adapters expose provider-assigned nameservers, DNSSEC state, DS
+and Route 53 lifecycle adapters expose provider-assigned nameservers, DNSSEC state, DS
 handoff, create/delete receipts, and full provider-state revisions. Provider completion never sets
 DNS readiness. An independent authority-verifier port supplies zone- and revision-bound parent NS
 and authoritative-resolution evidence; public readiness additionally requires an exact delegated
@@ -860,9 +848,6 @@ and future WAF workflows use their provider-specific APIs and menus directly.
 - AWS SDK credential chains support automatically refreshed ambient, web-identity, and
   assume-role credentials:
   https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html
-- Google recommends Application Default Credentials and Workload Identity Federation:
-  https://cloud.google.com/docs/authentication/application-default-credentials and
-  https://cloud.google.com/iam/docs/workload-identity-federation
 - Kubernetes Secret access requires encryption and least-privilege RBAC:
   https://kubernetes.io/docs/concepts/security/secrets-good-practices/
 - Kubernetes controllers continuously reconcile desired and observed state:
@@ -875,8 +860,6 @@ and future WAF workflows use their provider-specific APIs and menus directly.
   https://gateway-api.sigs.k8s.io/geps/gep-2162/
 - AWS IAM simulation is useful evidence but does not exactly reproduce every authorization path:
   https://docs.aws.amazon.com/IAM/latest/APIReference/API_SimulatePrincipalPolicy.html
-- Google IAM permission testing returns the permissions held by the caller for a resource:
-  https://cloud.google.com/iam/docs/testing-permissions
 - Cloudflare token verification proves token state, not every zone/account business permission:
   https://developers.cloudflare.com/api/resources/user/subresources/tokens/methods/verify/
 

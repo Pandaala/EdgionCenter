@@ -8,11 +8,13 @@ members = [
     "crates/center-adapter-cloudflare",
     "crates/center-adapter-route53",
     "crates/center-adapter-cloudfront",
-    "crates/center-adapter-google-cloud-dns",
+    "crates/center-adapter-aws-waf",
     "crates/center-adapter-dns-verifier",
     "crates/center-adapter-credential-files",
     "crates/center-integration-cloudflare",
     "crates/center-integration-route53",
+    "crates/center-integration-aws-waf",
+    "crates/center-integration-cloudfront",
     "bins/edgion-center-standalone",
     "bins/edgion-center-kubernetes",
 ]
@@ -33,6 +35,7 @@ aws-config = { version = "1.9", features = ["behavior-version-latest"] }
 aws-credential-types = "1.3"
 aws-sdk-route53 = "1.116"
 aws-sdk-cloudfront = "=1.124.0"
+aws-sdk-wafv2 = "=1.116.0"
 aws-sdk-sts = "1.108"
 aws-types = "1.4"
 idna = "1.1"
@@ -41,7 +44,6 @@ serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sha2 = "0.10"
 base64 = "0.22"
 hmac = "0.12"
-google-cloud-auth = "1.14"
 http = "1"
 zeroize = "1.8"
 cap-std = "=4.0.2"
