@@ -18,10 +18,10 @@ if (!runId) throw new Error('Resource action tests require the E2E run')
 if (mode !== 'standalone' && mode !== 'kubernetes') throw new Error('Resource action tests require a runtime mode')
 const prefix = `eruie2e-${createHash('sha256').update(runId).digest('hex').slice(0, 8)}`
 const render = (value: string) => value.replaceAll('__PREFIX__', prefix)
-const formControls: Partial<Record<string, readonly [string, string]>> = {
+const formControls: Partial<Record<string, readonly string[]>> = {
   edgiongatewayconfig: ['edgiongatewayconfig-ip-group-add', 'edgiongatewayconfig-ip-group-remove'],
   gateway: ['gateway-address-add', 'gateway-address-remove'],
-  httproute: ['httproute-rule-add', 'httproute-rule-remove'],
+  httproute: ['httproute-rule-add', 'httproute-rule-remove', 'mirror-tuning-annotations'],
   grpcroute: ['grpcroute-rule-add', 'grpcroute-rule-remove'],
   tcproute: ['streamroute-rule-add', 'streamroute-rule-remove'],
   udproute: ['streamroute-rule-add', 'streamroute-rule-remove'],
@@ -41,6 +41,9 @@ async function exerciseFormControls(page: import('@playwright/test').Page, kind:
   const remove = page.getByTestId(controls[1]).last()
   await expect(remove).toBeEnabled()
   await remove.click()
+  if (kind === 'httproute') {
+    await page.getByTestId('mirror-tuning-annotations').getByRole('spinbutton').first().fill('1250')
+  }
 }
 
 async function installActionRecorder(page: import('@playwright/test').Page): Promise<void> {

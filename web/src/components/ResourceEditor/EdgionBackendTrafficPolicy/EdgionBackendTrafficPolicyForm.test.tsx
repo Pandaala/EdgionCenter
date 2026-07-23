@@ -148,4 +148,62 @@ describe('EdgionBackendTrafficPolicyForm', () => {
     expect(await screen.findByDisplayValue('200')).toBeInTheDocument()
     expect(onDraftValidationChange).toHaveBeenLastCalledWith([])
   })
+
+  it('enables retry constraints with the Edgion defaults', () => {
+    const onChange = vi.fn()
+    const policy: EdgionBackendTrafficPolicy = {
+      apiVersion: 'edgion.io/v1',
+      kind: 'EdgionBackendTrafficPolicy',
+      metadata: { name: 'policy', namespace: 'prod' },
+      spec: { targetRefs: [{ group: '', kind: 'Service', name: 'service-a' }] },
+    }
+
+    render(<EdgionBackendTrafficPolicyForm data={policy} onChange={onChange} />)
+    fireEvent.click(screen.getAllByRole('switch')[3])
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...policy,
+      spec: {
+        ...policy.spec,
+        retryConstraint: {
+          budget: { percent: 20, interval: '10s' },
+          minRetryRate: { count: 10, interval: '1s' },
+        },
+      },
+    })
+  })
+
+  it('narrowly patches retry budget fields while preserving unknown siblings', () => {
+    const onChange = vi.fn()
+    const policy: EdgionBackendTrafficPolicy = {
+      apiVersion: 'edgion.io/v1',
+      kind: 'EdgionBackendTrafficPolicy',
+      metadata: { name: 'policy', namespace: 'prod' },
+      spec: {
+        targetRefs: [{ group: '', kind: 'Service', name: 'service-a' }],
+        retryConstraint: {
+          budget: { percent: 20, interval: '10s', futureBudget: true },
+          minRetryRate: { count: 10, interval: '1s', futureFloor: true },
+          futureRetry: true,
+        },
+      },
+    }
+
+    render(<EdgionBackendTrafficPolicyForm data={policy} onChange={onChange} />)
+    fireEvent.change(screen.getByDisplayValue('10s'), { target: { value: '30s' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...policy,
+      spec: {
+        ...policy.spec,
+        retryConstraint: {
+          ...policy.spec.retryConstraint!,
+          budget: {
+            ...policy.spec.retryConstraint!.budget,
+            interval: '30s',
+          },
+        },
+      },
+    })
+  })
 })

@@ -1,7 +1,7 @@
 import type { K8sMetadata } from '@/api/types'
 
 export type LoadBalancerType = 'RoundRobin' | 'LeastConn' | 'Ewma' | 'ConsistentHash'
-export type ConsistentHashOn = 'header' | 'cookie' | 'queryParam'
+export type ConsistentHashOn = 'header' | 'cookie' | 'queryParam' | 'sourceIp'
 export type HealthCheckType = 'http' | 'tcp' | 'grpc'
 
 export interface PolicyTargetRef {
@@ -13,7 +13,7 @@ export interface PolicyTargetRef {
 
 export interface ConsistentHashConfig {
   hashOn: ConsistentHashOn
-  key: string
+  key?: string
   [key: string]: unknown
 }
 
@@ -47,9 +47,37 @@ export interface OutlierDetectionConfig {
   consecutiveErrors?: number
   consecutiveGatewayErrors?: number
   consecutiveLocalOriginFailures?: number
-  ejectionSeconds?: number
-  maxEjectionSeconds?: number
+  ejectionTime?: string
+  maxEjectionTime?: string
   maxEjectionPercent?: number
+  [key: string]: unknown
+}
+
+export interface RetryBudget {
+  percent: number
+  interval: string
+  [key: string]: unknown
+}
+
+export interface RetryRateThreshold {
+  count: number
+  interval: string
+  [key: string]: unknown
+}
+
+export interface RetryConstraintConfig {
+  budget: RetryBudget
+  minRetryRate: RetryRateThreshold
+  [key: string]: unknown
+}
+
+export interface CircuitBreakerConfig {
+  maxParallelRequests: number
+  [key: string]: unknown
+}
+
+export interface ConnectionOverride {
+  connectTimeout?: string
   [key: string]: unknown
 }
 
@@ -66,6 +94,9 @@ export interface EdgionBackendTrafficPolicySpec {
   healthCheck?: ServiceHealthCheck
   outlierDetection?: OutlierDetectionConfig
   upstreamAuthority?: UpstreamAuthorityConfig
+  retryConstraint?: RetryConstraintConfig
+  circuitBreaker?: CircuitBreakerConfig
+  connection?: ConnectionOverride
   [key: string]: unknown
 }
 

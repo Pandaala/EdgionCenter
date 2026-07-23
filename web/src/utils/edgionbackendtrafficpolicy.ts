@@ -1,13 +1,17 @@
 import * as yaml from 'js-yaml'
 import type {
   ActiveHealthCheckConfig,
+  CircuitBreakerConfig,
+  ConnectionOverride,
   EdgionBackendTrafficPolicy,
   LoadBalancerConfig,
   OutlierDetectionConfig,
+  RetryConstraintConfig,
   UpstreamAuthorityConfig,
 } from '@/types/edgion-backend-traffic-policy'
 import { dumpYaml } from './yaml-utils'
 import { mutationDocumentToYaml } from './resource-document'
+import { isGep2257DurationInRange, isValidGep2257Duration, isValidPort } from './validation'
 
 export function createDefaultLoadBalancer(): LoadBalancerConfig {
   return { type: 'RoundRobin' }
@@ -28,9 +32,24 @@ export function createDefaultActiveHealthCheck(): ActiveHealthCheckConfig {
 export function createDefaultOutlierDetection(): OutlierDetectionConfig {
   return {
     consecutiveErrors: 5,
-    ejectionSeconds: 30,
+    ejectionTime: '30s',
     maxEjectionPercent: 50,
   }
+}
+
+export function createDefaultRetryConstraint(): RetryConstraintConfig {
+  return {
+    budget: { percent: 20, interval: '10s' },
+    minRetryRate: { count: 10, interval: '1s' },
+  }
+}
+
+export function createDefaultCircuitBreaker(): CircuitBreakerConfig {
+  return { maxParallelRequests: 1 }
+}
+
+export function createDefaultConnectionOverride(): ConnectionOverride {
+  return { connectTimeout: '10s' }
 }
 
 export function createDefaultUpstreamAuthority(): UpstreamAuthorityConfig {
@@ -75,35 +94,12 @@ function isPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value >= 1
 }
 
-function isNonZeroDuration(value: string): boolean {
-  const compact = value.trim().replace(/\s+/g, '')
-  if (!compact || compact.startsWith('-')) return false
-  const token = /(\d+(?:\.\d+)?)(milliseconds?|millis|ms|seconds?|secs?|sec|s|minutes?|mins?|min|m|hours?|hrs?|hr|h|days?|d)?/gy
-  let offset = 0
-  let totalMilliseconds = 0
-  let components = 0
-  while (offset < compact.length) {
-    token.lastIndex = offset
-    const match = token.exec(compact)
-    if (!match || match.index !== offset) return false
-    const number = Number(match[1])
-    const unit = match[2]
-    if (!unit && compact.length !== match[0].length) return false
-    const multiplier = unit?.startsWith('ms') || unit?.startsWith('milli') ? 1
-      : unit?.startsWith('m') ? 60_000
-      : unit?.startsWith('h') ? 3_600_000
-      : unit?.startsWith('d') ? 86_400_000
-      : 1_000
-    totalMilliseconds += number * multiplier
-    offset = token.lastIndex
-    components += 1
-  }
-  return components > 0 && totalMilliseconds > 0
-}
-
 function validateDuration(value: string | undefined, field: string, errors: string[]) {
-  if (value !== undefined && !isNonZeroDuration(value)) {
-    errors.push(`${field} must be a valid non-zero duration`)
+  if (value !== undefined && !isGep2257DurationInRange(value, {
+    minimumMilliseconds: 0,
+    minimumInclusive: false,
+  })) {
+    errors.push(`${field} must be a valid non-zero GEP-2257 duration`)
   }
 }
 
@@ -135,8 +131,10 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
     if (lb.type === 'ConsistentHash') {
       if (!lb.consistentHash) errors.push('loadBalancer.consistentHash is required')
       else {
-        if (!['header', 'cookie', 'queryParam'].includes(lb.consistentHash.hashOn)) errors.push('consistentHash.hashOn is invalid')
-        if (!lb.consistentHash.key) errors.push('consistentHash.key must not be empty')
+        if (!['header', 'cookie', 'queryParam', 'sourceIp'].includes(lb.consistentHash.hashOn)) errors.push('consistentHash.hashOn is invalid')
+        if (lb.consistentHash.hashOn === 'sourceIp') {
+          if (lb.consistentHash.key !== undefined) errors.push('consistentHash.key must be absent for sourceIp')
+        } else if (!lb.consistentHash.key) errors.push('consistentHash.key must not be empty')
       }
     } else if (lb.consistentHash) errors.push('consistentHash is only valid for ConsistentHash')
     if (lb.panicThreshold !== undefined && (!Number.isInteger(lb.panicThreshold) || lb.panicThreshold < 0 || lb.panicThreshold > 100)) {
@@ -151,7 +149,7 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
     if (active.unhealthyThreshold !== undefined && !isPositiveInteger(active.unhealthyThreshold)) errors.push('unhealthyThreshold must be >= 1')
     validateDuration(active.interval, 'interval', errors)
     validateDuration(active.timeout, 'timeout', errors)
-    if (active.port !== undefined && (!Number.isInteger(active.port) || active.port < 0 || active.port > 65535)) errors.push('port must be 0-65535')
+    if (active.port !== undefined && !isValidPort(active.port)) errors.push('port must be 1-65535')
     if ((active.type ?? 'http') === 'http') {
       if (active.path === '') errors.push('path must not be empty for http health check')
       if (active.expectedStatuses?.length === 0) errors.push('expectedStatuses must not be empty for http health check')
@@ -166,9 +164,49 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
     if (outlier.consecutiveErrors !== undefined && !isPositiveInteger(outlier.consecutiveErrors)) errors.push('consecutiveErrors must be >= 1')
     if (outlier.consecutiveGatewayErrors !== undefined && !isPositiveInteger(outlier.consecutiveGatewayErrors)) errors.push('consecutiveGatewayErrors must be >= 1')
     if (outlier.consecutiveLocalOriginFailures !== undefined && !isPositiveInteger(outlier.consecutiveLocalOriginFailures)) errors.push('consecutiveLocalOriginFailures must be >= 1')
-    if (outlier.ejectionSeconds !== undefined && !isPositiveInteger(outlier.ejectionSeconds)) errors.push('ejectionSeconds must be >= 1')
+    if (outlier.ejectionTime !== undefined && !isGep2257DurationInRange(outlier.ejectionTime, {
+      minimumMilliseconds: 1_000,
+    })) errors.push('ejectionTime must be a valid GEP-2257 duration of at least 1s')
+    if (outlier.maxEjectionTime !== undefined && !isValidGep2257Duration(outlier.maxEjectionTime)) {
+      errors.push('maxEjectionTime must be a valid GEP-2257 duration')
+    }
     if (outlier.maxEjectionPercent !== undefined && (!Number.isInteger(outlier.maxEjectionPercent) || outlier.maxEjectionPercent < 0 || outlier.maxEjectionPercent > 100)) errors.push('maxEjectionPercent must be 0-100')
   }
+
+  const retry = policy.spec.retryConstraint
+  if (retry) {
+    const budget = retry.budget
+    if (!budget || !Number.isInteger(budget.percent) || budget.percent < 0 || budget.percent > 100) {
+      errors.push('retryConstraint.budget.percent must be 0-100')
+    }
+    if (!budget || !isGep2257DurationInRange(budget.interval, {
+      minimumMilliseconds: 1_000,
+      maximumMilliseconds: 3_600_000,
+    })) errors.push('retryConstraint.budget.interval must be in [1s, 1h]')
+    const minRetryRate = retry.minRetryRate
+    if (!minRetryRate || !Number.isInteger(minRetryRate.count)
+      || minRetryRate.count < 1 || minRetryRate.count > 1_000_000) {
+      errors.push('retryConstraint.minRetryRate.count must be in 1-1000000')
+    }
+    if (!minRetryRate || !isGep2257DurationInRange(minRetryRate.interval, {
+      minimumMilliseconds: 0,
+      maximumMilliseconds: 3_600_000,
+      minimumInclusive: false,
+    })) errors.push('retryConstraint.minRetryRate.interval must be in (0s, 1h]')
+  }
+
+  const circuitBreaker = policy.spec.circuitBreaker
+  if (circuitBreaker && (!Number.isInteger(circuitBreaker.maxParallelRequests)
+    || circuitBreaker.maxParallelRequests < 1)) {
+    errors.push('circuitBreaker.maxParallelRequests must be >= 1')
+  }
+
+  const connectTimeout = policy.spec.connection?.connectTimeout
+  if (connectTimeout !== undefined && !isGep2257DurationInRange(connectTimeout, {
+    minimumMilliseconds: 0,
+    maximumMilliseconds: 3_600_000,
+    minimumInclusive: false,
+  })) errors.push('connection.connectTimeout must be in (0s, 1h]')
 
   const authority = policy.spec.upstreamAuthority
   if (authority) {

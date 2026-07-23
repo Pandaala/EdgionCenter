@@ -151,14 +151,28 @@ function FilterBody({ filter, onChange, disabled }: {
   }
   if (filter.type === 'RequestMirror') {
     const mirror = (filter as any).requestMirror || { backendRef: {} }
+    const patchMirror = (patch: Record<string, unknown>) => {
+      const next = { ...mirror, ...patch }
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) delete next[key]
+      }
+      for (const stale of [
+        'percentage',
+        'connectTimeoutMs',
+        'writeTimeoutMs',
+        'channelFullTimeoutMs',
+        'maxBufferedChunks',
+        'mirrorLog',
+        'maxConcurrent',
+      ]) delete next[stale]
+      onChange({ ...filter, requestMirror: next })
+    }
     return <Space direction="vertical" style={{ width: '100%' }}>
-      <ObjectRefFields value={mirror.backendRef} onChange={(backendRef) => onChange({ ...filter, requestMirror: { ...mirror, backendRef } })} disabled={disabled} />
+      <ObjectRefFields value={mirror.backendRef} onChange={(backendRef) => patchMirror({ backendRef })} disabled={disabled} />
       <Space wrap>
-        <Form.Item label={t('routeFilter.numerator')} style={{ marginBottom: 0 }}><InputNumber min={0} value={mirror.fraction?.numerator} onChange={(numerator) => onChange({ ...filter, requestMirror: { ...mirror, fraction: { ...mirror.fraction, numerator: numerator ?? 0 } } })} disabled={disabled} /></Form.Item>
-        <Form.Item label={t('routeFilter.denominator')} style={{ marginBottom: 0 }}><InputNumber min={1} value={mirror.fraction?.denominator} onChange={(denominator) => onChange({ ...filter, requestMirror: { ...mirror, fraction: { ...mirror.fraction, denominator: denominator ?? undefined } } })} disabled={disabled} /></Form.Item>
-        <Form.Item label={t('routeFilter.percentage')} style={{ marginBottom: 0 }}><InputNumber min={0} max={100} value={mirror.percentage} onChange={(percentage) => onChange({ ...filter, requestMirror: { ...mirror, percentage: percentage ?? undefined } })} disabled={disabled} /></Form.Item>
-        {(['connectTimeoutMs','writeTimeoutMs','maxBufferedChunks','maxConcurrent','channelFullTimeoutMs'] as const).map((field) => <Form.Item key={field} label={t(`routeFilter.${field}` as any)} style={{ marginBottom: 0 }}><InputNumber min={0} value={mirror[field]} onChange={(v) => onChange({ ...filter, requestMirror: { ...mirror, [field]: v ?? undefined } })} disabled={disabled} /></Form.Item>)}
-        <Checkbox checked={mirror.mirrorLog ?? false} onChange={(e) => onChange({ ...filter, requestMirror: { ...mirror, mirrorLog: e.target.checked } })} disabled={disabled}>{t('routeFilter.mirrorLog')}</Checkbox>
+        <Form.Item label={t('routeFilter.numerator')} style={{ marginBottom: 0 }}><InputNumber min={0} value={mirror.fraction?.numerator} onChange={(numerator) => patchMirror({ fraction: { ...mirror.fraction, numerator: numerator ?? 0 }, percent: undefined })} disabled={disabled} /></Form.Item>
+        <Form.Item label={t('routeFilter.denominator')} style={{ marginBottom: 0 }}><InputNumber min={1} value={mirror.fraction?.denominator} onChange={(denominator) => patchMirror({ fraction: { ...mirror.fraction, denominator: denominator ?? undefined }, percent: undefined })} disabled={disabled} /></Form.Item>
+        <Form.Item label={t('routeFilter.percent')} style={{ marginBottom: 0 }}><InputNumber aria-label={t('routeFilter.percent')} min={0} max={100} value={mirror.percent} onChange={(percent) => patchMirror(percent === null ? { percent: undefined } : { percent, fraction: undefined })} disabled={disabled} /></Form.Item>
       </Space>
     </Space>
   }

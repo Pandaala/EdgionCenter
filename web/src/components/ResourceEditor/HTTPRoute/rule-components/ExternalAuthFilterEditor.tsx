@@ -158,8 +158,6 @@ const ExternalAuthFilterEditor: React.FC<Props> = ({ value, onChange, disabled }
       {textField(value as any, 'timeoutMsTemplate', patch)}
       {numberField(value as any, 'maxResponseBytes', patch, 1)}
       {numberField(value as any, 'statusOnError', patch, 200, 599)}
-      <Checkbox checked={value.allowDegradation ?? false} onChange={(e) => patch({ allowDegradation: e.target.checked })} disabled={disabled}>{label(t, 'allowDegradation')}</Checkbox>
-      {textField(value as any, 'allowDegradationTemplate', patch)}
     </Space></Card>
 
     <Card size="small" title={t('externalAuth.tls')}><Space direction="vertical" style={{ width: '100%' }}>

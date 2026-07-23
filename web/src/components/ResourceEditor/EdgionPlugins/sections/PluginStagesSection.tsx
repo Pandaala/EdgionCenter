@@ -10,6 +10,7 @@ import {
   pluginTypesForStage,
   type PluginStage,
 } from '../pluginCatalog'
+import { pluginAcceptsBodyRequirement } from '@/utils/edgionplugins'
 
 const STAGES: Array<{ key: PluginStage; label: string }> = [
   { key: 'requestPlugins', label: 'RequestFilter' },
@@ -53,7 +54,11 @@ export default function PluginStagesSection({ value, onChange, readOnly }: {
                         options={availableTypes.map((type) => ({ value: type, label: type }))}
                         onChange={(type) => {
                           const next = [...entries]
-                          next[index] = { ...entry, type, config: defaultConfigForPlugin(type) }
+                          const nextEntry = { ...entry, type, config: defaultConfigForPlugin(type) } as PluginEntry
+                          if (!pluginAcceptsBodyRequirement(stage, type, nextEntry.config)) {
+                            delete (nextEntry as PluginEntry & { body?: unknown }).body
+                          }
+                          next[index] = nextEntry
                           updateEntries(stage, next)
                         }}
                       />
@@ -81,6 +86,39 @@ export default function PluginStagesSection({ value, onChange, readOnly }: {
                       }}
                     />
                   </Card>
+                  {pluginAcceptsBodyRequirement(stage, entry.type, entry.config) && (
+                    <Card title={t('plugins.body')} size="small">
+                      <StructuredConfigEditor
+                        fields={[
+                          { name: 'maxBodySize', kind: 'string' },
+                          { name: 'conditions', kind: 'object', defaultValue: {} },
+                          { name: 'onReadFailure', kind: 'string', options: ['failClose', 'failOpen'] },
+                        ]}
+                        value={(('body' in entry && entry.body) || {}) as Record<string, unknown>}
+                        readOnly={readOnly}
+                        onChange={(body) => {
+                          const next = [...entries]
+                          next[index] = { ...entry, body } as PluginEntry
+                          updateEntries(stage, next)
+                        }}
+                      />
+                    </Card>
+                  )}
+                  <Card title={t('plugins.dye')} size="small">
+                    <StructuredConfigEditor
+                      fields={[
+                        { name: 'request', kind: 'array', defaultValue: [] },
+                        { name: 'response', kind: 'array', defaultValue: [] },
+                      ]}
+                      value={(entry.dye ?? {}) as Record<string, unknown>}
+                      readOnly={readOnly}
+                      onChange={(dye) => {
+                        const next = [...entries]
+                        next[index] = { ...entry, dye }
+                        updateEntries(stage, next)
+                      }}
+                    />
+                  </Card>
                   <Card title={t('plugins.config')} size="small">
                     {definition ? (
                       <StructuredConfigEditor
@@ -88,7 +126,13 @@ export default function PluginStagesSection({ value, onChange, readOnly }: {
                         value={entry.config ?? {}}
                         readOnly={readOnly}
                         onChange={(config) => {
-                          const next = [...entries]; next[index] = { ...entry, config }; updateEntries(stage, next)
+                          const next = [...entries]
+                          const nextEntry = { ...entry, config } as PluginEntry
+                          if (!pluginAcceptsBodyRequirement(stage, entry.type, config)) {
+                            delete (nextEntry as PluginEntry & { body?: unknown }).body
+                          }
+                          next[index] = nextEntry
+                          updateEntries(stage, next)
                         }}
                       />
                     ) : <Tag color="red">{t('plugins.unknownType')}</Tag>}

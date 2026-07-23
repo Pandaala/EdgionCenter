@@ -4,17 +4,23 @@ import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import MetadataSection from '../common/MetadataSection'
 import type {
   ActiveHealthCheckConfig,
+  CircuitBreakerConfig,
+  ConnectionOverride,
   EdgionBackendTrafficPolicy,
   EdgionBackendTrafficPolicySpec,
   LoadBalancerConfig,
   OutlierDetectionConfig,
   PolicyTargetRef,
+  RetryConstraintConfig,
   UpstreamAuthorityConfig,
 } from '@/types/edgion-backend-traffic-policy'
 import {
   createDefaultActiveHealthCheck,
+  createDefaultCircuitBreaker,
+  createDefaultConnectionOverride,
   createDefaultLoadBalancer,
   createDefaultOutlierDetection,
+  createDefaultRetryConstraint,
   createDefaultUpstreamAuthority,
 } from '@/utils/edgionbackendtrafficpolicy'
 import { useT } from '@/i18n'
@@ -62,6 +68,12 @@ const EdgionBackendTrafficPolicyForm = ({
     })
   const patchOutlier = (patch: Partial<OutlierDetectionConfig>) =>
     setSection('outlierDetection', { ...data.spec.outlierDetection!, ...patch })
+  const patchRetryConstraint = (patch: Partial<RetryConstraintConfig>) =>
+    setSection('retryConstraint', { ...data.spec.retryConstraint!, ...patch })
+  const patchCircuitBreaker = (patch: Partial<CircuitBreakerConfig>) =>
+    setSection('circuitBreaker', { ...data.spec.circuitBreaker!, ...patch })
+  const patchConnection = (patch: Partial<ConnectionOverride>) =>
+    setSection('connection', { ...data.spec.connection!, ...patch })
   const patchAuthority = (patch: Partial<UpstreamAuthorityConfig>) =>
     setSection('upstreamAuthority', { ...data.spec.upstreamAuthority!, ...patch })
 
@@ -73,6 +85,9 @@ const EdgionBackendTrafficPolicyForm = ({
   )
   const [expectedStatusesTouched, setExpectedStatusesTouched] = useState(false)
   const outlier = data.spec.outlierDetection
+  const retryConstraint = data.spec.retryConstraint
+  const circuitBreaker = data.spec.circuitBreaker
+  const connection = data.spec.connection
   const authority = data.spec.upstreamAuthority
 
   useEffect(() => {
@@ -202,13 +217,19 @@ const EdgionBackendTrafficPolicyForm = ({
                       value={lb.consistentHash.hashOn}
                       disabled={readOnly}
                       style={{ width: 160 }}
-                      options={['header', 'cookie', 'queryParam'].map((value) => ({ value, label: value }))}
-                      onChange={(hashOn) => patchLoadBalancer({ consistentHash: { ...lb.consistentHash!, hashOn } })}
+                      options={['header', 'cookie', 'queryParam', 'sourceIp'].map((value) => ({ value, label: value }))}
+                      onChange={(hashOn) => {
+                        const consistentHash = { ...lb.consistentHash!, hashOn }
+                        if (hashOn === 'sourceIp') delete consistentHash.key
+                        patchLoadBalancer({ consistentHash })
+                      }}
                     />
                   </Form.Item>
-                  <Form.Item label={t('field.hashKey')} required>
-                    <Input value={lb.consistentHash.key} disabled={readOnly} onChange={(event) => patchLoadBalancer({ consistentHash: { ...lb.consistentHash!, key: event.target.value } })} />
-                  </Form.Item>
+                  {lb.consistentHash.hashOn !== 'sourceIp' && (
+                    <Form.Item label={t('field.hashKey')} required>
+                      <Input value={lb.consistentHash.key} disabled={readOnly} onChange={(event) => patchLoadBalancer({ consistentHash: { ...lb.consistentHash!, key: event.target.value } })} />
+                    </Form.Item>
+                  )}
                 </Space>
               )}
             </>
@@ -233,7 +254,7 @@ const EdgionBackendTrafficPolicyForm = ({
                   />
                 </Form.Item>
                 <Form.Item label={t('field.healthCheckPort')}>
-                  <InputNumber min={0} max={65535} value={active.port} disabled={readOnly} onChange={(value) => patchActive({ port: value ?? undefined })} />
+                  <InputNumber min={1} max={65535} value={active.port} disabled={readOnly} onChange={(value) => patchActive({ port: value ?? undefined })} />
                 </Form.Item>
                 <Form.Item label={t('field.interval')} required>
                   <Input value={active.interval} disabled={readOnly} onChange={(event) => patchActive({ interval: event.target.value })} />
@@ -292,10 +313,94 @@ const EdgionBackendTrafficPolicyForm = ({
               <Form.Item label={t('field.consecutiveErrors')} required><InputNumber min={1} value={outlier.consecutiveErrors} disabled={readOnly} onChange={(value) => patchOutlier({ consecutiveErrors: value ?? 0 })} /></Form.Item>
               <Form.Item label={t('field.consecutiveGatewayErrors')} tooltip={t('help.inheritConsecutiveErrors')}><InputNumber min={1} value={outlier.consecutiveGatewayErrors} disabled={readOnly} onChange={(value) => patchOutlier({ consecutiveGatewayErrors: value ?? undefined })} /></Form.Item>
               <Form.Item label={t('field.consecutiveLocalOriginFailures')} tooltip={t('help.inheritGatewayErrors')}><InputNumber min={1} value={outlier.consecutiveLocalOriginFailures} disabled={readOnly} onChange={(value) => patchOutlier({ consecutiveLocalOriginFailures: value ?? undefined })} /></Form.Item>
-              <Form.Item label={t('field.ejectionSeconds')} required><InputNumber min={1} value={outlier.ejectionSeconds} disabled={readOnly} onChange={(value) => patchOutlier({ ejectionSeconds: value ?? 0 })} /></Form.Item>
-              <Form.Item label={t('field.maxEjectionSeconds')} tooltip={t('help.maxEjectionSeconds')}><InputNumber min={1} value={outlier.maxEjectionSeconds} disabled={readOnly} onChange={(value) => patchOutlier({ maxEjectionSeconds: value ?? undefined })} /></Form.Item>
+              <Form.Item label={t('field.ejectionTime')} required><Input value={outlier.ejectionTime} disabled={readOnly} onChange={(event) => patchOutlier({ ejectionTime: event.target.value })} /></Form.Item>
+              <Form.Item label={t('field.maxEjectionTime')} tooltip={t('help.maxEjectionTime')}><Input value={outlier.maxEjectionTime} disabled={readOnly} onChange={(event) => patchOutlier({ maxEjectionTime: event.target.value || undefined })} /></Form.Item>
               <Form.Item label={t('field.maxEjectionPercent')} required><InputNumber min={0} max={100} value={outlier.maxEjectionPercent} disabled={readOnly} onChange={(value) => patchOutlier({ maxEjectionPercent: value ?? 0 })} /></Form.Item>
             </Space>
+          )}
+        </Card>
+
+        <Card
+          title={t('section.retryConstraint')}
+          size="small"
+          extra={<Switch checked={Boolean(retryConstraint)} disabled={readOnly} onChange={(checked) => setSection('retryConstraint', checked ? createDefaultRetryConstraint() : undefined)} />}
+        >
+          {retryConstraint && (
+            <Space wrap align="start">
+              <Form.Item label={t('field.retryBudgetPercent')} required>
+                <InputNumber
+                  min={0}
+                  max={100}
+                  value={retryConstraint.budget.percent}
+                  disabled={readOnly}
+                  onChange={(value) => patchRetryConstraint({
+                    budget: { ...retryConstraint.budget, percent: value ?? 0 },
+                  })}
+                />
+              </Form.Item>
+              <Form.Item label={t('field.retryBudgetInterval')} required>
+                <Input
+                  value={retryConstraint.budget.interval}
+                  disabled={readOnly}
+                  onChange={(event) => patchRetryConstraint({
+                    budget: { ...retryConstraint.budget, interval: event.target.value },
+                  })}
+                />
+              </Form.Item>
+              <Form.Item label={t('field.minRetryRateCount')} required>
+                <InputNumber
+                  min={1}
+                  max={1_000_000}
+                  value={retryConstraint.minRetryRate.count}
+                  disabled={readOnly}
+                  onChange={(value) => patchRetryConstraint({
+                    minRetryRate: { ...retryConstraint.minRetryRate, count: value ?? 0 },
+                  })}
+                />
+              </Form.Item>
+              <Form.Item label={t('field.minRetryRateInterval')} required>
+                <Input
+                  value={retryConstraint.minRetryRate.interval}
+                  disabled={readOnly}
+                  onChange={(event) => patchRetryConstraint({
+                    minRetryRate: { ...retryConstraint.minRetryRate, interval: event.target.value },
+                  })}
+                />
+              </Form.Item>
+            </Space>
+          )}
+        </Card>
+
+        <Card
+          title={t('section.circuitBreaker')}
+          size="small"
+          extra={<Switch checked={Boolean(circuitBreaker)} disabled={readOnly} onChange={(checked) => setSection('circuitBreaker', checked ? createDefaultCircuitBreaker() : undefined)} />}
+        >
+          {circuitBreaker && (
+            <Form.Item label={t('field.maxParallelRequests')} required>
+              <InputNumber
+                min={1}
+                value={circuitBreaker.maxParallelRequests}
+                disabled={readOnly}
+                onChange={(value) => patchCircuitBreaker({ maxParallelRequests: value ?? 0 })}
+              />
+            </Form.Item>
+          )}
+        </Card>
+
+        <Card
+          title={t('section.connectionOverride')}
+          size="small"
+          extra={<Switch checked={Boolean(connection)} disabled={readOnly} onChange={(checked) => setSection('connection', checked ? createDefaultConnectionOverride() : undefined)} />}
+        >
+          {connection && (
+            <Form.Item label={t('field.backendConnectTimeout')} required>
+              <Input
+                value={connection.connectTimeout}
+                disabled={readOnly}
+                onChange={(event) => patchConnection({ connectTimeout: event.target.value || undefined })}
+              />
+            </Form.Item>
           )}
         </Card>
 

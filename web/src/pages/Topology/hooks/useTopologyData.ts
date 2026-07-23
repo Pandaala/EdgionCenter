@@ -467,9 +467,9 @@ export function useTopologyData(namespaceFilter: string | null): TopologyData {
     TOPOLOGY_KINDS.map((kind, index) => [kind, results[index]?.data ?? []]),
   ) as TopologyResources, results.map((result) => result.data)) // eslint-disable-line react-hooks/exhaustive-deps
   const partialErrors = results.flatMap((result, index) => result.isError ? [TOPOLOGY_KINDS[index]] : [])
-  const grantSettings = (resourceData.edgiongatewayconfig ?? []).map((config) => config.spec?.enableReferenceGrantValidation).filter((value): value is boolean => typeof value === 'boolean')
-  const referenceGrantValidation: boolean | 'unknown' = partialErrors.includes('edgiongatewayconfig') || grantSettings.length === 0
-    ? 'unknown' : grantSettings.every((value) => value === grantSettings[0]) ? grantSettings[0] : 'unknown'
+  // ReferenceGrant validation is Controller process configuration, not an
+  // EdgionGatewayConfig field. The resource API cannot reveal its value.
+  const referenceGrantValidation = 'unknown' as const
   const graph = useMemo(
     () => buildTopologyGraph(resourceData, namespaceFilter, new Set(partialErrors), referenceGrantValidation),
     [resourceData, namespaceFilter, partialErrors.join('|'), referenceGrantValidation], // eslint-disable-line react-hooks/exhaustive-deps

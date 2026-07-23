@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import * as yaml from 'js-yaml'
-import { Form, Input, InputNumber, Select, Switch, Card, Space, Divider, message } from 'antd'
+import { Form, Input, Select, Switch, Card, Space, Divider, message } from 'antd'
 import MetadataSection from '../common/MetadataSection'
 import type { Dns01Challenge, EdgionAcme, Http01Challenge } from '@/types/edgion-acme'
 import { replaceChallengeType } from '@/utils/edgionacme'
@@ -229,22 +229,24 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
                 />
               </Form.Item>
               <Form.Item label={t('field.propagationTimeout')} style={{ marginBottom: 8 }}>
-                <InputNumber
-                  value={dns01.propagationTimeout}
-                  onChange={(val) => updateChallenge({ propagationTimeout: val ?? undefined })}
-                  placeholder="120"
+                <Input
+                  value={dns01.propagationTimeout ?? ''}
+                  onChange={(event) => updateChallenge({
+                    propagationTimeout: event.target.value || undefined,
+                  })}
+                  placeholder="120s"
                   disabled={readOnly}
-                  min={0}
                   style={{ width: 160 }}
                 />
               </Form.Item>
               <Form.Item label={t('field.propagationInterval')} style={{ marginBottom: 0 }}>
-                <InputNumber
-                  value={dns01.propagationCheckInterval}
-                  onChange={(val) => updateChallenge({ propagationCheckInterval: val ?? undefined })}
-                  placeholder="15"
+                <Input
+                  value={dns01.propagationCheckInterval ?? ''}
+                  onChange={(event) => updateChallenge({
+                    propagationCheckInterval: event.target.value || undefined,
+                  })}
+                  placeholder="5s"
                   disabled={readOnly}
-                  min={0}
                   style={{ width: 160 }}
                 />
               </Form.Item>
@@ -326,32 +328,36 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
 
         {/* Renewal */}
         <Card title={t('section.renewal')} size="small">
-          <Form.Item label={t('field.renewBeforeDays')} style={{ marginBottom: 8 }}>
-            <InputNumber
-              value={renewal?.renewBeforeDays ?? 30}
-              onChange={(val) => updateRenewal({ renewBeforeDays: val ?? undefined })}
+          <Form.Item label={t('field.renewBefore')} style={{ marginBottom: 8 }}>
+            <Input
+              value={renewal?.renewBefore ?? ''}
+              onChange={(event) => updateRenewal({
+                renewBefore: event.target.value || undefined,
+              })}
+              placeholder="720h"
               disabled={readOnly}
-              min={1}
               style={{ width: 160 }}
             />
           </Form.Item>
           <Form.Item label={t('field.checkInterval')} style={{ marginBottom: 8 }}>
-            <InputNumber
-              value={renewal?.checkInterval}
-              onChange={(val) => updateRenewal({ checkInterval: val ?? undefined })}
-              placeholder="3600"
+            <Input
+              value={renewal?.checkInterval ?? ''}
+              onChange={(event) => updateRenewal({
+                checkInterval: event.target.value || undefined,
+              })}
+              placeholder="24h"
               disabled={readOnly}
-              min={0}
               style={{ width: 160 }}
             />
           </Form.Item>
           <Form.Item label={t('field.failBackoff')} style={{ marginBottom: 0 }}>
-            <InputNumber
-              value={renewal?.failBackoff}
-              onChange={(val) => updateRenewal({ failBackoff: val ?? undefined })}
-              placeholder="300"
+            <Input
+              value={renewal?.failBackoff ?? ''}
+              onChange={(event) => updateRenewal({
+                failBackoff: event.target.value || undefined,
+              })}
+              placeholder="5m"
               disabled={readOnly}
-              min={0}
               style={{ width: 160 }}
             />
           </Form.Item>

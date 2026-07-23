@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeHTTPRoute, toHTTPRouteMutationDocument, validateHTTPRouteForMutation } from './httproute'
+import {
+  normalizeHTTPRoute,
+  toHTTPRouteMutationDocument,
+  validateHTTPRouteForMutation,
+  withHTTPRouteMirrorTuningAnnotation,
+} from './httproute'
 
 describe('HTTPRoute lossless adapter', () => {
   it('preserves rule extensions and backend filters while stripping runtime state', () => {
@@ -61,5 +66,116 @@ describe('HTTPRoute lossless adapter', () => {
     expect(() => validateHTTPRouteForMutation(route)).toThrow(/PathPrefix/)
     route.spec.rules[0].matches[0].path.type = 'PathPrefix'
     expect(() => validateHTTPRouteForMutation(route)).toThrow(/100 through 599/)
+  })
+
+  it('patches one mirror annotation without losing unrelated annotations', () => {
+    const route: any = {
+      apiVersion: 'gateway.networking.k8s.io/v1',
+      kind: 'HTTPRoute',
+      metadata: {
+        name: 'route',
+        namespace: 'edge',
+        annotations: {
+          'future.example.com/retained': 'yes',
+          'edgion.io/mirror-log': 'true',
+        },
+      },
+      spec: { parentRefs: [{ name: 'gateway' }] },
+    }
+
+    const updated = withHTTPRouteMirrorTuningAnnotation(route, 'connectTimeoutMs', '2500')
+    expect(updated.metadata.annotations).toEqual({
+      'future.example.com/retained': 'yes',
+      'edgion.io/mirror-log': 'true',
+      'edgion.io/mirror-connect-timeout-ms': '2500',
+    })
+    expect(withHTTPRouteMirrorTuningAnnotation(updated, 'connectTimeoutMs', undefined).metadata.annotations)
+      .toEqual({
+        'future.example.com/retained': 'yes',
+        'edgion.io/mirror-log': 'true',
+      })
+    expect(route.metadata.annotations).not.toHaveProperty('edgion.io/mirror-connect-timeout-ms')
+  })
+
+  it('accepts RequestMirror percent and rejects invalid or mixed sampling fields', () => {
+    const route: any = {
+      apiVersion: 'gateway.networking.k8s.io/v1',
+      kind: 'HTTPRoute',
+      metadata: { name: 'route', namespace: 'edge' },
+      spec: {
+        parentRefs: [{ name: 'gateway' }],
+        rules: [{
+          filters: [{
+            type: 'RequestMirror',
+            requestMirror: { backendRef: { name: 'mirror' }, percent: 20 },
+          }],
+        }],
+      },
+    }
+
+    expect(() => validateHTTPRouteForMutation(route)).not.toThrow()
+    route.spec.rules[0].filters[0].requestMirror.percent = 101
+    expect(() => validateHTTPRouteForMutation(route)).toThrow(/integer from 0 through 100/)
+    route.spec.rules[0].filters[0].requestMirror.percent = 20
+    route.spec.rules[0].filters[0].requestMirror.fraction = { numerator: 1, denominator: 2 }
+    expect(() => validateHTTPRouteForMutation(route)).toThrow(/cannot combine percent and fraction/)
+  })
+
+  it('strips removed mirror and ExternalAuth fields while retaining unknown siblings', () => {
+    const route: any = {
+      apiVersion: 'gateway.networking.k8s.io/v1',
+      kind: 'HTTPRoute',
+      metadata: { name: 'route', namespace: 'edge' },
+      spec: {
+        parentRefs: [{ name: 'gateway' }],
+        rules: [{
+          filters: [
+            {
+              type: 'RequestMirror',
+              requestMirror: {
+                backendRef: { name: 'mirror' },
+                percentage: 25,
+                connectTimeoutMs: 500,
+                futureMirrorField: { retained: true },
+              },
+            },
+            {
+              type: 'ExternalAuth',
+              externalAuth: {
+                target: { name: 'auth' },
+                allowDegradation: true,
+                allowDegradationTemplate: '${ctx:degrade}',
+                futureAuthField: { retained: true },
+              },
+            },
+          ],
+          backendRefs: [{
+            name: 'backend',
+            filters: [{
+              type: 'ExternalAuth',
+              externalAuth: {
+                target: { name: 'auth' },
+                allowDegradation: false,
+                futureBackendAuthField: true,
+              },
+            }],
+          }],
+        }],
+      },
+    }
+
+    const mutation: any = toHTTPRouteMutationDocument(route, 'update')
+    expect(mutation.spec.rules[0].filters[0].requestMirror).toEqual({
+      backendRef: { name: 'mirror' },
+      futureMirrorField: { retained: true },
+    })
+    expect(mutation.spec.rules[0].filters[1].externalAuth).toEqual({
+      target: { name: 'auth' },
+      futureAuthField: { retained: true },
+    })
+    expect(mutation.spec.rules[0].backendRefs[0].filters[0].externalAuth).toEqual({
+      target: { name: 'auth' },
+      futureBackendAuthField: true,
+    })
   })
 })

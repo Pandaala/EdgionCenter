@@ -46,7 +46,7 @@ export interface EffectiveRegionRoute {
   hashCalc?: { algorithm?: string; modulo?: number; [key: string]: unknown }
   routeRules: Array<{ type?: string; [key: string]: unknown }>
   routeByKeyConfMatch?: Record<string, unknown>
-  dyeHeaders?: Record<string, unknown>
+  dye?: unknown
   overrideRef: RegionRouteOverrideRef | null
   overrideApplied: boolean
   serviceUsages: RegionRouteServiceUsage[]

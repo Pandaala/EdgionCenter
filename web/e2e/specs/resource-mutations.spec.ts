@@ -53,10 +53,12 @@ function fixtureFor(catalog: ResourceCatalogEntry): Record<string, any> {
 function mutationDocument(catalog: ResourceCatalogEntry, name: string): Record<string, any> {
   const document = fixtureFor(catalog)
   delete document.status
+  const fixtureAnnotations = document.metadata?.annotations
   document.metadata = {
     name,
     ...(catalog.scope === 'namespaced' ? { namespace: document.metadata.namespace } : {}),
     labels: { ...document.metadata.labels, 'edgion.io/e2e-run': runId },
+    ...(fixtureAnnotations ? { annotations: structuredClone(fixtureAnnotations) } : {}),
   }
   if (catalog.kind === 'service') {
     for (const key of ['clusterIP', 'clusterIPs', 'healthCheckNodePort', 'ipFamilies', 'ipFamilyPolicy']) delete document.spec?.[key]
@@ -123,6 +125,9 @@ async function exerciseEditorRoundTrip(
   await page.getByTestId('editor-yaml-tab').click()
   const roundTrip = await yamlEditorDocument(page)
   if (hasMetadataEditor) expect(roundTrip.metadata?.annotations?.['edgion.io/e2e-form']).toBe(annotationValue)
+  if (expected.metadata?.annotations) {
+    expect(roundTrip.metadata?.annotations).toMatchObject(expected.metadata.annotations)
+  }
   if (expected.spec !== undefined) expect(roundTrip.spec).toMatchObject(expected.spec)
 
   if (conditionKinds.has(kind)) {
@@ -312,6 +317,9 @@ for (const catalog of RESOURCE_CATALOG.values()) {
 
       const afterForm = await readControllerResourceDocument(request, controller, catalog.kind, catalog.scope === 'cluster' ? 'Cluster' : 'Namespaced', resourceNamespace, name)
       if (formMetadataRoundTrip) expect(afterForm.metadata?.annotations?.['edgion.io/e2e-form']).toBe('form-update')
+      if (document.metadata?.annotations) {
+        expect(afterForm.metadata?.annotations).toMatchObject(document.metadata.annotations)
+      }
       if (concurrentWriterMarker) expect(afterForm.metadata?.annotations?.['edgion.io/e2e-concurrent-writer']).toBe(concurrentWriterMarker)
       if (catalog.lifecycle === 'firstClass' && document.spec !== undefined) expect(afterForm.spec).toMatchObject(document.spec)
 

@@ -45,7 +45,7 @@
   "restrictedDependencyTemplates": ["{kind}-tab", "{kind}-refresh", "{kind}-search", "{kind}-create", "{kind}-row-replace", "editor-form-tab", "editor-yaml-tab", "editor-submit", "editor-cancel"],
   "resourceSpecific": {
     "gateway": [],
-    "httproute": [],
+    "httproute": ["mirror-tuning-annotations"],
     "grpcroute": [],
     "backendtlspolicy": [],
     "edgionbackendtrafficpolicy": [],

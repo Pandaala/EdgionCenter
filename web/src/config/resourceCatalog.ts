@@ -45,12 +45,18 @@ const HTTP_PLUGIN_INTERNAL_TERMINALS = [
   'rateBytesPerSecond', 'requestTimeoutDuration',
 ] as const
 const HTTP_PLUGIN_INTERNAL_PATHS: readonly MutationPath[] = HTTP_PLUGIN_STAGES.flatMap((stage) => (
-  HTTP_PLUGIN_INTERNAL_TERMINALS.map((terminal) => ['spec', stage, '*', '**', terminal])
+  [
+    ['spec', stage, '*', 'policyAction'],
+    ['spec', stage, '*', 'config', 'allowDegradation'],
+    ['spec', stage, '*', 'config', 'allowDegradationTemplate'],
+    ...HTTP_PLUGIN_INTERNAL_TERMINALS.map((terminal) => ['spec', stage, '*', '**', terminal]),
+  ]
 ))
 
 const EXCLUDED_MUTATION_PATHS = {
   gatewayclass: [],
   edgiongatewayconfig: [
+    ['spec', 'enableReferenceGrantValidation'],
     ['spec', 'outboundTls', 'resolvedCaCertificates'],
     ['spec', 'outboundTls', 'resolvedClientCertificate'],
   ],
@@ -67,6 +73,15 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'rules', '*', 'parsedAllowNonIdempotentRetry'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'backendTlsPolicy'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
+    ['spec', 'rules', '**', 'externalAuth', 'allowDegradation'],
+    ['spec', 'rules', '**', 'externalAuth', 'allowDegradationTemplate'],
+    ['spec', 'rules', '**', 'requestMirror', 'percentage'],
+    ['spec', 'rules', '**', 'requestMirror', 'connectTimeoutMs'],
+    ['spec', 'rules', '**', 'requestMirror', 'writeTimeoutMs'],
+    ['spec', 'rules', '**', 'requestMirror', 'channelFullTimeoutMs'],
+    ['spec', 'rules', '**', 'requestMirror', 'maxBufferedChunks'],
+    ['spec', 'rules', '**', 'requestMirror', 'mirrorLog'],
+    ['spec', 'rules', '**', 'requestMirror', 'maxConcurrent'],
   ],
   grpcroute: [
     ['spec', 'resolvedHostnames'], ['spec', 'resolvedListeners'], ['spec', 'invalidRuleIndices'],
@@ -99,12 +114,14 @@ const EXCLUDED_MUTATION_PATHS = {
   ],
   edgionplugins: HTTP_PLUGIN_INTERNAL_PATHS,
   edgionstreamplugins: [
+    ['spec', 'plugins', '*', 'policyAction'],
     ['spec', 'plugins', '*', 'config', '**', 'refDenied'],
     ['spec', 'plugins', '*', 'config', '**', 'ipMatcher'],
     ['spec', 'plugins', '*', 'config', '**', 'allowMatcher'],
     ['spec', 'plugins', '*', 'config', '**', 'denyMatcher'],
     ['spec', 'plugins', '*', 'config', '**', 'intervalDuration'],
     ['spec', 'plugins', '*', 'config', '**', 'effectiveSlots'],
+    ['spec', 'tlsRoutePlugins', '*', 'policyAction'],
     ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'refDenied'],
     ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'ipMatcher'],
     ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'allowMatcher'],
@@ -113,7 +130,9 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'effectiveSlots'],
   ],
   edgionconfigdata: [],
-  edgionacme: [],
+  edgionacme: [
+    ['spec', 'renewal', 'renewBeforeDays'],
+  ],
   linksys: [
     ['spec', 'config', 'resolvedSecrets'],
     ['spec', 'config', 'auth', 'secret'],
@@ -122,8 +141,13 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'config', 'sasl', 'password', 'secret'],
     ['spec', 'config', 'connection', 'tls', 'resolvedCaCertificates'],
     ['spec', 'config', 'connection', 'tls', 'resolvedClientCertificate'],
+    ['spec', 'config', 'allowDegradation'],
+    ['spec', 'config', 'allowDegradationTemplate'],
   ],
-  edgionbackendtrafficpolicy: [],
+  edgionbackendtrafficpolicy: [
+    ['spec', 'outlierDetection', 'ejectionSeconds'],
+    ['spec', 'outlierDetection', 'maxEjectionSeconds'],
+  ],
   secret: [],
   configmap: [],
 } as const satisfies Record<ResourceKind, readonly MutationPath[]>

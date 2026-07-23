@@ -16,6 +16,41 @@ export interface PluginConditions {
 
 export type PluginConditionItem = Record<string, unknown>
 
+export type DyeOutcome = 'success' | 'fallback' | 'reject' | 'fail-open' | 'fail-close'
+
+export interface DyeRule {
+  name: string
+  on?: DyeOutcome[]
+  value?: string
+  conditions?: PluginConditions
+}
+
+export interface DyeSuite {
+  request?: DyeRule[]
+  response?: DyeRule[]
+}
+
+export interface BodyRequirement {
+  maxBodySize?: string
+  conditions?: PluginConditions
+  onReadFailure?: 'failClose' | 'failOpen'
+}
+
+export type AccessLogExternSource =
+  | 'routeLabel'
+  | 'routeAnnotation'
+  | 'header'
+  | 'query'
+  | 'cookie'
+  | 'respHeader'
+  | 'ctx'
+
+export interface AccessLogExternField {
+  key: string
+  from: AccessLogExternSource
+  name: string
+}
+
 /**
  * 插件入口 - 包含 enable/conditions + 扁平化的 type + config
  *
@@ -35,6 +70,8 @@ export interface PluginEntry {
   conditions?: PluginConditions
   /** Optional access-log label; must match [a-zA-Z0-9._-]{1,32}. */
   alias?: string
+  /** Entry-level traffic tagging rules. */
+  dye?: DyeSuite
   /** 插件类型名称，对应 EdgionPlugin 枚举变体 */
   type: string
   /** 插件配置，具体结构由 type 决定 */
@@ -42,7 +79,9 @@ export interface PluginEntry {
 }
 
 /** 请求阶段插件入口 */
-export type RequestFilterEntry = PluginEntry
+export interface RequestFilterEntry extends PluginEntry {
+  body?: BodyRequirement
+}
 
 /** 上游响应过滤阶段插件入口（同步） */
 export type UpstreamResponseFilterEntry = PluginEntry
@@ -51,7 +90,9 @@ export type UpstreamResponseFilterEntry = PluginEntry
 export type UpstreamResponseBodyFilterEntry = PluginEntry
 
 /** 上游响应阶段插件入口（异步） */
-export type UpstreamResponseEntry = PluginEntry
+export interface UpstreamResponseEntry extends PluginEntry {
+  body?: BodyRequirement
+}
 
 /**
  * EdgionPlugins Spec
@@ -66,6 +107,8 @@ export interface EdgionPluginsSpec {
   upstreamResponseBodyFilterPlugins?: UpstreamResponseBodyFilterEntry[]
   /** 上游响应阶段插件（异步） */
   upstreamResponsePlugins?: UpstreamResponseEntry[]
+  /** Access-log projection declarations; this is not an execution stage. */
+  accessLogExtern?: AccessLogExternField[]
   [key: string]: unknown
 }
 

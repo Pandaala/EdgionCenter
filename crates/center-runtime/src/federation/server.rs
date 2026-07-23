@@ -724,7 +724,7 @@ fn apply_watch_list(
         );
         return WatchOutcome::Skipped;
     }
-    match serde_json::from_str::<Vec<WatchedConfigData>>(&resp.data) {
+    match serde_json::from_slice::<Vec<WatchedConfigData>>(&resp.data) {
         Ok(items) => {
             let keyed: Vec<(String, WatchedConfigData)> = items
                 .into_iter()
@@ -1663,6 +1663,7 @@ impl FederationSync for FederationGrpcServer {
 mod tests {
     use super::*;
     use edgion_center_core::{CoreResult, ReleaseOutcome};
+    use prost::Message;
     use std::sync::atomic::AtomicUsize;
 
     #[derive(Default)]
@@ -2275,13 +2276,13 @@ mod tests {
         .to_string()
     }
 
-    /// JSON array string for a WatchListResponse.data field.
-    fn list_json(items: &[(&str, &str)]) -> String {
+    /// JSON array bytes for a WatchListResponse.data field.
+    fn list_json(items: &[(&str, &str)]) -> Vec<u8> {
         let pms: Vec<serde_json::Value> = items
             .iter()
             .map(|(ns, n)| serde_json::from_str(&pm_json(ns, n)).unwrap())
             .collect();
-        serde_json::to_string(&pms).unwrap()
+        serde_json::to_vec(&pms).unwrap()
     }
 
     /// JSON array string for a WatchEventResponse.data field.
@@ -2351,7 +2352,7 @@ mod tests {
 
         let resp = FedWatchListResponse {
             request_id: "req-1".to_string(),
-            data: "this is not valid json".to_string(),
+            data: b"this is not valid json".to_vec(),
             sync_version: 1,
             server_id: "srv-1".to_string(),
         };
@@ -2364,6 +2365,44 @@ mod tests {
             0,
             "cache must be untouched on parse error"
         );
+    }
+
+    #[test]
+    fn apply_watch_list_invalid_utf8_is_parse_error() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data: vec![0xff, 0xfe, 0xfd],
+            sync_version: 1,
+            server_id: "srv-1".to_string(),
+        };
+
+        let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ParseError);
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "cache must be untouched on invalid UTF-8"
+        );
+    }
+
+    #[test]
+    fn watch_list_response_prost_round_trip_preserves_data_bytes() {
+        let expected = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data: vec![0x00, 0xff, b'{', b'}'],
+            sync_version: 42,
+            server_id: "srv-1".to_string(),
+        };
+
+        let encoded = expected.encode_to_vec();
+        let decoded = FedWatchListResponse::decode(encoded.as_slice()).unwrap();
+
+        assert_eq!(decoded, expected);
+        assert_eq!(decoded.data, vec![0x00, 0xff, b'{', b'}']);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

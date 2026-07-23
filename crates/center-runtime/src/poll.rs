@@ -311,6 +311,7 @@ mod tests {
              "keyGet":[{"type":"header","name":"X-Tenant"}],
              "hashCalc":{"algorithm":"crc32","modulo":1000},
              "routeRules":[{"type":"RouteByHashRange"}],
+             "dye":{"headerName":"X-Edgion-Dye","headerValue":"canary"},
              "serviceUsages":[{"routeKind":"HTTPRoute","routeNamespace":"default","routeName":"api","ruleIndex":0,"backendServices":[{"namespace":"default","name":"api","port":8080}]}]},
             {"garbage":true}
         ]}"#;
@@ -319,6 +320,13 @@ mod tests {
         assert_eq!(parsed[0].plugin_name, "ep1");
         assert_eq!(parsed[0].key_get[0]["name"], "X-Tenant");
         assert_eq!(parsed[0].route_rules[0]["type"], "RouteByHashRange");
+        assert_eq!(
+            parsed[0].dye,
+            Some(serde_json::json!({
+                "headerName": "X-Edgion-Dye",
+                "headerValue": "canary"
+            }))
+        );
         assert_eq!(
             parsed[0].service_usages[0].backend_services[0].port,
             Some(8080)

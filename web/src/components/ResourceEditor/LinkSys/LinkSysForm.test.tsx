@@ -17,4 +17,12 @@ describe('LinkSysForm variant drafts',()=>{
     const restored=screen.getByText('Database Number').closest('.ant-form-item')!.querySelector('input')!
     expect(restored).toHaveValue('3')
   })
+
+  it('does not expose removed webhook degradation controls', async () => {
+    render(<Harness/>)
+    fireEvent.mouseDown(screen.getAllByRole('combobox')[0])
+    fireEvent.click((await screen.findAllByText('Webhook')).at(-1)!)
+    expect(screen.queryByText('Allow degradation')).not.toBeInTheDocument()
+    expect(screen.queryByText('Degradation template')).not.toBeInTheDocument()
+  })
 })

@@ -2,6 +2,7 @@ import * as yaml from 'js-yaml'
 import type { EdgionGatewayConfig } from '@/types/edgion-gateway-config'
 import { dumpYaml } from './yaml-utils'
 import { mutationDocumentToYaml } from './resource-document'
+import { isValidGep2257Duration } from './validation'
 
 export const DEFAULT_YAML = `apiVersion: edgion.io/v1alpha1
 kind: EdgionGatewayConfig
@@ -19,6 +20,7 @@ spec:
       defaultConnectTimeout: "5s"
       defaultRequestTimeout: "60s"
   maxRetries: 3
+  maxBodySize: 32MiB
   preflightPolicy:
     mode: cors-standard
     statusCode: 204
@@ -36,6 +38,7 @@ export function createEmpty(): EdgionGatewayConfig {
         backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s' },
       },
       maxRetries: 3,
+      maxBodySize: '32MiB',
       preflightPolicy: { mode: 'cors-standard', statusCode: 204 },
     },
   }
@@ -62,11 +65,36 @@ export function fromYaml(yamlStr: string): EdgionGatewayConfig {
   return normalize(yaml.load(yamlStr) as any)
 }
 
-const DURATION_PATTERN = /^([0-9]+(\.[0-9]+)?(milliseconds|millisecond|millis|ms|seconds|second|secs|sec|s|minutes|minute|mins|min|m|hours|hour|hrs|hr|h|days|day|d))+$/
 const IP_GROUP_NAME_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$/
+const BYTE_SIZE_UNITS: Array<[string, number]> = [
+  ['kib', 1024],
+  ['kb', 1024],
+  ['ki', 1024],
+  ['k', 1024],
+  ['mib', 1024 ** 2],
+  ['mb', 1024 ** 2],
+  ['mi', 1024 ** 2],
+  ['m', 1024 ** 2],
+  ['gib', 1024 ** 3],
+  ['gb', 1024 ** 3],
+  ['gi', 1024 ** 3],
+  ['g', 1024 ** 3],
+  ['b', 1],
+]
+const U64_MAX = Number((1n << 64n) - 1n)
+const RUST_FLOAT_PATTERN = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/
 
-function validDuration(value: unknown): boolean {
-  return typeof value === 'string' && (DURATION_PATTERN.test(value) || /^[0-9]+(?:\.[0-9]+)?$/.test(value))
+export function parseEdgionByteSize(value: string): number | null {
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return null
+
+  const unit = BYTE_SIZE_UNITS.find(([suffix]) => normalized.endsWith(suffix))
+  const numericPart = (unit ? normalized.slice(0, -unit[0].length) : normalized).trim()
+  if (!RUST_FLOAT_PATTERN.test(numericPart)) return null
+
+  const numericValue = Number(numericPart)
+  if (!Number.isFinite(numericValue) || numericValue < 0) return null
+  return Math.min(Math.trunc(numericValue * (unit?.[1] ?? 1)), U64_MAX)
 }
 
 function validIpOrCidr(value: string): boolean {
@@ -91,7 +119,17 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
     ['spec.tcpTimeout.connectTimeout', spec.tcpTimeout?.connectTimeout],
     ['spec.dnsResolver.cacheTtl', spec.dnsResolver?.cacheTtl],
   ]
-  durations.forEach(([path, value]) => { if (value !== undefined && !validDuration(value)) errors.push(`${path} is not a valid duration`) })
+  durations.forEach(([path, value]) => {
+    if (value !== undefined && (typeof value !== 'string' || !isValidGep2257Duration(value))) {
+      errors.push(`${path} is not a valid GEP-2257 duration`)
+    }
+  })
+  const maxBodySizeBytes = typeof spec.maxBodySize === 'string'
+    ? parseEdgionByteSize(spec.maxBodySize)
+    : null
+  if (spec.maxBodySize !== undefined && (maxBodySizeBytes === null || maxBodySizeBytes <= 0)) {
+    errors.push("spec.maxBodySize is invalid (expected a positive byte size such as '32MiB')")
+  }
   if (spec.loadBalancing?.panicThreshold !== undefined && (spec.loadBalancing.panicThreshold < 0 || spec.loadBalancing.panicThreshold > 100)) errors.push('spec.loadBalancing.panicThreshold must be 0-100')
   const groupNames = new Set<string>()
   spec.realIp?.trustedIps?.forEach((group, index) => {

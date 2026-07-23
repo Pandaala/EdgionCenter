@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createEmpty,
   fromYaml,
   normalize,
   replaceChallengeType,
   toMutationDocument,
   toYaml,
+  validateEdgionAcme,
 } from './edgionacme'
 import type { EdgionAcme } from '@/types/edgion-acme'
 
@@ -21,10 +23,10 @@ const fullDnsFixture: EdgionAcme = {
     challenge: {
       type: 'dns-01', provider: 'cloudflare',
       credentialRef: { name: 'dns', namespace: 'secrets' },
-      propagationTimeout: 0, propagationCheckInterval: 5,
+      propagationTimeout: '120s', propagationCheckInterval: '5s',
       futureChallengeField: false,
     },
-    renewal: { renewBeforeDays: 30, checkInterval: 86400, failBackoff: 0, futureRenewal: '' },
+    renewal: { renewBefore: '720h', checkInterval: '24h', failBackoff: '5m', futureRenewal: '' },
     externalAccountBinding: {
       keyId: 'kid', keySecretRef: { name: 'eab', namespace: 'secrets' },
     },
@@ -52,6 +54,18 @@ const fullHttpFixture: EdgionAcme = {
 }
 
 describe('EdgionAcme resource adapter', () => {
+  it('uses duration-string defaults only for newly created resources', () => {
+    const created = createEmpty()
+    expect(created.spec.renewal).toEqual({
+      renewBefore: '720h',
+      checkInterval: '24h',
+      failBackoff: '5m',
+    })
+    expect(created.spec.renewal).not.toHaveProperty('renewBeforeDays')
+    expect(created.spec.challenge).not.toHaveProperty('propagationTimeout')
+    expect(created.spec.challenge).not.toHaveProperty('propagationCheckInterval')
+  })
+
   it.each([['dns-01', fullDnsFixture], ['http-01', fullHttpFixture]] as const)(
     'round-trips the full flat %s fixture without injecting defaults',
     (_type, fixture) => {
@@ -86,9 +100,91 @@ describe('EdgionAcme resource adapter', () => {
     expect(http).not.toHaveProperty('dns01')
     const dns = replaceChallengeType(fullHttpFixture.spec.challenge, 'dns-01')
     expect(dns).toEqual({
-      type: 'dns-01', provider: '', credentialRef: { name: '' }, futureChallengeField: [],
+      type: 'dns-01',
+      provider: '',
+      credentialRef: { name: '' },
+      propagationTimeout: '120s',
+      propagationCheckInterval: '5s',
+      futureChallengeField: [],
     })
     expect(dns).not.toHaveProperty('http01')
+  })
+
+  it('does not inject absent duration defaults into normalized existing documents', () => {
+    const existing = {
+      apiVersion: 'edgion.io/v1',
+      kind: 'EdgionAcme',
+      metadata: { name: 'existing', namespace: 'edge' },
+      spec: {
+        email: 'ops@example.com',
+        privateKeySecretRef: { name: 'account' },
+        domains: ['example.com'],
+        challenge: {
+          type: 'dns-01',
+          provider: 'cloudflare',
+          credentialRef: { name: 'dns' },
+          futureChallengeField: { retained: true },
+        },
+        renewal: { futureRenewal: false },
+        storage: { secretName: 'certificate' },
+        futureSpecField: ['retained'],
+      },
+    }
+    const normalized = normalize(existing)
+    expect(normalized).toBe(existing)
+    expect(normalized.spec.challenge).not.toHaveProperty('propagationTimeout')
+    expect(normalized.spec.challenge).not.toHaveProperty('propagationCheckInterval')
+    expect(normalized.spec.renewal).not.toHaveProperty('renewBefore')
+    expect(normalized.spec.renewal).not.toHaveProperty('checkInterval')
+    expect(normalized.spec.renewal).not.toHaveProperty('failBackoff')
+    expect(fromYaml(toYaml(normalized, 'update'))).toEqual(existing)
+  })
+
+  it.each([
+    ['bare number', 30],
+    ['bare numeric string', '30'],
+    ['decimal', '1.5h'],
+    ['days unit', '30d'],
+  ])('rejects an invalid %s duration before mutation', (_label, invalidDuration) => {
+    const resource = createEmpty()
+    resource.spec.renewal = {
+      ...resource.spec.renewal,
+      renewBefore: invalidDuration as string,
+    }
+    expect(validateEdgionAcme(resource)).toEqual([
+      'renewal.renewBefore must be a valid GEP-2257 duration',
+    ])
+    expect(() => toMutationDocument(resource, 'create')).toThrow(
+      /renewal\.renewBefore must be a valid GEP-2257 duration/,
+    )
+  })
+
+  it('validates every DNS and renewal duration while preserving unknown siblings', () => {
+    const resource: EdgionAcme = {
+      ...fullDnsFixture,
+      spec: {
+        ...fullDnsFixture.spec,
+        challenge: {
+          ...fullDnsFixture.spec.challenge,
+          propagationTimeout: '2m30s',
+          propagationCheckInterval: '500ms',
+        },
+        renewal: {
+          ...fullDnsFixture.spec.renewal,
+          renewBefore: '720h',
+          checkInterval: '24h',
+          failBackoff: '5m',
+        },
+      },
+    }
+    expect(validateEdgionAcme(resource)).toEqual([])
+    expect(toMutationDocument(resource, 'update')).toMatchObject({
+      spec: {
+        challenge: { futureChallengeField: false },
+        renewal: { futureRenewal: '' },
+        futureSpecField: { empty: {}, disabled: false },
+      },
+    })
   })
 
   it('rejects the obsolete nested challenge shape', () => {

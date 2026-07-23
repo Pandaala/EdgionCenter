@@ -7,6 +7,35 @@ import type { HTTPRoute } from '@/types/gateway-api';
 import { DEFAULT_VALUES } from '@/constants/gateway-api';
 import { buildMutationDocument } from './resource-document';
 
+export const HTTPROUTE_MIRROR_TUNING_ANNOTATIONS = {
+  connectTimeoutMs: 'edgion.io/mirror-connect-timeout-ms',
+  writeTimeoutMs: 'edgion.io/mirror-write-timeout-ms',
+  channelFullTimeoutMs: 'edgion.io/mirror-channel-full-timeout-ms',
+  maxBufferedChunks: 'edgion.io/mirror-max-buffered-chunks',
+  mirrorLog: 'edgion.io/mirror-log',
+  maxConcurrent: 'edgion.io/mirror-max-concurrent',
+} as const;
+
+export type HTTPRouteMirrorTuningField = keyof typeof HTTPROUTE_MIRROR_TUNING_ANNOTATIONS;
+
+export function withHTTPRouteMirrorTuningAnnotation(
+  route: HTTPRoute,
+  field: HTTPRouteMirrorTuningField,
+  value: string | undefined,
+): HTTPRoute {
+  const annotations = { ...(route.metadata.annotations || {}) };
+  const key = HTTPROUTE_MIRROR_TUNING_ANNOTATIONS[field];
+  if (value === undefined || value === '') delete annotations[key];
+  else annotations[key] = value;
+  return {
+    ...route,
+    metadata: {
+      ...route.metadata,
+      annotations,
+    },
+  };
+}
+
 /**
  * 默认的 HTTPRoute YAML 模板
  */
@@ -131,6 +160,17 @@ export function validateHTTPRouteForMutation(route: HTTPRoute): void {
           const hasService = ['name', 'namespace', 'port', 'kind', 'group'].some((key) => target[key] !== undefined && target[key] !== '')
           if (target.url && hasService) throw new Error(`${location} ExternalAuth target cannot combine url and Service fields`)
           if (!target.url && !target.name) throw new Error(`${location} ExternalAuth target requires url or name`)
+        }
+        if (filter.type === 'RequestMirror') {
+          const mirror = filter.requestMirror || {}
+          if (mirror.percent !== undefined && (
+            !Number.isInteger(mirror.percent) || mirror.percent < 0 || mirror.percent > 100
+          )) {
+            throw new Error(`${location} RequestMirror percent must be an integer from 0 through 100`)
+          }
+          if (mirror.percent !== undefined && mirror.fraction !== undefined) {
+            throw new Error(`${location} RequestMirror cannot combine percent and fraction`)
+          }
         }
       }
     }

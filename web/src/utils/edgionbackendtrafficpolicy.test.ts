@@ -1,6 +1,10 @@
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import {
+  createDefaultCircuitBreaker,
+  createDefaultConnectionOverride,
+  createDefaultOutlierDetection,
+  createDefaultRetryConstraint,
   edgionBackendTrafficPolicyFromYaml,
   edgionBackendTrafficPolicyToMutationYaml,
   edgionBackendTrafficPolicyToYaml,
@@ -49,8 +53,8 @@ const fullPolicy: EdgionBackendTrafficPolicy = {
       consecutiveErrors: 5,
       consecutiveGatewayErrors: 6,
       consecutiveLocalOriginFailures: 7,
-      ejectionSeconds: 30,
-      maxEjectionSeconds: 600,
+      ejectionTime: '30s',
+      maxEjectionTime: '10m',
       maxEjectionPercent: 40,
       futureOutlier: 0,
     },
@@ -60,6 +64,13 @@ const fullPolicy: EdgionBackendTrafficPolicy = {
       healthCheckHost: 'probe.sandbox.internal',
       futureAuthority: '',
     },
+    retryConstraint: {
+      budget: { percent: 20, interval: '10s', futureBudget: true },
+      minRetryRate: { count: 10, interval: '1s', futureFloor: true },
+      futureRetry: true,
+    },
+    circuitBreaker: { maxParallelRequests: 100, futureCircuit: true },
+    connection: { connectTimeout: '5s', futureConnection: true },
     futureSpec: { enabled: false, entries: [] },
   },
   status: { conditions: [{ type: 'Accepted', status: 'True' }] },
@@ -85,6 +96,22 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
     expect(fromForm.spec.futureSpec).toEqual({ enabled: false, entries: [] })
     expect(fromForm.spec.targetRefs).toHaveLength(2)
     expect(fromForm.spec.healthCheck.active.futureProbe).toBe(false)
+    expect(fromForm.spec.retryConstraint.futureRetry).toBe(true)
+    expect(fromForm.spec.connection.futureConnection).toBe(true)
+  })
+
+  it('uses the Edgion defaults when optional resilience sections are enabled', () => {
+    expect(createDefaultRetryConstraint()).toEqual({
+      budget: { percent: 20, interval: '10s' },
+      minRetryRate: { count: 10, interval: '1s' },
+    })
+    expect(createDefaultCircuitBreaker()).toEqual({ maxParallelRequests: 1 })
+    expect(createDefaultConnectionOverride()).toEqual({ connectTimeout: '10s' })
+    expect(createDefaultOutlierDetection()).toEqual({
+      consecutiveErrors: 5,
+      ejectionTime: '30s',
+      maxEjectionPercent: 50,
+    })
   })
 
   it.each(['RoundRobin', 'LeastConn', 'Ewma'] as const)('accepts the %s algorithm without consistentHash', (type) => {
@@ -104,10 +131,16 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
       consecutiveErrors: 0,
       consecutiveGatewayErrors: 0,
       consecutiveLocalOriginFailures: 0,
-      ejectionSeconds: 0,
-      maxEjectionSeconds: 0,
+      ejectionTime: '500ms',
+      maxEjectionTime: 'bad',
       maxEjectionPercent: 101,
     }
+    policy.spec.retryConstraint = {
+      budget: { percent: 101, interval: '999ms' },
+      minRetryRate: { count: 0, interval: '0s' },
+    }
+    policy.spec.circuitBreaker = { maxParallelRequests: 0 }
+    policy.spec.connection = { connectTimeout: '1h1ms' }
     policy.spec.upstreamAuthority = {
       pattern: 'sandbox.internal',
       template: '${ctx:tenant}.wrong.internal',
@@ -118,7 +151,13 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
     expect(errors).toContain('healthyThreshold must be >= 1')
     expect(errors).toContain('expectedStatuses must contain valid HTTP status codes')
     expect(errors).toContain('consecutiveLocalOriginFailures must be >= 1')
+    expect(errors).toContain('ejectionTime must be a valid GEP-2257 duration of at least 1s')
+    expect(errors).toContain('maxEjectionTime must be a valid GEP-2257 duration')
     expect(errors).toContain('maxEjectionPercent must be 0-100')
+    expect(errors).toContain('retryConstraint.budget.interval must be in [1s, 1h]')
+    expect(errors).toContain('retryConstraint.minRetryRate.count must be in 1-1000000')
+    expect(errors).toContain('circuitBreaker.maxParallelRequests must be >= 1')
+    expect(errors).toContain('connection.connectTimeout must be in (0s, 1h]')
     expect(errors).toContain('upstreamAuthority.pattern')
     expect(errors).toContain('healthCheckHost is required')
   })
@@ -127,16 +166,60 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
     const policy = structuredClone(fullPolicy)
     policy.spec.healthCheck!.active = {
       interval: '1h30m',
-      timeout: '500millis',
+      timeout: '500ms',
       path: '/',
-      port: 0,
+      port: 1,
     }
-    policy.spec.outlierDetection = { maxEjectionSeconds: 0 }
+    policy.spec.outlierDetection = { ejectionTime: '1s', maxEjectionTime: '500ms' }
     policy.spec.upstreamAuthority = {
       pattern: '*.sandbox.internal',
       template: 'tenant-${ctx:id}.sandbox.internal',
       healthCheckHost: 'probe.sandbox.internal',
     }
     expect(validateEdgionBackendTrafficPolicy(policy)).toEqual([])
+  })
+
+  it('supports sourceIp consistent hashing only when key is absent', () => {
+    const policy = structuredClone(fullPolicy)
+    policy.spec.loadBalancer = {
+      type: 'ConsistentHash',
+      consistentHash: { hashOn: 'sourceIp', futureHash: true },
+    }
+    expect(validateEdgionBackendTrafficPolicy(policy)).toEqual([])
+
+    policy.spec.loadBalancer.consistentHash!.key = 'x-forwarded-for'
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain(
+      'consistentHash.key must be absent for sourceIp',
+    )
+  })
+
+  it('accepts exact retry, connection, and health-port boundaries', () => {
+    const policy = structuredClone(fullPolicy)
+    policy.spec.retryConstraint = {
+      budget: { percent: 0, interval: '1s' },
+      minRetryRate: { count: 1, interval: '1ms' },
+    }
+    policy.spec.connection = { connectTimeout: '1ms' }
+    policy.spec.healthCheck!.active!.port = 1
+    expect(validateEdgionBackendTrafficPolicy(policy)).toEqual([])
+
+    policy.spec.retryConstraint = {
+      budget: { percent: 100, interval: '1h' },
+      minRetryRate: { count: 1_000_000, interval: '1h' },
+    }
+    policy.spec.connection = { connectTimeout: '1h' }
+    policy.spec.healthCheck!.active!.port = 65535
+    expect(validateEdgionBackendTrafficPolicy(policy)).toEqual([])
+  })
+
+  it('rejects null minRetryRate instead of treating it as disabled', () => {
+    const policy = structuredClone(fullPolicy)
+    policy.spec.retryConstraint = {
+      budget: { percent: 20, interval: '10s' },
+      minRetryRate: null,
+    } as any
+    const errors = validateEdgionBackendTrafficPolicy(policy)
+    expect(errors).toContain('retryConstraint.minRetryRate.count must be in 1-1000000')
+    expect(errors).toContain('retryConstraint.minRetryRate.interval must be in (0s, 1h]')
   })
 })

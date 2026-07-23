@@ -50,4 +50,32 @@ describe('structured route editors', () => {
       type: 'URLRewrite', urlRewrite: {}, futureFilter: { keep: true },
     })
   })
+
+  it('edits the Gateway API RequestMirror percent field without inline tuning controls', () => {
+    const onChange = vi.fn()
+    render(<RouteFiltersEditor value={[{
+      type: 'RequestMirror',
+      requestMirror: {
+        backendRef: { name: 'mirror' },
+        fraction: { numerator: 1, denominator: 2 },
+        percent: 25,
+        percentage: 10,
+        connectTimeoutMs: 500,
+        futureMirrorField: { retained: true },
+      } as any,
+    }]} onChange={onChange} />)
+
+    fireEvent.change(screen.getByLabelText('Mirror Percent'), { target: { value: '40' } })
+
+    expect(onChange).toHaveBeenCalledWith([{
+      type: 'RequestMirror',
+      requestMirror: {
+        backendRef: { name: 'mirror' },
+        percent: 40,
+        futureMirrorField: { retained: true },
+      },
+    }])
+    expect(screen.queryByText('Connect Timeout (ms)')).not.toBeInTheDocument()
+    expect(screen.queryByText('Dedicated Mirror Access Log')).not.toBeInTheDocument()
+  })
 })

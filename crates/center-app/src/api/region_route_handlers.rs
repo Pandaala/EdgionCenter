@@ -373,7 +373,10 @@ mod tests {
             hash_calc: None,
             route_rules: serde_json::json!([]),
             route_by_key_conf_match: None,
-            dye_headers: None,
+            dye: Some(serde_json::json!({
+                "headerName": "X-Edgion-Dye",
+                "headerValue": "canary"
+            })),
             override_ref: None,
             override_applied: false,
             service_usages: Vec::new(),
@@ -385,6 +388,19 @@ mod tests {
         assert_eq!(v["success"], true);
         assert_eq!(v["data"].as_array().unwrap().len(), 1);
         assert_eq!(v["data"][0]["onlineControllerIds"], serde_json::json!([]));
+        assert_eq!(
+            v["data"][0]["controllers"]["ctrl-a"]["dye"],
+            serde_json::json!({
+                "headerName": "X-Edgion-Dye",
+                "headerValue": "canary"
+            })
+        );
+        assert!(
+            v["data"][0]["controllers"]["ctrl-a"]
+                .get("dyeHeaders")
+                .is_none(),
+            "the stale dyeHeaders compatibility alias must not be serialized"
+        );
     }
 
     #[test]

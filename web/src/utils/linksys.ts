@@ -18,7 +18,7 @@ export const LINKSYS_RUST_FIELD_MATRIX = {
   redis: ['endpoints','auth','db','timeout','pool','retry','topology','tls','observability'],
   elasticsearch: ['endpoints','auth','tls','timeout','pool','bulk','index'],
   etcd: ['endpoints','auth','tls','timeout','keepAlive','namespace','autoSyncInterval','maxCallSendSize','maxCallRecvSize','userAgent','rejectOldCluster','observability'],
-  webhook: ['target','tls','timeoutMs','timeoutMsTemplate','retry','rateLimit','healthCheck','maxResponseBytes','success','allowDegradation','statusOnError','allowDegradationTemplate','request'],
+  webhook: ['target','tls','timeoutMs','timeoutMsTemplate','retry','rateLimit','healthCheck','maxResponseBytes','success','statusOnError','request'],
   kafka: ['brokers','sasl','tls','channelSize','lingerMs'],
   httpdns: ['preset','urlTemplate','response','fallback','connection'],
 } as const
@@ -157,8 +157,8 @@ export function validateLinkSys(resource: LinkSys): void {
       if ((webhook.timeoutMs ?? 5000) < 1 || (webhook.timeoutMs ?? 5000) > 60_000) fail('Webhook timeoutMs must be between 1 and 60000')
       if (webhook.maxResponseBytes !== undefined && webhook.maxResponseBytes < 1) fail('Webhook maxResponseBytes must be greater than 0')
       if (webhook.statusOnError !== undefined && (webhook.statusOnError < 200 || webhook.statusOnError > 599)) fail('Webhook statusOnError must be between 200 and 599')
-      for (const [name, template] of [['timeoutMsTemplate',webhook.timeoutMsTemplate],['allowDegradationTemplate',webhook.allowDegradationTemplate]] as const) {
-        if (template && /\$\{(?:header|query|cookie|path|method|uri|secretRef):/i.test(template)) fail(`${name} must not read client-controlled or Secret variables`)
+      if (webhook.timeoutMsTemplate && /\$\{(?:header|query|cookie|path|method|uri|secretRef):/i.test(webhook.timeoutMsTemplate)) {
+        fail('timeoutMsTemplate must not read client-controlled or Secret variables')
       }
       const retry = webhook.retry as any
       if (retry?.maxRetries > 10) fail('Webhook retry.maxRetries must be between 0 and 10')

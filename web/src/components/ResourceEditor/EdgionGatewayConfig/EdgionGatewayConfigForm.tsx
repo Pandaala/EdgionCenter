@@ -6,7 +6,12 @@
 import React from 'react'
 import { Form, Input, InputNumber, Switch, Card, Space, Select, Button } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import type { EdgionGatewayConfig, IpGroup, ObjectReference, SubjectAltName } from '@/types/edgion-gateway-config'
+import type {
+  EdgionGatewayConfig,
+  IpGroup,
+  ObjectReference,
+  SubjectAltName,
+} from '@/types/edgion-gateway-config'
 import { useT } from '@/i18n'
 
 interface EdgionGatewayConfigFormProps {
@@ -17,6 +22,7 @@ interface EdgionGatewayConfigFormProps {
 }
 
 interface ListProps<T> { value: T[]; onChange: (value: T[]) => void; disabled: boolean; maxItems?: number }
+type UnmaskedKeySource = 'header' | 'respHeader' | 'query' | 'cookie' | 'ctx'
 
 const IpGroupsEditor: React.FC<ListProps<IpGroup>> = ({ value, onChange, disabled }) => {
   const t = useT()
@@ -44,6 +50,52 @@ const ObjectRefsEditor: React.FC<ListProps<ObjectReference>> = ({ value, onChang
     </Space>)}
     {!disabled && (maxItems === undefined || value.length < maxItems) && <Button type="dashed" block icon={<PlusOutlined />} onClick={() => onChange([...value, { name: '', group: '', kind: 'Secret' }])}>{t('btn.addReference')}</Button>}
   </Space>
+}
+
+interface StringListEditorProps extends ListProps<string> {
+  source: UnmaskedKeySource
+  label: string
+}
+
+const StringListEditor: React.FC<StringListEditorProps> = ({
+  value,
+  onChange,
+  disabled,
+  source,
+  label,
+}) => {
+  const t = useT()
+  return <Form.Item label={label} style={{ marginBottom: 8 }}>
+    <Space direction="vertical" style={{ width: '100%' }}>
+      {value.map((item, index) => <Space key={index} style={{ width: '100%' }}>
+        <Input
+          aria-label={t('egc.unmaskedKeyItem', { source: label, n: index + 1 })}
+          data-testid={`edgiongatewayconfig-unmasked-${source}-${index}`}
+          value={item}
+          disabled={disabled}
+          onChange={(event) => onChange(value.map((entry, entryIndex) => (
+            entryIndex === index ? event.target.value : entry
+          )))}
+        />
+        {!disabled && <Button
+          aria-label={t('egc.removeUnmaskedKey', { source: label, n: index + 1 })}
+          danger
+          type="text"
+          icon={<MinusCircleOutlined />}
+          onClick={() => onChange(value.filter((_, entryIndex) => entryIndex !== index))}
+        />}
+      </Space>)}
+      {!disabled && <Button
+        data-testid={`edgiongatewayconfig-unmasked-${source}-add`}
+        type="dashed"
+        block
+        icon={<PlusOutlined />}
+        onClick={() => onChange([...value, ''])}
+      >
+        {t('egc.addUnmaskedKey', { source: label })}
+      </Button>}
+    </Space>
+  </Form.Item>
 }
 
 const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
@@ -90,6 +142,23 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
   const updateSpecBlock = <K extends keyof EdgionGatewayConfig['spec']>(key: K, partial: Record<string, unknown>) =>
     onChange({ ...data, spec: { ...data.spec, [key]: { ...((data.spec[key] || {}) as object), ...partial } } })
 
+  const updateUnmaskedKeys = (
+    source: UnmaskedKeySource,
+    value: string[],
+  ) => onChange({
+    ...data,
+    spec: {
+      ...data.spec,
+      accessLogExtern: {
+        ...data.spec.accessLogExtern,
+        unmaskedKeys: {
+          ...data.spec.accessLogExtern?.unmaskedKeys,
+          [source]: value,
+        },
+      },
+    },
+  })
+
   const server = data.spec?.server || {}
   const client = data.spec?.httpTimeout?.client || {}
   const backend = data.spec?.httpTimeout?.backend || {}
@@ -103,6 +172,7 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
   const outboundValidation = outboundTls.validation || {}
   const dnsResolver = data.spec?.dnsResolver || {}
   const dnsResolverMode = dnsResolver.linkSysRef ? 'linkSysRef' : dnsResolver.servers ? 'servers' : undefined
+  const unmaskedKeys = data.spec?.accessLogExtern?.unmaskedKeys || {}
 
   return (
     <Form layout="vertical" size="small">
@@ -237,6 +307,22 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           <Form.Item label={t('field.tcpIdleTimeout')} style={{ marginBottom: 8, marginTop: 8 }}><Input value={tcpTimeout.idleTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { idleTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
           <Form.Item label={t('field.tcpConnectTimeout')} style={{ marginBottom: 8 }}><Input value={tcpTimeout.connectTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { connectTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
           <Form.Item label={t('field.panicThreshold')} style={{ marginBottom: 0 }}><InputNumber value={loadBalancing.panicThreshold} min={0} max={100} onChange={(value) => updateSpecBlock('loadBalancing', { panicThreshold: value ?? undefined })} disabled={readOnly} /></Form.Item>
+          <Form.Item
+            label={t('field.gatewayMaxBodySize')}
+            help={t('field.gatewayMaxBodySizeHelp')}
+            style={{ marginBottom: 0, marginTop: 8 }}
+          >
+            <Input
+              value={data.spec?.maxBodySize || ''}
+              onChange={(event) => onChange({
+                ...data,
+                spec: { ...data.spec, maxBodySize: event.target.value || undefined },
+              })}
+              placeholder="32MiB"
+              disabled={readOnly}
+              style={{ width: 160 }}
+            />
+          </Form.Item>
         </Card>
 
         {/* Real IP */}
@@ -279,6 +365,14 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           {!readOnly && <Button type="dashed" block icon={<PlusOutlined />} onClick={() => onChange({ ...data, spec: { ...data.spec, globalPluginsRef: [...(data.spec.globalPluginsRef || []), { name: '', namespace: 'default' }] } })}>{t('btn.addPluginRef')}</Button>}
         </Card>
 
+        <Card title={t('section.accessLogExternPolicy')} size="small">
+          <StringListEditor source="header" label={t('field.unmaskedRequestHeaders')} value={unmaskedKeys.header || []} onChange={(value) => updateUnmaskedKeys('header', value)} disabled={readOnly} />
+          <StringListEditor source="respHeader" label={t('field.unmaskedResponseHeaders')} value={unmaskedKeys.respHeader || []} onChange={(value) => updateUnmaskedKeys('respHeader', value)} disabled={readOnly} />
+          <StringListEditor source="query" label={t('field.unmaskedQueryKeys')} value={unmaskedKeys.query || []} onChange={(value) => updateUnmaskedKeys('query', value)} disabled={readOnly} />
+          <StringListEditor source="cookie" label={t('field.unmaskedCookieKeys')} value={unmaskedKeys.cookie || []} onChange={(value) => updateUnmaskedKeys('cookie', value)} disabled={readOnly} />
+          <StringListEditor source="ctx" label={t('field.unmaskedContextKeys')} value={unmaskedKeys.ctx || []} onChange={(value) => updateUnmaskedKeys('ctx', value)} disabled={readOnly} />
+        </Card>
+
         {/* Preflight Policy */}
         <Card title={t('section.preflightPolicy')} size="small">
           <Form.Item label={t('field.preflightMode')} style={{ marginBottom: 8 }}>
@@ -302,10 +396,6 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               style={{ width: 160 }}
             />
           </Form.Item>
-        </Card>
-
-        <Card title={t('section.validation')} size="small">
-          <Form.Item label={t('field.referenceGrantValidation')} style={{ marginBottom: 0 }}><Switch checked={data.spec.enableReferenceGrantValidation ?? false} disabled={readOnly} onChange={(enableReferenceGrantValidation) => onChange({ ...data, spec: { ...data.spec, enableReferenceGrantValidation } })} /></Form.Item>
         </Card>
 
         <Card title={t('section.linkSys')} size="small"><Form.Item label={t('field.webhookMaxResponseBytes')} style={{ marginBottom: 0 }}><InputNumber value={linkSys.webhookMaxResponseBytes} min={1} disabled={readOnly} onChange={(value) => updateSpecBlock('linkSys', { webhookMaxResponseBytes: value ?? undefined })} /></Form.Item></Card>

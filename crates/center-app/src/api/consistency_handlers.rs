@@ -19,6 +19,14 @@ use crate::common::api::ApiResponse;
 
 use super::ApiState;
 
+fn values_differ<T: PartialEq>(values: impl IntoIterator<Item = T>) -> bool {
+    let mut values = values.into_iter();
+    let Some(first) = values.next() else {
+        return false;
+    };
+    values.any(|value| value != first)
+}
+
 // ---------------------------------------------------------------------------
 // Report DTOs
 // ---------------------------------------------------------------------------
@@ -94,67 +102,50 @@ pub async fn region_routes_consistency(
             if online_views.len() != online.len() {
                 conflicts.push("presence".to_string());
             }
-            let mut differs = |field: &str, values: Vec<String>| {
-                if values.into_iter().collect::<HashSet<_>>().len() > 1 {
+            let mut record_difference = |field: &str, differs: bool| {
+                if differs {
                     conflicts.push(field.to_string());
                 }
             };
-            differs(
+            record_difference(
                 "regions",
-                online_views.iter().map(|v| v.regions.to_string()).collect(),
+                values_differ(online_views.iter().map(|view| &view.regions)),
             );
-            differs(
+            record_difference(
                 "keyGet",
-                online_views.iter().map(|v| v.key_get.to_string()).collect(),
+                values_differ(online_views.iter().map(|view| &view.key_get)),
             );
-            differs(
+            record_difference(
                 "hashKeyGet",
-                online_views
-                    .iter()
-                    .map(|v| format!("{:?}", v.hash_key_get))
-                    .collect(),
+                values_differ(online_views.iter().map(|view| &view.hash_key_get)),
             );
-            differs(
+            record_difference(
                 "hashCalc",
-                online_views
-                    .iter()
-                    .map(|v| format!("{:?}", v.hash_calc))
-                    .collect(),
+                values_differ(online_views.iter().map(|view| &view.hash_calc)),
             );
-            differs(
+            record_difference(
                 "routeRules",
-                online_views
-                    .iter()
-                    .map(|v| v.route_rules.to_string())
-                    .collect(),
+                values_differ(online_views.iter().map(|view| &view.route_rules)),
             );
-            differs(
+            record_difference(
                 "routeByKeyConfMatch",
-                online_views
-                    .iter()
-                    .map(|v| format!("{:?}", v.route_by_key_conf_match))
-                    .collect(),
+                values_differ(
+                    online_views
+                        .iter()
+                        .map(|view| &view.route_by_key_conf_match),
+                ),
             );
-            differs(
-                "dyeHeaders",
-                online_views
-                    .iter()
-                    .map(|v| format!("{:?}", v.dye_headers))
-                    .collect(),
+            record_difference(
+                "dye",
+                values_differ(online_views.iter().map(|view| &view.dye)),
             );
-            differs(
+            record_difference(
                 "overrideRef",
-                online_views
-                    .iter()
-                    .map(|v| format!("{:?}", v.override_ref))
-                    .collect(),
+                values_differ(online_views.iter().map(|view| &view.override_ref)),
             );
-            differs(
+            record_difference(
                 "overrideApplied",
-                online_views
-                    .iter()
-                    .map(|v| v.override_applied.to_string())
-                    .collect(),
+                values_differ(online_views.iter().map(|view| view.override_applied)),
             );
             let consistent = conflicts.is_empty();
 
@@ -261,7 +252,7 @@ mod tests {
             hash_calc: None,
             route_rules: serde_json::json!([]),
             route_by_key_conf_match: None,
-            dye_headers: None,
+            dye: None,
             override_ref: None,
             override_applied: false,
             service_usages: Vec::new(),
@@ -381,6 +372,42 @@ mod tests {
         let row = &resp.data.expect("data")[0];
         assert!(!row.consistent);
         assert!(row.conflicts.contains(&"presence".to_string()));
+    }
+
+    #[tokio::test]
+    async fn region_consistency_flags_semantic_dye_divergence() {
+        let state = test_api_state();
+        state
+            .aggregator
+            .set_controller_info("ctrl-a", make_register_info("ctrl-a"));
+        state
+            .aggregator
+            .set_controller_info("ctrl-b", make_register_info("ctrl-b"));
+
+        let mut canary = make_region_route(serde_json::json!([]));
+        canary.dye = Some(serde_json::json!({
+            "headerName": "X-Edgion-Dye",
+            "headerValue": "canary"
+        }));
+        let mut stable = make_region_route(serde_json::json!([]));
+        stable.dye = Some(serde_json::json!({
+            "headerName": "X-Edgion-Dye",
+            "headerValue": "stable"
+        }));
+        state
+            .metadata_store
+            .replace_region_routes("ctrl-a", vec![canary]);
+        state
+            .metadata_store
+            .replace_region_routes("ctrl-b", vec![stable]);
+
+        let Json(resp) = match region_routes_consistency(State(state)).await {
+            Ok(response) => response,
+            Err(_) => panic!("consistency response should succeed"),
+        };
+        let row = &resp.data.expect("data")[0];
+        assert!(!row.consistent);
+        assert_eq!(row.conflicts, vec!["dye"]);
     }
 
     #[tokio::test]

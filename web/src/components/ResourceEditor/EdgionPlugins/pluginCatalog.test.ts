@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { PLUGIN_TYPES, STAGE_PLUGIN_TYPES } from '@/types/edgion-plugins'
-import { HTTP_PLUGIN_CATALOG, pluginTypesForStage } from './pluginCatalog'
+import {
+  HTTP_PLUGIN_CATALOG,
+  pluginTypesForStage,
+} from './pluginCatalog'
 
 describe('current Rust HTTP plugin catalog', () => {
   it('contains exactly the 39 EdgionPlugin variants and no nested ExtensionRef', () => {
@@ -33,8 +36,21 @@ describe('current Rust HTTP plugin catalog', () => {
       'instancePoolSize', 'calloutTimeoutMs', 'calloutAllowlist',
     ])
     expect(HTTP_PLUGIN_CATALOG.find((entry) => entry.type === 'RequestMirror')?.fields.map((field) => field.name)).toEqual([
-      'backendRef', 'fraction', 'percentage', 'connectTimeoutMs', 'writeTimeoutMs',
+      'backendRef', 'fraction', 'percent', 'connectTimeoutMs', 'writeTimeoutMs',
       'maxBufferedChunks', 'maxConcurrent', 'channelFullTimeoutMs', 'mirrorLog',
     ])
+  })
+
+  it('does not expose the removed config-level dyeHeaders fields', () => {
+    for (const type of [
+      'DirectEndpoint',
+      'DynamicInternalUpstream',
+      'DynamicExternalUpstream',
+      'RegionRoute',
+      'Canary',
+    ]) {
+      expect(HTTP_PLUGIN_CATALOG.find((entry) => entry.type === type)?.fields.map((field) => field.name))
+        .not.toContain('dyeHeaders')
+    }
   })
 })

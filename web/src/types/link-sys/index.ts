@@ -90,9 +90,7 @@ export interface WebhookConfig {
   healthCheck?: Record<string, unknown>
   maxResponseBytes?: number
   success?: Record<string, unknown>
-  allowDegradation?: boolean
   statusOnError?: number
-  allowDegradationTemplate?: string
 }
 
 export interface KafkaConfig {

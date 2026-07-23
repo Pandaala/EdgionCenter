@@ -26,8 +26,8 @@ export interface Dns01Challenge {
   type: 'dns-01'
   provider: string
   credentialRef: ObjectReference
-  propagationTimeout?: number
-  propagationCheckInterval?: number
+  propagationTimeout?: string
+  propagationCheckInterval?: string
   [key: string]: unknown
 }
 
@@ -41,9 +41,9 @@ export interface EdgionAcmeSpec {
   keyType?: AcmeKeyType
   challenge: AcmeChallenge
   renewal?: {
-    renewBeforeDays?: number
-    checkInterval?: number
-    failBackoff?: number
+    renewBefore?: string
+    checkInterval?: string
+    failBackoff?: string
     [key: string]: unknown
   }
   externalAccountBinding?: {

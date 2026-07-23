@@ -190,13 +190,7 @@ export interface HTTPRequestMirrorFilter {
   backendRef: BackendObjectReference;
 
   fraction?: { numerator: number; denominator?: number };
-  percentage?: number;
-  connectTimeoutMs?: number;
-  writeTimeoutMs?: number;
-  maxBufferedChunks?: number;
-  mirrorLog?: boolean;
-  maxConcurrent?: number;
-  channelFullTimeoutMs?: number;
+  percent?: number;
   [key: string]: unknown;
 }
 
@@ -215,8 +209,6 @@ export interface HTTPExternalAuthFilter {
   timeoutMs?: number;
   timeoutMsTemplate?: string;
   maxResponseBytes?: number;
-  allowDegradation?: boolean;
-  allowDegradationTemplate?: string;
   statusOnError?: number;
   request?: Record<string, unknown>;
   decision?: {

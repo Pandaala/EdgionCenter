@@ -6,7 +6,19 @@ spec: {controllerName: edgion.io/gateway-controller, parametersRef: {group: edgi
 apiVersion: edgion.io/v1alpha1
 kind: EdgionGatewayConfig
 metadata: {name: "__PREFIX__-config", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
-spec: {enableReferenceGrantValidation: true}
+spec:
+  maxBodySize: 32MiB
+  httpTimeout:
+    client: {readTimeout: 30s, writeTimeout: 30s, keepaliveTimeout: 60s}
+    backend: {defaultConnectTimeout: 5s, defaultRequestTimeout: 30s, defaultIdleTimeout: 60s}
+  tcpTimeout: {idleTimeout: 5m, connectTimeout: 5s}
+  accessLogExtern:
+    unmaskedKeys:
+      header: [user-agent, x-request-id]
+      respHeader: [content-type, x-request-id]
+      query: [page]
+      cookie: []
+      ctx: [tenant_id]
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -22,11 +34,23 @@ spec:
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
-metadata: {name: "__PREFIX__-http", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+metadata:
+  name: "__PREFIX__-http"
+  namespace: "__NS_A__"
+  labels: {edgion.io/e2e-run: "__RUN_ID__"}
+  annotations:
+    edgion.io/mirror-connect-timeout-ms: "1000"
+    edgion.io/mirror-write-timeout-ms: "1000"
+    edgion.io/mirror-channel-full-timeout-ms: "100"
+    edgion.io/mirror-max-buffered-chunks: "64"
+    edgion.io/mirror-log: "true"
+    edgion.io/mirror-max-concurrent: "128"
 spec:
   parentRefs: [{name: "__PREFIX__-gateway", sectionName: http}]
   rules:
-    - filters: [{type: ExtensionRef, extensionRef: {group: edgion.io, kind: EdgionPlugins, name: "__PREFIX__-region-route"}}]
+    - filters:
+        - {type: ExtensionRef, extensionRef: {group: edgion.io, kind: EdgionPlugins, name: "__PREFIX__-plugins"}}
+        - {type: RequestMirror, requestMirror: {backendRef: {name: "__PREFIX__-service", port: 8080}, percent: 10}}
       backendRefs: [{name: "__PREFIX__-service", port: 8080}]
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -79,7 +103,18 @@ spec: {targetRefs: [{group: "", kind: Service, name: "__PREFIX__-service"}], val
 apiVersion: edgion.io/v1
 kind: EdgionPlugins
 metadata: {name: "__PREFIX__-plugins", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
-spec: {requestPlugins: [{type: TraceContext, config: {trustInbound: true}}]}
+spec:
+  requestPlugins:
+    - type: HmacAuth
+      config: {validateRequestBody: true, anonymous: e2e}
+      body: {maxBodySize: 1MiB, onReadFailure: failClose}
+    - type: DirectEndpoint
+      config: {from: {type: header, name: x-target-ip}, onMissing: fallback, onInvalid: reject, inheritTls: false}
+      dye:
+        response: [{name: x-direct-endpoint, on: [success], value: accepted}]
+  accessLogExtern:
+    - {key: tenant, from: ctx, name: tenant_id}
+    - {key: route, from: routeLabel, name: edgion.io/e2e-run}
 ---
 apiVersion: edgion.io/v1
 kind: EdgionStreamPlugins
@@ -94,7 +129,7 @@ spec: {enable: true, visibility: Namespace, data: {type: IpList, config: {items:
 apiVersion: edgion.io/v1
 kind: EdgionAcme
 metadata: {name: "__PREFIX__-acme", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
-spec: {server: "https://127.0.0.1:1/directory", email: e2e@example.test, privateKeySecretRef: {name: "__PREFIX__-acme-account"}, domains: [e2e.example.test], challenge: {type: http-01, gatewayRef: {name: "__PREFIX__-gateway"}}, storage: {secretName: "__PREFIX__-secret"}, autoEdgionTls: {enabled: false}}
+spec: {server: "https://127.0.0.1:1/directory", email: e2e@example.test, privateKeySecretRef: {name: "__PREFIX__-acme-account"}, domains: [e2e.example.test], challenge: {type: http-01, gatewayRef: {name: "__PREFIX__-gateway"}}, storage: {secretName: "__PREFIX__-secret"}, renewal: {renewBefore: 720h, checkInterval: 24h, failBackoff: 5m}, autoEdgionTls: {enabled: false}}
 status: {phase: Ready, certificateNotAfter: "2099-01-01T00:00:00Z", secretName: "__PREFIX__-secret"}
 ---
 apiVersion: edgion.io/v1
@@ -105,7 +140,13 @@ spec: {type: redis, config: {endpoints: ["redis://127.0.0.1:6379"]}}
 apiVersion: edgion.io/v1
 kind: EdgionBackendTrafficPolicy
 metadata: {name: "__PREFIX__-traffic", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
-spec: {targetRefs: [{group: "", kind: Service, name: "__PREFIX__-service"}], loadBalancer: {type: RoundRobin}}
+spec:
+  targetRefs: [{group: "", kind: Service, name: "__PREFIX__-service"}]
+  loadBalancer: {type: RoundRobin}
+  retryConstraint: {budget: {percent: 20, interval: 10s}, minRetryRate: {count: 10, interval: 1s}}
+  circuitBreaker: {maxParallelRequests: 128}
+  connection: {connectTimeout: 5s}
+  outlierDetection: {consecutiveErrors: 5, ejectionTime: 30s, maxEjectionTime: 5m, maxEjectionPercent: 50}
 ---
 apiVersion: v1
 kind: Secret

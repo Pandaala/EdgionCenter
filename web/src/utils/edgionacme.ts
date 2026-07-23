@@ -1,6 +1,7 @@
 import * as yaml from 'js-yaml'
 import type { AcmeChallenge, ChallengeType, EdgionAcme } from '@/types/edgion-acme'
 import { buildMutationDocument, withCreateDefaults } from './resource-document'
+import { isValidGep2257Duration } from './validation'
 import { dumpYaml } from './yaml-utils'
 
 export const DEFAULT_YAML = `apiVersion: edgion.io/v1
@@ -22,9 +23,9 @@ spec:
   storage:
     secretName: acme-cert
   renewal:
-    renewBeforeDays: 30
-    checkInterval: 86400
-    failBackoff: 300
+    renewBefore: 720h
+    checkInterval: 24h
+    failBackoff: 5m
   autoEdgionTls:
     enabled: true
 `
@@ -41,7 +42,7 @@ const CREATE_DEFAULTS: EdgionAcme = {
     keyType: 'ecdsa-p256',
     challenge: { type: 'http-01', gatewayRef: { name: '' } },
     storage: { secretName: '' },
-    renewal: { renewBeforeDays: 30, checkInterval: 86400, failBackoff: 300 },
+    renewal: { renewBefore: '720h', checkInterval: '24h', failBackoff: '5m' },
     autoEdgionTls: { enabled: true },
   },
 }
@@ -72,10 +73,38 @@ export function normalize(raw: unknown): EdgionAcme {
   return raw as unknown as EdgionAcme
 }
 
+export function validateEdgionAcme(resource: EdgionAcme): string[] {
+  const errors: string[] = []
+  const durations: Array<[string, unknown]> = [
+    ['challenge.propagationTimeout',
+      resource.spec.challenge.type === 'dns-01'
+        ? resource.spec.challenge.propagationTimeout
+        : undefined],
+    ['challenge.propagationCheckInterval',
+      resource.spec.challenge.type === 'dns-01'
+        ? resource.spec.challenge.propagationCheckInterval
+        : undefined],
+    ['renewal.renewBefore', resource.spec.renewal?.renewBefore],
+    ['renewal.checkInterval', resource.spec.renewal?.checkInterval],
+    ['renewal.failBackoff', resource.spec.renewal?.failBackoff],
+  ]
+  durations.forEach(([path, value]) => {
+    if (value !== undefined
+      && (typeof value !== 'string' || !isValidGep2257Duration(value))) {
+      errors.push(`${path} must be a valid GEP-2257 duration`)
+    }
+  })
+  return errors
+}
+
 export function toMutationDocument(
   resource: EdgionAcme,
   mode: 'create' | 'update',
 ): Record<string, unknown> {
+  const validationErrors = validateEdgionAcme(resource)
+  if (validationErrors.length > 0) {
+    throw new Error(validationErrors.join('; '))
+  }
   return buildMutationDocument(resource, { resourceKind: 'edgionacme', mode })
 }
 
@@ -100,5 +129,12 @@ export function replaceChallengeType(challenge: AcmeChallenge, type: ChallengeTy
   }
   const unknown: Record<string, unknown> = { ...challenge }
   delete unknown.gatewayRef
-  return { ...unknown, type, provider: '', credentialRef: { name: '' } }
+  return {
+    ...unknown,
+    type,
+    provider: '',
+    credentialRef: { name: '' },
+    propagationTimeout: '120s',
+    propagationCheckInterval: '5s',
+  }
 }

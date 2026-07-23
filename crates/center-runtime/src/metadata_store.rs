@@ -53,7 +53,7 @@ pub struct EffectiveRegionRouteView {
     #[serde(default)]
     pub route_by_key_conf_match: Option<serde_json::Value>,
     #[serde(default)]
-    pub dye_headers: Option<serde_json::Value>,
+    pub dye: Option<serde_json::Value>,
     #[serde(default)]
     pub override_ref: Option<EffectiveConfigDataRef>,
     #[serde(default)]
@@ -582,7 +582,7 @@ mod tests {
             hash_calc: None,
             route_rules: serde_json::json!([]),
             route_by_key_conf_match: None,
-            dye_headers: None,
+            dye: None,
             override_ref: None,
             override_applied: false,
             service_usages: Vec::new(),
@@ -609,7 +609,7 @@ mod tests {
             hash_calc: None,
             route_rules: serde_json::json!([]),
             route_by_key_conf_match: None,
-            dye_headers: None,
+            dye: None,
             override_ref: None,
             override_applied: false,
             service_usages: Vec::new(),

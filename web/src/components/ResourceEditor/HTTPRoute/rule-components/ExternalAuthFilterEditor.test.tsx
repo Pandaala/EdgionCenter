@@ -37,6 +37,12 @@ function Harness() {
 }
 
 describe('ExternalAuthFilterEditor wire values', () => {
+  it('does not expose the removed degradation controls', () => {
+    render(<Harness />)
+    expect(screen.queryByText('allowDegradation')).not.toBeInTheDocument()
+    expect(screen.queryByText('allowDegradationTemplate')).not.toBeInTheDocument()
+  })
+
   it('switches SAN type by removing only hostname/uri and preserving unknown fields', () => {
     expect(switchSubjectAltNameType({
       type: 'Hostname', hostname: 'auth.example.com', uri: 'legacy', futureSan: { keep: true },

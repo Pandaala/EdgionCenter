@@ -28,6 +28,20 @@ export interface SubjectAltName {
   [key: string]: unknown
 }
 
+export interface GatewayConfigUnmaskedKeys {
+  header?: string[]
+  respHeader?: string[]
+  query?: string[]
+  cookie?: string[]
+  ctx?: string[]
+  [key: string]: unknown
+}
+
+export interface GatewayConfigAccessLogExtern {
+  unmaskedKeys?: GatewayConfigUnmaskedKeys
+  [key: string]: unknown
+}
+
 export interface EdgionGatewayConfigSpec {
   server?: {
     threads?: number
@@ -45,6 +59,7 @@ export interface EdgionGatewayConfigSpec {
     backend?: { defaultConnectTimeout?: string; defaultRequestTimeout?: string; defaultIdleTimeout?: string }
   }
   maxRetries?: number
+  maxBodySize?: string
   tcpTimeout?: { idleTimeout?: string; connectTimeout?: string; [key: string]: unknown }
   loadBalancing?: { panicThreshold?: number; [key: string]: unknown }
   realIp?: {
@@ -64,8 +79,8 @@ export interface EdgionGatewayConfigSpec {
     [key: string]: unknown
   }
   globalPluginsRef?: Array<{ name: string; namespace?: string; [key: string]: unknown }>
+  accessLogExtern?: GatewayConfigAccessLogExtern
   preflightPolicy?: { mode?: 'cors-standard' | 'all-options'; statusCode?: number; [key: string]: unknown }
-  enableReferenceGrantValidation?: boolean
   linkSys?: { webhookMaxResponseBytes?: number; [key: string]: unknown }
   outboundTls?: {
     verify?: boolean

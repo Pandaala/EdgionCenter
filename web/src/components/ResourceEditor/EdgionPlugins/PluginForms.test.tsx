@@ -32,6 +32,37 @@ describe('structured plugin forms', () => {
     })
   })
 
+  it('narrowly edits access-log declarations while preserving entry-level dye, body, and unknown siblings', () => {
+    const onChange = vi.fn()
+    const resource: any = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'p', namespace: 'edge' },
+      spec: {
+        requestPlugins: [{
+          alias: 'auth',
+          dye: { request: [{ name: 'x-auth', on: ['success'] }], futureDye: true },
+          body: { maxBodySize: '1m', onReadFailure: 'failClose', futureBody: false },
+          type: 'HmacAuth',
+          config: { validateRequestBody: true },
+          futureEntry: [],
+        }],
+        accessLogExtern: [{ key: 'tenant', from: 'routeLabel', name: 'tenant', futureField: 1 }],
+        futureSpec: true,
+      },
+    }
+    render(<EdgionPluginsForm value={resource} onChange={onChange} />)
+    fireEvent.change(screen.getAllByDisplayValue('tenant')[0], { target: { value: 'tenant-id' } })
+    expect(onChange).toHaveBeenCalledWith({
+      ...resource,
+      spec: {
+        ...resource.spec,
+        accessLogExtern: [{
+          ...resource.spec.accessLogExtern[0],
+          key: 'tenant-id',
+        }],
+      },
+    })
+  })
+
   it('edits Stage 1 while preserving TLSRoute and flattened entry fields', () => {
     const onChange = vi.fn()
     const resource: any = {

@@ -145,6 +145,8 @@ spec:
 
   it('locks the Rust-derived field matrix and round-trips deep webhook configuration', () => {
     expect(LINKSYS_RUST_FIELD_MATRIX.webhook).toContain('healthCheck')
+    expect(LINKSYS_RUST_FIELD_MATRIX.webhook).not.toContain('allowDegradation')
+    expect(LINKSYS_RUST_FIELD_MATRIX.webhook).not.toContain('allowDegradationTemplate')
     expect(LINKSYS_RUST_FIELD_MATRIX.etcd).toContain('maxCallRecvSize')
     const resource = fromYaml(`apiVersion: edgion.io/v1
 kind: LinkSys
@@ -160,10 +162,10 @@ spec:
     rateLimit: {rate: 100, windowSec: 1}
     healthCheck: {active: {path: /healthz, intervalSec: 10, timeoutMs: 2000, healthyThreshold: 1, unhealthyThreshold: 3}, passive: {unhealthyThreshold: 3, failureStatusCodes: [500], countTimeout: true, backoff: {initialSec: 5, multiplier: 2, maxSec: 60}}}
     maxResponseBytes: 4096
-    success: {statusCodes: [200], body: [{pointer: /code, equals: 0}]}
-    allowDegradation: false
-    statusOnError: 503
+    allowDegradation: true
     allowDegradationTemplate: "\${ctx:degrade}"
+    success: {statusCodes: [200], body: [{pointer: /code, equals: 0}]}
+    statusOnError: 503
     request:
       path: {template: /lookup, allowOverride: false}
       method: {template: POST}
@@ -175,7 +177,8 @@ spec:
     const output = toMutationYaml(resource, 'update')
     expect(output).toContain('healthCheck:')
     expect(output).toContain('retryOnStatus:')
-    expect(output).toContain('allowDegradationTemplate:')
+    expect(output).not.toContain('allowDegradation')
+    expect(output).toContain('healthCheck:')
     expect(output).not.toContain('resolvedSecrets:')
   })
 })

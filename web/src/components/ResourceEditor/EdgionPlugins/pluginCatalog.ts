@@ -41,7 +41,7 @@ export const HTTP_PLUGIN_CATALOG: readonly PluginDefinition[] = [
     fields: [
       ...objects('backendRef', 'fraction'),
       ...numbers(
-        'percentage',
+        'percent',
         'connectTimeoutMs',
         'writeTimeoutMs',
         'maxBufferedChunks',
@@ -80,16 +80,16 @@ export const HTTP_PLUGIN_CATALOG: readonly PluginDefinition[] = [
     ...numbers('sessionLifetime', 'maxSessionCookieBytes', 'accessTokenExpiresLeeway', 'clockSkewSeconds', 'jwksCacheTtl', 'jwksMinRefreshInterval', 'introspectionCacheTtl', 'maxHeaderValueBytes', 'maxTotalHeaderBytes', 'timeout', 'discoveryMaxResponseBytes', 'jwksMaxResponseBytes', 'userinfoMaxResponseBytes', 'authFailureDelayMs'),
   ] },
   { type: 'BandwidthLimit', stages: ['upstreamResponseBodyFilterPlugins'], fields: [...strings('rate')] },
-  { type: 'DirectEndpoint', stages: REQUEST, fields: [...objects('from', 'extract', 'dyeHeaders'), ...numbers('port'), ...strings('onMissing', 'onInvalid'), ...booleans('inheritTls')] },
+  { type: 'DirectEndpoint', stages: REQUEST, fields: [...objects('from', 'extract'), ...numbers('port'), ...strings('onMissing', 'onInvalid'), ...booleans('inheritTls')] },
   { type: 'AllEndpointStatus', stages: REQUEST, fields: [...numbers('timeoutMs', 'wallTimeoutMs', 'maxEndpoints', 'maxBodySize', 'concurrencyLimit'), ...booleans('includeResponseHeaders'), ...strings('methodOverride', 'pathOverride')] },
-  { type: 'DynamicInternalUpstream', stages: REQUEST, fields: [...objects('from', 'extract', 'dyeHeaders'), ...arrays('rules'), ...strings('onMissing', 'onNoMatch', 'onInvalid')] },
-  { type: 'DynamicExternalUpstream', stages: REQUEST, fields: [...objects('from', 'extract', 'domainMap', 'dyeHeaders'), ...strings('onMissing', 'onNoMatch')] },
+  { type: 'DynamicInternalUpstream', stages: REQUEST, fields: [...objects('from', 'extract'), ...arrays('rules'), ...strings('onMissing', 'onNoMatch', 'onInvalid')] },
+  { type: 'DynamicExternalUpstream', stages: REQUEST, fields: [...objects('from', 'extract', 'domainMap'), ...strings('onMissing', 'onNoMatch')] },
   { type: 'Dsl', stages: ['requestPlugins', 'upstreamResponseFilterPlugins'], fields: [...strings('name'), f('source', 'code', ''), f('bytecode', 'code', ''), ...numbers('maxSteps', 'maxLoopIterations', 'maxCallCount', 'maxStackDepth', 'maxStringLen', 'maxListLen', 'maxMapSize', 'httpMaxTimeoutMs', 'httpMaxResponseBodyBytes'), ...strings('errorPolicy'), ...booleans('httpBlockPrivateIps'), ...arrays('linksysRefs')] },
-  { type: 'RegionRoute', stages: REQUEST, fields: [...strings('myRegion'), ...arrays('keyGet', 'hashKeyGet', 'routeRules', 'regions'), ...objects('hashCalc', 'routeByKeyConfMatch', 'overrideRef', 'dyeHeaders')] },
+  { type: 'RegionRoute', stages: REQUEST, fields: [...strings('myRegion'), ...arrays('keyGet', 'hashKeyGet', 'routeRules', 'regions'), ...objects('hashCalc', 'routeByKeyConfMatch', 'overrideRef')] },
   { type: 'TraceContext', stages: REQUEST, fields: [...booleans('generateWhenMissing', 'echoToClient', 'trustInbound', 'defaultSampled')] },
   { type: 'ExtProc', stages: ['requestPlugins', 'upstreamResponsePlugins'], fields: [...objects('grpcService', 'processingMode'), ...booleans('failureModeAllow')] },
   { type: 'GlobalAccessControl', stages: REQUEST, fields: [...booleans('enable'), ...strings('activeProfile', 'description', 'message', 'ipSource'), ...objects('profiles', 'activeProfileRef'), ...numbers('status')] },
-  { type: 'Canary', stages: REQUEST, fields: [...booleans('enable'), ...strings('activeProfile', 'onInvalid'), ...objects('profiles', 'activeProfileRef', 'dyeHeaders')] },
+  { type: 'Canary', stages: REQUEST, fields: [...booleans('enable'), ...strings('activeProfile', 'onInvalid'), ...objects('profiles', 'activeProfileRef')] },
   { type: 'Wasm', stages: ['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins'], fields: [...objects('source'), ...strings('sha256'), f('pluginConfig', 'code', ''), f('vmConfig', 'code', ''), ...booleans('failOpen'), ...numbers('timeoutMs', 'instancePoolSize', 'calloutTimeoutMs'), ...arrays('calloutAllowlist')] },
 ] as const
 

@@ -28,4 +28,62 @@ describe('EdgionGatewayConfigForm', () => {
     expect(next.spec.dnsResolver).toEqual(data.spec.dnsResolver)
     expect(next.spec.futureSpec).toEqual({ enabled: false })
   })
+
+  it('narrowly edits GatewayConfig access-log whitelist arrays', () => {
+    const onChange = vi.fn()
+    const data: any = {
+      apiVersion: 'edgion.io/v1alpha1',
+      kind: 'EdgionGatewayConfig',
+      metadata: { name: 'default' },
+      spec: {
+        maxBodySize: '32MiB',
+        accessLogExtern: {
+          unmaskedKeys: {
+            header: ['x-request-id'],
+            respHeader: ['content-type'],
+            query: [],
+            cookie: ['locale'],
+            ctx: ['tenant'],
+            futureSource: ['preserved'],
+          },
+          futurePolicy: { enabled: false },
+        },
+        futureSpec: { enabled: true },
+      },
+    }
+
+    render(<EdgionGatewayConfigForm data={data} onChange={onChange} />)
+    fireEvent.change(screen.getByTestId('edgiongatewayconfig-unmasked-header-0'), {
+      target: { value: 'traceparent' },
+    })
+
+    const edited = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0]
+    expect(edited.spec.accessLogExtern).toEqual({
+      ...data.spec.accessLogExtern,
+      unmaskedKeys: {
+        ...data.spec.accessLogExtern.unmaskedKeys,
+        header: ['traceparent'],
+      },
+    })
+    expect(edited.spec.futureSpec).toEqual(data.spec.futureSpec)
+
+    fireEvent.click(screen.getByTestId('edgiongatewayconfig-unmasked-query-add'))
+    const added = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0]
+    expect(added.spec.accessLogExtern.unmaskedKeys.query).toEqual([''])
+    expect(added.spec.accessLogExtern.unmaskedKeys.cookie).toEqual(['locale'])
+    expect(added.spec.accessLogExtern.futurePolicy).toEqual({ enabled: false })
+  })
+
+  it('renders maxBodySize and omits the removed ReferenceGrant control', () => {
+    const data: any = {
+      apiVersion: 'edgion.io/v1alpha1',
+      kind: 'EdgionGatewayConfig',
+      metadata: { name: 'default' },
+      spec: { maxBodySize: '32MiB' },
+    }
+
+    render(<EdgionGatewayConfigForm data={data} onChange={vi.fn()} />)
+    expect(screen.getByDisplayValue('32MiB')).toBeInTheDocument()
+    expect(screen.queryByText('Enable ReferenceGrant Validation')).not.toBeInTheDocument()
+  })
 })
