@@ -49,7 +49,7 @@ export default function GlobalConnectionIpRestrictionDetail() {
     return (
       <Card>
         <Text type="secondary">Entry not found on controller "{controllerId}".</Text>
-        <Button style={{ marginTop: 16 }} onClick={() => navigate('/global-connection-ip-restrictions')}>
+        <Button style={{ marginTop: 16 }} onClick={() => navigate('/global-rules/ip-lists')}>
           Back to list
         </Button>
       </Card>
@@ -62,7 +62,7 @@ export default function GlobalConnectionIpRestrictionDetail() {
         title={`${namespace}/${name}`}
         subtitle={`on ${controllerId}`}
         actions={
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/global-connection-ip-restrictions')}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/global-rules/ip-lists')}>
             Back
           </Button>
         }

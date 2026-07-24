@@ -119,14 +119,23 @@ export const controllerMenu: MenuSection[] = [
   },
 ]
 
-// Single flat section: Center has no User/Ops split — it manages a fleet of controllers.
 export const centerMenu: MenuSection[] = [
   {
     kind: 'section',
-    labelKey: 'center.title',
+    labelKey: 'center.nav.section.federation',
     children: [
       { kind: 'item', key: 'center-controllers', labelKey: 'center.nav.controllers',
         path: '/', icon: <ClusterOutlined /> },
+      { kind: 'item', key: 'center-federation-diagnostics', labelKey: 'center.nav.federationDiagnostics',
+        path: '/federation-diagnostics', icon: <ApartmentOutlined />, requiredPermission: 'server:read' },
+      { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',
+        path: '/admin', icon: <SettingOutlined />, requiredPermission: 'controllers:read', requiredCapability: 'controllerHistory' },
+    ],
+  },
+  {
+    kind: 'section',
+    labelKey: 'center.nav.section.traffic',
+    children: [
       {
         kind: 'group',
         labelKey: 'center.nav.regionRoutes',
@@ -135,10 +144,24 @@ export const centerMenu: MenuSection[] = [
           { kind: 'item', key: 'center-rr-service', labelKey: 'center.nav.serviceDimension', path: '/region-routes/service', icon: <DatabaseOutlined />, requiredPermission: 'region-routes:read' },
         ],
       },
-      { kind: 'item', key: 'center-gipr', labelKey: 'center.nav.globalIpRestrictions',
-        path: '/global-connection-ip-restrictions', icon: <SafetyOutlined />, requiredPermission: 'ip-restrictions:read' },
-      { kind: 'item', key: 'center-federation-diagnostics', labelKey: 'center.nav.federationDiagnostics',
-        path: '/federation-diagnostics', icon: <ApartmentOutlined />, requiredPermission: 'server:read' },
+      {
+        kind: 'group',
+        labelKey: 'center.nav.globalRules',
+        children: [
+          { kind: 'item', key: 'center-global-ip-lists', labelKey: 'center.nav.globalIpLists',
+            path: '/global-rules/ip-lists', icon: <SafetyOutlined />, requiredPermission: 'ip-restrictions:read' },
+          { kind: 'item', key: 'center-global-shared-plugins', labelKey: 'center.nav.globalSharedPlugins',
+            path: '/global-rules/shared-plugins', icon: <ApiOutlined />, requiredPermission: 'server:read' },
+          { kind: 'item', key: 'center-global-waf-control', labelKey: 'center.nav.globalWafControl',
+            path: '/global-rules/waf-control', icon: <LockOutlined />, requiredPermission: 'server:read' },
+        ],
+      },
+    ],
+  },
+  {
+    kind: 'section',
+    labelKey: 'center.nav.section.cloud',
+    children: [
       { kind: 'item', key: 'center-cloud-accounts', labelKey: 'cloud.nav.accounts',
         path: '/cloud/provider-accounts', icon: <CloudOutlined />, requiredPermission: 'provider-accounts:read', requiredCapability: 'providerAccountAdmin' },
       {
@@ -158,8 +181,12 @@ export const centerMenu: MenuSection[] = [
           { kind: 'item', key: 'center-aws-waf', labelKey: 'cloud.nav.awsWaf', path: '/cloud/aws/waf', icon: <SafetyOutlined />, requiredPermissions: ['aws-waf:read', 'provider-accounts:read'], requiredCapability: 'awsWafRead' },
         ],
       },
-      { kind: 'item', key: 'center-admin', labelKey: 'center.nav.admin',
-        path: '/admin', icon: <SettingOutlined />, requiredPermission: 'controllers:read', requiredCapability: 'controllerHistory' },
+    ],
+  },
+  {
+    kind: 'section',
+    labelKey: 'center.nav.section.system',
+    children: [
       { kind: 'item', key: 'center-audit', labelKey: 'center.nav.audit',
         path: '/audit', icon: <AuditOutlined />, requiredPermission: 'audit:read', requiredCapability: 'auditQuery' },
       { kind: 'item', key: 'center-users', labelKey: 'center.nav.users',

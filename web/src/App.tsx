@@ -48,6 +48,7 @@ import EdgionAcmeList from './pages/System/EdgionAcmeList'
 import TopologyPage from './pages/Topology/TopologyPage'
 import GlobalConnectionIpRestrictionList from './pages/GlobalConnectionIpRestriction/List'
 import GlobalConnectionIpRestrictionDetail from './pages/GlobalConnectionIpRestriction/Detail'
+import GlobalRulePendingPage from './pages/GlobalRules/GlobalRulePendingPage'
 import ProviderAccountsPage from './pages/Cloud/ProviderAccountsPage'
 import CloudflareDnsPage from './pages/Cloud/CloudflareDnsPage'
 import CloudflareWafPage from './pages/Cloud/CloudflareWafPage'
@@ -150,10 +151,24 @@ function App() {
           {capabilities?.route53DnsRead && <Route path="cloud/aws/route53" element={<RequirePermissions permissions={['route53-dns:read', 'provider-accounts:read']}><Route53DnsPage dnsWriteAvailable={capabilities.route53DnsWrite === true} zoneLifecycleAvailable={capabilities.route53ZoneLifecycle === true} /></RequirePermissions>} />}
           {capabilities?.cloudfrontRead && <Route path="cloud/aws/cloudfront" element={<RequirePermissions permissions={['cloudfront:read', 'provider-accounts:read']}><CloudFrontPage writeAvailable={capabilities.cloudfrontWrite === true} /></RequirePermissions>} />}
           {capabilities?.awsWafRead && <Route path="cloud/aws/waf" element={<RequirePermissions permissions={['aws-waf:read', 'provider-accounts:read']}><AwsWafPage writeAvailable={capabilities.awsWafWrite === true} attachAvailable={capabilities.awsWafAttach === true} detachAvailable={capabilities.awsWafDetach === true} securityWeakenAvailable={capabilities.awsWafSecurityWeaken === true} cloudfrontWriteAvailable={capabilities.cloudfrontWrite === true} /></RequirePermissions>} />}
+          <Route path="global-rules" element={<Navigate to="/global-rules/ip-lists" replace />} />
           <Route
-            path="global-connection-ip-restrictions"
+            path="global-rules/ip-lists"
             element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionList /></RequirePermission>}
           />
+          <Route
+            path="global-rules/ip-lists/:namespace/:name/:controllerId"
+            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionDetail /></RequirePermission>}
+          />
+          <Route
+            path="global-rules/shared-plugins"
+            element={<RequirePermission permission="server:read"><GlobalRulePendingPage resource="sharedPlugins" /></RequirePermission>}
+          />
+          <Route
+            path="global-rules/waf-control"
+            element={<RequirePermission permission="server:read"><GlobalRulePendingPage resource="wafControl" /></RequirePermission>}
+          />
+          <Route path="global-connection-ip-restrictions" element={<Navigate to="/global-rules/ip-lists" replace />} />
           <Route
             path="global-connection-ip-restrictions/:namespace/:name/:controllerId"
             element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionDetail /></RequirePermission>}

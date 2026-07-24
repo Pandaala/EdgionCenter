@@ -11,6 +11,7 @@ import {
 } from '@/api/globalConnectionIpRestriction'
 import DetailModal from './DetailModal'
 import PageHeader from '@/components/PageHeader'
+import { useT } from '@/i18n'
 import { useCan } from '@/utils/permissions'
 
 const { Text } = Typography
@@ -23,6 +24,7 @@ interface FlatRow {
 }
 
 export default function GlobalConnectionIpRestrictionList() {
+  const t = useT()
   const queryClient = useQueryClient()
   const canWrite = useCan('ip-restrictions:write')
   const [detailTarget, setDetailTarget] = useState<FlatRow | null>(null)
@@ -251,7 +253,7 @@ export default function GlobalConnectionIpRestrictionList() {
   return (
     <div>
       <PageHeader
-        title="GlobalConnectionIpRestriction"
+        title={t('center.nav.globalIpLists')}
         actions={
           <Button data-testid="gcir-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>Refresh</Button>
         }
@@ -259,7 +261,7 @@ export default function GlobalConnectionIpRestrictionList() {
       {isLoading ? (
         <Spin size="large" style={{ display: 'flex', justifyContent: 'center', minHeight: 300 }} />
       ) : flatRows.length === 0 ? (
-        <Empty description="No GlobalConnectionIpRestriction entries yet" />
+        <Empty description={t('globalRules.ipLists.empty')} />
       ) : (
         <Table
           dataSource={flatRows}

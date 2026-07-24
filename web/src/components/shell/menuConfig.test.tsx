@@ -7,6 +7,12 @@ const auditItem = { requiredPermission: 'audit:read', requiredCapability: 'audit
 const historyItem = { requiredPermission: 'controllers:read', requiredCapability: 'controllerHistory' as const }
 const ungated = {}
 
+const findCenterSection = (labelKey: string) => {
+  const section = centerMenu.find((item) => item.labelKey === labelKey)
+  if (!section) throw new Error(`Center menu section is missing: ${labelKey}`)
+  return section
+}
+
 const ctx = (
   permissions: string[],
   capabilities: MenuGateContext['capabilities'] = {},
@@ -61,29 +67,52 @@ describe('isMenuItemVisible', () => {
   })
 
   it('keeps RegionRoute region and service management as distinct Center destinations', () => {
-    const regionGroup = centerMenu[0].children.find((item) => item.kind === 'group' && item.labelKey === 'center.nav.regionRoutes')
+    const trafficSection = findCenterSection('center.nav.section.traffic')
+    const regionGroup = trafficSection.children.find((item) => item.kind === 'group' && item.labelKey === 'center.nav.regionRoutes')
     expect(regionGroup?.kind).toBe('group')
     if (regionGroup?.kind !== 'group') throw new Error('RegionRoute group is missing')
     expect(regionGroup.children.map((item) => item.path)).toEqual(['/region-routes/region', '/region-routes/service'])
     expect(regionGroup.children.every((item) => item.requiredPermission === 'region-routes:read')).toBe(true)
     expect(regionGroup.children.every((item) => !isMenuItemVisible(item, ctx([])))).toBe(true)
     expect(regionGroup.children.every((item) => isMenuItemVisible(item, ctx(['region-routes:read'])))).toBe(true)
-    const diagnostics = centerMenu[0].children.find((item) => item.kind === 'item' && item.key === 'center-federation-diagnostics')
+    const globalRules = trafficSection.children.find((item) => item.kind === 'group' && item.labelKey === 'center.nav.globalRules')
+    expect(globalRules?.kind).toBe('group')
+    if (globalRules?.kind !== 'group') throw new Error('GlobalRules group is missing')
+    expect(globalRules.children.map((item) => item.path)).toEqual([
+      '/global-rules/ip-lists',
+      '/global-rules/shared-plugins',
+      '/global-rules/waf-control',
+    ])
+    const ipLists = globalRules.children.find((item) => item.key === 'center-global-ip-lists')
+    expect(ipLists).toBeDefined()
+    expect(isMenuItemVisible(ipLists!, ctx([]))).toBe(false)
+    expect(isMenuItemVisible(ipLists!, ctx(['ip-restrictions:read']))).toBe(true)
+  })
+
+  it('groups controller operations under Federation and account administration under System Management', () => {
+    const federationSection = findCenterSection('center.nav.section.federation')
+    expect(federationSection.children.map((item) => item.kind === 'item' ? item.key : item.labelKey)).toEqual([
+      'center-controllers',
+      'center-federation-diagnostics',
+      'center-admin',
+    ])
+    const diagnostics = federationSection.children.find((item) => item.kind === 'item' && item.key === 'center-federation-diagnostics')
     expect(diagnostics?.kind).toBe('item')
     if (diagnostics?.kind !== 'item') throw new Error('Federation diagnostics item is missing')
     expect(diagnostics?.requiredPermission).toBe('server:read')
     expect(isMenuItemVisible(diagnostics, ctx([]))).toBe(false)
     expect(isMenuItemVisible(diagnostics, ctx(['server:read']))).toBe(true)
-    const restrictions = centerMenu[0].children.find((item) => item.kind === 'item' && item.key === 'center-gipr')
-    expect(restrictions?.kind).toBe('item')
-    if (restrictions?.kind !== 'item') throw new Error('Global IP restrictions item is missing')
-    expect(restrictions.requiredPermission).toBe('ip-restrictions:read')
-    expect(isMenuItemVisible(restrictions, ctx([]))).toBe(false)
-    expect(isMenuItemVisible(restrictions, ctx(['ip-restrictions:read']))).toBe(true)
+
+    const systemSection = findCenterSection('center.nav.section.system')
+    expect(systemSection.children.map((item) => item.kind === 'item' ? item.key : item.labelKey)).toEqual([
+      'center-audit',
+      'center-users',
+      'center-roles',
+    ])
   })
 
   it('requires both DNS inventory and provider-account read authority for Cloudflare DNS', () => {
-    const cloudflare = centerMenu[0].children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
+    const cloudflare = findCenterSection('center.nav.section.cloud').children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
     expect(cloudflare?.kind).toBe('group')
     if (cloudflare?.kind !== 'group') throw new Error('Cloudflare group is missing')
     const dns = cloudflare.children[0]
@@ -93,7 +122,7 @@ describe('isMenuItemVisible', () => {
   })
 
   it('requires WAF, DNS Zone inventory, and provider-account authority for Cloudflare WAF', () => {
-    const cloudflare = centerMenu[0].children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
+    const cloudflare = findCenterSection('center.nav.section.cloud').children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
     expect(cloudflare?.kind).toBe('group')
     if (cloudflare?.kind !== 'group') throw new Error('Cloudflare group is missing')
     const waf = cloudflare.children.find((item) => item.key === 'center-cloudflare-waf')
