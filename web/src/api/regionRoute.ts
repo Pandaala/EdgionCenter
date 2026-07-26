@@ -72,6 +72,55 @@ export interface ConsistencyResult {
   conflicts: string[]
 }
 
+export interface RegionRouteSyncTargetResult {
+  controllerId: string
+  success: boolean
+  error?: string
+}
+
+export interface RegionRouteSyncResult {
+  modified: number
+  failed: number
+  targets: RegionRouteSyncTargetResult[]
+}
+
+export interface RegionRouteOverrideResource {
+  apiVersion: string
+  kind: string
+  metadata: {
+    namespace?: string
+    name?: string
+    resourceVersion?: string
+  }
+  spec: {
+    enable?: boolean
+    data: {
+      type: 'RegionRouteOverride' | 'ServiceRegionRouteOverride'
+      config: {
+        regions?: Array<{
+          name: string
+          failoverTo?: string
+          hashRange?: [number, number]
+          backendEndpoint?: string
+          tls?: boolean
+        }>
+      }
+    }
+  }
+}
+
+export interface CenterRegionRouteOverride {
+  namespace: string
+  name: string
+  controllers: Record<string, RegionRouteOverrideResource>
+}
+
+export interface RegionRouteOverrideListResult {
+  success: boolean
+  data: CenterRegionRouteOverride[]
+  onlineControllerIds: string[]
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -93,6 +142,65 @@ function prefix(): string {
 // ---------------------------------------------------------------------------
 
 export const regionRouteApi = {
+  listOverrides: async (
+    scope: 'region' | 'service',
+  ): Promise<RegionRouteOverrideListResult> => {
+    const url = scope === 'region'
+      ? 'center/region-route-overrides'
+      : 'center/service-region-route-overrides'
+    const { data } = await apiClient.get(url)
+    return data
+  },
+
+  overrideFailover: async (
+    scope: 'region' | 'service',
+    namespace: string,
+    name: string,
+    regionName: string,
+    failoverTo: string,
+  ): Promise<void> => {
+    const url = scope === 'region'
+      ? 'center/region-route-overrides/failover'
+      : 'center/service-region-route-overrides/failover'
+    const { data } = await apiClient.post(url, {
+      namespace,
+      name,
+      regionName,
+      failoverTo,
+    })
+    if (!data.success || data.data?.failed > 0) {
+      throw new Error(
+        `Failover was not applied to every Controller (${data.data?.modified ?? 0} modified, ${data.data?.failed ?? 0} failed)`,
+      )
+    }
+  },
+
+  syncOverride: async (
+    scope: 'region' | 'service',
+    namespace: string,
+    name: string,
+    sourceControllerId: string,
+    targetControllerIds: string[],
+  ): Promise<void> => {
+    const url = scope === 'region'
+      ? 'center/region-route-overrides/sync'
+      : 'center/service-region-route-overrides/sync'
+    const { data } = await apiClient.post(url, {
+      namespace,
+      name,
+      sourceControllerId,
+      targetControllerIds,
+    })
+    if (!data.success || data.data?.failed > 0) {
+      const detail = (data.data?.targets ?? [])
+        .filter((target: RegionRouteSyncTargetResult) => !target.success)
+        .map((target: RegionRouteSyncTargetResult) =>
+          `${target.controllerId}: ${target.error ?? 'failed'}`)
+        .join('; ')
+      throw new Error(detail || 'Override sync failed')
+    }
+  },
+
   listRegionRoutes: async (): Promise<{ success: boolean; data: CenterRegionRoute[] | EffectiveRegionRoute[] }> => {
     const center = prefix() === 'center/'
     const url = center ? 'center/region-routes' : 'region-routes/effective'
@@ -114,6 +222,36 @@ export const regionRouteApi = {
       throw new Error(`Failover was not applied to every target (${data.data?.modified ?? 0} modified, ${data.data?.failed ?? 0} failed)`)
     }
     return data
+  },
+
+  syncRegionRoute: async (
+    route: { namespace: string; pluginName: string; entryIndex: number },
+    sourceControllerId: string,
+    targetControllerIds: string[],
+  ): Promise<{ success: boolean; data: RegionRouteSyncResult }> => {
+    try {
+      const { data } = await apiClient.post('center/region-routes/sync', {
+        ...route,
+        sourceControllerId,
+        targetControllerIds,
+      })
+      if (!data.success || data.data?.failed > 0) {
+        const details = (data.data?.targets ?? [])
+          .filter((target: RegionRouteSyncTargetResult) => !target.success)
+          .map((target: RegionRouteSyncTargetResult) => `${target.controllerId}: ${target.error ?? 'failed'}`)
+          .join('; ')
+        throw new Error(details || 'RegionRoute sync was not applied to every target')
+      }
+      return data
+    } catch (error: any) {
+      const response = error?.response?.data
+      const details = (response?.data?.targets ?? [])
+        .filter((target: RegionRouteSyncTargetResult) => !target.success)
+        .map((target: RegionRouteSyncTargetResult) => `${target.controllerId}: ${target.error ?? 'failed'}`)
+        .join('; ')
+      if (details || response?.error) throw new Error(details || response.error)
+      throw error
+    }
   },
 
   // Center-only consistency check

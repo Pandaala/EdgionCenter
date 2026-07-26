@@ -9,42 +9,39 @@ export interface GlobalResourceDescriptor {
   route: string
   kind: GlobalResourceKind
   apiSlug: GlobalResourceApiSlug
-  titleKey?: string
-  configDataType?: EdgionConfigDataType
+  configDataType: EdgionConfigDataType
 }
 
 const CONFIG_DATA_ROUTE = '/global-resources/edgion-config-data'
 
 export const GLOBAL_RESOURCE_DESCRIPTORS = [
   {
-    key: 'http-route',
-    route: '/global-resources/http-route',
-    kind: 'HTTPRoute',
-    apiSlug: 'http-route',
-  },
-  {
-    key: 'grpc-route',
-    route: '/global-resources/grpc-route',
-    kind: 'GRPCRoute',
-    apiSlug: 'grpc-route',
-  },
-  {
-    key: 'edgion-plugins',
-    route: '/global-resources/edgion-plugins',
-    kind: 'EdgionPlugins',
-    apiSlug: 'edgion-plugins',
-  },
-  {
-    key: 'edgion-config-data',
-    route: CONFIG_DATA_ROUTE,
+    key: 'ip-list',
+    route: `${CONFIG_DATA_ROUTE}/ip-list`,
     kind: 'EdgionConfigData',
     apiSlug: 'edgion-config-data',
+    configDataType: 'IpList',
   },
   {
-    key: 'reference-grant',
-    route: '/global-resources/reference-grant',
-    kind: 'ReferenceGrant',
-    apiSlug: 'reference-grant',
+    key: 'key-list',
+    route: `${CONFIG_DATA_ROUTE}/key-list`,
+    kind: 'EdgionConfigData',
+    apiSlug: 'edgion-config-data',
+    configDataType: 'KeyList',
+  },
+  {
+    key: 'selector',
+    route: `${CONFIG_DATA_ROUTE}/selector`,
+    kind: 'EdgionConfigData',
+    apiSlug: 'edgion-config-data',
+    configDataType: 'Selector',
+  },
+  {
+    key: 'misc',
+    route: `${CONFIG_DATA_ROUTE}/misc`,
+    kind: 'EdgionConfigData',
+    apiSlug: 'edgion-config-data',
+    configDataType: 'Misc',
   },
 ] as const satisfies readonly GlobalResourceDescriptor[]
 

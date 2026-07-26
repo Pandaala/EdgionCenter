@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, createContext, useCallback } from 'react'
 import type { ReactNode } from 'react'
-import { ConfigProvider } from 'antd'
+import { App, ConfigProvider } from 'antd'
 import enUS from 'antd/es/locale/en_US'
 import zhCN from 'antd/es/locale/zh_CN'
 import { useLanguage } from '@/i18n'
@@ -68,7 +68,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   return (
     <ThemeContext.Provider value={{ mode, resolvedMode, setMode, tokens }}>
       <ConfigProvider locale={locale} theme={antdConfig}>
-        {children}
+        <App>{children}</App>
       </ConfigProvider>
     </ThemeContext.Provider>
   )

@@ -16,6 +16,7 @@
 //!   GET  /api/v1/center/global-resources/preflight          → fenced Controller capability diagnostics
 //!   GET  /api/v1/center/region-routes                              → aggregated effective region routes (unified)
 //!   POST /api/v1/center/region-routes/failover                     → fan-out failover to all online controllers (unified)
+//!   POST /api/v1/center/region-routes/sync                         → explicit source-to-target base + override sync
 //!   GET  /api/v1/center/region-routes/consistency                  → cross-controller consistency check (unified, online-only)
 //!   GET  /api/v1/center/cluster-region-routes                      → 308 redirect → /api/v1/center/region-routes
 //!   GET  /api/v1/center/service-region-routes                      → 308 redirect → /api/v1/center/region-routes
@@ -294,6 +295,30 @@ pub fn router(mut state: ApiState) -> Router {
             "/api/v1/center/region-routes",
             get(region_route_handlers::list_region_routes),
         )
+        .route(
+            "/api/v1/center/region-route-overrides",
+            get(region_route_handlers::list_region_route_overrides),
+        )
+        .route(
+            "/api/v1/center/service-region-route-overrides",
+            get(region_route_handlers::list_service_region_route_overrides),
+        )
+        .route(
+            "/api/v1/center/region-route-overrides/failover",
+            post(region_route_handlers::region_route_failover),
+        )
+        .route(
+            "/api/v1/center/service-region-route-overrides/failover",
+            post(region_route_handlers::service_region_route_failover),
+        )
+        .route(
+            "/api/v1/center/region-route-overrides/sync",
+            post(region_route_handlers::region_route_override_sync),
+        )
+        .route(
+            "/api/v1/center/service-region-route-overrides/sync",
+            post(region_route_handlers::service_region_route_override_sync),
+        )
         // Legacy paths redirect permanently (308) to the unified endpoint above.
         .route(
             "/api/v1/center/cluster-region-routes",
@@ -307,6 +332,10 @@ pub fn router(mut state: ApiState) -> Router {
         .route(
             "/api/v1/center/region-routes/failover",
             post(region_route_handlers::region_route_failover),
+        )
+        .route(
+            "/api/v1/center/region-routes/sync",
+            post(region_route_handlers::region_route_sync),
         )
         .route(
             "/api/v1/center/cluster-region-routes/failover",

@@ -2,7 +2,6 @@ import type { AxiosRequestConfig } from 'axios'
 import { apiClient } from './client'
 
 const GLOBAL_RESOURCES_BASE = '/api/v1/center/global-resources'
-const GLOBAL_RESOURCE_SYNC_BASE = '/api/v1/center/global-resource-sync/resources'
 
 type CenterRequestConfig = AxiosRequestConfig & {
   _skipControllerProxy: true
@@ -173,57 +172,6 @@ export interface GlobalResourceListOptions {
   continueToken?: string
 }
 
-export interface GlobalResourceDesired {
-  displayName: string
-  resourceKind: GlobalResourceKind
-  targetNamespace: string
-  templateDocument: JsonObject
-  targetSelector: { type: string; clusters?: string[]; metadata?: Record<string, string> }
-  syncPolicy: { mode: string; adoption: string; prune: string }
-}
-
-export interface DurableGlobalResource {
-  id: string
-  desired: GlobalResourceDesired
-  generation: number
-  desiredRevision: string
-  createdBy?: string
-  updatedBy?: string
-  updatedAtUnixMs?: number
-}
-
-export interface DurableGlobalResourcePage { data: DurableGlobalResource[]; continueToken?: string | null }
-export interface GlobalResourcePlanTarget {
-  cluster: string
-  state: string
-  reason?: string
-  controllerId?: string | null
-  observedResourceVersion?: string | null
-  changedPaths?: string[]
-}
-export interface GlobalResourcePlan {
-  globalResourceId: string
-  generation: number
-  desiredRevision: string
-  targetClusters: string[]
-  planToken: string
-  applicable: boolean
-  targets: GlobalResourcePlanTarget[]
-}
-export interface GlobalResourceApplyTarget extends GlobalResourcePlanTarget {
-  statusCode?: number | null
-  requestId?: string
-}
-export interface GlobalResourceApplyResult { targets: GlobalResourceApplyTarget[]; [key: string]: unknown }
-
-function syncPath(id?: string): string {
-  return id ? `${GLOBAL_RESOURCE_SYNC_BASE}/${encodeURIComponent(id)}` : GLOBAL_RESOURCE_SYNC_BASE
-}
-
-function unwrap<T>(value: T | { data: T }): T {
-  return (value && typeof value === 'object' && 'data' in value) ? (value as { data: T }).data : value as T
-}
-
 function resourcePath(kind: GlobalResourceApiSlug): string {
   return `${GLOBAL_RESOURCES_BASE}/resources/${kind}`
 }
@@ -289,38 +237,5 @@ export const globalResourcesApi = {
       { ...centerRequest, params },
     )
     return data
-  },
-
-  syncList: async (options: { limit?: number; cursor?: string } = {}): Promise<DurableGlobalResourcePage> => {
-    const { data } = await apiClient.get(syncPath(), { ...centerRequest, params: options })
-    return unwrap(data)
-  },
-
-  syncGet: async (id: string): Promise<DurableGlobalResource> => {
-    const { data } = await apiClient.get(syncPath(id), centerRequest)
-    return unwrap(data)
-  },
-
-  syncCreate: async (resource: { id: string; desired: GlobalResourceDesired }): Promise<DurableGlobalResource> => {
-    const { data } = await apiClient.post(syncPath(), resource, centerRequest)
-    return unwrap(data)
-  },
-
-  syncReplace: async (id: string, desired: GlobalResourceDesired, generation: number): Promise<DurableGlobalResource> => {
-    const { data } = await apiClient.put(syncPath(id), { desired }, {
-      ...centerRequest,
-      headers: { ...centerRequest.headers, 'If-Match': `"${generation}"` },
-    })
-    return unwrap(data)
-  },
-
-  syncPlan: async (id: string, targetClusters?: string[]): Promise<GlobalResourcePlan> => {
-    const { data } = await apiClient.post(`${syncPath(id)}/plan`, targetClusters ? { targetClusters } : {}, centerRequest)
-    return unwrap(data)
-  },
-
-  syncApply: async (id: string, input: { planToken: string; generation: number; targetClusters: string[] }): Promise<GlobalResourceApplyResult> => {
-    const { data } = await apiClient.post(`${syncPath(id)}/apply`, input, centerRequest)
-    return unwrap(data)
   },
 }

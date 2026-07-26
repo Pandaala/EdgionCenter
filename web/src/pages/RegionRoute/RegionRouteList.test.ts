@@ -3,6 +3,7 @@ import type { CenterRegionRoute, EffectiveRegionRoute } from '@/api/regionRoute'
 import {
   regionRouteConsistencyKey,
   regionRouteRowKey,
+  regionRouteSyncTargets,
   writableOverrideRef,
 } from './RegionRouteList'
 
@@ -47,4 +48,19 @@ describe('RegionRoute row identity and writable references', () => {
     center.controllers.permitted.overrideRef = null
     expect(writableOverrideRef(center)).toBeNull()
   })
+
+  it('targets every other online Controller, including missing reporters', () => {
+    const center: CenterRegionRoute = {
+      namespace: 'shop',
+      pluginName: 'regional',
+      alias: null,
+      entryIndex: 0,
+      controllers: {
+        source: effective(0, true),
+      },
+      onlineControllerIds: ['missing', 'source'],
+    }
+    expect(regionRouteSyncTargets(center, 'source')).toEqual(['missing'])
+  })
+
 })

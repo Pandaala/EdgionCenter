@@ -134,9 +134,8 @@ describe('Center navigation structure', () => {
 
   it('groups Controller operations under Federation and account administration under System Management', () => {
     expect(findCenterSection('center.nav.section.federation').children.map((item) => item.key)).toEqual([
+      'center-dashboard',
       'center-controllers',
-      'center-federation-diagnostics',
-      'center-admin',
     ])
     expect(findCenterSection('center.nav.section.system').children.map((item) => item.key)).toEqual([
       'center-audit',
@@ -166,18 +165,17 @@ describe('Center navigation structure', () => {
     expect(globalResources.requiredPermission).toBe('global-resources:read')
     expect(globalResources.requiredCapability).toBe('globalResourcesInventory')
     expect(globalResources.children.map((node) => node.key)).toEqual([
-      'center-global-http-route',
-      'center-global-grpc-route',
-      'center-global-edgion-plugins',
-      'center-global-edgion-config-data',
-      'center-global-reference-grant',
+      'center-global-config-data-ip-list',
+      'center-global-config-data-key-list',
+      'center-global-config-data-selector',
+      'center-global-config-data-misc',
     ])
-    const configData = flattenLeaves(globalResources.children)
-      .find((item) => item.key === 'center-global-edgion-config-data')
-    expect(configData).toMatchObject({
-      labelKey: 'center.nav.edgionConfigData',
-      path: '/global-resources/edgion-config-data',
-    })
+    expect(flattenLeaves(globalResources.children).map((item) => item.path)).toEqual([
+      '/global-resources/edgion-config-data/ip-list',
+      '/global-resources/edgion-config-data/key-list',
+      '/global-resources/edgion-config-data/selector',
+      '/global-resources/edgion-config-data/misc',
+    ])
 
     expect(filterMenuTree([globalResources], ctx(['global-resources:read']))).toEqual([])
     expect(filterMenuTree(
@@ -195,7 +193,9 @@ describe('Center navigation structure', () => {
     expect(leaves.map((item) => item.key)).not.toContain('center-global-shared-plugins')
     expect(leaves.map((item) => item.key)).not.toContain('center-global-waf-control')
     expect(leaves.map((item) => item.key)).not.toContain('center-global-ip-lists')
+    expect(leaves.map((item) => item.key)).not.toContain('center-global-resource-sync')
     expect(leaves.map((item) => item.path)).not.toContain('/global-rules/ip-lists')
+    expect(leaves.map((item) => item.path)).not.toContain('/global-resources/sync')
   })
 
   it('keeps the existing Cloud Services permission composition', () => {

@@ -484,6 +484,8 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     // Region routes: list/consistency are GET reads, failover/sync are writes.
     // Keep the two legacy prefixes mapped while their redirect routes remain.
     if under_segment(path, "/api/v1/center/region-routes")
+        || under_segment(path, "/api/v1/center/region-route-overrides")
+        || under_segment(path, "/api/v1/center/service-region-route-overrides")
         || under_segment(path, "/api/v1/center/cluster-region-routes")
         || under_segment(path, "/api/v1/center/service-region-routes")
     {
@@ -694,6 +696,7 @@ mod tests {
                 Method::POST,
                 "/api/v1/center/service-region-routes/failover",
             ),
+            (Method::POST, "/api/v1/center/region-routes/sync"),
             (Method::POST, "/api/v1/center/cluster-region-routes/sync"),
             (Method::POST, "/api/v1/center/service-region-routes/sync"),
             (
@@ -1450,6 +1453,10 @@ mod tests {
         );
         assert_eq!(
             route_permission(&Method::POST, "/api/v1/center/region-routes/failover"),
+            Some(REGION_ROUTES_WRITE)
+        );
+        assert_eq!(
+            route_permission(&Method::POST, "/api/v1/center/region-routes/sync"),
             Some(REGION_ROUTES_WRITE)
         );
         assert_eq!(

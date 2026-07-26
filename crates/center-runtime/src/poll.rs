@@ -87,7 +87,10 @@ pub fn parse_gir_effective(body: &[u8]) -> Vec<EffectiveGirView> {
         .collect()
 }
 
-/// Poll one controller's two effective endpoints and update the store.
+/// Poll one controller's GIR effective endpoint and update the store.
+///
+/// RegionRoute is fed directly by the federation EdgionConfigData list/watch
+/// stream and must not be rebuilt by polling EdgionPlugins and route usages.
 /// On a non-200 response or forwarding error the store is left unchanged for that
 /// endpoint (fail-open: keep the previous snapshot rather than clearing it).
 pub async fn poll_controller_once<C: ControllerHttpClient + ?Sized>(
@@ -131,54 +134,6 @@ async fn poll_controller_once_inner<C: ControllerHttpClient + ?Sized>(
     revision: Option<&str>,
     expected_owner: Option<&ControllerOwnerRoute>,
 ) -> Result<(), String> {
-    let region = match expected_owner {
-        Some(owner) => {
-            client
-                .request_fenced(
-                    controller_id,
-                    "GET".to_string(),
-                    "/api/v1/region-routes/effective".to_string(),
-                    HashMap::new(),
-                    Vec::new(),
-                    owner,
-                )
-                .await?
-        }
-        None => {
-            client
-                .request(
-                    controller_id,
-                    "GET".to_string(),
-                    "/api/v1/region-routes/effective".to_string(),
-                    HashMap::new(),
-                    Vec::new(),
-                )
-                .await?
-        }
-    };
-    if region.status_code != 200 {
-        return Err(format!(
-            "region-route endpoint returned {}",
-            region.status_code
-        ));
-    }
-    let region_body: serde_json::Value = serde_json::from_slice(&region.body)
-        .map_err(|error| format!("invalid region-route response: {error}"))?;
-    if !region_body
-        .get("data")
-        .is_some_and(serde_json::Value::is_array)
-    {
-        return Err("region-route response has no data array".to_string());
-    }
-    let region_routes = parse_region_effective(&region.body);
-    if let Some(revision) = revision {
-        if !store.replace_region_routes_fenced(controller_id, revision, region_routes) {
-            return Err("Controller session changed during region-route poll".to_string());
-        }
-    } else {
-        store.replace_region_routes(controller_id, region_routes);
-    }
-
     let gir = match expected_owner {
         Some(owner) => {
             client
@@ -372,35 +327,26 @@ mod tests {
     #[tokio::test]
     async fn polling_contract_updates_successes_and_preserves_failed_snapshots() {
         let store = CenterMetaDataStore::new();
-        let responses = HashMap::from([
-            (
-                "/api/v1/region-routes/effective".to_string(),
-                Ok(ControllerHttpResponse {
-                    status_code: 200,
-                    body: br#"{"data":[{"namespace":"default","pluginName":"ep1","myRegion":"east","regions":[]}]}"#.to_vec(),
-                }),
-            ),
-            (
+        let responses = HashMap::from([(
                 "/api/v1/global-ip-restrictions/effective".to_string(),
                 Ok(ControllerHttpResponse {
                     status_code: 200,
                     body: br#"{"data":[{"namespace":"default","pluginName":"gir1","enable":true,"activeProfile":"strict","profiles":{}}]}"#.to_vec(),
                 }),
-            ),
-        ]);
+            )]);
         let client = FakeClient {
             responses: Mutex::new(responses),
         };
 
         poll_controller_once(&client, &store, "c1").await.unwrap();
-        assert_eq!(store.list_region_routes().len(), 1);
+        assert!(store.list_region_routes().is_empty());
         assert_eq!(store.list_gir_effective().len(), 1);
 
         let failing = FakeClient {
             responses: Mutex::new(HashMap::new()),
         };
         assert!(poll_controller_once(&failing, &store, "c1").await.is_err());
-        assert_eq!(store.list_region_routes().len(), 1);
+        assert!(store.list_region_routes().is_empty());
         assert_eq!(store.list_gir_effective().len(), 1);
     }
 
@@ -426,22 +372,13 @@ mod tests {
             phase: ControllerPhase::Online,
             last_seen_unix_ms: 1,
         }]);
-        let responses = HashMap::from([
-            (
-                "/api/v1/region-routes/effective".to_string(),
-                Ok(ControllerHttpResponse {
-                    status_code: 200,
-                    body: br#"{"data":[{"namespace":"default","pluginName":"rr","myRegion":"east","regions":[]}]}"#.to_vec(),
-                }),
-            ),
-            (
+        let responses = HashMap::from([(
                 "/api/v1/global-ip-restrictions/effective".to_string(),
                 Ok(ControllerHttpResponse {
                     status_code: 200,
                     body: br#"{"data":[{"namespace":"default","pluginName":"gir","enable":true,"activeProfile":"strict","profiles":{}}]}"#.to_vec(),
                 }),
-            ),
-        ]);
+            )]);
         let client = FakeClient {
             responses: Mutex::new(responses),
         };
@@ -452,7 +389,7 @@ mod tests {
                 .unwrap(),
             1
         );
-        assert_eq!(store.list_region_routes()[0].controllers.len(), 1);
+        assert!(store.list_region_routes().is_empty());
         assert_eq!(store.list_gir_effective()[0].controllers.len(), 1);
     }
 
@@ -465,22 +402,13 @@ mod tests {
             "session-a".to_string(),
         )]));
         let client = FakeClient {
-            responses: Mutex::new(HashMap::from([
-                (
-                    "/api/v1/region-routes/effective".to_string(),
-                    Ok(ControllerHttpResponse {
-                        status_code: 200,
-                        body: br#"{"data":[]}"#.to_vec(),
-                    }),
-                ),
-                (
-                    "/api/v1/global-ip-restrictions/effective".to_string(),
-                    Ok(ControllerHttpResponse {
-                        status_code: 200,
-                        body: br#"{"data":[]}"#.to_vec(),
-                    }),
-                ),
-            ])),
+            responses: Mutex::new(HashMap::from([(
+                "/api/v1/global-ip-restrictions/effective".to_string(),
+                Ok(ControllerHttpResponse {
+                    status_code: 200,
+                    body: br#"{"data":[]}"#.to_vec(),
+                }),
+            )])),
         };
         poll_controller_once_fenced(&client, &store, "c1", "session-a")
             .await
@@ -494,7 +422,7 @@ mod tests {
         assert!(!store.has_fresh_coverage(&ids, std::time::Duration::from_secs(30)));
         let late = FakeClient {
             responses: Mutex::new(HashMap::from([(
-                "/api/v1/region-routes/effective".to_string(),
+                "/api/v1/global-ip-restrictions/effective".to_string(),
                 Ok(ControllerHttpResponse {
                     status_code: 200,
                     body: br#"{"data":[]}"#.to_vec(),

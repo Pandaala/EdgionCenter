@@ -1,17 +1,19 @@
 ---
 name: center-region-route-page
-description: Center RegionRoute Region and Service multi-cluster management views.
+description: Center RegionRoute Region and Service override management views.
 ---
 
 # Center RegionRoute Pages
 
-RegionRoute is an HTTP request plugin embedded in `EdgionPlugins`. Its complete routing logic and
-safe default region table are git-owned. An optional `overrideRef` points to a
-`RegionRouteOverride` `EdgionConfigData` that is the only Center-writable failover surface.
+The operator defines routing logic and the safe Region topology in the
+`RegionRoute` entry of `EdgionPlugins`. Runtime failover state is separate:
 
-Preserve the historical two-dimensional Center management design without restoring the removed
-`ClusterRegionRoute` or `ServiceRegionRoute` persistence models. Both views are projections of the
-current effective RegionRoute contract.
+- `overrideRef` points to a Region-level `RegionRouteOverride`.
+- `serviceOverrideRef` points to a service-specific
+  `ServiceRegionRouteOverride`.
+
+The Gateway applies the Region override first and the Service override second.
+Neither Center page edits or synchronizes `EdgionPlugins`.
 
 ## Navigation
 
@@ -21,64 +23,49 @@ RegionRoute
 └── Service  → /region-routes/service
 ```
 
-`/region-routes` redirects to the Region page. The former `/cluster`, `/topology`, and `/services` URLs remain
-redirect aliases. A selected Controller keeps the compact
-`/region-routes` route because the split is a Center fleet projection.
+The Region and Service pages directly display their corresponding
+`EdgionConfigData` resources. They are not projections of effective plugins,
+HTTPRoutes, GRPCRoutes, or backend Service usage.
 
-## Effective contract
+## Federation read model
 
-Center polls each Controller's `GET /api/v1/region-routes/effective` endpoint and aggregates by
-`(namespace, pluginName, entryIndex)`. `entryIndex` is the stable position in `requestPlugins` and
-prevents missing or duplicate aliases from overwriting another entry. Each Controller entry includes:
+Controllers already list/watch `EdgionConfigData` over federation. Center
+classifies each watched resource using `spec.data.type` and maintains two maps:
 
-- `myRegion`, `regions`, `keyGet`, `hashKeyGet`, `hashCalc`, `routeRules`, and
-  `routeByKeyConfMatch`, and `dyeHeaders`;
-- structured `overrideRef { namespace, name, permitted }` and `overrideApplied`; `regions` is the
-  effective whole-replacement overlay when a permitted, enabled `RegionRouteOverride` resolves;
-- `serviceUsages`, derived by the Controller from HTTPRoute/GRPCRoute ExtensionRefs targeting the
-  containing EdgionPlugins resource.
+```text
+(namespace, name) -> controllerId -> raw EdgionConfigData
+```
 
-The contract is additive and defaults new collections to empty so a rolling upgrade can accept an
-older Controller without dropping its effective RegionRoute row.
-Each aggregated row also carries `onlineControllerIds`, resolved by the Center backend under the
-same `region-routes:read` permission. The Service page must show unknown coverage when an older
-backend omits this membership instead of treating only reporting Controllers as the complete fleet.
+The Region map accepts only `RegionRouteOverride`; the Service map accepts only
+`ServiceRegionRouteOverride`. Full list responses replace one Controller's
+entries, incremental watch events update or delete one key, and offline
+Controllers retain their last observation until eviction.
 
-## Region page
+Center must not poll `/api/v1/region-routes/effective` for these pages and must
+not aggregate pluginName, alias, entryIndex, routing rules, or service usage.
 
-The Region page shows one row per aggregated RegionRoute plugin entry. Expanded rows show the
-complete routing configuration for every Controller. Consistency checks compare shared routing
-logic, effective regions, and override state. They report missing online Controllers as a
-`presence` conflict. `myRegion` and `serviceUsages` are intentionally local deployment state and
-are not cross-cluster consistency conflicts.
+## Operations
 
-Failover writes only `RegionRouteOverride.regions[].failoverTo`. Center resolves each online
-Controller's own structured reference, including cross-namespace targets, rather than copying an
-arbitrary Controller's reference across the fleet. Zero-target, partial, and all-failed writes are
-reported as failures. The action is disabled when the plugin has no permitted `overrideRef`; the
-Center must never rewrite the git-owned base plugin.
+Failover actions fan out the same compact patch to every online Controller.
+Center concurrently waits for every POST, calculates the dispatch duration,
+then allows the federation list/watch stream the same convergence duration
+(capped at ten seconds) before returning the aggregate result.
 
-## Service page
+Consistency compares only managed spec fields. Server-owned metadata such as
+`resourceVersion`, UID, generation, and status never creates a conflict.
+Missing online Controllers are inconsistent.
 
-The Service page groups each logical usage across Controllers instead of rendering duplicate rows.
-It shows Controller coverage, backend and effective-region consistency, and per-Controller expanded
-details. A usage records its Route kind, namespace/name, zero-based rule index, and Service backends
-from that rule. Rule-level ExtensionRefs
-apply to all Service backends in the rule; backend-level ExtensionRefs apply only to that backend.
-Delegated HTTPRoute/GRPCRoute trees use Controller-produced `resolvedRules`, so inherited parent
-ExtensionRefs are attributed to the child Service backends that actually receive traffic.
-
-ExtensionRefs are namespace-local. Cross-namespace or non-`edgion.io/EdgionPlugins` references are
-not attributed to a RegionRoute plugin. Failover is not Service-local in the current schema: it is
-stored in the shared RegionRoute override and affects all consumers. Service rows therefore link to
-the Region management action and must not imply an isolated per-Service write.
+The warning action lets an operator choose a Controller that has the resource
+and synchronize that complete `EdgionConfigData` document to the other online
+Controllers. Sync preserves each target's update precondition and strips
+server-owned metadata. Controller federation RBAC remains the final authority.
 
 ## Validation
 
-- Controller unit tests cover rule-level, backend-level, delegated usage discovery, structured
-  references, and effective overlay application.
-- Center runtime tests cover additive deserialization and multi-Controller aggregation.
-- Frontend tests cover distinct navigation and both views.
-- Kubernetes E2E must contain two Controllers and an HTTPRoute that references the RegionRoute
-  fixture, assert both Controllers appear in Region and Service, execute a failover across
-  both Controllers, verify labels are preserved, and restore the original overlay state.
+- Shared-schema tests cover both override variants and Service-over-Region
+  precedence.
+- Center runtime tests cover list/watch classification and aggregation.
+- Center API tests cover all-success, partial-failure, and source-to-target sync.
+- Frontend tests cover missing-controller and metadata-insensitive consistency.
+- Two-Controller integration verifies both menus update from watch without the
+  retired effective RegionRoute poll.

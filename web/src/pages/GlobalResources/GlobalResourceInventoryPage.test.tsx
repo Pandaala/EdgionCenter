@@ -44,8 +44,8 @@ const inventory = {
   configRevision: 'config-1',
   membershipRevision: 'membership-1',
   inventoryRevision: 'inventory-1',
-  kind: 'HTTPRoute' as const,
-  configDataType: null,
+  kind: 'EdgionConfigData' as const,
+  configDataType: 'IpList' as const,
   clusters: [
     {
       ...catalog.clusters[0],
@@ -60,14 +60,15 @@ const inventory = {
     { ...catalog.clusters[1], complete: false, errors: [] },
   ],
   groups: [{
-    key: { kind: 'HTTPRoute', namespace: 'edgion-system', name: 'public-route' },
+    key: { kind: 'EdgionConfigData', namespace: 'edgion-system', name: 'trusted-proxies' },
     members: [{
       cluster: 'alpha',
       controllerId: 'controller-a',
       object: {
-        apiVersion: 'gateway.networking.k8s.io/v1',
-        kind: 'HTTPRoute',
-        metadata: { namespace: 'edgion-system', name: 'public-route' },
+        apiVersion: 'edgion.io/v1',
+        kind: 'EdgionConfigData',
+        metadata: { namespace: 'edgion-system', name: 'trusted-proxies' },
+        data: { type: 'IpList', values: ['192.0.2.1'] },
       },
     }],
   }],
@@ -91,22 +92,21 @@ describe('GlobalResourceInventoryPage', () => {
     vi.mocked(globalResourcesApi.list).mockReset().mockResolvedValue(inventory)
     vi.mocked(globalResourcesApi.detail).mockReset().mockResolvedValue({
       ...inventory.clusters[0],
-      kind: 'HTTPRoute',
+      kind: 'EdgionConfigData',
       namespace: 'edgion-system',
-      name: 'public-route',
+      name: 'trusted-proxies',
       object: inventory.groups[0].members[0].object,
     })
   })
 
-  it('renders incomplete and unavailable clusters without treating them as empty', async () => {
+  it('renders inventory rows without the cluster coverage card', async () => {
     mount()
 
-    expect(await screen.findByText('public-route')).toBeInTheDocument()
-    expect(screen.getAllByText(/beta: globalResources.clusterState.offline/)).toHaveLength(2)
-    expect(screen.getAllByText(/globalResources.clusterState.incomplete/).length).toBeGreaterThan(0)
-    expect(screen.getByTestId('global-resource-cluster-error')).toHaveTextContent(
-      'edgion-data · globalResources.errorCode.upstream_unavailable',
-    )
+    expect(screen.getByRole('heading', { name: 'IpList' })).toBeInTheDocument()
+    expect(screen.queryByText('EdgionConfigData · IpList')).not.toBeInTheDocument()
+    expect(await screen.findByText('trusted-proxies')).toBeInTheDocument()
+    expect(screen.queryByText('globalResources.clusterSummary.title')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('global-resource-cluster-error')).not.toBeInTheDocument()
   })
 
   it('does not request detail until a concrete member is selected', async () => {
@@ -118,9 +118,9 @@ describe('GlobalResourceInventoryPage', () => {
 
     await waitFor(() => {
       expect(globalResourcesApi.detail).toHaveBeenCalledWith(
-        'http-route',
+        'edgion-config-data',
         'edgion-system',
-        'public-route',
+        'trusted-proxies',
         'alpha',
       )
     })
@@ -137,13 +137,14 @@ describe('GlobalResourceInventoryPage', () => {
         status: 403,
         retryable: false,
       }],
-      kind: 'HTTPRoute',
+      kind: 'EdgionConfigData',
       namespace: 'edgion-system',
-      name: 'public-route',
+      name: 'trusted-proxies',
       object: {
-        apiVersion: 'gateway.networking.k8s.io/v1',
-        kind: 'HTTPRoute',
+        apiVersion: 'edgion.io/v1',
+        kind: 'EdgionConfigData',
         metadata: { namespace: 'edgion-system', name: 'must-not-be-shown' },
+        data: { type: 'IpList', values: [] },
       },
     })
     mount()
@@ -155,7 +156,7 @@ describe('GlobalResourceInventoryPage', () => {
     expect(screen.getByTestId('global-resource-detail-errors')).toHaveTextContent(
       'edgion-system · globalResources.errorCode.upstream_rejected',
     )
-    expect(screen.getByTestId('yaml-editor')).toHaveTextContent('name: public-route')
+    expect(screen.getByTestId('yaml-editor')).toHaveTextContent('name: trusted-proxies')
     expect(screen.getByTestId('yaml-editor')).not.toHaveTextContent('must-not-be-shown')
   })
 
@@ -164,9 +165,9 @@ describe('GlobalResourceInventoryPage', () => {
       ...inventory.clusters[0],
       complete: true,
       errors: [],
-      kind: 'HTTPRoute',
+      kind: 'EdgionConfigData',
       namespace: 'edgion-system',
-      name: 'public-route',
+      name: 'trusted-proxies',
       object: null,
     })
     mount()
@@ -175,7 +176,7 @@ describe('GlobalResourceInventoryPage', () => {
 
     expect(await screen.findByText('globalResources.drawer.freshObjectMissing')).toBeInTheDocument()
     expect(screen.getByText('globalResources.drawer.showingSnapshot')).toBeInTheDocument()
-    expect(screen.getByTestId('yaml-editor')).toHaveTextContent('name: public-route')
+    expect(screen.getByTestId('yaml-editor')).toHaveTextContent('name: trusted-proxies')
   })
 
   it('reports an incomplete fresh read even when it has no structured errors', async () => {
@@ -183,9 +184,9 @@ describe('GlobalResourceInventoryPage', () => {
       ...inventory.clusters[0],
       complete: false,
       errors: [],
-      kind: 'HTTPRoute',
+      kind: 'EdgionConfigData',
       namespace: 'edgion-system',
-      name: 'public-route',
+      name: 'trusted-proxies',
       object: inventory.groups[0].members[0].object,
     })
     mount()
@@ -196,29 +197,23 @@ describe('GlobalResourceInventoryPage', () => {
     expect(screen.getByText('globalResources.drawer.showingSnapshot')).toBeInTheDocument()
   })
 
-  it('uses one EdgionConfigData entry point before a type is selected', async () => {
+  it('uses the descriptor type without rendering a duplicate type switcher', async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
     })
     render(
       <QueryClientProvider client={client}>
-        <GlobalResourceInventoryPage descriptor={GLOBAL_RESOURCE_DESCRIPTORS[3]} />
+        <GlobalResourceInventoryPage descriptor={GLOBAL_RESOURCE_DESCRIPTORS[0]} />
       </QueryClientProvider>,
     )
 
     await waitFor(() => {
       expect(globalResourcesApi.list).toHaveBeenCalledWith(
         'edgion-config-data',
-        expect.objectContaining({ configDataType: undefined }),
-      )
-    })
-
-    fireEvent.click(screen.getByText('IpList'))
-    await waitFor(() => {
-      expect(globalResourcesApi.list).toHaveBeenCalledWith(
-        'edgion-config-data',
         expect.objectContaining({ configDataType: 'IpList' }),
       )
     })
+    expect(screen.queryByText('RegionRouteOverride')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
   })
 })

@@ -11,15 +11,13 @@ Center has two intentionally separate global-resource capabilities.
 
 `GlobalResources` is a virtual, non-durable view over cluster-owned namespaced resources in configured platform namespaces. The default namespaces are `edgion-system` and `edgion-global`; this convention does not change Kubernetes resource scope.
 
-The initial kinds are:
+The live global kind is `EdgionConfigData`. `HTTPRoute`, `GRPCRoute`, `EdgionPlugins`, and
+`ReferenceGrant` remain Controller-local resources: Center enters them through a selected
+Controller instead of holding a cross-cluster inventory mirror.
 
-- `HTTPRoute`
-- `GRPCRoute`
-- `EdgionPlugins`
-- `EdgionConfigData`
-- `ReferenceGrant`
-
-`EdgionConfigData` is filtered by the current `ConfigEntry` variants: `KeyList`, `IpList`, `Selector`, `RegionRouteOverride`, and `Misc`.
+The GlobalResources dashboard exposes `IpList`, `KeyList`, `Selector`, and `Misc` as direct
+children, each backed by an exact `EdgionConfigData` type filter. `RegionRouteOverride`
+remains an EdgionConfigData variant but is operated through the dedicated RegionRoute views.
 
 Center resolves exactly one eligible Controller per cluster, fans out bounded list/get requests through the existing federation HTTP proxy, and returns per-cluster observations and errors. It does not persist observed resource payloads or merge same-named cluster objects into one mutable object.
 
@@ -70,29 +68,30 @@ Controller's built-in Center policy permits reads for the initial non-Secret kin
 
 The ordered implementation ledger is `tasks/pending/global-resource-management/03-subtasks.md`. Read the task's `01-design.md` and open issues before implementing any numbered task.
 
-## Namespace-scoped inventory evolution
+## Namespace-scoped global configuration evolution
 
-The initial five-kind catalog is a bootstrap inventory only. The next capability makes
-the configured namespace set the inclusion rule: a GlobalResources inventory scans every
-Controller-supported, inventory-safe namespaced kind in the Center-configured namespaces.
-The target default namespace set is `edgion-system` and `edgion-global`.
+The initial five-kind catalog is being retired as a global inventory model. The configured
+namespace set is the inclusion rule for global `EdgionConfigData` only. The target default
+namespace set is `edgion-system` and `edgion-global`.
 
 The policy remains Center-owned. Controller must not know that a namespace is "global".
-Center owns a reviewed, versioned descriptor set (kind, collection path, and display
-category), resolves the authoritative Controller for a cluster, and uses the existing
-authenticated namespaced `list`/`watch` paths for every descriptor in each configured
-namespace. There is no separate Controller inventory-catalog protocol.
+Center owns the EdgionConfigData global namespace policy and type presentation, resolves the
+authoritative Controller for a cluster, and maintains an in-memory real-time view through
+bounded initial namespaced lists plus federated watch events for EdgionConfigData in each
+configured namespace. There is no separate Controller inventory-catalog protocol. Controller
+status reporting (identity, liveness, and resource counts) remains a separate compact
+federation projection.
 
-"All resources" means all inventory-safe Controller resource kinds, not arbitrary
-Kubernetes objects. `Secret` is permanently absent from the Center descriptor set. Resources that may
-contain resolved credentials or private key material are also excluded until they have an
-explicit safe projection. A raw `ConfigMap` is not inventory-safe by default because its
-data can contain credentials. Controller authorization remains concrete per kind; Center
-must report a denied or unavailable kind/namespace observation rather than treating it as
-an empty list.
+"Global" does not mean all Controller resources or arbitrary Kubernetes objects. `Secret` is
+permanently absent. Resources such as routes, plugins, and grants retain Controller-local
+navigation and authorization. A raw `ConfigMap` is excluded because its data can contain
+credentials. Center must report a denied or unavailable ConfigData namespace observation rather
+than treating it as an empty list.
 
 An unsupported kind is reported as `not_supported`; a forbidden list/watch is `denied`; only
-a successful empty list is `empty`. The first expanded-inventory release is inventory-only. Durable desired-state synchronization
+a successful empty list in a ready subscription is `empty`. Writes return only after their
+Controller acknowledgement and corresponding watch convergence, never by optimistically
+mutating Center's view. The first expanded-inventory release is inventory-only. Durable desired-state synchronization
 continues to use its explicit safe-kind policy until per-kind create/update contracts,
 normalization rules, ownership markers, and schema validation guarantees are reviewed.
 The implementation ledger is

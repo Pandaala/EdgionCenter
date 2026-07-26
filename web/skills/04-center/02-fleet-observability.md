@@ -16,7 +16,7 @@ modes; it does not depend on SQL persistence or Kubernetes-native RBAC.
 ## Data boundaries
 
 The Center controller list reports connection and aggregate-count metadata. Detailed
-fleet health is read through each online Controller's existing HTTP proxy. The web
+resource inventory is read through each online Controller's existing HTTP proxy. The web
 loads every first-class catalog resource with the Controller id encoded in the proxy
 path and `_skipControllerProxy` set, so comparison never depends on the currently
 selected Controller.
@@ -24,6 +24,20 @@ selected Controller.
 Failures are partial: one denied or old resource endpoint is recorded as unavailable
 for that Controller/kind and must not hide successful snapshots. Secret and ConfigMap
 contents are not loaded by fleet observability.
+
+## Dashboard resource overview
+
+The Center Dashboard is an inventory summary, not a diagnostics console. It shows
+Controller membership plus the total number of readable first-class resource instances,
+broken down by kind. A resource reported by two Controllers counts as two fleet instances;
+the Dashboard does not deduplicate or compare resource identities.
+
+Every first-class kind remains visible when its count is zero. If any Controller/kind read
+is denied, unsupported, offline, malformed, or times out, the Dashboard renders that kind
+as unavailable (or a lower bound when partial data exists) and adds `+` to the fleet total
+instead of presenting it as complete. Drift, unresolved references, rejected
+conditions, file conflicts, certificate expiry, watch ownership, and metadata-store
+coverage are not Dashboard metrics.
 
 ## Consistency semantics
 

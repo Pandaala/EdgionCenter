@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Table, Space, Tag, Typography, Spin, Empty, Button,
-  Collapse, Alert, Tooltip, Select, Popover, AutoComplete, message, Input,
+  App, Table, Space, Tag, Typography, Spin, Empty, Button,
+  Collapse, Alert, Tooltip, Select, Popover, AutoComplete, Input,
 } from 'antd'
 import type { FilterDropdownProps } from 'antd/es/table/interface'
 import { ReloadOutlined, WarningOutlined, SearchOutlined } from '@ant-design/icons'
@@ -45,6 +45,14 @@ export function writableOverrideRef(route: RegionRouteRow): RegionRouteOverrideR
     return Object.values(route.controllers).find((entry) => entry.overrideRef?.permitted)?.overrideRef ?? null
   }
   return route.overrideRef?.permitted ? route.overrideRef : null
+}
+
+export function regionRouteSyncTargets(
+  route: CenterRegionRoute,
+  sourceControllerId: string,
+): string[] {
+  return (route.onlineControllerIds ?? Object.keys(route.controllers))
+    .filter((controllerId) => controllerId !== sourceControllerId)
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +106,73 @@ function RouteConfigSummary({ entry }: { entry: EffectiveRegionRoute }) {
 // ConsistencyTag
 // ---------------------------------------------------------------------------
 
-function ConsistencyTag({ result }: { result?: ConsistencyResult }) {
+function SyncPanel({ item }: { item: CenterRegionRoute }) {
+  const t = useT()
+  const { message } = App.useApp()
+  const queryClient = useQueryClient()
+  const sourceIds = Object.keys(item.controllers).sort()
+  const [sourceControllerId, setSourceControllerId] = useState(sourceIds[0] ?? '')
+  const targetControllerIds = regionRouteSyncTargets(item, sourceControllerId)
+  const syncMutation = useMutation({
+    mutationFn: () => regionRouteApi.syncRegionRoute(
+      {
+        namespace: item.namespace,
+        pluginName: item.pluginName,
+        entryIndex: item.entryIndex,
+      },
+      sourceControllerId,
+      targetControllerIds,
+    ),
+    onSuccess: async () => {
+      message.success(t('center.regionRoute.syncOk'))
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      queryClient.invalidateQueries({ queryKey: ['region-routes'] })
+      queryClient.invalidateQueries({ queryKey: ['region-routes-consistency'] })
+    },
+    onError: (error: unknown) => {
+      message.error(t('center.regionRoute.syncFail', { err: (error as Error).message }))
+    },
+  })
+
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Text type="secondary">{t('center.regionRoute.syncDescription')}</Text>
+      <Space wrap>
+        <Text>{t('center.regionRoute.syncHint')}</Text>
+        <Select
+          data-testid="region-sync-source"
+          value={sourceControllerId}
+          onChange={setSourceControllerId}
+          options={sourceIds.map((controllerId) => ({ value: controllerId, label: controllerId }))}
+          style={{ minWidth: 220 }}
+          disabled={syncMutation.isPending}
+        />
+        <Button
+          data-testid="region-sync-apply"
+          type="primary"
+          loading={syncMutation.isPending}
+          disabled={!sourceControllerId || targetControllerIds.length === 0}
+          onClick={() => syncMutation.mutate()}
+        >
+          {t('center.regionRoute.syncToTargets', { n: targetControllerIds.length })}
+        </Button>
+      </Space>
+      <Text type="secondary">
+        {t('center.regionRoute.syncTargets')}: {targetControllerIds.join(', ') || '—'}
+      </Text>
+    </Space>
+  )
+}
+
+function ConsistencyTag({
+  result,
+  item,
+  canWrite,
+}: {
+  result?: ConsistencyResult
+  item?: CenterRegionRoute
+  canWrite?: boolean
+}) {
   const t = useT()
   if (!result) return <Text type="secondary">—</Text>
   if (result.consistent) return <Tag color="green">{t('center.regionRoute.consistent')}</Tag>
@@ -110,6 +184,11 @@ function ConsistencyTag({ result }: { result?: ConsistencyResult }) {
           <Text strong>{c}</Text>
         </div>
       ))}
+      {item && canWrite && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--ec-color-border)' }}>
+          <SyncPanel item={item} />
+        </div>
+      )}
     </div>
   )
 
@@ -138,11 +217,22 @@ function FailoverPanel({
   onDone?: () => void
 }) {
   const t = useT()
+  const { message } = App.useApp()
   const queryClient = useQueryClient()
 
   const [pending, setPending] = useState<Record<string, string>>(
     () => Object.fromEntries(regions.map((r) => [r.name, r.failoverTo ?? ''])),
   )
+  const effectiveStateKey = regions
+    .map((region) => `${region.name}:${region.failoverTo ?? ''}`)
+    .join('|')
+
+  // The popover remains mounted while the fleet snapshot refreshes. Keep the
+  // controls aligned with the latest effective state instead of preserving the
+  // values captured when it first opened.
+  useEffect(() => {
+    setPending(Object.fromEntries(regions.map((region) => [region.name, region.failoverTo ?? ''])))
+  }, [effectiveStateKey, regions])
 
   const isDirty = regions.some((r) => (r.failoverTo ?? '') !== (pending[r.name] ?? ''))
 
@@ -160,12 +250,12 @@ function FailoverPanel({
           ),
         ),
       )
-      // Allow time for backend gRPC propagation before refreshing
-      await new Promise((r) => setTimeout(r, 2000))
+      // Center delays its response long enough for the list/watch projection to
+      // converge, so refresh from the authoritative read model after success.
+      await queryClient.refetchQueries({ queryKey: ['region-routes'] })
     },
     onSuccess: () => {
       message.success(t('center.regionRoute.failoverUpdateOk'))
-      queryClient.invalidateQueries({ queryKey: ['region-routes'] })
       queryClient.invalidateQueries({ queryKey: ['region-routes-consistency'] })
       onDone?.()
     },
@@ -183,6 +273,9 @@ function FailoverPanel({
             <Text type="secondary" style={{ width: 100, display: 'inline-block', fontSize: 12 }}>
               [{region.hashRange[0]}, {region.hashRange[1]}]
             </Text>
+            <Tag color={region.failoverTo ? 'orange' : 'green'}>
+              {t('center.regionRoute.currentEffective')}: {region.failoverTo ?? t('center.regionRoute.failoverNone')}
+            </Tag>
             <Select
               data-testid={`region-failover-select-${region.name}`}
               size="small"
@@ -286,7 +379,11 @@ function RowActions({
         </Popover>
       )}
       {consistencyResult && !consistencyResult.consistent && (
-        <ConsistencyTag result={consistencyResult} />
+        <ConsistencyTag
+          result={consistencyResult}
+          item={isCenterRow(row) ? row : undefined}
+          canWrite={canWrite}
+        />
       )}
     </span>
   )
@@ -304,6 +401,7 @@ function CenterExpandedDetail({
   consistencyResult?: ConsistencyResult
 }) {
   const t = useT()
+  const canWrite = useCan('region-routes:write')
   const controllerEntries = Object.entries(item.controllers)
 
   if (controllerEntries.length === 0) return <Empty description={t('center.regionRoute.noData')} />
@@ -324,6 +422,11 @@ function CenterExpandedDetail({
                   <Text strong>{c}</Text>
                 </div>
               ))}
+              {canWrite && (
+                <div style={{ marginTop: 12 }}>
+                  <SyncPanel item={item} />
+                </div>
+              )}
             </div>
           }
         />

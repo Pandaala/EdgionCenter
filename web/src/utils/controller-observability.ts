@@ -7,8 +7,6 @@ export interface ControllerResourceSnapshot {
   cluster: string
   resources: Partial<Record<ResourceKind, K8sResource[]>>
   errors: ResourceKind[]
-  fileConflicts?: Array<{ kind: string; key: string; winner: string; losers: string[] }>
-  diagnosticsAvailable?: boolean
 }
 
 export type ResourceIssue = 'unresolved' | 'rejected' | 'conflict'

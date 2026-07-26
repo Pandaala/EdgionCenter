@@ -1,15 +1,8 @@
 //! CenterMetaDataStore — aggregates EdgionConfigData across all controllers.
 //!
-//! Implements [`CenterConfHandler<EdgionConfigData>`] for the EdgionConfigData watch cache.
-//! The impl is a minimal no-op because GIR/region feeding via fed_sync has been replaced
-//! by the background poller (`poll` module).  The trait impl must remain so the generic
-//! EdgionConfigData watch cache (wired in `cli/mod.rs`) still compiles.
-//!
-//! NOTE(migration): ClusterRegionRoute and ServiceRegionRoute aggregation was removed
-//! because ClusterRegionRouteEntry, ServiceRegionRouteEntry, MetaDataEntry, and
-//! GlobalConnectionIpRestrictionData were deleted upstream. The cluster_routes and
-//! service_routes maps are gone; restore from git history when RegionRoute is
-//! re-implemented on EdgionConfigData.
+//! Implements [`CenterConfHandler<WatchedConfigData>`] for the federation
+//! EdgionConfigData list/watch cache. RegionRouteOverride and
+//! ServiceRegionRouteOverride are classified directly into namespace/name maps.
 //!
 //! The global_ip_restrictions map (legacy fed-sync GIR feed) has been removed; GIR
 //! is now populated by the background poller via `replace_gir`/`gir_effective`.
@@ -148,6 +141,15 @@ pub struct CenterRegionRouteView {
     pub controllers: HashMap<String, EffectiveRegionRouteView>,
 }
 
+/// One watched override resource aggregated across Controllers by namespace/name.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CenterRegionRouteOverrideView {
+    pub namespace: String,
+    pub name: String,
+    pub controllers: HashMap<String, serde_json::Value>,
+}
+
 /// One controller's effective GIR (Global IP Restriction) state (deserialized from
 /// the controller's /api/v1/global-ip-restrictions/effective response; field names
 /// match the controller's EffectiveGir DTO).
@@ -182,14 +184,11 @@ pub struct CenterGirView {
 /// - `region_routes`: route_key ("ns/plugin/alias") → { controller_id → EffectiveRegionRouteView }
 /// - `gir_effective`: gir_key ("ns/pluginName") → { controller_id → EffectiveGirView }
 ///
-/// Both maps are populated by the background poller (`poll` module); the
-/// `CenterConfHandler<EdgionConfigData>` trait impl is a no-op because feeding
-/// via fed_sync was replaced by polling the controller's `/effective` endpoints.
-///
-/// NOTE(migration): cluster_routes and service_routes maps were removed because
-/// ClusterRegionRouteEntry and ServiceRegionRouteEntry were deleted upstream.
-/// Restore from git history when RegionRoute is re-implemented on EdgionConfigData.
+/// Effective GIR remains populated by its background poller. RegionRoute
+/// override maps are populated only by federation list/watch.
 pub struct CenterMetaDataStore {
+    region_route_overrides: RwLock<HashMap<String, HashMap<String, serde_json::Value>>>,
+    service_region_route_overrides: RwLock<HashMap<String, HashMap<String, serde_json::Value>>>,
     // route_key ("ns/plugin/entry-index") → { controller_id → EffectiveRegionRouteView }
     // Populated by the background poller (poll module); not fed by the conf_sync path.
     region_routes: RwLock<HashMap<String, HashMap<String, EffectiveRegionRouteView>>>,
@@ -210,11 +209,21 @@ struct ControllerCoverage {
 impl CenterMetaDataStore {
     pub fn new() -> Self {
         Self {
+            region_route_overrides: RwLock::new(HashMap::new()),
+            service_region_route_overrides: RwLock::new(HashMap::new()),
             region_routes: RwLock::new(HashMap::new()),
             gir_effective: RwLock::new(HashMap::new()),
             coverage: RwLock::new(HashMap::new()),
             expected_revisions: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn list_region_route_overrides(&self) -> Vec<CenterRegionRouteOverrideView> {
+        list_override_map(&self.region_route_overrides)
+    }
+
+    pub fn list_service_region_route_overrides(&self) -> Vec<CenterRegionRouteOverrideView> {
+        list_override_map(&self.service_region_route_overrides)
     }
 
     /// Replace all region routes for one controller (full snapshot from a poll).
@@ -427,6 +436,11 @@ impl CenterMetaDataStore {
     /// directory. This lets a fresh active-active replica rebuild its local
     /// read model while also removing projections hidden by an eviction fence.
     pub fn retain_controllers(&self, controller_ids: &HashSet<String>) {
+        retain_override_controllers(&mut self.region_route_overrides.write(), controller_ids);
+        retain_override_controllers(
+            &mut self.service_region_route_overrides.write(),
+            controller_ids,
+        );
         {
             let mut routes = self.region_routes.write();
             routes.retain(|_, controllers| {
@@ -454,9 +468,6 @@ impl CenterMetaDataStore {
         controller_ids.iter().all(|id| {
             coverage.get(id).is_some_and(|entry| {
                 entry.revision.as_ref() == self.expected_revisions.read().get(id)
-                    && entry
-                        .region_routes_at
-                        .is_some_and(|at| at.elapsed() <= max_age)
                     && entry.gir_at.is_some_and(|at| at.elapsed() <= max_age)
             })
         })
@@ -465,6 +476,14 @@ impl CenterMetaDataStore {
     /// Remove all entries for a given controller from all maps.
     /// If an inner HashMap becomes empty after removal, the outer key is also removed.
     fn remove_all_for_controller(&self, controller_id: &str) {
+        remove_controller_from_override_map(
+            &mut self.region_route_overrides.write(),
+            controller_id,
+        );
+        remove_controller_from_override_map(
+            &mut self.service_region_route_overrides.write(),
+            controller_id,
+        );
         {
             let mut rr = self.region_routes.write();
             rr.retain(|_, inner| {
@@ -491,11 +510,17 @@ impl Default for CenterMetaDataStore {
 
 impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
     fn full_set(&self, controller_id: &str, data: &HashMap<String, Arc<WatchedConfigData>>) {
-        // No-op: GIR and RegionRoute feeding via fed_sync (EdgionConfigData watch) has been
-        // replaced by the background poller (`poll` module) which calls replace_region_routes
-        // and replace_gir directly. The trait impl must remain so the generic EdgionConfigData
-        // watch cache in cli/mod.rs compiles.
-        let _ = (controller_id, data);
+        remove_controller_from_override_map(
+            &mut self.region_route_overrides.write(),
+            controller_id,
+        );
+        remove_controller_from_override_map(
+            &mut self.service_region_route_overrides.write(),
+            controller_id,
+        );
+        for resource in data.values() {
+            self.upsert_watched_override(controller_id, resource.as_ref().clone());
+        }
     }
 
     fn partial_update(
@@ -505,8 +530,21 @@ impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
         update: HashMap<String, Arc<WatchedConfigData>>,
         remove: HashSet<String>,
     ) {
-        // No-op: see full_set comment.
-        let _ = (controller_id, add, update, remove);
+        for key in remove {
+            remove_override_key_for_controller(
+                &mut self.region_route_overrides.write(),
+                &key,
+                controller_id,
+            );
+            remove_override_key_for_controller(
+                &mut self.service_region_route_overrides.write(),
+                &key,
+                controller_id,
+            );
+        }
+        for resource in add.into_values().chain(update.into_values()) {
+            self.upsert_watched_override(controller_id, resource.as_ref().clone());
+        }
     }
 
     fn controller_offline(&self, _controller_id: &str) {
@@ -516,6 +554,100 @@ impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
     fn controller_removed(&self, controller_id: &str) {
         self.remove_all_for_controller(controller_id);
     }
+}
+
+impl CenterMetaDataStore {
+    fn upsert_watched_override(&self, controller_id: &str, resource: serde_json::Value) {
+        let Some(namespace) = resource
+            .pointer("/metadata/namespace")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+        let Some(name) = resource
+            .pointer("/metadata/name")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+        let key = format!("{namespace}/{name}");
+        let data_type = resource
+            .pointer("/spec/data/type")
+            .and_then(serde_json::Value::as_str);
+
+        remove_override_key_for_controller(
+            &mut self.region_route_overrides.write(),
+            &key,
+            controller_id,
+        );
+        remove_override_key_for_controller(
+            &mut self.service_region_route_overrides.write(),
+            &key,
+            controller_id,
+        );
+        let target = match data_type {
+            Some("RegionRouteOverride") => &self.region_route_overrides,
+            Some("ServiceRegionRouteOverride") => &self.service_region_route_overrides,
+            _ => return,
+        };
+        target
+            .write()
+            .entry(key)
+            .or_default()
+            .insert(controller_id.to_string(), resource);
+    }
+}
+
+fn list_override_map(
+    source: &RwLock<HashMap<String, HashMap<String, serde_json::Value>>>,
+) -> Vec<CenterRegionRouteOverrideView> {
+    let map = source.read();
+    let mut rows: Vec<_> = map
+        .iter()
+        .filter_map(|(key, controllers)| {
+            let (namespace, name) = key.split_once('/')?;
+            Some(CenterRegionRouteOverrideView {
+                namespace: namespace.to_string(),
+                name: name.to_string(),
+                controllers: controllers.clone(),
+            })
+        })
+        .collect();
+    rows.sort_by(|left, right| (&left.namespace, &left.name).cmp(&(&right.namespace, &right.name)));
+    rows
+}
+
+fn remove_override_key_for_controller(
+    map: &mut HashMap<String, HashMap<String, serde_json::Value>>,
+    key: &str,
+    controller_id: &str,
+) {
+    if let Some(controllers) = map.get_mut(key) {
+        controllers.remove(controller_id);
+        if controllers.is_empty() {
+            map.remove(key);
+        }
+    }
+}
+
+fn remove_controller_from_override_map(
+    map: &mut HashMap<String, HashMap<String, serde_json::Value>>,
+    controller_id: &str,
+) {
+    map.retain(|_, controllers| {
+        controllers.remove(controller_id);
+        !controllers.is_empty()
+    });
+}
+
+fn retain_override_controllers(
+    map: &mut HashMap<String, HashMap<String, serde_json::Value>>,
+    controller_ids: &HashSet<String>,
+) {
+    map.retain(|_, controllers| {
+        controllers.retain(|id, _| controller_ids.contains(id));
+        !controllers.is_empty()
+    });
 }
 
 /// Build the canonical storage key for a region route: "namespace/plugin_name/entry_index".
@@ -533,6 +665,51 @@ fn gir_key(g: &EffectiveGirView) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watched_overrides_are_split_and_aggregated_by_namespace_name() {
+        let store = CenterMetaDataStore::new();
+        let region = serde_json::json!({
+            "metadata": { "namespace": "shop", "name": "shared" },
+            "spec": {
+                "data": {
+                    "type": "RegionRouteOverride",
+                    "config": { "regions": [{ "name": "east" }] }
+                }
+            }
+        });
+        let service = serde_json::json!({
+            "metadata": { "namespace": "shop", "name": "checkout" },
+            "spec": {
+                "data": {
+                    "type": "ServiceRegionRouteOverride",
+                    "config": { "regions": [{ "name": "east", "failoverTo": "west" }] }
+                }
+            }
+        });
+        store.full_set(
+            "ctrl-a",
+            &HashMap::from([
+                ("shop/shared".to_string(), Arc::new(region.clone())),
+                ("shop/checkout".to_string(), Arc::new(service.clone())),
+            ]),
+        );
+        store.full_set(
+            "ctrl-b",
+            &HashMap::from([("shop/shared".to_string(), Arc::new(region))]),
+        );
+
+        let region_rows = store.list_region_route_overrides();
+        assert_eq!(region_rows.len(), 1);
+        assert_eq!(region_rows[0].namespace, "shop");
+        assert_eq!(region_rows[0].name, "shared");
+        assert_eq!(region_rows[0].controllers.len(), 2);
+
+        let service_rows = store.list_service_region_route_overrides();
+        assert_eq!(service_rows.len(), 1);
+        assert_eq!(service_rows[0].name, "checkout");
+        assert_eq!(service_rows[0].controllers.len(), 1);
+    }
 
     // ── GIR effective aggregation tests ──
 
@@ -631,13 +808,10 @@ mod tests {
     }
 
     #[test]
-    fn readiness_coverage_requires_both_snapshots_for_every_online_controller() {
+    fn readiness_coverage_requires_gir_snapshot_for_every_online_controller() {
         let store = CenterMetaDataStore::new();
         let ids = HashSet::from(["c1".to_string(), "c2".to_string()]);
-        store.replace_region_routes("c1", Vec::new());
         store.replace_gir("c1", Vec::new());
-        assert!(!store.has_fresh_coverage(&ids, Duration::from_secs(30)));
-        store.replace_region_routes("c2", Vec::new());
         assert!(!store.has_fresh_coverage(&ids, Duration::from_secs(30)));
         store.replace_gir("c2", Vec::new());
         assert!(store.has_fresh_coverage(&ids, Duration::from_secs(30)));

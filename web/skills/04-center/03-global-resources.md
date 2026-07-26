@@ -1,6 +1,6 @@
 ---
 name: dashboard-global-resources
-description: Dashboard navigation and page boundaries for GlobalResources inventory and GlobalResource synchronization.
+description: Dashboard navigation and page boundaries for GlobalResources inventory and row-scoped synchronization.
 ---
 
 # GlobalResources dashboard
@@ -14,27 +14,29 @@ The inventory tree is:
 
 ```text
 GlobalResources
-├── HTTPRoute
-├── GRPCRoute
-├── EdgionPlugins
-├── EdgionConfigData
-│   ├── KeyList
-│   ├── IpList
-│   ├── Selector
-│   ├── RegionRouteOverride
-│   └── Misc
-└── ReferenceGrant
+├── IpList
+├── KeyList
+├── Selector
+└── Misc
 ```
 
-The sidebar currently supports only section, group, and leaf. Implement recursive menu nodes before adding the EdgionConfigData subtree. Recursive permission filtering must drop empty ancestors, active state must propagate to ancestors, and collapsed mode must preserve accessible labels.
+Every leaf is an `EdgionConfigData` inventory filtered by its exact `data.type`. Do not add
+an intermediate EdgionConfigData menu node or repeat the type selection as content-area tabs.
+Use the leaf type alone as the page title; do not prefix it with `EdgionConfigData`.
+`RegionRouteOverride` is operated through the RegionRoute pages. Routes, plugins, and grants
+remain available only in the selected Controller context.
 
 ## Page boundaries
 
 - Inventory pages read Center aggregate APIs; they must not issue one browser request per Controller.
 - The API returns per-cluster errors. Denied, unavailable, ambiguous, and malformed results are not empty lists.
+- Keep cluster state in the cluster filter and request failure handling; do not render a
+  separate cluster-coverage summary card above every inventory table.
 - Per-cluster editing reuses the existing lossless resource adapters and sends mutations through Center's Controller proxy.
-- `EdgionConfigData` filtering uses exact current `data.type` values.
-- The separate GlobalResource desired-state and synchronization UI must not be mixed with non-durable inventory.
+- The four visible `EdgionConfigData` filters are `IpList`, `KeyList`, `Selector`, and `Misc`.
+- Do not expose a separate desired-state and synchronization page. A future manual sync starts
+  from one inventory row, compares that object across all clusters, then presents target
+  selection, a fresh plan, and explicit apply confirmation in a modal.
 - Do not create placeholder resource data while a backend task is pending.
 
 ## Implementation order

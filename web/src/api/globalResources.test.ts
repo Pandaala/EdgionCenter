@@ -101,27 +101,18 @@ describe('Global Resources Center API', () => {
 })
 
 describe('Global Resource descriptors', () => {
-  it('covers every route and exact EdgionConfigData type once', () => {
-    expect(GLOBAL_RESOURCE_DESCRIPTORS).toHaveLength(9)
-    expect(new Set(GLOBAL_RESOURCE_DESCRIPTORS.map(({ route }) => route)).size).toBe(9)
-    expect(
-      GLOBAL_RESOURCE_DESCRIPTORS
-        .filter(({ kind }) => kind === 'EdgionConfigData')
-        .map((descriptor) => (
-          'configDataType' in descriptor ? descriptor.configDataType : undefined
-        )),
-    ).toEqual([
-      'KeyList',
+  it('exposes only the four requested EdgionConfigData inventory types', () => {
+    expect(GLOBAL_RESOURCE_DESCRIPTORS).toHaveLength(4)
+    expect(new Set(GLOBAL_RESOURCE_DESCRIPTORS.map(({ route }) => route)).size).toBe(4)
+    expect(GLOBAL_RESOURCE_DESCRIPTORS.map(({ configDataType }) => configDataType)).toEqual([
       'IpList',
+      'KeyList',
       'Selector',
-      'RegionRouteOverride',
       'Misc',
     ])
-    expect(
-      GLOBAL_RESOURCE_DESCRIPTORS
-        .filter(({ kind }) => kind !== 'EdgionConfigData')
-        .every((descriptor) => !('configDataType' in descriptor)),
-    ).toBe(true)
+    expect(GLOBAL_RESOURCE_DESCRIPTORS.every(
+      ({ kind, apiSlug }) => kind === 'EdgionConfigData' && apiSlug === 'edgion-config-data',
+    )).toBe(true)
   })
 
   it('resolves only exact descriptor routes', () => {
@@ -134,6 +125,10 @@ describe('Global Resource descriptors', () => {
     })
     expect(
       findGlobalResourceDescriptor('/global-resources/edgion-config-data/ip-list/extra'),
+    ).toBeUndefined()
+    expect(findGlobalResourceDescriptor('/global-resources/http-route')).toBeUndefined()
+    expect(
+      findGlobalResourceDescriptor('/global-resources/edgion-config-data/region-route-override'),
     ).toBeUndefined()
   })
 })
