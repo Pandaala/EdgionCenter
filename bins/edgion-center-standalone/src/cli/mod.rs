@@ -315,6 +315,39 @@ impl EdgionCenterCli {
             pending_proxies,
             config.sync.command_timeout_secs,
         ));
+        let global_resources = controller_directory.as_ref().map(|directory| {
+            Arc::new(
+                edgion_center_runtime::global_resources::GlobalResourcesService::new_standalone(
+                    directory.clone(),
+                    registry.clone(),
+                    proxy.clone(),
+                    config.global_resources.clone(),
+                ),
+            )
+        });
+        let global_resource_sync = match (db.clone(), controller_directory.clone()) {
+            (Some(store), Some(directory)) => {
+                let planner = Arc::new(
+                    edgion_center_runtime::global_resource_planner::GlobalResourcePlanService::new_standalone(
+                        directory,
+                        registry.clone(),
+                        proxy.clone(),
+                        config.global_resources.clone(),
+                    ),
+                );
+                let store = edgion_center_adapter_sql::SqlGlobalResourceStore::new(
+                    store,
+                    config.global_resources.clone(),
+                )?;
+                Some(Arc::new(
+                    edgion_center_app::api::global_resource_sync::GlobalResourceSyncApi {
+                        store: Arc::new(store),
+                        planner,
+                    },
+                ))
+            }
+            _ => None,
+        };
         let local_evictor = Arc::new(
             edgion_center_runtime::eviction::LocalControllerEvictor::new(
                 registry.clone(),
@@ -332,6 +365,8 @@ impl EdgionCenterCli {
             commander,
             proxy: proxy.clone(),
             controller_directory: controller_directory.clone(),
+            global_resources: global_resources.clone(),
+            global_resource_sync: global_resource_sync.clone(),
             controller_evictor,
             user_admin: sql_admin
                 .clone()
@@ -376,6 +411,8 @@ impl EdgionCenterCli {
                     credential_inspection_service.is_some(),
                 );
                 capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
+                capabilities.global_resources_inventory = global_resources.is_some();
+                capabilities.global_resource_sync = global_resource_sync.is_some();
                 capabilities.cloudflare_waf_read =
                     config.cloudflare_waf.read_enabled && cloudflare_waf_admin.is_some();
                 capabilities.cloudflare_waf_write =
@@ -712,6 +749,10 @@ fn validate_startup_policy(config: &CenterConfig) -> anyhow::Result<()> {
             "edgion-center-standalone requires database.enabled = true; use the Kubernetes binary for database-free operation"
         );
     }
+    config
+        .global_resources
+        .validate()
+        .map_err(anyhow::Error::msg)?;
     Ok(())
 }
 

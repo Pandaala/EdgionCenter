@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Modal } from 'antd'
 import type { ComponentProps } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { controllerMenu } from '@/components/shell/menuConfig'
+import { controllerMenu, type MenuNode } from '@/components/shell/menuConfig'
 import EdgionBackendTrafficPolicyList from './EdgionBackendTrafficPolicyList'
 
 vi.mock('@/hooks/useControllerMutationTarget', () => ({ useControllerMutationTarget: () => ({ controllerId: 'cluster/controller' }) }))
@@ -37,9 +37,10 @@ describe('EdgionBackendTrafficPolicy navigation', () => {
   beforeEach(() => { vi.restoreAllMocks() })
 
   it('registers the canonical services route in the controller menu', () => {
-    const paths = controllerMenu.flatMap((section) => section.children.flatMap((entry) => (
-      entry.kind === 'group' ? entry.children.map((item) => item.path) : [entry.path]
-    )))
+    const collectPaths = (nodes: MenuNode[]): string[] => nodes.flatMap((node) => (
+      node.kind === 'item' ? [node.path] : collectPaths(node.children)
+    ))
+    const paths = controllerMenu.flatMap((section) => collectPaths(section.children))
     expect(paths).toContain('/services/backend-traffic-policies')
   })
 

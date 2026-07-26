@@ -236,6 +236,33 @@ impl ProxyForwarder {
             .await
     }
 
+    /// Dispatch only while the exact standalone Controller session remains
+    /// current. This prevents continuation tokens from crossing reconnects.
+    pub async fn forward_expected_session(
+        &self,
+        controller_id: &str,
+        expected_session_id: &str,
+        method: String,
+        path: String,
+        headers: HashMap<String, String>,
+        body: Vec<u8>,
+    ) -> Result<HttpProxyResponse, (StatusCode, String)> {
+        let session = self.registry.get_session(controller_id).ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Controller {controller_id} not found or offline"),
+            )
+        })?;
+        if session.session_id != expected_session_id || session.stream_tx.is_none() {
+            return Err((
+                StatusCode::PRECONDITION_FAILED,
+                "Controller session changed".to_string(),
+            ));
+        }
+        self.dispatch_to_session(controller_id, method, path, headers, body, session)
+            .await
+    }
+
     pub async fn forward_fenced_local(
         &self,
         controller_id: &str,
@@ -374,6 +401,31 @@ impl crate::poll::ControllerHttpClient for ProxyForwarder {
                 body: response.body,
             })
             .map_err(|(_, message)| message)
+    }
+
+    async fn request_session_fenced(
+        &self,
+        controller_id: &str,
+        method: String,
+        path: String,
+        headers: HashMap<String, String>,
+        body: Vec<u8>,
+        expected_session_id: &str,
+    ) -> Result<crate::poll::ControllerHttpResponse, String> {
+        self.forward_expected_session(
+            controller_id,
+            expected_session_id,
+            method,
+            path,
+            headers,
+            body,
+        )
+        .await
+        .map(|response| crate::poll::ControllerHttpResponse {
+            status_code: response.status_code,
+            body: response.body,
+        })
+        .map_err(|(_, message)| message)
     }
 }
 

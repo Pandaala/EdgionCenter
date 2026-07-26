@@ -103,6 +103,7 @@ pub struct KubernetesWebConfig {
 pub struct KubernetesCenterConfig {
     pub server: KubernetesServerConfig,
     pub sync: CenterSyncConfig,
+    pub global_resources: edgion_center_core::GlobalResourcesConfig,
     pub auth: AdminAuthConfig,
     pub grpc_security: ConfSyncSecurityConfig,
     pub trust_domain: String,
@@ -137,6 +138,7 @@ impl Default for KubernetesCenterConfig {
         Self {
             server: KubernetesServerConfig::default(),
             sync: CenterSyncConfig::default(),
+            global_resources: edgion_center_core::GlobalResourcesConfig::default(),
             auth: AdminAuthConfig::default(),
             grpc_security: ConfSyncSecurityConfig::default(),
             trust_domain: String::new(),
@@ -179,6 +181,9 @@ impl KubernetesCenterConfig {
             anyhow::bail!("Kubernetes mode requires OIDC TLS certificate verification");
         }
         self.grpc_security.validate()?;
+        self.global_resources
+            .validate()
+            .map_err(anyhow::Error::msg)?;
         self.grpc_security
             .resolve_mtls_or_refuse()
             .map_err(|error| anyhow::anyhow!("Kubernetes federation requires mTLS: {error:?}"))?;

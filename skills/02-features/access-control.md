@@ -115,14 +115,16 @@ control under `allow_all`, where everyone is an admin.
 
 ## Permission catalog
 
-Source of truth: `crates/center-app/src/common/authz/catalog.rs` (`catalog_groups()` / `all_keys()`). **Eleven
-keys in seven groups.** Each business API route + dashboard page maps to exactly one key;
-roles bundle keys; users get roles.
+Source of truth: `crates/center-app/src/common/authz/catalog.rs` (`catalog_groups()` /
+`all_keys()`). Each business API route and dashboard page maps to exactly one key; roles
+bundle keys; users get roles.
 
 | Group | Keys |
 |-------|------|
 | Controllers | `controllers:read`, `controllers:write` |
 | Region Routes | `region-routes:read`, `region-routes:write` |
+| Global Resources | `global-resources:read`, `global-resources:diagnose` |
+| Global Resource Sync | `global-resource-sync:read`, `global-resource-sync:write`, `global-resource-sync:plan`, `global-resource-sync:apply` |
 | IP Restrictions | `ip-restrictions:read`, `ip-restrictions:write` |
 | Audit | `audit:read` |
 | Server | `server:read` |
@@ -132,6 +134,15 @@ roles bundle keys; users get roles.
 GET endpoints map to a `:read` key, mutating endpoints to a `:write` key.
 `users:manage` gates `/api/v1/center/admin/users`; `roles:manage` gates
 `/api/v1/center/admin/roles` and `/api/v1/center/admin/permission-catalog`.
+`global-resources:read` gates the catalog, inventory, and exact detail views.
+`global-resources:diagnose` separately gates the fenced Controller access/namespace
+preflight because it exposes operational authorization and reachability evidence.
+`global-resource-sync:read` gates durable desired-state list/detail reads;
+`global-resource-sync:write` gates create and generation-guarded replacement.
+`global-resource-sync:plan` is separate because a read-only plan still exposes target
+selection, ownership, Controller reachability, and authorization evidence. It grants no
+apply authority. `global-resource-sync:apply` is required for manual fenced apply; it grants
+no adoption, prune, or delete authority.
 
 ## How RBAC enforcement works (`authz.mode: rbac`)
 

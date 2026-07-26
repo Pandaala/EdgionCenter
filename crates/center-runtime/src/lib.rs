@@ -9,6 +9,8 @@ pub mod cloud;
 pub mod commander;
 pub mod eviction;
 pub mod federation;
+pub mod global_resource_planner;
+pub mod global_resources;
 pub mod internal_forwarding;
 pub mod metadata_store;
 pub mod observe;

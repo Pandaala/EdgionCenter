@@ -15,17 +15,13 @@ import {
   UserOutlined,
   TeamOutlined,
   CloudOutlined,
+  SyncOutlined,
 } from '@ant-design/icons'
 
 export type AppMode = 'center' | 'controller'
-export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin' | 'providerAccountAdmin' | 'providerCapabilityRead' | 'providerCredentialInspection' | 'cloudflareDnsRead' | 'cloudflareDnsWrite' | 'cloudflareWafRead' | 'cloudflareWafWrite' | 'route53DnsRead' | 'route53DnsWrite' | 'route53ZoneLifecycle' | 'cloudfrontRead' | 'cloudfrontWrite' | 'awsWafRead' | 'awsWafWrite' | 'awsWafAttach' | 'awsWafDetach' | 'awsWafSecurityWeaken'
+export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin' | 'providerAccountAdmin' | 'providerCapabilityRead' | 'providerCredentialInspection' | 'cloudflareDnsRead' | 'cloudflareDnsWrite' | 'cloudflareWafRead' | 'cloudflareWafWrite' | 'route53DnsRead' | 'route53DnsWrite' | 'route53ZoneLifecycle' | 'cloudfrontRead' | 'cloudfrontWrite' | 'awsWafRead' | 'awsWafWrite' | 'awsWafAttach' | 'awsWafDetach' | 'awsWafSecurityWeaken' | 'globalResourcesInventory' | 'globalResourceSync'
 
-export interface MenuLeaf {
-  kind: 'item'
-  key: string
-  labelKey: string
-  path: string
-  icon?: ReactNode
+interface MenuGate {
   /** Permission key the caller must hold for this item to be visible. */
   requiredPermission?: string
   /** Additional permission keys; all declared keys are required. */
@@ -34,16 +30,28 @@ export interface MenuLeaf {
   requiredCapability?: CenterCapability
 }
 
-export interface MenuGroup {
-  kind: 'group'
+interface MenuEntry extends MenuGate {
+  key: string
   labelKey: string
-  children: MenuLeaf[]
 }
+
+export interface MenuLeaf extends MenuEntry {
+  kind: 'item'
+  path: string
+  icon?: ReactNode
+}
+
+export interface MenuBranch extends MenuEntry {
+  kind: 'group'
+  children: MenuNode[]
+}
+
+export type MenuNode = MenuLeaf | MenuBranch
 
 export interface MenuSection {
   kind: 'section'
   labelKey: string
-  children: (MenuGroup | MenuLeaf)[]
+  children: MenuNode[]
 }
 
 export const controllerMenu: MenuSection[] = [
@@ -57,6 +65,7 @@ export const controllerMenu: MenuSection[] = [
         path: '/topology', icon: <ApartmentOutlined /> },
       {
         kind: 'group',
+        key: 'routes',
         labelKey: 'nav.group.routes',
         children: [
           { kind: 'item', key: 'route-http', labelKey: 'route.http', path: '/routes/http', icon: <ApiOutlined /> },
@@ -68,6 +77,7 @@ export const controllerMenu: MenuSection[] = [
       },
       {
         kind: 'group',
+        key: 'services',
         labelKey: 'nav.group.services',
         children: [
           { kind: 'item', key: 'svc-list',     labelKey: 'infra.service',       path: '/services/list',          icon: <DatabaseOutlined /> },
@@ -77,6 +87,7 @@ export const controllerMenu: MenuSection[] = [
       },
       {
         kind: 'group',
+        key: 'security',
         labelKey: 'nav.group.security',
         children: [
           { kind: 'item', key: 'sec-tls',        labelKey: 'security.tls',        path: '/security/tls',        icon: <SafetyOutlined /> },
@@ -86,6 +97,7 @@ export const controllerMenu: MenuSection[] = [
       },
       {
         kind: 'group',
+        key: 'plugins',
         labelKey: 'nav.group.plugins',
         children: [
           { kind: 'item', key: 'plg-edgion', labelKey: 'plugins.edgion',  path: '/plugins',          icon: <AppstoreOutlined /> },
@@ -105,6 +117,7 @@ export const controllerMenu: MenuSection[] = [
         path: '/', icon: <DashboardOutlined /> },
       {
         kind: 'group',
+        key: 'infrastructure',
         labelKey: 'nav.group.infrastructure',
         children: [
           { kind: 'item', key: 'infra-gw',       labelKey: 'infra.gateway',      path: '/infrastructure/gateways',       icon: <ClusterOutlined /> },
@@ -138,6 +151,7 @@ export const centerMenu: MenuSection[] = [
     children: [
       {
         kind: 'group',
+        key: 'center-region-routes',
         labelKey: 'center.nav.regionRoutes',
         children: [
           { kind: 'item', key: 'center-rr-region', labelKey: 'center.nav.regionDimension', path: '/region-routes/region', icon: <ShareAltOutlined />, requiredPermission: 'region-routes:read' },
@@ -146,16 +160,25 @@ export const centerMenu: MenuSection[] = [
       },
       {
         kind: 'group',
-        labelKey: 'center.nav.globalRules',
+        key: 'center-global-resources',
+        labelKey: 'center.nav.globalResources',
+        requiredPermission: 'global-resources:read',
+        requiredCapability: 'globalResourcesInventory',
         children: [
-          { kind: 'item', key: 'center-global-ip-lists', labelKey: 'center.nav.globalIpLists',
-            path: '/global-rules/ip-lists', icon: <SafetyOutlined />, requiredPermission: 'ip-restrictions:read' },
-          { kind: 'item', key: 'center-global-shared-plugins', labelKey: 'center.nav.globalSharedPlugins',
-            path: '/global-rules/shared-plugins', icon: <ApiOutlined />, requiredPermission: 'server:read' },
-          { kind: 'item', key: 'center-global-waf-control', labelKey: 'center.nav.globalWafControl',
-            path: '/global-rules/waf-control', icon: <LockOutlined />, requiredPermission: 'server:read' },
+          { kind: 'item', key: 'center-global-http-route', labelKey: 'route.http',
+            path: '/global-resources/http-route', icon: <ApiOutlined /> },
+          { kind: 'item', key: 'center-global-grpc-route', labelKey: 'route.grpc',
+            path: '/global-resources/grpc-route', icon: <ApiOutlined /> },
+          { kind: 'item', key: 'center-global-edgion-plugins', labelKey: 'plugins.edgion',
+            path: '/global-resources/edgion-plugins', icon: <AppstoreOutlined /> },
+          { kind: 'item', key: 'center-global-edgion-config-data', labelKey: 'center.nav.edgionConfigData',
+            path: '/global-resources/edgion-config-data', icon: <DatabaseOutlined /> },
+          { kind: 'item', key: 'center-global-reference-grant', labelKey: 'infra.referencegrant',
+            path: '/global-resources/reference-grant', icon: <ShareAltOutlined /> },
         ],
       },
+      { kind: 'item', key: 'center-global-resource-sync', labelKey: 'center.nav.globalResourceSync',
+        path: '/global-resources/sync', icon: <SyncOutlined />, requiredPermission: 'global-resource-sync:read', requiredCapability: 'globalResourceSync' },
     ],
   },
   {
@@ -166,6 +189,7 @@ export const centerMenu: MenuSection[] = [
         path: '/cloud/provider-accounts', icon: <CloudOutlined />, requiredPermission: 'provider-accounts:read', requiredCapability: 'providerAccountAdmin' },
       {
         kind: 'group',
+        key: 'center-cloudflare',
         labelKey: 'cloud.nav.cloudflare',
         children: [
           { kind: 'item', key: 'center-cloudflare-dns', labelKey: 'cloud.nav.cloudflareDns', path: '/cloud/cloudflare/dns', icon: <CloudOutlined />, requiredPermissions: ['cloudflare-dns:read', 'provider-accounts:read'], requiredCapability: 'cloudflareDnsRead' },
@@ -174,6 +198,7 @@ export const centerMenu: MenuSection[] = [
       },
       {
         kind: 'group',
+        key: 'center-aws',
         labelKey: 'cloud.nav.aws',
         children: [
           { kind: 'item', key: 'center-aws-route53', labelKey: 'cloud.nav.route53', path: '/cloud/aws/route53', icon: <CloudOutlined />, requiredPermissions: ['route53-dns:read', 'provider-accounts:read'], requiredCapability: 'route53DnsRead' },
@@ -215,7 +240,7 @@ export interface MenuGateContext {
  * unaffected.
  */
 export const isMenuItemVisible = (
-  item: { requiredPermission?: string; requiredPermissions?: string[]; requiredCapability?: CenterCapability },
+  item: MenuGate,
   ctx: MenuGateContext,
 ): boolean => {
   if (item.requiredCapability && ctx.capabilities[item.requiredCapability] !== true) return false
@@ -223,3 +248,27 @@ export const isMenuItemVisible = (
   if (item.requiredPermissions?.some((permission) => !ctx.permissions.includes(permission))) return false
   return true
 }
+
+/** Recursively applies access gates and removes branches with no visible descendants. */
+export const filterMenuTree = (
+  nodes: MenuNode[],
+  ctx: MenuGateContext,
+): MenuNode[] => nodes.reduce<MenuNode[]>((visible, node) => {
+  if (!isMenuItemVisible(node, ctx)) return visible
+  if (node.kind === 'item') {
+    visible.push(node)
+    return visible
+  }
+
+  const children = filterMenuTree(node.children, ctx)
+  if (children.length > 0) visible.push({ ...node, children })
+  return visible
+}, [])
+
+/** Reports whether this node or any descendant resolves to the active route. */
+export const isMenuNodeActive = (
+  node: MenuNode,
+  isPathActive: (path: string) => boolean,
+): boolean => node.kind === 'item'
+  ? isPathActive(node.path)
+  : node.children.some((child) => isMenuNodeActive(child, isPathActive))

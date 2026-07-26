@@ -31,6 +31,7 @@ description: Root navigation for the EdgionCenter web dashboard knowledge base. 
 | **Resource page guides** | [03-resources/SKILL.md](03-resources/SKILL.md) |
 | **Center federation UI** — RegionRoute page, conflict detection, failover | [04-center/01-region-route-page.md](04-center/01-region-route-page.md) |
 | **Fleet observability** — topology, Conditions, multi-Controller consistency | [04-center/02-fleet-observability.md](04-center/02-fleet-observability.md) |
+| **GlobalResources UI** — recursive navigation, fleet inventory, selective synchronization | [04-center/03-global-resources.md](04-center/03-global-resources.md) |
 | **Testing** | [05-testing/SKILL.md](05-testing/SKILL.md) |
 
 ## Directory overview

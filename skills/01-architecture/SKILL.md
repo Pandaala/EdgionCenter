@@ -23,3 +23,7 @@ Independent cloud infrastructure expansion starts with
 [08-cloud-integration-security.md](08-cloud-integration-security.md). Cloud resources are owned by Center and
 do not extend Edgion resource schemas or federation contracts unless a later integration
 explicitly requires Controller participation.
+
+Fleet-wide management of Edgion resources in platform namespaces is a separate Controller-backed
+capability. Read [06-center/04-global-resource-management.md](06-center/04-global-resource-management.md)
+before changing its inventory, persistence, synchronization, or dashboard contracts.

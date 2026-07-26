@@ -38,6 +38,19 @@ pub trait ControllerHttpClient: Send + Sync {
     ) -> Result<ControllerHttpResponse, String> {
         Err("owner-fenced Controller request is unsupported".to_string())
     }
+
+    /// Execute only while the supplied standalone session remains current.
+    async fn request_session_fenced(
+        &self,
+        _controller_id: &str,
+        _method: String,
+        _path: String,
+        _headers: HashMap<String, String>,
+        _body: Vec<u8>,
+        _expected_session_id: &str,
+    ) -> Result<ControllerHttpResponse, String> {
+        Err("session-fenced Controller request is unsupported".to_string())
+    }
 }
 
 /// Tolerant element-wise parse: a single bad element is dropped, not the whole batch.

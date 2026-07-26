@@ -1,17 +1,20 @@
-import { describe, it, expect } from 'vitest'
-import { centerMenu, isMenuItemVisible, type MenuGateContext } from './menuConfig'
+import { describe, expect, it } from 'vitest'
+import {
+  centerMenu,
+  filterMenuTree,
+  isMenuItemVisible,
+  isMenuNodeActive,
+  type MenuBranch,
+  type MenuGateContext,
+  type MenuLeaf,
+  type MenuNode,
+} from './menuConfig'
 
 const usersItem = { requiredPermission: 'users:manage', requiredCapability: 'userAdmin' as const }
 const rolesItem = { requiredPermission: 'roles:manage', requiredCapability: 'roleAdmin' as const }
 const auditItem = { requiredPermission: 'audit:read', requiredCapability: 'auditQuery' as const }
 const historyItem = { requiredPermission: 'controllers:read', requiredCapability: 'controllerHistory' as const }
 const ungated = {}
-
-const findCenterSection = (labelKey: string) => {
-  const section = centerMenu.find((item) => item.labelKey === labelKey)
-  if (!section) throw new Error(`Center menu section is missing: ${labelKey}`)
-  return section
-}
 
 const ctx = (
   permissions: string[],
@@ -21,114 +24,194 @@ const ctx = (
   permissions,
 })
 
-describe('isMenuItemVisible', () => {
-  it('hides SQL management when capabilities are unavailable, even with permission keys', () => {
-    const c = ctx(['users:manage', 'roles:manage'])
-    expect(isMenuItemVisible(usersItem, c)).toBe(false)
-    expect(isMenuItemVisible(rolesItem, c)).toBe(false)
-  })
+const findCenterSection = (labelKey: string) => {
+  const section = centerMenu.find((item) => item.labelKey === labelKey)
+  if (!section) throw new Error(`Center menu section is missing: ${labelKey}`)
+  return section
+}
 
-  it('resolves user and role management independently from backend capabilities', () => {
-    const c = ctx(['users:manage', 'roles:manage'], { userAdmin: true })
-    expect(isMenuItemVisible(usersItem, c)).toBe(true)
-    expect(isMenuItemVisible(rolesItem, c)).toBe(false)
-  })
+const findBranch = (nodes: MenuNode[], key: string): MenuBranch => {
+  for (const node of nodes) {
+    if (node.kind === 'group') {
+      if (node.key === key) return node
+      try {
+        return findBranch(node.children, key)
+      } catch {
+        // Search the next branch.
+      }
+    }
+  }
+  throw new Error(`Menu branch is missing: ${key}`)
+}
 
-  it('shows both Users and Roles when capabilities and keys are present', () => {
-    const c = ctx(['users:manage', 'roles:manage'], { userAdmin: true, roleAdmin: true })
-    expect(isMenuItemVisible(usersItem, c)).toBe(true)
-    expect(isMenuItemVisible(rolesItem, c)).toBe(true)
-  })
+const flattenLeaves = (nodes: MenuNode[]): MenuLeaf[] => nodes.flatMap((node) =>
+  node.kind === 'item' ? [node] : flattenLeaves(node.children),
+)
 
-  it('hides Users when the permission key is missing even though the mode gate passes', () => {
+describe('menu access gates', () => {
+  it('requires both capabilities and permission keys', () => {
+    expect(isMenuItemVisible(usersItem, ctx(['users:manage']))).toBe(false)
+    expect(isMenuItemVisible(rolesItem, ctx(['roles:manage'], { userAdmin: true }))).toBe(false)
     expect(isMenuItemVisible(usersItem, ctx([], { userAdmin: true }))).toBe(false)
+    expect(isMenuItemVisible(usersItem, ctx(['users:manage'], { userAdmin: true }))).toBe(true)
+    expect(isMenuItemVisible(rolesItem, ctx(['roles:manage'], { roleAdmin: true }))).toBe(true)
   })
 
-  it('hides Roles when the permission key is missing even though authz is rbac', () => {
-    expect(isMenuItemVisible(rolesItem, ctx([], { roleAdmin: true }))).toBe(false)
-  })
-
-  it('shows a permission-only item (audit) regardless of mode when granted', () => {
-    expect(isMenuItemVisible(auditItem, ctx(['audit:read'], { auditQuery: true }))).toBe(true)
-  })
-
-  it('hides a permission-only item when the permission is missing', () => {
+  it('supports permission-only, capability-gated, and ungated entries', () => {
     expect(isMenuItemVisible(auditItem, ctx([], { auditQuery: true }))).toBe(false)
-  })
-
-  it('shows controller history only when its capability is resolved', () => {
-    expect(isMenuItemVisible(historyItem, ctx([]))).toBe(false)
-    expect(isMenuItemVisible(historyItem, ctx([], { controllerHistory: true }))).toBe(false)
+    expect(isMenuItemVisible(auditItem, ctx(['audit:read'], { auditQuery: true }))).toBe(true)
+    expect(isMenuItemVisible(historyItem, ctx(['controllers:read']))).toBe(false)
     expect(isMenuItemVisible(historyItem, ctx(['controllers:read'], { controllerHistory: true }))).toBe(true)
-  })
-
-  it('always shows an item carrying neither gate', () => {
     expect(isMenuItemVisible(ungated, ctx([]))).toBe(true)
   })
 
-  it('keeps RegionRoute region and service management as distinct Center destinations', () => {
-    const trafficSection = findCenterSection('center.nav.section.traffic')
-    const regionGroup = trafficSection.children.find((item) => item.kind === 'group' && item.labelKey === 'center.nav.regionRoutes')
-    expect(regionGroup?.kind).toBe('group')
-    if (regionGroup?.kind !== 'group') throw new Error('RegionRoute group is missing')
-    expect(regionGroup.children.map((item) => item.path)).toEqual(['/region-routes/region', '/region-routes/service'])
-    expect(regionGroup.children.every((item) => item.requiredPermission === 'region-routes:read')).toBe(true)
-    expect(regionGroup.children.every((item) => !isMenuItemVisible(item, ctx([])))).toBe(true)
-    expect(regionGroup.children.every((item) => isMenuItemVisible(item, ctx(['region-routes:read'])))).toBe(true)
-    const globalRules = trafficSection.children.find((item) => item.kind === 'group' && item.labelKey === 'center.nav.globalRules')
-    expect(globalRules?.kind).toBe('group')
-    if (globalRules?.kind !== 'group') throw new Error('GlobalRules group is missing')
-    expect(globalRules.children.map((item) => item.path)).toEqual([
-      '/global-rules/ip-lists',
-      '/global-rules/shared-plugins',
-      '/global-rules/waf-control',
-    ])
-    const ipLists = globalRules.children.find((item) => item.key === 'center-global-ip-lists')
-    expect(ipLists).toBeDefined()
-    expect(isMenuItemVisible(ipLists!, ctx([]))).toBe(false)
-    expect(isMenuItemVisible(ipLists!, ctx(['ip-restrictions:read']))).toBe(true)
+  it('recursively filters arbitrary-depth trees and removes empty ancestors', () => {
+    const tree: MenuNode[] = [{
+      kind: 'group',
+      key: 'root',
+      labelKey: 'Root',
+      children: [
+        {
+          kind: 'group',
+          key: 'empty-parent',
+          labelKey: 'Empty',
+          children: [{
+            kind: 'item',
+            key: 'denied',
+            labelKey: 'Denied',
+            path: '/denied',
+            requiredPermission: 'denied:read',
+          }],
+        },
+        {
+          kind: 'group',
+          key: 'visible-parent',
+          labelKey: 'Visible',
+          children: [{
+            kind: 'group',
+            key: 'deep-parent',
+            labelKey: 'Deep',
+            children: [{ kind: 'item', key: 'visible', labelKey: 'Visible', path: '/visible' }],
+          }],
+        },
+      ],
+    }]
+
+    const filtered = filterMenuTree(tree, ctx([]))
+    expect(filtered).toHaveLength(1)
+    expect(findBranch(filtered, 'root').children.map((node) => node.key)).toEqual(['visible-parent'])
+    expect(flattenLeaves(filtered).map((leaf) => leaf.key)).toEqual(['visible'])
   })
 
-  it('groups controller operations under Federation and account administration under System Management', () => {
-    const federationSection = findCenterSection('center.nav.section.federation')
-    expect(federationSection.children.map((item) => item.kind === 'item' ? item.key : item.labelKey)).toEqual([
+  it('propagates descendant active state through every ancestor', () => {
+    const tree: MenuNode = {
+      kind: 'group',
+      key: 'root',
+      labelKey: 'Root',
+      children: [{
+        kind: 'group',
+        key: 'nested',
+        labelKey: 'Nested',
+        children: [{ kind: 'item', key: 'target', labelKey: 'Target', path: '/target' }],
+      }],
+    }
+
+    expect(isMenuNodeActive(tree, (path) => path === '/target')).toBe(true)
+    expect(isMenuNodeActive(findBranch(tree.children, 'nested'), (path) => path === '/target')).toBe(true)
+    expect(isMenuNodeActive(tree, (path) => path === '/other')).toBe(false)
+  })
+})
+
+describe('Center navigation structure', () => {
+  it('uses the four requested navigation sections', () => {
+    expect(centerMenu.map((section) => section.labelKey)).toEqual([
+      'center.nav.section.federation',
+      'center.nav.section.traffic',
+      'center.nav.section.cloud',
+      'center.nav.section.system',
+    ])
+  })
+
+  it('groups Controller operations under Federation and account administration under System Management', () => {
+    expect(findCenterSection('center.nav.section.federation').children.map((item) => item.key)).toEqual([
       'center-controllers',
       'center-federation-diagnostics',
       'center-admin',
     ])
-    const diagnostics = federationSection.children.find((item) => item.kind === 'item' && item.key === 'center-federation-diagnostics')
-    expect(diagnostics?.kind).toBe('item')
-    if (diagnostics?.kind !== 'item') throw new Error('Federation diagnostics item is missing')
-    expect(diagnostics?.requiredPermission).toBe('server:read')
-    expect(isMenuItemVisible(diagnostics, ctx([]))).toBe(false)
-    expect(isMenuItemVisible(diagnostics, ctx(['server:read']))).toBe(true)
-
-    const systemSection = findCenterSection('center.nav.section.system')
-    expect(systemSection.children.map((item) => item.kind === 'item' ? item.key : item.labelKey)).toEqual([
+    expect(findCenterSection('center.nav.section.system').children.map((item) => item.key)).toEqual([
       'center-audit',
       'center-users',
       'center-roles',
     ])
   })
 
-  it('requires both DNS inventory and provider-account read authority for Cloudflare DNS', () => {
-    const cloudflare = findCenterSection('center.nav.section.cloud').children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
-    expect(cloudflare?.kind).toBe('group')
-    if (cloudflare?.kind !== 'group') throw new Error('Cloudflare group is missing')
-    const dns = cloudflare.children[0]
-    expect(isMenuItemVisible(dns, ctx(['cloudflare-dns:read'], { cloudflareDnsRead: true }))).toBe(false)
-    expect(isMenuItemVisible(dns, ctx(['provider-accounts:read'], { cloudflareDnsRead: true }))).toBe(false)
-    expect(isMenuItemVisible(dns, ctx(['cloudflare-dns:read', 'provider-accounts:read'], { cloudflareDnsRead: true }))).toBe(true)
+  it('keeps only Region and Service under RegionRoute', () => {
+    const regionRoutes = findBranch(
+      findCenterSection('center.nav.section.traffic').children,
+      'center-region-routes',
+    )
+    const leaves = flattenLeaves(regionRoutes.children)
+    expect(leaves.map((item) => item.path)).toEqual([
+      '/region-routes/region',
+      '/region-routes/service',
+    ])
+    expect(leaves.every((item) => item.requiredPermission === 'region-routes:read')).toBe(true)
   })
 
-  it('requires WAF, DNS Zone inventory, and provider-account authority for Cloudflare WAF', () => {
-    const cloudflare = findCenterSection('center.nav.section.cloud').children.find((item) => item.kind === 'group' && item.labelKey === 'cloud.nav.cloudflare')
-    expect(cloudflare?.kind).toBe('group')
-    if (cloudflare?.kind !== 'group') throw new Error('Cloudflare group is missing')
-    const waf = cloudflare.children.find((item) => item.key === 'center-cloudflare-waf')
-    expect(waf).toBeDefined()
-    expect(isMenuItemVisible(waf!, ctx(['cloudflare-waf:read', 'cloudflare-dns:read'], { cloudflareWafRead: true }))).toBe(false)
-    expect(isMenuItemVisible(waf!, ctx(['cloudflare-waf:read', 'provider-accounts:read'], { cloudflareWafRead: true }))).toBe(false)
-    expect(isMenuItemVisible(waf!, ctx(['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read'], { cloudflareWafRead: true }))).toBe(true)
+  it('defines the GlobalResources inventory menu behind both gates', () => {
+    const globalResources = findBranch(
+      findCenterSection('center.nav.section.traffic').children,
+      'center-global-resources',
+    )
+    expect(globalResources.requiredPermission).toBe('global-resources:read')
+    expect(globalResources.requiredCapability).toBe('globalResourcesInventory')
+    expect(globalResources.children.map((node) => node.key)).toEqual([
+      'center-global-http-route',
+      'center-global-grpc-route',
+      'center-global-edgion-plugins',
+      'center-global-edgion-config-data',
+      'center-global-reference-grant',
+    ])
+    const configData = flattenLeaves(globalResources.children)
+      .find((item) => item.key === 'center-global-edgion-config-data')
+    expect(configData).toMatchObject({
+      labelKey: 'center.nav.edgionConfigData',
+      path: '/global-resources/edgion-config-data',
+    })
+
+    expect(filterMenuTree([globalResources], ctx(['global-resources:read']))).toEqual([])
+    expect(filterMenuTree(
+      [globalResources],
+      ctx([], { globalResourcesInventory: true }),
+    )).toEqual([])
+    expect(filterMenuTree(
+      [globalResources],
+      ctx(['global-resources:read'], { globalResourcesInventory: true }),
+    )).toHaveLength(1)
+  })
+
+  it('removes temporary Global rule entries and keeps legacy IP Lists outside GlobalResources', () => {
+    const leaves = centerMenu.flatMap((section) => flattenLeaves(section.children))
+    expect(leaves.map((item) => item.key)).not.toContain('center-global-shared-plugins')
+    expect(leaves.map((item) => item.key)).not.toContain('center-global-waf-control')
+    expect(leaves.map((item) => item.key)).not.toContain('center-global-ip-lists')
+    expect(leaves.map((item) => item.path)).not.toContain('/global-rules/ip-lists')
+  })
+
+  it('keeps the existing Cloud Services permission composition', () => {
+    const cloudflare = findBranch(
+      findCenterSection('center.nav.section.cloud').children,
+      'center-cloudflare',
+    )
+    const dns = flattenLeaves(cloudflare.children).find((item) => item.key === 'center-cloudflare-dns')
+    if (!dns) throw new Error('Cloudflare DNS item is missing')
+    expect(isMenuItemVisible(
+      dns,
+      ctx(['cloudflare-dns:read'], { cloudflareDnsRead: true }),
+    )).toBe(false)
+    expect(isMenuItemVisible(
+      dns,
+      ctx(['cloudflare-dns:read', 'provider-accounts:read'], { cloudflareDnsRead: true }),
+    )).toBe(true)
   })
 })

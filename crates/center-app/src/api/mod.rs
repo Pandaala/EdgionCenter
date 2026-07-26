@@ -10,6 +10,10 @@
 //!   GET  /api/v1/controllers                              → list all controller summaries
 //!   GET  /api/v1/clusters                                 → list distinct cluster names
 //!   POST /api/v1/controllers/{id}/reload                  → send reload command
+//!   GET  /api/v1/center/global-resources/catalog          → supported kinds, namespaces, and clusters
+//!   GET  /api/v1/center/global-resources/resources/{kind} → grouped cross-cluster inventory
+//!   GET  /api/v1/center/global-resources/resources/{kind}/{namespace}/{name} → exact fenced cluster detail
+//!   GET  /api/v1/center/global-resources/preflight          → fenced Controller capability diagnostics
 //!   GET  /api/v1/center/region-routes                              → aggregated effective region routes (unified)
 //!   POST /api/v1/center/region-routes/failover                     → fan-out failover to all online controllers (unified)
 //!   GET  /api/v1/center/region-routes/consistency                  → cross-controller consistency check (unified, online-only)
@@ -94,6 +98,8 @@ pub mod cloudflare_waf;
 pub mod cloudfront;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
+pub mod global_resource_sync;
+mod global_resources;
 pub mod provider_accounts;
 pub mod provider_capabilities;
 pub mod provider_credential_inspections;
@@ -120,6 +126,9 @@ pub struct ApiState {
     pub commander: Arc<Commander>,
     pub proxy: Arc<ProxyForwarder>,
     pub controller_directory: Option<Arc<dyn edgion_center_core::ControllerDirectory>>,
+    pub global_resources:
+        Option<Arc<edgion_center_runtime::global_resources::GlobalResourcesService>>,
+    pub global_resource_sync: Option<Arc<global_resource_sync::GlobalResourceSyncApi>>,
     pub controller_evictor: Arc<dyn edgion_center_runtime::eviction::ControllerEviction>,
     pub user_admin: Option<Arc<dyn edgion_center_core::UserAdmin>>,
     pub role_admin: Option<Arc<dyn edgion_center_core::RoleAdmin>>,
@@ -271,6 +280,8 @@ pub fn router(mut state: ApiState) -> Router {
         state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
     state.capabilities.provider_credential_inspection &=
         state.credential_inspection_service.is_some();
+    state.capabilities.global_resources_inventory &= state.global_resources.is_some();
+    state.capabilities.global_resource_sync &= state.global_resource_sync.is_some();
     let capabilities = state.capabilities.clone();
     let mut app = Router::new()
         // Center-specific endpoints
@@ -361,6 +372,44 @@ pub fn router(mut state: ApiState) -> Router {
             .route(
                 "/api/v1/center/admin/controllers/{id}",
                 delete(delete_admin_controller),
+            );
+    }
+    if capabilities.global_resources_inventory && state.global_resources.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/global-resources/catalog",
+                get(global_resources::catalog),
+            )
+            .route(
+                "/api/v1/center/global-resources/resources/{kind}",
+                get(global_resources::list),
+            )
+            .route(
+                "/api/v1/center/global-resources/resources/{kind}/{namespace}/{name}",
+                get(global_resources::detail),
+            )
+            .route(
+                "/api/v1/center/global-resources/preflight",
+                get(global_resources::preflight),
+            );
+    }
+    if capabilities.global_resource_sync && state.global_resource_sync.is_some() {
+        app = app
+            .route(
+                "/api/v1/center/global-resource-sync/resources",
+                get(global_resource_sync::list).post(global_resource_sync::create),
+            )
+            .route(
+                "/api/v1/center/global-resource-sync/resources/{id}",
+                get(global_resource_sync::get).put(global_resource_sync::replace),
+            )
+            .route(
+                "/api/v1/center/global-resource-sync/resources/{id}/plan",
+                post(global_resource_sync::plan),
+            )
+            .route(
+                "/api/v1/center/global-resource-sync/resources/{id}/apply",
+                post(global_resource_sync::apply),
             );
     }
     #[cfg(feature = "password-auth")]
@@ -1604,6 +1653,8 @@ mod tests {
             commander,
             proxy,
             controller_directory: None,
+            global_resources: None,
+            global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,
             role_admin: None,
@@ -1739,6 +1790,7 @@ mod tests {
             "/api/v1/center/admin/roles",
             "/api/v1/center/admin/audit-logs",
             "/api/v1/center/admin/controllers",
+            "/api/v1/center/global-resources/catalog",
         ] {
             let response = app
                 .clone()
@@ -1752,6 +1804,46 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn global_resources_routes_require_both_capability_and_service() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/global-resources/catalog";
+        let mut capability_only = state_with_authz_mode(AuthzMode::AllowAll, false);
+        capability_only.capabilities.global_resources_inventory = true;
+        let response = router(capability_only)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut composed = state_with_authz_mode(AuthzMode::AllowAll, false);
+        composed.capabilities.global_resources_inventory = true;
+        composed.global_resources = Some(Arc::new(
+            edgion_center_runtime::global_resources::GlobalResourcesService::new_standalone(
+                Arc::new(GlobalDirectory(Vec::new())),
+                composed.registry.clone(),
+                composed.proxy.clone(),
+                edgion_center_core::GlobalResourcesConfig::default(),
+            ),
+        ));
+        let response = router(composed)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(path)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]

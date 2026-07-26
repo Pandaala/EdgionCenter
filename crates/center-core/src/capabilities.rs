@@ -10,6 +10,10 @@ pub enum CenterMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CenterCapabilities {
+    /// Non-durable fleet inventory over configured platform namespaces.
+    pub global_resources_inventory: bool,
+    /// Durable desired-state planning and selective synchronization.
+    pub global_resource_sync: bool,
     pub user_admin: bool,
     pub role_admin: bool,
     pub audit_query: bool,
@@ -57,6 +61,8 @@ impl CenterCapabilities {
     pub const fn for_mode(mode: CenterMode) -> Self {
         match mode {
             CenterMode::Standalone => Self {
+                global_resources_inventory: false,
+                global_resource_sync: false,
                 user_admin: true,
                 role_admin: true,
                 audit_query: true,
@@ -83,6 +89,8 @@ impl CenterCapabilities {
                 provider_credential_inspection: false,
             },
             CenterMode::Kubernetes => Self {
+                global_resources_inventory: false,
+                global_resource_sync: false,
                 user_admin: false,
                 role_admin: false,
                 audit_query: false,
@@ -126,6 +134,8 @@ impl CenterCapabilities {
         provider_credential_inspection: bool,
     ) -> Self {
         Self {
+            global_resources_inventory: false,
+            global_resource_sync: false,
             user_admin,
             role_admin,
             audit_query,
@@ -163,6 +173,9 @@ mod tests {
         let standalone = CenterCapabilities::for_mode(CenterMode::Standalone);
         let kubernetes = CenterCapabilities::for_mode(CenterMode::Kubernetes);
         assert!(standalone.user_admin && standalone.audit_query);
+        assert!(!standalone.global_resources_inventory);
+        assert!(!kubernetes.global_resources_inventory);
+        assert!(!standalone.global_resource_sync && !kubernetes.global_resource_sync);
         assert!(!standalone.native_rbac);
         assert!(!kubernetes.user_admin && !kubernetes.audit_query);
         assert!(kubernetes.native_rbac && kubernetes.leader_election);

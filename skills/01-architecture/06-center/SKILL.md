@@ -21,6 +21,7 @@ used for routing correctness.
 | Federation protocol and security | [01-fed-sync-server.md](01-fed-sync-server.md) |
 | Aggregation and reverse watches | [02-aggregator-and-watch-cache.md](02-aggregator-and-watch-cache.md) |
 | SQL and Kubernetes persistence | [03-persistence.md](03-persistence.md) |
+| GlobalResources inventory and GlobalResource synchronization | [04-global-resource-management.md](04-global-resource-management.md) |
 
 Authentication and authorization differ by composition. Standalone supports OIDC/password
 providers and optional database RBAC. Kubernetes requires OIDC and delegates every protected

@@ -19,6 +19,16 @@ pub const CONTROLLERS_WRITE: &str = "controllers:write";
 // Region routes page (cluster + service region routes, failover, sync, consistency).
 pub const REGION_ROUTES_READ: &str = "region-routes:read";
 pub const REGION_ROUTES_WRITE: &str = "region-routes:write";
+// Global resource catalog and cross-cluster inventory.
+pub const GLOBAL_RESOURCES_READ: &str = "global-resources:read";
+// Global resource ownership and reachability diagnostics.
+pub const GLOBAL_RESOURCES_DIAGNOSE: &str = "global-resources:diagnose";
+// Durable Center-owned GlobalResource desired state.
+pub const GLOBAL_RESOURCE_SYNC_READ: &str = "global-resource-sync:read";
+pub const GLOBAL_RESOURCE_SYNC_WRITE: &str = "global-resource-sync:write";
+// Read-only planning exposes target selection, ownership, and reachability evidence.
+pub const GLOBAL_RESOURCE_SYNC_PLAN: &str = "global-resource-sync:plan";
+pub const GLOBAL_RESOURCE_SYNC_APPLY: &str = "global-resource-sync:apply";
 // Global connection IP restrictions page.
 pub const IP_RESTRICTIONS_READ: &str = "ip-restrictions:read";
 pub const IP_RESTRICTIONS_WRITE: &str = "ip-restrictions:write";
@@ -92,6 +102,12 @@ pub fn all_keys() -> &'static [&'static str] {
         CONTROLLERS_WRITE,
         REGION_ROUTES_READ,
         REGION_ROUTES_WRITE,
+        GLOBAL_RESOURCES_READ,
+        GLOBAL_RESOURCES_DIAGNOSE,
+        GLOBAL_RESOURCE_SYNC_READ,
+        GLOBAL_RESOURCE_SYNC_WRITE,
+        GLOBAL_RESOURCE_SYNC_PLAN,
+        GLOBAL_RESOURCE_SYNC_APPLY,
         IP_RESTRICTIONS_READ,
         IP_RESTRICTIONS_WRITE,
         AUDIT_READ,
@@ -156,6 +172,19 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         PermissionGroup {
             group: "Region Routes",
             keys: vec![REGION_ROUTES_READ, REGION_ROUTES_WRITE],
+        },
+        PermissionGroup {
+            group: "Global Resources",
+            keys: vec![GLOBAL_RESOURCES_READ, GLOBAL_RESOURCES_DIAGNOSE],
+        },
+        PermissionGroup {
+            group: "Global Resource Sync",
+            keys: vec![
+                GLOBAL_RESOURCE_SYNC_READ,
+                GLOBAL_RESOURCE_SYNC_WRITE,
+                GLOBAL_RESOURCE_SYNC_PLAN,
+                GLOBAL_RESOURCE_SYNC_APPLY,
+            ],
         },
         PermissionGroup {
             group: "IP Restrictions",
@@ -264,6 +293,37 @@ fn under_segment(path: &str, base: &str) -> bool {
 /// `/api/v1/center/global-connection-ip-restrictions/default/foo`.
 pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     let is_read = method == Method::GET || method == Method::HEAD;
+
+    if path == "/api/v1/center/global-resources/catalog"
+        || under_segment(path, "/api/v1/center/global-resources/resources")
+    {
+        return is_read.then_some(GLOBAL_RESOURCES_READ);
+    }
+
+    if under_segment(path, "/api/v1/center/global-resources/preflight") {
+        return is_read.then_some(GLOBAL_RESOURCES_DIAGNOSE);
+    }
+
+    const GLOBAL_RESOURCE_SYNC_COLLECTION: &str = "/api/v1/center/global-resource-sync/resources";
+    if let Some(suffix) = path.strip_prefix(GLOBAL_RESOURCE_SYNC_COLLECTION) {
+        if suffix.is_empty() {
+            return match *method {
+                Method::GET | Method::HEAD => Some(GLOBAL_RESOURCE_SYNC_READ),
+                Method::POST => Some(GLOBAL_RESOURCE_SYNC_WRITE),
+                _ => None,
+            };
+        }
+        let suffix = suffix.strip_prefix('/')?;
+        let mut segments = suffix.split('/');
+        let _id = segments.next().filter(|value| !value.is_empty())?;
+        return match (segments.next(), segments.next(), method) {
+            (None, None, &Method::GET | &Method::HEAD) => Some(GLOBAL_RESOURCE_SYNC_READ),
+            (None, None, &Method::PUT) => Some(GLOBAL_RESOURCE_SYNC_WRITE),
+            (Some("plan"), None, &Method::POST) => Some(GLOBAL_RESOURCE_SYNC_PLAN),
+            (Some("apply"), None, &Method::POST) => Some(GLOBAL_RESOURCE_SYNC_APPLY),
+            _ => None,
+        };
+    }
 
     // HTTP proxy — any method forwards to a controller.
     if path.starts_with("/api/v1/proxy/") {
@@ -1188,6 +1248,143 @@ mod tests {
             grouped_set, all_set,
             "catalog_groups() must cover exactly all_keys()"
         );
+    }
+
+    #[test]
+    fn global_resource_routes_use_narrow_read_and_diagnose_permissions() {
+        for path in [
+            "/api/v1/center/global-resources/catalog",
+            "/api/v1/center/global-resources/resources",
+            "/api/v1/center/global-resources/resources/http-route",
+            "/api/v1/center/global-resources/resources/http-route/edgion-system/example",
+        ] {
+            assert_eq!(
+                route_permission(&Method::GET, path),
+                Some(GLOBAL_RESOURCES_READ),
+                "GET {path}"
+            );
+            assert_eq!(
+                route_permission(&Method::HEAD, path),
+                Some(GLOBAL_RESOURCES_READ),
+                "HEAD {path}"
+            );
+            for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+                assert_eq!(
+                    route_permission(&method, path),
+                    None,
+                    "{method} {path} must fail closed"
+                );
+            }
+        }
+
+        for path in [
+            "/api/v1/center/global-resources/preflight",
+            "/api/v1/center/global-resources/preflight/cluster-a",
+        ] {
+            assert_eq!(
+                route_permission(&Method::GET, path),
+                Some(GLOBAL_RESOURCES_DIAGNOSE),
+                "GET {path}"
+            );
+            assert_eq!(
+                route_permission(&Method::HEAD, path),
+                Some(GLOBAL_RESOURCES_DIAGNOSE),
+                "HEAD {path}"
+            );
+            for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+                assert_eq!(
+                    route_permission(&method, path),
+                    None,
+                    "{method} {path} must fail closed"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn global_resource_routes_require_exact_segment_boundaries() {
+        for path in [
+            "/api/v1/center/global-resources",
+            "/api/v1/center/global-resources-v2/catalog",
+            "/api/v1/center/global-resources/catalog/v2",
+            "/api/v1/center/global-resources/catalog-v2",
+            "/api/v1/center/global-resources/resources-v2",
+            "/api/v1/center/global-resources/preflight-v2",
+        ] {
+            assert_eq!(
+                route_permission(&Method::GET, path),
+                None,
+                "GET {path} must not match a neighboring route"
+            );
+            assert_eq!(
+                route_permission(&Method::HEAD, path),
+                None,
+                "HEAD {path} must not match a neighboring route"
+            );
+        }
+    }
+
+    #[test]
+    fn global_resource_sync_routes_use_separate_read_write_and_plan_permissions() {
+        let collection = "/api/v1/center/global-resource-sync/resources";
+        let detail = "/api/v1/center/global-resource-sync/resources/shared-allow-list";
+        let plan = "/api/v1/center/global-resource-sync/resources/shared-allow-list/plan";
+
+        for method in [Method::GET, Method::HEAD] {
+            assert_eq!(
+                route_permission(&method, collection),
+                Some(GLOBAL_RESOURCE_SYNC_READ)
+            );
+            assert_eq!(
+                route_permission(&method, detail),
+                Some(GLOBAL_RESOURCE_SYNC_READ)
+            );
+        }
+        assert_eq!(
+            route_permission(&Method::POST, collection),
+            Some(GLOBAL_RESOURCE_SYNC_WRITE)
+        );
+        assert_eq!(
+            route_permission(&Method::PUT, detail),
+            Some(GLOBAL_RESOURCE_SYNC_WRITE)
+        );
+        assert_eq!(
+            route_permission(&Method::POST, plan),
+            Some(GLOBAL_RESOURCE_SYNC_PLAN)
+        );
+
+        assert_eq!(
+            route_permission(
+                &Method::POST,
+                "/api/v1/center/global-resource-sync/resources/shared-allow-list/apply"
+            ),
+            Some(GLOBAL_RESOURCE_SYNC_APPLY)
+        );
+
+        for (method, path) in [
+            (Method::DELETE, collection),
+            (Method::DELETE, detail),
+            (Method::POST, detail),
+            (Method::GET, plan),
+            (
+                Method::POST,
+                "/api/v1/center/global-resource-sync/resources/shared-allow-list/adopt",
+            ),
+            (
+                Method::POST,
+                "/api/v1/center/global-resource-sync/resources/shared-allow-list/prune",
+            ),
+            (
+                Method::GET,
+                "/api/v1/center/global-resource-sync/resources-v2",
+            ),
+        ] {
+            assert_eq!(
+                route_permission(&method, path),
+                None,
+                "{method} {path} must fail closed"
+            );
+        }
     }
 
     /// GET endpoints resolve to `:read`, mutations to `:write`.

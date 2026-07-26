@@ -1,8 +1,15 @@
+import type { ReactNode } from 'react'
 import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useT } from '@/i18n'
 import { usePermissions } from '@/utils/permissions'
 import { useServerInfo } from '@/hooks/useServerInfo'
-import { getMenuByMode, isMenuItemVisible, type AppMode, type MenuGroup, type MenuLeaf } from './menuConfig'
+import {
+  filterMenuTree,
+  getMenuByMode,
+  isMenuNodeActive,
+  type AppMode,
+  type MenuNode,
+} from './menuConfig'
 import { SidebarSection } from './SidebarSection'
 import { SidebarGroup } from './SidebarGroup'
 import { SidebarItem } from './SidebarItem'
@@ -43,6 +50,39 @@ export const Sidebar = ({ collapsed, mode = 'controller' }: SidebarProps) => {
 
   const handleClick = (path: string) => navigate(`${prefix}${path}`)
 
+  const renderMenuNode = (node: MenuNode, depth = 0): ReactNode => {
+    const label = t(node.labelKey)
+    if (node.kind === 'item') {
+      return (
+        <div
+          key={node.key}
+          aria-label={collapsed ? label : undefined}
+          title={collapsed ? label : undefined}
+        >
+          <SidebarItem
+            label={label}
+            icon={node.icon}
+            active={isActive(node.path)}
+            collapsed={collapsed}
+            onClick={() => handleClick(node.path)}
+          />
+        </div>
+      )
+    }
+
+    return (
+      <SidebarGroup
+        key={node.key}
+        label={label}
+        collapsed={collapsed}
+        active={isMenuNodeActive(node, isActive)}
+        depth={depth}
+      >
+        {node.children.map((child) => renderMenuNode(child, depth + 1))}
+      </SidebarGroup>
+    )
+  }
+
   return (
     <aside
       style={{
@@ -57,17 +97,7 @@ export const Sidebar = ({ collapsed, mode = 'controller' }: SidebarProps) => {
       }}
     >
       {menuConfig.map((section, sIdx) => {
-        // Filter leaves by the access-mode + permission gate; drop groups that
-        // end up empty so we never render a header with no items.
-        const visibleChildren = section.children
-          .map((child): MenuLeaf | MenuGroup | null => {
-            if (child.kind === 'item') {
-              return isMenuItemVisible(child, gateCtx) ? child : null
-            }
-            const leaves = child.children.filter((leaf) => isMenuItemVisible(leaf, gateCtx))
-            return leaves.length > 0 ? { ...child, children: leaves } : null
-          })
-          .filter((c): c is MenuLeaf | MenuGroup => c !== null)
+        const visibleChildren = filterMenuTree(section.children, gateCtx)
         if (visibleChildren.length === 0) return null
         return (
           <SidebarSection
@@ -76,34 +106,7 @@ export const Sidebar = ({ collapsed, mode = 'controller' }: SidebarProps) => {
             collapsed={collapsed}
             showDivider={sIdx > 0}
           >
-            {visibleChildren.map((child) => {
-              if (child.kind === 'item') {
-                return (
-                <SidebarItem
-                  key={child.key}
-                  label={t(child.labelKey)}
-                  icon={child.icon}
-                  active={isActive(child.path)}
-                  collapsed={collapsed}
-                  onClick={() => handleClick(child.path)}
-                />
-              )
-            }
-            return (
-              <SidebarGroup key={child.labelKey} label={t(child.labelKey)} collapsed={collapsed}>
-                {child.children.map((leaf) => (
-                  <SidebarItem
-                    key={leaf.key}
-                    label={t(leaf.labelKey)}
-                    icon={leaf.icon}
-                    active={isActive(leaf.path)}
-                    collapsed={collapsed}
-                    onClick={() => handleClick(leaf.path)}
-                  />
-                ))}
-              </SidebarGroup>
-            )
-            })}
+            {visibleChildren.map((child) => renderMenuNode(child))}
           </SidebarSection>
         )
       })}

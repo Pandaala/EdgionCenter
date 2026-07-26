@@ -294,6 +294,8 @@ mod tests {
             commander,
             proxy,
             controller_directory: None,
+            global_resources: None,
+            global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: user_admin.clone(),
             role_admin: None,

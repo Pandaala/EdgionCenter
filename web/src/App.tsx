@@ -48,7 +48,9 @@ import EdgionAcmeList from './pages/System/EdgionAcmeList'
 import TopologyPage from './pages/Topology/TopologyPage'
 import GlobalConnectionIpRestrictionList from './pages/GlobalConnectionIpRestriction/List'
 import GlobalConnectionIpRestrictionDetail from './pages/GlobalConnectionIpRestriction/Detail'
-import GlobalRulePendingPage from './pages/GlobalRules/GlobalRulePendingPage'
+import GlobalResourceInventoryPage from './pages/GlobalResources/GlobalResourceInventoryPage'
+import GlobalResourceSyncPage from './pages/GlobalResources/GlobalResourceSyncPage'
+import { GLOBAL_RESOURCE_DESCRIPTORS } from './pages/GlobalResources/globalResourceDescriptors'
 import ProviderAccountsPage from './pages/Cloud/ProviderAccountsPage'
 import CloudflareDnsPage from './pages/Cloud/CloudflareDnsPage'
 import CloudflareWafPage from './pages/Cloud/CloudflareWafPage'
@@ -160,14 +162,33 @@ function App() {
             path="global-rules/ip-lists/:namespace/:name/:controllerId"
             element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionDetail /></RequirePermission>}
           />
-          <Route
-            path="global-rules/shared-plugins"
-            element={<RequirePermission permission="server:read"><GlobalRulePendingPage resource="sharedPlugins" /></RequirePermission>}
-          />
-          <Route
-            path="global-rules/waf-control"
-            element={<RequirePermission permission="server:read"><GlobalRulePendingPage resource="wafControl" /></RequirePermission>}
-          />
+          {capabilities?.globalResourcesInventory && (
+            <>
+              {capabilities?.globalResourceSync && <Route path="global-resources/sync" element={<RequirePermission permission="global-resource-sync:read"><GlobalResourceSyncPage /></RequirePermission>} />}
+              <Route
+                path="global-resources"
+                element={<Navigate to={GLOBAL_RESOURCE_DESCRIPTORS[0].route} replace />}
+              />
+              <Route
+                path="global-resources/edgion-config-data/*"
+                element={<Navigate to="/global-resources/edgion-config-data" replace />}
+              />
+              {GLOBAL_RESOURCE_DESCRIPTORS.map((descriptor) => (
+                <Route
+                  key={descriptor.key}
+                  path={descriptor.route.slice(1)}
+                  element={(
+                    <RequirePermission permission="global-resources:read">
+                      <GlobalResourceInventoryPage descriptor={descriptor} />
+                    </RequirePermission>
+                  )}
+                />
+              ))}
+            </>
+          )}
+          {capabilities?.globalResourceSync && (
+            <Route path="global-resources/sync" element={<RequirePermission permission="global-resource-sync:read"><GlobalResourceSyncPage /></RequirePermission>} />
+          )}
           <Route path="global-connection-ip-restrictions" element={<Navigate to="/global-rules/ip-lists" replace />} />
           <Route
             path="global-connection-ip-restrictions/:namespace/:name/:controllerId"
