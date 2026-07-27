@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ControllersPage from './ControllersPage'
@@ -20,8 +20,8 @@ vi.mock('@/hooks/useControllerAccess', () => ({ invalidateControllerAccess: vi.f
 vi.mock('@/i18n', () => ({ useT: () => (key: string, params?: Record<string, string | number>) => params?.n != null ? `${key}:${params.n}` : key }))
 
 const controllers = [
-  { controller_id: 'east/controller-a', cluster: 'east', env: ['prod'], tag: ['edge'], online: true, last_seen_secs_ago: 10, key_count: 4 },
-  { controller_id: 'west/controller-b', cluster: 'west', env: [], tag: [], online: false, last_seen_secs_ago: null, key_count: null },
+  { controller_id: 'east/controller-a', cluster: 'east', env: ['prod'], tag: ['edge'], online: true, last_seen_secs_ago: 10, key_count: 4, stats_state: 'fresh' },
+  { controller_id: 'west/controller-b', cluster: 'west', env: [], tag: [], online: false, last_seen_secs_ago: null, key_count: null, stats_state: 'missing' },
 ]
 
 function renderPage() {
@@ -66,5 +66,30 @@ describe('ControllersPage', () => {
     fireEvent.change(screen.getByTestId('controller-search'), { target: { value: 'east' } })
     await waitFor(() => expect(screen.queryByText('west/controller-b')).not.toBeInTheDocument())
     expect(screen.getByText('east/controller-a')).toBeInTheDocument()
+  })
+
+  it('renders the Resources column per stats_state: missing, fresh, and stale', async () => {
+    mocks.useServerInfo.mockReturnValue({ data: { data: { capabilities: { controllerHistory: false } } } })
+    mocks.listControllers.mockResolvedValue({
+      success: true,
+      count: 3,
+      data: [
+        { controller_id: 'a/missing', cluster: 'a', env: [], tag: [], online: true, last_seen_secs_ago: 1, key_count: null, stats_state: 'missing' },
+        { controller_id: 'b/fresh', cluster: 'b', env: [], tag: [], online: true, last_seen_secs_ago: 1, key_count: 12, stats_state: 'fresh' },
+        { controller_id: 'c/stale', cluster: 'c', env: [], tag: [], online: false, last_seen_secs_ago: 900, key_count: 7, stats_state: 'stale' },
+      ],
+    })
+    renderPage()
+
+    expect(await screen.findByText('b/fresh')).toBeInTheDocument()
+    const rows = screen.getAllByRole('row').filter((row) => row.querySelector('td'))
+    const missingRow = rows.find((row) => row.textContent?.includes('a/missing'))!
+    const freshRow = rows.find((row) => row.textContent?.includes('b/fresh'))!
+    const staleRow = rows.find((row) => row.textContent?.includes('c/stale'))!
+
+    expect(within(missingRow).getByText('—')).toBeInTheDocument()
+    expect(within(freshRow).getByText('12')).toBeInTheDocument()
+    expect(within(staleRow).getByText('7')).toBeInTheDocument()
+    expect(within(staleRow).getByText('globalResources.syncState.stale')).toBeInTheDocument()
   })
 })

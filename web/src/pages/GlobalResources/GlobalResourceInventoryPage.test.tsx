@@ -23,7 +23,6 @@ vi.mock('@/api/globalResources', async (importOriginal) => {
       catalog: vi.fn(),
       list: vi.fn(),
       detail: vi.fn(),
-      preflight: vi.fn(),
     },
   }
 })
@@ -31,7 +30,6 @@ vi.mock('@/api/globalResources', async (importOriginal) => {
 const catalog = {
   catalogRevision: 'catalog-1',
   configRevision: 'config-1',
-  platformNamespaces: ['edgion-system'],
   kinds: [],
   clusters: [
     { cluster: 'alpha', state: 'available' as const, controllerId: 'controller-a', candidates: [] },
@@ -70,6 +68,9 @@ const inventory = {
         metadata: { namespace: 'edgion-system', name: 'trusted-proxies' },
         data: { type: 'IpList', values: ['192.0.2.1'] },
       },
+      syncState: 'stale' as const,
+      freshnessUnixMs: Date.now() - 120_000,
+      revision: 7,
     }],
   }],
   continueToken: null,
@@ -107,6 +108,22 @@ describe('GlobalResourceInventoryPage', () => {
     expect(await screen.findByText('trusted-proxies')).toBeInTheDocument()
     expect(screen.queryByText('globalResources.clusterSummary.title')).not.toBeInTheDocument()
     expect(screen.queryByTestId('global-resource-cluster-error')).not.toBeInTheDocument()
+    expect(screen.getByTestId('global-resource-sync-stale')).toHaveTextContent(
+      'globalResources.syncState.stale',
+    )
+  })
+
+  it('shows the selected member freshness and sync state in the drawer', async () => {
+    mount()
+    fireEvent.click(await screen.findByText('globalResources.action.compare'))
+    fireEvent.click(screen.getByTestId('global-resource-member-alpha'))
+
+    expect(await screen.findByTestId('global-resource-member-freshness')).toHaveTextContent(
+      'globalResources.member.freshness',
+    )
+    expect(screen.getByTestId('global-resource-member-freshness')).toHaveTextContent(
+      'globalResources.syncState.stale',
+    )
   })
 
   it('does not request detail until a concrete member is selected', async () => {

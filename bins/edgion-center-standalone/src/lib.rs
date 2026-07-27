@@ -1,6 +1,6 @@
 //! Standalone Edgion Center composition library.
 
-pub use edgion_center_app::{aggregator, api, commander, metadata_store, poll, proxy, watch_cache};
+pub use edgion_center_app::{aggregator, api, metadata_store, poll, proxy, watch_cache};
 mod cli;
 mod common;
 mod config;

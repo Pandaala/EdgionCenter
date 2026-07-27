@@ -4,7 +4,7 @@
 //! 1. Wait up to 5s for first ControllerMessage (must be RegisterRequest)
 //! 2. Register controller in registry
 //! 3. Spawn heartbeat task (Ping every ping_interval)
-//! 4. Loop: forward incoming messages to aggregator/commander; forward outgoing to stream
+//! 4. Loop: forward incoming messages to aggregator/proxy; forward outgoing to stream
 
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -17,7 +17,6 @@ use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 
 use crate::aggregator::{ControllerInfo, ResourceAggregator};
-use crate::commander::PendingCommandMap;
 use crate::federation::config::CenterSyncConfig;
 use crate::federation::proto::{
     center_message::Payload as CenterPayload, controller_message::Payload as CtrlPayload,
@@ -28,7 +27,10 @@ use crate::federation::proto::{
 use crate::federation::registry::{ControllerRegistry, SessionOwnership};
 use crate::observe::fed_metrics;
 use crate::proxy::PendingProxyMap;
-use crate::watch_cache::{CenterSyncClient, EventType, WatchEventSimple, WatchedConfigData};
+use crate::watch_cache::{
+    ApplyResult, CenterSyncClient, EventType, WatchEventSimple, WatchedConfigData,
+    MAX_ENTRIES_PER_CONTROLLER,
+};
 use edgion_center_core::{
     AuditEvent, AuditWriter, ControllerDirectory, ControllerId, ControllerRegistration,
     ControllerRuntimeObservation, CoordinationRole, Coordinator, Leadership, OfflineOutcome,
@@ -41,6 +43,50 @@ use edgion_center_core::{
 /// kind instead of this constant.
 const PLUGIN_METADATA_KIND: &str = "EdgionConfigData";
 const RUNTIME_PROJECTION_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Upper bound for decoding one `ControllerMessage` from the federation
+/// stream. Must exceed the Controller's 10 MiB proxied-response body cap
+/// (plus envelope overhead): tonic's 4 MiB default tears down the entire
+/// federation stream — heartbeat and watch included — on a single
+/// oversized frame instead of failing only that request.
+pub const MAX_FED_DECODE_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Upper bound on the number of kinds carried in a single StatsReport's
+/// `per_kind` map before the observation drops it rather than truncating.
+const MAX_STATS_KINDS: usize = 64;
+/// Upper bound on a single kind name's length in a StatsReport's `per_kind`
+/// map before the observation drops it rather than truncating.
+const MAX_STATS_KIND_LEN: usize = 63;
+
+/// Validate a StatsReport's `per_kind` map against the ingest bounds and
+/// convert it into the deterministic BTreeMap shape the CRD status stores.
+///
+/// This is fail-closed rather than truncating: an oversized or malformed map
+/// would otherwise silently undercount some kinds, which is worse than
+/// temporarily losing the per-kind breakdown while keeping the scalar total.
+fn bounded_per_kind(
+    per_kind: HashMap<String, u32>,
+) -> Option<std::collections::BTreeMap<String, u32>> {
+    if per_kind.len() > MAX_STATS_KINDS {
+        tracing::warn!(
+            component = "fed_server",
+            bound = "MAX_STATS_KINDS",
+            kinds = per_kind.len(),
+            "StatsReport per_kind map exceeds the kind-count bound; dropping per-kind counts"
+        );
+        return None;
+    }
+    if let Some(offending_key) = per_kind.keys().find(|key| key.len() > MAX_STATS_KIND_LEN) {
+        tracing::warn!(
+            component = "fed_server",
+            bound = "MAX_STATS_KIND_LEN",
+            key = %offending_key,
+            "StatsReport per_kind map has a kind name exceeding the length bound; dropping per-kind counts"
+        );
+        return None;
+    }
+    Some(per_kind.into_iter().collect())
+}
 
 #[derive(Clone)]
 struct RuntimeProjector {
@@ -99,6 +145,10 @@ impl RuntimeProjector {
                         }
                         if observation.resource_count.is_some() {
                             slot.observation.resource_count = observation.resource_count;
+                        }
+                        if observation.resource_counts_by_kind.is_some() {
+                            slot.observation.resource_counts_by_kind =
+                                observation.resource_counts_by_kind;
                         }
                         if observation.stats_updated_unix_ms.is_some() {
                             slot.observation.stats_updated_unix_ms =
@@ -585,7 +635,6 @@ fn validate_register_req(req: &RegisterRequest) -> Result<(), &'static str> {
     }
     validate_string_list(&req.env, "env")?;
     validate_string_list(&req.tag, "tag")?;
-    validate_string_list(&req.supported_kinds, "supported_kinds")?;
     Ok(())
 }
 
@@ -594,7 +643,6 @@ fn validate_string_list(items: &[String], field: &'static str) -> Result<(), &'s
         return Err(match field {
             "env" => "env list exceeds max items",
             "tag" => "tag list exceeds max items",
-            "supported_kinds" => "supported_kinds list exceeds max items",
             _ => "list exceeds max items",
         });
     }
@@ -603,7 +651,6 @@ fn validate_string_list(items: &[String], field: &'static str) -> Result<(), &'s
             return Err(match field {
                 "env" => "env item exceeds max length",
                 "tag" => "tag item exceeds max length",
-                "supported_kinds" => "supported_kinds item exceeds max length",
                 _ => "list item exceeds max length",
             });
         }
@@ -611,7 +658,6 @@ fn validate_string_list(items: &[String], field: &'static str) -> Result<(), &'s
             return Err(match field {
                 "env" => "env item contains control characters",
                 "tag" => "tag item contains control characters",
-                "supported_kinds" => "supported_kinds item contains control characters",
                 _ => "list item contains control characters",
             });
         }
@@ -659,6 +705,9 @@ struct FedWatchState {
     server_id: Option<String>,
     /// Consecutive error count (INFO on first, WARN on subsequent).
     consecutive_errors: u32,
+    /// Set once a terminal error (e.g. RBAC denial) has stopped the watch.
+    /// No further re-watch attempts are made once this is true.
+    terminated: bool,
 }
 
 impl FedWatchState {
@@ -667,11 +716,16 @@ impl FedWatchState {
             request_id,
             server_id,
             consecutive_errors: 0,
+            terminated: false,
         }
     }
 
     /// Generate a new FedWatchRequest (from_version=0) and update internal request_id.
+    ///
+    /// Calling this on a terminated state is a programming error: once the
+    /// watch is terminated, nothing should attempt to re-watch it.
     fn re_watch(&mut self, kind: &str) -> CenterMessage {
+        debug_assert!(!self.terminated);
         let new_id = Uuid::new_v4().to_string();
         self.request_id = new_id.clone();
         self.consecutive_errors = 0;
@@ -682,6 +736,30 @@ impl FedWatchState {
                 from_version: 0,
             })),
         }
+    }
+
+    /// Mark this watch as terminated. No further re-watch attempts should be
+    /// made after this; the session must be re-registered (or RBAC fixed) to
+    /// restore the watch.
+    fn terminate(&mut self) {
+        self.terminated = true;
+    }
+
+    /// Whether this watch has been terminated by a terminal error.
+    fn is_terminated(&self) -> bool {
+        self.terminated
+    }
+}
+
+/// Build the initial `FedWatchRequest` (wrapped in a `CenterMessage`) sent
+/// right after registration, resuming from the cached sync version.
+fn initial_watch_request(request_id: &str, from_version: u64) -> CenterMessage {
+    CenterMessage {
+        payload: Some(CenterPayload::WatchRequest(FedWatchRequest {
+            request_id: request_id.to_string(),
+            kind: PLUGIN_METADATA_KIND.to_string(),
+            from_version,
+        })),
     }
 }
 
@@ -701,6 +779,13 @@ enum WatchOutcome {
     ReWatch,
     /// Error field set — back off 3 s then re-watch from version 0.
     BackoffReWatch,
+    /// Error field set to a terminal condition (e.g. RBAC denial) — the
+    /// watch has been stopped and will not be retried.
+    Terminal,
+    /// The batch would have exceeded `MAX_ENTRIES_PER_CONTROLLER` — nothing
+    /// was applied and the watch has been stopped (treated like `Terminal`;
+    /// no re-watch storm against a controller that keeps overflowing).
+    Overflow,
 }
 
 /// Handle a `FedWatchListResponse` from the controller.
@@ -724,13 +809,69 @@ fn apply_watch_list(
         );
         return WatchOutcome::Skipped;
     }
+
+    // Watch already terminated by a prior terminal error — skip silently.
+    // The request_id stays fixed after termination (Terminal never
+    // re-watches), so a late frame under the same id must not be applied.
+    if pm_watch.is_terminated() {
+        return WatchOutcome::Skipped;
+    }
+
     match serde_json::from_slice::<Vec<WatchedConfigData>>(&resp.data) {
         Ok(items) => {
-            let keyed: Vec<(String, WatchedConfigData)> = items
-                .into_iter()
-                .filter_map(|item| resource_key(&item).map(|key| (key, item)))
-                .collect();
-            pm_cache.replace_all(keyed, resp.sync_version, resp.server_id.clone());
+            let total = items.len();
+            // Validate the WHOLE batch before touching the cache: a single
+            // keyless object or a duplicate key rejects everything, rather
+            // than silently applying the valid subset and advancing the
+            // sync version past data the cache never actually received.
+            let mut keyed: Vec<(String, WatchedConfigData)> = Vec::with_capacity(total);
+            let mut seen_keys: std::collections::HashSet<String> =
+                std::collections::HashSet::with_capacity(total);
+            let mut keyless_count = 0usize;
+            let mut duplicate_count = 0usize;
+            for item in items {
+                match resource_key(&item) {
+                    None => keyless_count += 1,
+                    Some(key) => {
+                        if !seen_keys.insert(key.clone()) {
+                            duplicate_count += 1;
+                        }
+                        keyed.push((key, item));
+                    }
+                }
+            }
+            if keyless_count > 0 || duplicate_count > 0 {
+                fed_metrics::record_watch_list(
+                    PLUGIN_METADATA_KIND,
+                    fed_metrics::labels::watch_list_result::PARSE_ERROR,
+                );
+                tracing::warn!(
+                    component = "fed_server",
+                    controller_id = %cid,
+                    total_items = total,
+                    keyless_count,
+                    duplicate_count,
+                    "Rejecting WatchListResponse batch: keyless or duplicate-keyed object present"
+                );
+                return WatchOutcome::ParseError;
+            }
+            match pm_cache.replace_all(keyed, resp.sync_version, resp.server_id.clone()) {
+                ApplyResult::Overflow => {
+                    fed_metrics::record_watch_error(
+                        PLUGIN_METADATA_KIND,
+                        fed_metrics::labels::watch_error_reason::OVERFLOW,
+                    );
+                    pm_watch.terminate();
+                    tracing::warn!(
+                        component = "fed_server",
+                        controller_id = %cid,
+                        max_entries_per_controller = MAX_ENTRIES_PER_CONTROLLER,
+                        "federation watch cache exceeded MAX_ENTRIES_PER_CONTROLLER capacity; terminating watch (no re-watch)"
+                    );
+                    return WatchOutcome::Overflow;
+                }
+                ApplyResult::Applied => {}
+            }
             pm_watch.server_id = Some(resp.server_id);
             pm_watch.consecutive_errors = 0;
             fed_metrics::record_watch_list(
@@ -784,11 +925,33 @@ fn apply_watch_event(
         return WatchOutcome::Skipped;
     }
 
+    // (1b) Watch already terminated by a prior terminal error — skip
+    // silently. Nothing should still be delivering frames for a terminated
+    // watch, but if one arrives, do not resurrect the retry loop.
+    if pm_watch.is_terminated() {
+        return WatchOutcome::Skipped;
+    }
+
     // (2) Record delivery metric (direction = recv from Center's perspective).
     fed_metrics::record_watch_event(PLUGIN_METADATA_KIND, fed_metrics::labels::direction::RECV);
 
-    // (3) Error set — back off then re-watch.
+    // (3) Error set — terminal errors stop the watch; everything else backs
+    // off then re-watches.
     if !resp.error.is_empty() {
+        if resp.error == "Forbidden" {
+            fed_metrics::record_watch_error(
+                PLUGIN_METADATA_KIND,
+                fed_metrics::labels::watch_error_reason::TERMINAL,
+            );
+            pm_watch.terminate();
+            pm_cache.set_stale();
+            tracing::warn!(
+                component = "fed_server",
+                controller_id = %cid,
+                "federation watch terminated by Controller RBAC; re-register or fix center.rbac to restore the watch"
+            );
+            return WatchOutcome::Terminal;
+        }
         fed_metrics::record_watch_error(
             PLUGIN_METADATA_KIND,
             fed_metrics::labels::watch_error_reason::RECV_ERROR,
@@ -832,64 +995,12 @@ fn apply_watch_event(
         }
     }
 
-    // (5) Parse and classify events.
-    match serde_json::from_str::<Vec<WatchEventRaw>>(&resp.data) {
-        Ok(raw_events) => {
-            let mut events = Vec::new();
-            for raw in raw_events {
-                let event_type = match raw.event_type.as_str() {
-                    "add" => EventType::Add,
-                    "update" => EventType::Update,
-                    "delete" => EventType::Delete,
-                    other => {
-                        tracing::warn!(
-                            component = "fed_server",
-                            controller_id = %cid,
-                            event_type = other,
-                            "Unknown watch event type, skipping"
-                        );
-                        continue;
-                    }
-                };
-                match serde_json::from_str::<WatchedConfigData>(raw.data.get()) {
-                    Ok(item) => {
-                        let Some(key) = resource_key(&item) else {
-                            tracing::warn!(
-                                component = "fed_server",
-                                controller_id = %cid,
-                                "Watch event resource is missing metadata.name"
-                            );
-                            continue;
-                        };
-                        events.push(WatchEventSimple {
-                            event_type,
-                            key,
-                            data: item,
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            component = "fed_server",
-                            controller_id = %cid,
-                            error = %e,
-                            "Failed to parse watch event data as EdgionConfigData"
-                        );
-                    }
-                }
-            }
-            if !events.is_empty() {
-                pm_cache.apply_events(events, resp.sync_version, resp.server_id.clone());
-            }
-            pm_watch.server_id = Some(resp.server_id);
-            pm_watch.consecutive_errors = 0;
-            tracing::debug!(
-                component = "fed_server",
-                controller_id = %cid,
-                sync_version = resp.sync_version,
-                "EdgionConfigData WatchEventResponse applied"
-            );
-            WatchOutcome::Applied
-        }
+    // (5) Parse and classify events. The WHOLE batch is validated up front:
+    // any malformed body, unknown event type, or keyless object rejects the
+    // entire batch (cache untouched) instead of applying the valid subset
+    // and advancing the sync version past data the cache never received.
+    let raw_events = match serde_json::from_str::<Vec<WatchEventRaw>>(&resp.data) {
+        Ok(raw_events) => raw_events,
         Err(e) => {
             fed_metrics::record_watch_error(
                 PLUGIN_METADATA_KIND,
@@ -901,15 +1012,141 @@ fn apply_watch_event(
                 error = %e,
                 "Failed to parse WatchEventResponse data"
             );
-            WatchOutcome::ParseError
+            return WatchOutcome::ParseError;
+        }
+    };
+
+    let total = raw_events.len();
+    let mut events = Vec::with_capacity(total);
+    let mut unknown_type_count = 0usize;
+    let mut keyless_count = 0usize;
+    let mut body_parse_error_count = 0usize;
+    for raw in raw_events {
+        let event_type = match raw.event_type.as_str() {
+            "add" => EventType::Add,
+            "update" => EventType::Update,
+            "delete" => EventType::Delete,
+            _ => {
+                unknown_type_count += 1;
+                continue;
+            }
+        };
+        match serde_json::from_str::<WatchedConfigData>(raw.data.get()) {
+            Ok(item) => match resource_key(&item) {
+                Some(key) => events.push(WatchEventSimple {
+                    event_type,
+                    key,
+                    data: item,
+                }),
+                None => keyless_count += 1,
+            },
+            Err(_) => body_parse_error_count += 1,
         }
     }
+    if unknown_type_count > 0 || keyless_count > 0 || body_parse_error_count > 0 {
+        fed_metrics::record_watch_error(
+            PLUGIN_METADATA_KIND,
+            fed_metrics::labels::watch_error_reason::PARSE_ERROR,
+        );
+        tracing::warn!(
+            component = "fed_server",
+            controller_id = %cid,
+            total_events = total,
+            unknown_type_count,
+            keyless_count,
+            body_parse_error_count,
+            "Rejecting WatchEventResponse batch: malformed or unknown-type event present"
+        );
+        return WatchOutcome::ParseError;
+    }
+
+    // (6) Version-gap check — only meaningful once the cache has actually
+    // observed a version. A non-monotonic batch version means the cache has
+    // missed or diverged from the controller's event stream; re-watch from 0
+    // rather than applying data on top of a state we can no longer trust.
+    let cache_version = pm_cache.get_sync_version();
+    if cache_version > 0 && resp.sync_version <= cache_version {
+        fed_metrics::record_watch_error(
+            PLUGIN_METADATA_KIND,
+            fed_metrics::labels::watch_error_reason::VERSION_GAP,
+        );
+        tracing::warn!(
+            component = "fed_server",
+            controller_id = %cid,
+            cache_version,
+            batch_version = resp.sync_version,
+            "WatchEventResponse batch version is not monotonic, re-watching from 0"
+        );
+        return WatchOutcome::ReWatch;
+    }
+
+    if !events.is_empty() {
+        match pm_cache.apply_events(events, resp.sync_version, resp.server_id.clone()) {
+            ApplyResult::Overflow => {
+                fed_metrics::record_watch_error(
+                    PLUGIN_METADATA_KIND,
+                    fed_metrics::labels::watch_error_reason::OVERFLOW,
+                );
+                pm_watch.terminate();
+                tracing::warn!(
+                    component = "fed_server",
+                    controller_id = %cid,
+                    max_entries_per_controller = MAX_ENTRIES_PER_CONTROLLER,
+                    "federation watch cache exceeded MAX_ENTRIES_PER_CONTROLLER capacity; terminating watch (no re-watch)"
+                );
+                return WatchOutcome::Overflow;
+            }
+            ApplyResult::Applied => {}
+        }
+    }
+    pm_watch.server_id = Some(resp.server_id);
+    pm_watch.consecutive_errors = 0;
+    tracing::debug!(
+        component = "fed_server",
+        controller_id = %cid,
+        sync_version = resp.sync_version,
+        "EdgionConfigData WatchEventResponse applied"
+    );
+    WatchOutcome::Applied
+}
+
+/// Sleep for the backoff duration, then send a re-watch request — unless the
+/// session closes first, in which case the caller must stop the message loop.
+///
+/// Shared by both the list and event watch arms in the stream loop: both
+/// `WatchOutcome::BackoffReWatch` (recoverable server-reported error) and
+/// `WatchOutcome::ParseError` (malformed/non-atomic batch) resync the same
+/// way, so they share this one implementation rather than duplicating the
+/// `tokio::select!` backoff dance.
+///
+/// Returns `true` if the caller should `break` out of the message loop
+/// (session closed during the backoff sleep), `false` otherwise.
+async fn backoff_then_rewatch(
+    cid: &str,
+    heartbeat_cancel: &tokio_util::sync::CancellationToken,
+    inner_tx: &mpsc::Sender<CenterMessage>,
+    pm_watch: &mut FedWatchState,
+) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
+        _ = heartbeat_cancel.cancelled() => return true,
+        _ = inner_tx.closed() => {
+            tracing::debug!(
+                component = "fed_server",
+                controller_id = %cid,
+                "Session closed during backoff, stopping re-watch"
+            );
+            return true;
+        }
+    }
+    let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
+    let _ = inner_tx.send(re_watch_msg).await;
+    false
 }
 
 pub struct FederationGrpcServer {
     pub registry: ControllerRegistry,
     pub aggregator: Arc<ResourceAggregator>,
-    pub pending_commands: PendingCommandMap,
     pub pending_proxies: PendingProxyMap,
     pub sync_config: CenterSyncConfig,
     pub sync_client: Arc<CenterSyncClient>,
@@ -939,7 +1176,6 @@ impl FederationGrpcServer {
         Self {
             registry,
             aggregator,
-            pending_commands: Arc::new(Mutex::new(HashMap::new())),
             pending_proxies,
             sync_config,
             sync_client,
@@ -1016,7 +1252,6 @@ impl FederationSync for FederationGrpcServer {
                 cluster_len = register_req.cluster.len(),
                 env_len = register_req.env.len(),
                 tag_len = register_req.tag.len(),
-                supported_kinds_len = register_req.supported_kinds.len(),
                 "Rejected RegisterRequest: shape validation failed"
             );
             return Err(Status::invalid_argument(
@@ -1284,13 +1519,7 @@ impl FederationSync for FederationGrpcServer {
         let watch_request_id = Uuid::new_v4().to_string();
 
         let _ = inner_tx
-            .send(CenterMessage {
-                payload: Some(CenterPayload::WatchRequest(FedWatchRequest {
-                    request_id: watch_request_id.clone(),
-                    kind: PLUGIN_METADATA_KIND.to_string(),
-                    from_version,
-                })),
-            })
+            .send(initial_watch_request(&watch_request_id, from_version))
             .await;
 
         tracing::debug!(
@@ -1303,7 +1532,6 @@ impl FederationSync for FederationGrpcServer {
 
         let registry = self.registry.clone();
         let aggregator = self.aggregator.clone();
-        let pending_commands = self.pending_commands.clone();
         let pending_proxies = self.pending_proxies.clone();
         let sync_client = self.sync_client.clone();
         let directory_for_offline = self.controller_directory.clone();
@@ -1543,17 +1771,12 @@ impl FederationSync for FederationGrpcServer {
                                             sync_version: None,
                                             watch_server_id: None,
                                             resource_count: None,
+                                            resource_counts_by_kind: None,
                                             stats_updated_unix_ms: None,
                                             watch_updated_unix_ms: None,
                                             observed_at_unix_ms: next_observed_at_ms(),
                                         });
                                     }
-                                Some(CtrlPayload::CommandResponse(resp)) => {
-                                    if !ownership_valid.load(Ordering::SeqCst) { continue; }
-                                    if let Some(sender) = pending_commands.lock().remove(&resp.request_id) {
-                                        let _ = sender.send(resp);
-                                    }
-                                }
                                 Some(CtrlPayload::HttpProxyResponse(resp)) => {
                                     if !ownership_valid.load(Ordering::SeqCst) { continue; }
                                     if let Some(tx) = self_pending_proxies.lock().remove(&resp.request_id) {
@@ -1564,21 +1787,34 @@ impl FederationSync for FederationGrpcServer {
                                     if !ownership_valid.load(Ordering::SeqCst) { continue; }
                                     let sync_version = resp.sync_version;
                                     let server_id = resp.server_id.clone();
-                                    if apply_watch_list(&cid, &pm_cache, &mut pm_watch, resp)
-                                        == WatchOutcome::Applied
-                                    {
-                                        let updated_at = next_observed_at_ms();
-                                        runtime_projector.submit(ControllerRuntimeObservation {
-                                                controller_id: ControllerId::new(cid.clone()).expect("validated controller id"),
-                                                session_id: SessionId::new(sid.clone()).expect("generated session id"),
-                                                ownership_fence: ownership_fence.clone(),
-                                                sync_version: Some(sync_version),
-                                                watch_server_id: Some(server_id),
-                                                resource_count: None,
-                                                stats_updated_unix_ms: None,
-                                                watch_updated_unix_ms: Some(updated_at),
-                                                observed_at_unix_ms: updated_at,
-                                            });
+                                    match apply_watch_list(&cid, &pm_cache, &mut pm_watch, resp) {
+                                        WatchOutcome::Applied => {
+                                            let updated_at = next_observed_at_ms();
+                                            runtime_projector.submit(ControllerRuntimeObservation {
+                                                    controller_id: ControllerId::new(cid.clone()).expect("validated controller id"),
+                                                    session_id: SessionId::new(sid.clone()).expect("generated session id"),
+                                                    ownership_fence: ownership_fence.clone(),
+                                                    sync_version: Some(sync_version),
+                                                    watch_server_id: Some(server_id),
+                                                    resource_count: None,
+                                                    resource_counts_by_kind: None,
+                                                    stats_updated_unix_ms: None,
+                                                    watch_updated_unix_ms: Some(updated_at),
+                                                    observed_at_unix_ms: updated_at,
+                                                });
+                                        }
+                                        WatchOutcome::ParseError
+                                            if backoff_then_rewatch(&cid, &heartbeat_cancel, &inner_tx, &mut pm_watch).await =>
+                                        {
+                                            break;
+                                        }
+                                        WatchOutcome::Overflow => {
+                                            // Watch stopped by capacity overflow (like
+                                            // Terminal): no re-watch, no sleep — the
+                                            // apply function already warned and
+                                            // terminated the watch state.
+                                        }
+                                        _ => {}
                                     }
                                 }
                                 Some(CtrlPayload::WatchEventResponse(resp)) => {
@@ -1586,23 +1822,11 @@ impl FederationSync for FederationGrpcServer {
                                     let sync_version = resp.sync_version;
                                     let server_id = resp.server_id.clone();
                                     match apply_watch_event(&cid, &pm_cache, &mut pm_watch, resp) {
-                                        WatchOutcome::BackoffReWatch => {
+                                        WatchOutcome::BackoffReWatch | WatchOutcome::ParseError => {
                                             // Backoff before retrying to avoid tight loop.
-                                            // Use select! to detect session close during sleep.
-                                            tokio::select! {
-                                                _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
-                                                _ = heartbeat_cancel.cancelled() => break,
-                                                _ = inner_tx.closed() => {
-                                                    tracing::debug!(
-                                                        component = "fed_server",
-                                                        controller_id = %cid,
-                                                        "Session closed during backoff, stopping re-watch"
-                                                    );
-                                                    break;
-                                                }
+                                            if backoff_then_rewatch(&cid, &heartbeat_cancel, &inner_tx, &mut pm_watch).await {
+                                                break;
                                             }
-                                            let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
-                                            let _ = inner_tx.send(re_watch_msg).await;
                                         }
                                         WatchOutcome::ReWatch => {
                                             let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
@@ -1617,10 +1841,22 @@ impl FederationSync for FederationGrpcServer {
                                                     sync_version: Some(sync_version),
                                                     watch_server_id: Some(server_id),
                                                     resource_count: None,
+                                                    resource_counts_by_kind: None,
                                                     stats_updated_unix_ms: None,
                                                     watch_updated_unix_ms: Some(updated_at),
                                                     observed_at_unix_ms: updated_at,
                                                 });
+                                        }
+                                        WatchOutcome::Terminal => {
+                                            // Watch stopped by a terminal error (e.g. RBAC
+                                            // denial). No re-watch, no sleep: the session
+                                            // must be re-registered to restore the watch.
+                                        }
+                                        WatchOutcome::Overflow => {
+                                            // Watch stopped by capacity overflow (like
+                                            // Terminal): no re-watch, no sleep — the
+                                            // apply function already warned and
+                                            // terminated the watch state.
                                         }
                                         _ => {}
                                     }
@@ -1628,8 +1864,19 @@ impl FederationSync for FederationGrpcServer {
                                 Some(CtrlPayload::StatsReport(report)) => {
                                     if !ownership_valid.load(Ordering::SeqCst) { continue; }
                                     // Push from Controller summarising per-kind resource counts.
-                                    // Stored in aggregator and exposed via the API layer.
-                                    aggregator_for_stats.update_stats(&cid, report.per_kind, report.total as u64);
+                                    // The bound is computed ONCE here and the same value feeds
+                                    // both consumers below, so neither can hold an unbounded
+                                    // map: the aggregator (the fallback the API always uses in
+                                    // standalone-SQL deployments, since the SQL adapter
+                                    // hardcodes the directory record's stats fields to None)
+                                    // and the durable runtime observation projected for the
+                                    // CRD path.
+                                    let resource_counts_by_kind = bounded_per_kind(report.per_kind);
+                                    aggregator_for_stats.update_stats(
+                                        &cid,
+                                        resource_counts_by_kind.clone(),
+                                        report.total as u64,
+                                    );
                                     let updated_at = next_observed_at_ms();
                                     runtime_projector.submit(ControllerRuntimeObservation {
                                             controller_id: ControllerId::new(cid.clone()).expect("validated controller id"),
@@ -1638,6 +1885,7 @@ impl FederationSync for FederationGrpcServer {
                                             sync_version: None,
                                             watch_server_id: None,
                                             resource_count: Some(report.total as u64),
+                                            resource_counts_by_kind,
                                             stats_updated_unix_ms: Some(updated_at),
                                             watch_updated_unix_ms: None,
                                             observed_at_unix_ms: updated_at,
@@ -2009,6 +2257,7 @@ mod tests {
             sync_version: Some(1),
             watch_server_id: Some("server-1".to_string()),
             resource_count: None,
+            resource_counts_by_kind: None,
             stats_updated_unix_ms: None,
             watch_updated_unix_ms: Some(1),
             observed_at_unix_ms: 1,
@@ -2056,6 +2305,7 @@ mod tests {
             sync_version: Some(1),
             watch_server_id: Some("server-1".to_string()),
             resource_count: None,
+            resource_counts_by_kind: None,
             stats_updated_unix_ms: None,
             watch_updated_unix_ms: Some(1),
             observed_at_unix_ms: 1,
@@ -2105,7 +2355,6 @@ mod tests {
             cluster: "cluster-a".to_string(),
             env: vec!["prod".to_string()],
             tag: vec!["region:us".to_string()],
-            supported_kinds: vec!["EdgionConfigData".to_string()],
         }
     }
 
@@ -2183,13 +2432,6 @@ mod tests {
     fn validate_rejects_overlong_tag_item() {
         let mut r = ok_req();
         r.tag = vec!["t".repeat(MAX_TAG_LEN + 1)];
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_too_many_supported_kinds() {
-        let mut r = ok_req();
-        r.supported_kinds = (0..(MAX_LIST_ITEMS + 1)).map(|i| format!("K{i}")).collect();
         assert!(validate_register_req(&r).is_err());
     }
 
@@ -2346,6 +2588,30 @@ mod tests {
     }
 
     #[test]
+    fn apply_watch_list_skips_on_terminated_state() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        pm_watch.terminate();
+
+        // A valid, matching-request_id list frame arrives after termination.
+        let resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data: list_json(&[("default", "pm-a")]),
+            sync_version: 42,
+            server_id: "srv-1".to_string(),
+        };
+
+        let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::Skipped);
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "cache must not be updated by a frame on a terminated watch"
+        );
+    }
+
+    #[test]
     fn apply_watch_list_parse_error() {
         let pm_cache = make_pm_cache();
         let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
@@ -2390,6 +2656,72 @@ mod tests {
     }
 
     #[test]
+    fn apply_watch_list_rejects_batch_with_keyless_object() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let valid: serde_json::Value = serde_json::from_str(&pm_json("default", "pm-a")).unwrap();
+        let keyless = serde_json::json!({
+            "apiVersion": "edgion.io/v1",
+            "kind": "EdgionConfigData",
+            "metadata": {"namespace": "default"},
+            "spec": {
+                "enable": true,
+                "data": {
+                    "type": "KeyList",
+                    "config": {"items": [{"name": "g1", "items": [{"key": "k1"}]}]}
+                }
+            }
+        });
+        let data = serde_json::to_vec(&vec![valid, keyless]).unwrap();
+
+        let resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data,
+            sync_version: 42,
+            server_id: "srv-1".to_string(),
+        };
+
+        let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ParseError);
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "cache must be untouched when a batch member is keyless"
+        );
+        assert!(
+            pm_cache.snapshot_keys().is_empty(),
+            "no entries must be applied from a rejected batch"
+        );
+    }
+
+    #[test]
+    fn apply_watch_list_rejects_duplicate_keys() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        // Two docs that resolve to the same resource_key ("default/pm-a").
+        let data = list_json(&[("default", "pm-a"), ("default", "pm-a")]);
+
+        let resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data,
+            sync_version: 42,
+            server_id: "srv-1".to_string(),
+        };
+
+        let outcome = apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ParseError);
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            0,
+            "cache must be untouched when the batch has a duplicate key"
+        );
+    }
+
+    #[test]
     fn watch_list_response_prost_round_trip_preserves_data_bytes() {
         let expected = FedWatchListResponse {
             request_id: "req-1".to_string(),
@@ -2403,6 +2735,14 @@ mod tests {
 
         assert_eq!(decoded, expected);
         assert_eq!(decoded.data, vec![0x00, 0xff, b'{', b'}']);
+    }
+
+    #[test]
+    fn fed_decode_limit_covers_controller_proxy_response_cap() {
+        // Controller-side cap: 10 MiB response body (fed_client MAX body read),
+        // plus headroom for headers/envelope. See the spec, section 2 (F2).
+        const CONTROLLER_PROXY_RESPONSE_CAP: usize = 10 * 1024 * 1024;
+        const { assert!(MAX_FED_DECODE_MESSAGE_BYTES >= CONTROLLER_PROXY_RESPONSE_CAP + 64 * 1024) };
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -2554,6 +2894,75 @@ mod tests {
     }
 
     #[test]
+    fn apply_watch_event_forbidden_is_terminal() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let make_forbidden_resp = || FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: String::new(),
+            sync_version: 0,
+            server_id: String::new(),
+            error: "Forbidden".to_string(),
+        };
+
+        // Forbidden terminates the watch instead of backing off.
+        let outcome1 =
+            apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, make_forbidden_resp());
+        assert_eq!(outcome1, WatchOutcome::Terminal);
+        assert!(pm_watch.is_terminated());
+
+        // A second frame arriving after termination is skipped, not retried.
+        let outcome2 =
+            apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, make_forbidden_resp());
+        assert_eq!(outcome2, WatchOutcome::Skipped);
+    }
+
+    #[test]
+    fn forbidden_terminal_marks_cache_stale() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        let forbidden_resp = FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: String::new(),
+            sync_version: 0,
+            server_id: String::new(),
+            error: "Forbidden".to_string(),
+        };
+
+        assert!(!pm_cache.status().stale, "cache must start fresh");
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, forbidden_resp);
+        assert_eq!(outcome, WatchOutcome::Terminal);
+        assert!(pm_watch.is_terminated());
+        assert!(
+            pm_cache.status().stale,
+            "a terminated (Forbidden) watch must mark its cache stale so freshness reporting is honest"
+        );
+    }
+
+    #[test]
+    fn terminal_watch_state_never_rewatches() {
+        // After FedWatchState::terminate(), is_terminated() is true and the
+        // stream loop contract is: no re_watch message is minted.
+        let mut state = FedWatchState::new("r1".to_string(), None);
+        state.terminate();
+        assert!(state.is_terminated());
+    }
+
+    #[test]
+    fn initial_watch_request_resumes_from_cached_version() {
+        let msg = initial_watch_request("req-1", 42);
+        let Some(CenterPayload::WatchRequest(req)) = msg.payload else {
+            panic!("expected WatchRequest");
+        };
+        assert_eq!(req.request_id, "req-1");
+        assert_eq!(req.kind, PLUGIN_METADATA_KIND);
+        assert_eq!(req.from_version, 42);
+    }
+
+    #[test]
     fn apply_watch_event_parse_error() {
         let pm_cache = make_pm_cache();
         let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
@@ -2572,11 +2981,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_watch_event_unknown_type_skipped() {
+    fn apply_watch_event_unknown_type_rejects_batch() {
         let pm_cache = make_pm_cache();
         let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
 
-        // One unknown event (warned and skipped) plus one valid add event.
+        // One unknown event type plus one otherwise-valid sibling add event.
         let resp = FedWatchEventResponse {
             request_id: "req-1".to_string(),
             data: event_json(
@@ -2593,32 +3002,125 @@ mod tests {
 
         let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
 
-        // Applied: the valid add event was processed; bogus_type was warned and skipped.
-        assert_eq!(outcome, WatchOutcome::Applied);
-        assert_eq!(pm_cache.get_sync_version(), 1);
-
-        // Verify that the unknown-type event was dropped (not inserted under any key) and
-        // only the one valid add event landed in the cache.
-        //
-        // If the unknown type were mistakenly treated as an add, there would be 2 keys.
-        // If the valid add were also dropped, there would be 0 keys.
-        let keys = pm_cache.snapshot_keys();
+        // The whole batch is rejected: an unknown event type anywhere in the
+        // batch means nothing is applied, including the valid sibling event.
+        assert_eq!(outcome, WatchOutcome::ParseError);
         assert_eq!(
-            keys.len(),
-            1,
-            "unknown-type event must be dropped; exactly 1 key expected; got: {:?}",
-            keys
+            pm_cache.get_sync_version(),
+            0,
+            "cache must be untouched when the batch has an unknown event type"
         );
-
-        // The valid add must be present.
         assert!(
-            pm_cache.get_entry("default/pm-valid").is_some(),
-            "valid add event must insert default/pm-valid"
+            pm_cache.get_entry("default/pm-valid").is_none(),
+            "valid sibling event must not be applied when the batch is rejected"
         );
-        // The unknown-type event must not have produced a cache entry.
         assert!(
             pm_cache.get_entry("default/pm-x").is_none(),
             "unknown-type event must not insert default/pm-x"
+        );
+    }
+
+    #[test]
+    fn apply_watch_event_rejects_partial_batch() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        // Seed the cache via a valid list at version 10.
+        let seed_resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data: list_json(&[("default", "seed1")]),
+            sync_version: 10,
+            server_id: "srv-1".to_string(),
+        };
+        assert_eq!(
+            apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, seed_resp),
+            WatchOutcome::Applied
+        );
+
+        // Event batch: one valid add + one keyless event, at version 11.
+        let valid_add = serde_json::json!({
+            "type": "add",
+            "data": serde_json::from_str::<serde_json::Value>(&pm_json("default", "new-pm")).unwrap(),
+            "sync_version": 11
+        });
+        let keyless_doc = serde_json::json!({
+            "apiVersion": "edgion.io/v1",
+            "kind": "EdgionConfigData",
+            "metadata": {"namespace": "default"},
+            "spec": {
+                "enable": true,
+                "data": {"type": "KeyList", "config": {"items": []}}
+            }
+        });
+        let keyless_event = serde_json::json!({
+            "type": "add",
+            "data": keyless_doc,
+            "sync_version": 11
+        });
+        let data = serde_json::to_string(&vec![valid_add, keyless_event]).unwrap();
+
+        let resp = FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data,
+            sync_version: 11,
+            server_id: "srv-1".to_string(),
+            error: String::new(),
+        };
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ParseError);
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            10,
+            "cache must stay at the seeded version when the batch is rejected"
+        );
+        let keys = pm_cache.snapshot_keys();
+        assert_eq!(
+            keys,
+            vec!["default/seed1".to_string()],
+            "only the seeded entry must remain"
+        );
+    }
+
+    #[test]
+    fn apply_watch_event_version_gap_rewatches() {
+        let pm_cache = make_pm_cache();
+        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+
+        // Seed the cache via a valid list at version 20.
+        let seed_resp = FedWatchListResponse {
+            request_id: "req-1".to_string(),
+            data: list_json(&[("default", "seed1")]),
+            sync_version: 20,
+            server_id: "srv-1".to_string(),
+        };
+        assert_eq!(
+            apply_watch_list("test-ctrl", &pm_cache, &mut pm_watch, seed_resp),
+            WatchOutcome::Applied
+        );
+
+        // Event batch carrying a non-monotonic sync_version (equal to the
+        // cache's current version).
+        let resp = FedWatchEventResponse {
+            request_id: "req-1".to_string(),
+            data: event_json(&[("add", "default", "new-pm")], 20),
+            sync_version: 20,
+            server_id: "srv-1".to_string(),
+            error: String::new(),
+        };
+
+        let outcome = apply_watch_event("test-ctrl", &pm_cache, &mut pm_watch, resp);
+
+        assert_eq!(outcome, WatchOutcome::ReWatch);
+        assert_eq!(
+            pm_cache.get_sync_version(),
+            20,
+            "cache must stay at the seeded version on a version gap"
+        );
+        assert!(
+            pm_cache.get_entry("default/new-pm").is_none(),
+            "event must not be applied on a version gap"
         );
     }
 
@@ -2635,7 +3137,6 @@ mod tests {
             cluster: "cluster-a".to_string(),
             env: vec!["prod".to_string()],
             tag: vec!["region:us".to_string()],
-            supported_kinds: vec!["EdgionConfigData".to_string()],
         };
 
         // New session s2 is authoritative.
@@ -2665,5 +3166,95 @@ mod tests {
             .map(|s| s.online)
             .unwrap_or(false);
         assert!(online, "controller must stay online after stale offline");
+    }
+
+    #[test]
+    fn bounded_per_kind_accepts_a_normal_report() {
+        let mut per_kind = HashMap::new();
+        per_kind.insert("EdgionConfigData".to_string(), 5u32);
+        per_kind.insert("EdgionRoute".to_string(), 3u32);
+        per_kind.insert("EdgionUpstream".to_string(), 1u32);
+
+        let bounded = bounded_per_kind(per_kind).expect("normal report must be accepted");
+
+        let mut expected = std::collections::BTreeMap::new();
+        expected.insert("EdgionConfigData".to_string(), 5u32);
+        expected.insert("EdgionRoute".to_string(), 3u32);
+        expected.insert("EdgionUpstream".to_string(), 1u32);
+        assert_eq!(bounded, expected);
+    }
+
+    #[test]
+    fn bounded_per_kind_rejects_oversized_maps_instead_of_truncating() {
+        let mut too_many_kinds = HashMap::new();
+        for index in 0..(MAX_STATS_KINDS + 1) {
+            too_many_kinds.insert(format!("kind-{index}"), 1u32);
+        }
+        assert_eq!(
+            bounded_per_kind(too_many_kinds),
+            None,
+            "a map with more than MAX_STATS_KINDS entries must be dropped, not truncated"
+        );
+
+        let mut key_too_long = HashMap::new();
+        key_too_long.insert("k".repeat(MAX_STATS_KIND_LEN + 1), 1u32);
+        assert_eq!(
+            bounded_per_kind(key_too_long),
+            None,
+            "a key longer than MAX_STATS_KIND_LEN must be dropped, not truncated"
+        );
+    }
+
+    /// The bound must be computed ONCE at ingest and fed to both consumers:
+    /// the aggregator (the fallback path the API always uses in
+    /// standalone-SQL deployments, since the SQL adapter hardcodes the
+    /// directory record's stats fields to None) and the durable runtime
+    /// observation stored for the CRD path. An oversized map must be DROPPED
+    /// on both, never truncated, while the scalar total keeps flowing.
+    #[test]
+    fn oversized_per_kind_is_dropped_on_both_ingest_paths() {
+        let aggregator = ResourceAggregator::new();
+        aggregator.set_controller_info(
+            "cid",
+            ControllerInfo {
+                controller_id: "cid".to_string(),
+                cluster: "cluster-a".to_string(),
+                environments: vec![],
+                tags: vec![],
+            },
+        );
+
+        let mut oversized = HashMap::new();
+        for index in 0..(MAX_STATS_KINDS + 1) {
+            oversized.insert(format!("kind-{index}"), 1u32);
+        }
+        let total = oversized.len() as u64;
+
+        // This mirrors exactly what the StatsReport arm in `handle` does:
+        // bound once, then feed the SAME value into both the aggregator
+        // (fallback path) and what would become the runtime observation
+        // (CRD path) — never the raw, unbounded report.per_kind.
+        let bounded_for_observation = bounded_per_kind(oversized);
+        aggregator.update_stats("cid", bounded_for_observation.clone(), total);
+
+        assert_eq!(
+            bounded_for_observation, None,
+            "the same bound applied to the observation must also reject the oversized map"
+        );
+
+        let summaries = aggregator.controller_summaries();
+        let summary = summaries
+            .iter()
+            .find(|s| s.controller_id == "cid")
+            .expect("controller present");
+        assert_eq!(
+            summary.per_kind, None,
+            "an oversized per_kind map must be dropped, never truncated or exposed"
+        );
+        assert_eq!(
+            summary.key_count,
+            Some(total),
+            "the scalar total must still flow even when the per-kind map is dropped"
+        );
     }
 }

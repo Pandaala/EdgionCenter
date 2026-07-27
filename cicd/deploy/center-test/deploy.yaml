@@ -109,7 +109,7 @@ data:
       metrics_addr: 0.0.0.0:12290
 
     sync:
-      command_timeout_secs: 30
+      command_timeout_secs: 25
       ping_interval_secs: 5
 
     database:

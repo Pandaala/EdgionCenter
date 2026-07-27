@@ -196,7 +196,11 @@ impl ProxyForwarder {
         })?
     }
 
-    fn local_session_is_dispatchable(&self, controller_id: &str) -> bool {
+    /// Whether this replica holds a dispatchable local session for the
+    /// Controller. It answers two questions at once: writes reach it without
+    /// a replica hop, AND this process's watch cache is the one fed by that
+    /// Controller — so only here can convergence be observed locally.
+    pub fn local_session_is_dispatchable(&self, controller_id: &str) -> bool {
         self.registry
             .get_session(controller_id)
             .is_some_and(|session| {
@@ -432,10 +436,7 @@ impl crate::poll::ControllerHttpClient for ProxyForwarder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        federation::proto::{command_request::Command, CommandResponse},
-        internal_forwarding::{ForwardError, InternalForwardTransport},
-    };
+    use crate::internal_forwarding::{ForwardError, InternalForwardTransport};
     use edgion_center_core::{
         ControllerId, ControllerOwnerLocator, ControllerOwnerRoute, CoreResult, OwnershipFence,
     };
@@ -453,16 +454,6 @@ mod tests {
 
     #[async_trait::async_trait]
     impl InternalForwardTransport for RecordingTransport {
-        async fn forward_command(
-            &self,
-            _: &ControllerOwnerRoute,
-            _: &str,
-            _: Command,
-            _: Duration,
-        ) -> Result<CommandResponse, ForwardError> {
-            unreachable!()
-        }
-
         async fn forward_http(
             &self,
             route: &ControllerOwnerRoute,

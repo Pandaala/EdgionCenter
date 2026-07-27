@@ -45,7 +45,7 @@ Center owns orchestration, targeting, aggregation, drift, desired-state persiste
 
 Controller remains authoritative for federation identity authorization, resource CRUD, optimistic concurrency, schema validation, reference resolution, status, ConfCenter persistence, requeue, and Gateway synchronization. Gateway remains the runtime enforcement boundary.
 
-The MVP uses the existing generic Controller Admin HTTP proxy. It adds no resource-specific Controller endpoint, ResourceKind, or federation protobuf message. The current protobuf apply/delete commands are not usable because the Controller handles only reload. Generic multi-kind reverse-watch multiplexing is an optional later optimization; the current Controller keeps one active reverse-watch task.
+The MVP uses the existing generic Controller Admin HTTP proxy. It adds no resource-specific Controller endpoint, ResourceKind, or federation protobuf message; the federation Command channel (apply/delete/reload) has been removed entirely, so this proxy is the only path. Generic multi-kind reverse-watch multiplexing is an optional later optimization; the current Controller keeps one active reverse-watch task.
 
 ## Failure rules
 

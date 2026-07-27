@@ -7,7 +7,7 @@ import {
 
 function groupWith(...objects: GlobalResourceComparisonGroup['members'][number]['object'][]) {
   return {
-    key: { kind: 'HTTPRoute', namespace: 'edgion-system', name: 'public-route' },
+    key: { kind: 'EdgionConfigData', namespace: 'edgion-system', name: 'public-route' },
     members: objects.map((object, index) => ({
       cluster: `cluster-${index}`,
       controllerId: `controller-${index}`,

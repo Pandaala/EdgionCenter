@@ -23,9 +23,6 @@ pub mod aggregator {
 }
 
 pub mod api;
-pub mod commander {
-    pub use edgion_center_runtime::commander::*;
-}
 pub mod common;
 pub mod fed_sync;
 pub mod metadata_store {

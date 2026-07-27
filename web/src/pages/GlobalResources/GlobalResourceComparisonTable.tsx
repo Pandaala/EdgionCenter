@@ -3,6 +3,7 @@ import type { ColumnsType } from 'antd/es/table'
 import type { GlobalResourceComparisonGroup } from '@/api/globalResources'
 import { useT } from '@/i18n'
 import { getGlobalResourceConsistency } from './globalResourceConsistency'
+import { getWorstSyncState, SYNC_STATE_TAG_COLOR } from './globalResourceSyncState'
 
 interface Props {
   groups: readonly GlobalResourceComparisonGroup[]
@@ -54,6 +55,17 @@ export default function GlobalResourceComparisonTable({
           ))}
         </>
       ),
+    },
+    {
+      title: t('globalResources.column.sync'),
+      render: (_, group) => {
+        const state = getWorstSyncState(group.members)
+        return (
+          <Tag color={SYNC_STATE_TAG_COLOR[state]} data-testid={`global-resource-sync-${state}`}>
+            {t(`globalResources.syncState.${state}`)}
+          </Tag>
+        )
+      },
     },
     {
       title: t('globalResources.column.actions'),

@@ -22,8 +22,8 @@ sync:
   list_interval_secs: 300
   # Timeout waiting for ListResponse (seconds, default: 30)
   list_timeout_secs: 30
-  # Timeout waiting for CommandResponse (seconds, default: 30)
-  command_timeout_secs: 30
+  # Timeout waiting for CommandResponse (seconds, default: 25)
+  command_timeout_secs: 25
   # Heartbeat ping interval sent to controllers (seconds, default: 30)
   ping_interval_secs: 30
 

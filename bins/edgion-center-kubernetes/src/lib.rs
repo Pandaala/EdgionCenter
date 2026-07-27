@@ -9,7 +9,6 @@ use edgion_center_adapter_kubernetes::{
 use edgion_center_app::{
     aggregator::{FedAggregatorMetrics, ResourceAggregator},
     api::{self, ApiState},
-    commander::Commander,
     common::{self, audit::AuditSink, unified_auth::UnifiedAuthState},
     fed_sync::{
         registry::{ControllerRegistry, FedRegistryMetrics},
@@ -320,14 +319,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         )),
         local_holder: identity.holder.clone(),
     };
-    let commander = Arc::new(
-        Commander::new(
-            registry.clone(),
-            grpc_server.pending_commands.clone(),
-            config.sync.command_timeout_secs,
-        )
-        .with_owner_forwarding(owner_forwarding.clone()),
-    );
     let ownership_tasks = grpc_server.ownership_tasks();
     let runtime_projection_handle = grpc_server.runtime_projection_handle();
     let proxy = Arc::new(
@@ -337,14 +328,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
             config.sync.command_timeout_secs,
         )
         .with_owner_forwarding(owner_forwarding.clone()),
-    );
-    let global_resources = Arc::new(
-        edgion_center_runtime::global_resources::GlobalResourcesService::new_kubernetes(
-            directory.clone(),
-            owner_locator.clone(),
-            proxy.clone(),
-            config.global_resources.clone(),
-        ),
     );
     let global_resource_sync = {
         let planner = Arc::new(
@@ -380,7 +363,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         ),
     );
     let internal_service = InternalForwardingService::new(
-        commander.clone(),
         proxy.clone(),
         local_evictor.clone(),
         identity.holder.clone(),
@@ -390,10 +372,8 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
     );
     let api_state = ApiState {
         aggregator: aggregator.clone(),
-        commander,
         proxy: proxy.clone(),
         controller_directory: Some(directory.clone()),
-        global_resources: Some(global_resources),
         global_resource_sync: Some(global_resource_sync),
         controller_evictor,
         user_admin: None,
@@ -486,7 +466,10 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         .http2_keepalive_timeout(Some(Duration::from_secs(5)))
         .tls_config(grpc_tls)?
         .add_service(
-            common::fed_sync::proto::federation_sync_server::FederationSyncServer::new(grpc_server),
+            common::fed_sync::proto::federation_sync_server::FederationSyncServer::new(grpc_server)
+                .max_decoding_message_size(
+                    edgion_center_runtime::federation::server::MAX_FED_DECODE_MESSAGE_BYTES,
+                ),
         );
     tasks.spawn(async move {
         let result = grpc_service
@@ -966,6 +949,7 @@ mod tests {
             sync_version: None,
             watch_server_id: None,
             resource_count: None,
+            resource_counts_by_kind: None,
             stats_updated_unix_ms: None,
             watch_updated_unix_ms: None,
             phase: ControllerPhase::Online,
@@ -995,6 +979,7 @@ mod tests {
             sync_version: None,
             watch_server_id: None,
             resource_count: None,
+            resource_counts_by_kind: None,
             stats_updated_unix_ms: None,
             watch_updated_unix_ms: None,
             phase: ControllerPhase::Online,

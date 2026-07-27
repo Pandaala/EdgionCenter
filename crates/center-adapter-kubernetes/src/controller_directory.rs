@@ -287,6 +287,7 @@ impl ControllerDirectory for KubernetesControllerDirectory {
                     sync_version: None,
                     watch_server_id: None,
                     resource_count: None,
+                    resource_counts_by_kind: None,
                     stats_updated_unix_ms: None,
                     watch_updated_unix_ms: None,
                     last_seen_time: last_seen_time.clone(),
@@ -364,6 +365,9 @@ impl ControllerDirectory for KubernetesControllerDirectory {
                         .as_ref()
                         .and_then(|status| status.watch_server_id.clone()),
                     resource_count: current.as_ref().and_then(|status| status.resource_count),
+                    resource_counts_by_kind: current
+                        .as_ref()
+                        .and_then(|status| status.resource_counts_by_kind.clone()),
                     stats_updated_unix_ms: current
                         .as_ref()
                         .and_then(|status| status.stats_updated_unix_ms),
@@ -425,6 +429,7 @@ impl ControllerDirectory for KubernetesControllerDirectory {
                 sync_version: status.sync_version,
                 watch_server_id: status.watch_server_id,
                 resource_count: status.resource_count,
+                resource_counts_by_kind: status.resource_counts_by_kind,
                 stats_updated_unix_ms: status.stats_updated_unix_ms,
                 watch_updated_unix_ms: status.watch_updated_unix_ms,
                 phase: match status.phase {
@@ -475,6 +480,9 @@ impl ControllerDirectory for KubernetesControllerDirectory {
             }
             if let Some(resource_count) = observation.resource_count {
                 projected.resource_count = Some(resource_count);
+            }
+            if let Some(resource_counts_by_kind) = observation.resource_counts_by_kind.as_ref() {
+                projected.resource_counts_by_kind = Some(resource_counts_by_kind.clone());
             }
             if let Some(updated_at) = observation.stats_updated_unix_ms {
                 projected.stats_updated_unix_ms = Some(updated_at);
@@ -833,6 +841,7 @@ mod tests {
             sync_version: Some(99),
             watch_server_id: Some("stale-server".to_string()),
             resource_count: Some(99),
+            resource_counts_by_kind: Some(BTreeMap::from([("Stale".to_string(), 99u32)])),
             stats_updated_unix_ms: Some(20),
             watch_updated_unix_ms: Some(20),
             observed_at_unix_ms: 20,
@@ -849,6 +858,10 @@ mod tests {
             sync_version: Some(7),
             watch_server_id: Some("server-7".to_string()),
             resource_count: Some(42),
+            resource_counts_by_kind: Some(BTreeMap::from([
+                ("EdgionConfigData".to_string(), 30u32),
+                ("EdgionRoute".to_string(), 12u32),
+            ])),
             stats_updated_unix_ms: Some(25),
             watch_updated_unix_ms: Some(30),
             observed_at_unix_ms: 30,
@@ -858,9 +871,61 @@ mod tests {
         assert_eq!(record.sync_version, Some(7));
         assert_eq!(record.watch_server_id.as_deref(), Some("server-7"));
         assert_eq!(record.resource_count, Some(42));
+        assert_eq!(
+            record.resource_counts_by_kind,
+            Some(BTreeMap::from([
+                ("EdgionConfigData".to_string(), 30u32),
+                ("EdgionRoute".to_string(), 12u32),
+            ]))
+        );
         assert_eq!(record.stats_updated_unix_ms, Some(25));
         assert_eq!(record.watch_updated_unix_ms, Some(30));
         assert_eq!(record.last_seen_unix_ms, 30);
+    }
+
+    #[tokio::test]
+    async fn offline_preserves_per_kind_counts() {
+        let directory =
+            KubernetesControllerDirectory::with_resources(Arc::new(FakeResources::default()));
+        let id = ControllerId::new("c1").unwrap();
+        directory
+            .upsert_registration(fenced_registration("c1", "s1", 1, 10))
+            .await
+            .unwrap();
+        let fence = edgion_center_core::OwnershipFence {
+            token: "token-1".to_string(),
+            epoch: 1,
+        };
+        let per_kind = BTreeMap::from([
+            ("EdgionConfigData".to_string(), 30u32),
+            ("EdgionRoute".to_string(), 12u32),
+        ]);
+        let observation = ControllerRuntimeObservation {
+            controller_id: id.clone(),
+            session_id: SessionId::new("s1").unwrap(),
+            ownership_fence: Some(fence.clone()),
+            sync_version: Some(1),
+            watch_server_id: Some("server-1".to_string()),
+            resource_count: Some(42),
+            resource_counts_by_kind: Some(per_kind.clone()),
+            stats_updated_unix_ms: Some(15),
+            watch_updated_unix_ms: Some(15),
+            observed_at_unix_ms: 15,
+        };
+        assert!(directory.project_runtime(observation).await.unwrap());
+
+        assert_eq!(
+            directory
+                .mark_offline(&id, &SessionId::new("s1").unwrap(), Some(&fence), 20)
+                .await
+                .unwrap(),
+            OfflineOutcome::Marked
+        );
+
+        let record = directory.list().await.unwrap().remove(0);
+        assert_eq!(record.phase, ControllerPhase::Offline);
+        assert_eq!(record.resource_count, Some(42));
+        assert_eq!(record.resource_counts_by_kind, Some(per_kind));
     }
 
     #[tokio::test]
@@ -1077,6 +1142,7 @@ mod tests {
                 sync_version: None,
                 watch_server_id: None,
                 resource_count: None,
+                resource_counts_by_kind: None,
                 stats_updated_unix_ms: None,
                 watch_updated_unix_ms: None,
                 last_seen_time: time_from_millis(10).unwrap(),

@@ -2,22 +2,30 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use tokio::sync::broadcast;
 
-use super::cache::CenterWatchCache;
+use super::cache::{CacheStatus, CenterWatchCache};
 use super::traits::CenterConfHandler;
+use super::ChangeSummary;
 
 /// Manages CenterWatchCache instances for a single resource kind.
 /// Caches persist across controller reconnects to preserve sync_version.
 pub struct CenterWatchCacheRegistry<T> {
     caches: RwLock<HashMap<String, Arc<CenterWatchCache<T>>>>,
     handler: Arc<dyn CenterConfHandler<T> + Send + Sync>,
+    /// Broadcasts a `ChangeSummary` for every batch applied by any cache in
+    /// this registry. Bounded (256); a lagging/full subscriber drops frames
+    /// rather than backpressuring the watch stream.
+    changes: broadcast::Sender<ChangeSummary>,
 }
 
 impl<T: Send + Sync + 'static> CenterWatchCacheRegistry<T> {
     pub fn new(handler: Arc<dyn CenterConfHandler<T> + Send + Sync>) -> Self {
+        let (changes, _rx) = broadcast::channel(256);
         Self {
             caches: RwLock::new(HashMap::new()),
             handler,
+            changes,
         }
     }
 
@@ -40,6 +48,7 @@ impl<T: Send + Sync + 'static> CenterWatchCacheRegistry<T> {
                 Arc::new(CenterWatchCache::new(
                     controller_id.to_string(),
                     self.handler.clone(),
+                    self.changes.clone(),
                 ))
             })
             .clone()
@@ -55,8 +64,52 @@ impl<T: Send + Sync + 'static> CenterWatchCacheRegistry<T> {
             .collect()
     }
 
+    /// Snapshot of every known controller's cache status (revision,
+    /// staleness, overflow, entry count).
+    pub fn statuses(&self) -> Vec<(String, CacheStatus)> {
+        self.caches
+            .read()
+            .iter()
+            .map(|(id, cache)| (id.clone(), cache.status()))
+            .collect()
+    }
+
+    /// Subscribe to the type-scoped change broadcast for this registry.
+    /// A new receiver only observes summaries sent after it subscribes.
+    pub fn subscribe_changes(&self) -> broadcast::Receiver<ChangeSummary> {
+        self.changes.subscribe()
+    }
+
+    /// Snapshot of every known controller's cache handle, taken under a
+    /// single read-lock acquisition. Backing accessor for the production
+    /// read model (`read_model::CenterWatchCacheRegistry::list_all`), which
+    /// aggregates entries across every controller's cache.
+    pub(crate) fn caches_snapshot(&self) -> Vec<(String, Arc<CenterWatchCache<T>>)> {
+        self.caches
+            .read()
+            .iter()
+            .map(|(id, cache)| (id.clone(), cache.clone()))
+            .collect()
+    }
+
+    /// Existing cache for `controller_id`, without creating one if it does
+    /// not exist yet. The non-creating counterpart to `get_or_create`:
+    /// unlike that method, a miss here never inserts an entry into the
+    /// registry. Backing accessor for the production read model
+    /// (`read_model::CenterWatchCacheRegistry::raw_document`).
+    pub(crate) fn get_if_present(&self, controller_id: &str) -> Option<Arc<CenterWatchCache<T>>> {
+        self.caches.read().get(controller_id).cloned()
+    }
+
     /// Mark controller offline. Preserves cache for reconnect.
+    ///
+    /// Flags the cache stale (if it exists) before notifying the handler, so
+    /// any reader observing `status()` concurrently with the handler
+    /// callback sees the offline state reflected.
     pub fn mark_offline(&self, controller_id: &str) {
+        if let Some(cache) = self.caches.read().get(controller_id) {
+            cache.set_stale();
+        }
         self.handler.controller_offline(controller_id);
     }
 
@@ -70,7 +123,7 @@ impl<T: Send + Sync + 'static> CenterWatchCacheRegistry<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap as StdHashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct MockHandler {
@@ -88,14 +141,14 @@ mod tests {
     }
 
     impl CenterConfHandler<String> for MockHandler {
-        fn full_set(&self, _controller_id: &str, _data: &HashMap<String, Arc<String>>) {}
+        fn full_set(&self, _controller_id: &str, _data: &StdHashMap<String, Arc<String>>) {}
 
         fn partial_update(
             &self,
             _controller_id: &str,
-            _add: HashMap<String, Arc<String>>,
-            _update: HashMap<String, Arc<String>>,
-            _remove: HashSet<String>,
+            _add: StdHashMap<String, Arc<String>>,
+            _update: StdHashMap<String, Arc<String>>,
+            _remove: StdHashMap<String, Arc<String>>,
         ) {
         }
 
@@ -174,5 +227,64 @@ mod tests {
         let fresh_cache = registry.get_or_create("ctrl-1");
         assert!(!Arc::ptr_eq(&cache, &fresh_cache));
         assert_eq!(fresh_cache.get_sync_version(), 0);
+    }
+
+    #[test]
+    fn stale_set_on_offline_cleared_on_next_batch() {
+        let handler = MockHandler::new();
+        let registry = CenterWatchCacheRegistry::<String>::new(handler.clone());
+
+        let cache = registry.get_or_create("ctrl-1");
+        cache.replace_all(
+            vec![("key1".to_string(), "val1".to_string())],
+            1,
+            "server-1".to_string(),
+        );
+        assert!(!cache.status().stale);
+
+        registry.mark_offline("ctrl-1");
+        assert!(cache.status().stale, "set_stale must run on mark_offline");
+        assert_eq!(handler.offline_count.load(Ordering::SeqCst), 1);
+
+        // Next applied batch (simulating reconnect resuming the watch)
+        // clears the staleness flag.
+        cache.replace_all(
+            vec![("key1".to_string(), "val1b".to_string())],
+            2,
+            "server-1".to_string(),
+        );
+        assert!(!cache.status().stale);
+    }
+
+    #[test]
+    fn subscribe_changes_observes_applied_batches() {
+        let handler = MockHandler::new();
+        let registry = CenterWatchCacheRegistry::<String>::new(handler);
+        let mut rx = registry.subscribe_changes();
+
+        let cache = registry.get_or_create("ctrl-1");
+        cache.replace_all(
+            vec![("key1".to_string(), "val1".to_string())],
+            1,
+            "server-1".to_string(),
+        );
+
+        let summary = rx.try_recv().expect("registry broadcasts applied batches");
+        assert_eq!(summary.controller_id, "ctrl-1");
+        assert_eq!(summary.revision, 1);
+    }
+
+    #[test]
+    fn statuses_reports_every_known_controller() {
+        let handler = MockHandler::new();
+        let registry = CenterWatchCacheRegistry::<String>::new(handler);
+        registry.get_or_create("ctrl-1");
+        registry.get_or_create("ctrl-2");
+
+        let statuses = registry.statuses();
+        let ids: Vec<&str> = statuses.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"ctrl-1"));
+        assert!(ids.contains(&"ctrl-2"));
     }
 }

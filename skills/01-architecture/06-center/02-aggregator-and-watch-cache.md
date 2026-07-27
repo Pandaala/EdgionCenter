@@ -14,6 +14,6 @@ re-establish watches rather than trusting state tied to the prior process.
 
 These structures are intentionally platform-neutral and in-memory. Durable controller
 identity and platform authorization live behind core ports. Kubernetes CRD status is a
-projection for operators and global reads, not an ownership oracle; command/proxy routing
-uses Lease fencing. Standalone persists the directory to SQL but still uses the shared live
+projection for operators and global reads, not an ownership oracle; proxy routing uses
+Lease fencing. Standalone persists the directory to SQL but still uses the shared live
 registry and caches for active streams.

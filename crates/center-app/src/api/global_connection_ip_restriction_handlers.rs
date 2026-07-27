@@ -17,6 +17,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use crate::api::config_data_ops::{write_config_data, OutcomeState, WriteOutcome};
 use crate::api::consistency_handlers::ConsistencyResult;
 use crate::api::ApiState;
 use crate::common::api::ApiResponse;
@@ -209,6 +210,15 @@ pub struct ControllerOpResult {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_code: Option<u16>,
+    /// The shared write core's outcome for this controller, when the result
+    /// came from [`write_config_data`] — e.g. `patch_active_profile`. Added
+    /// alongside the existing `detail`/`error`/`status_code` fields (rather
+    /// than replacing them) so existing callers of this fan-out response
+    /// shape are unaffected; new callers can read `outcome.state` for the
+    /// same `converged`/`superseded`/`accepted`/... vocabulary the failover
+    /// endpoint reports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<WriteOutcome>,
 }
 
 #[derive(Debug, Serialize)]
@@ -262,119 +272,120 @@ fn fanout_status(success: &[ControllerOpResult], failed: &[ControllerOpResult]) 
     }
 }
 
-fn selector_path(ns: &str, name: &str) -> String {
-    format!("/api/v1/namespaced/edgionconfigdata/{}/{}", ns, name)
+/// Report whether the Selector's `/spec/data/config/active` already equals
+/// `active_profile`. Used both as the write core's idempotent-skip check and
+/// its convergence predicate. Mirrors `region_route_handlers::
+/// region_failover_matches`: `false` (not an error) whenever the document
+/// isn't a matching Selector at all — the mutate side is what surfaces that
+/// as an error.
+fn selector_active_matches(document: &serde_json::Value, active_profile: &str) -> bool {
+    document
+        .pointer("/spec/data/type")
+        .and_then(serde_json::Value::as_str)
+        == Some("Selector")
+        && document
+            .pointer("/spec/data/config/active")
+            .and_then(serde_json::Value::as_str)
+            == Some(active_profile)
 }
 
-/// Change only the active profile in a previously fetched Selector document.
+/// Set `/spec/data/config/active` to `active_profile`.
 ///
-/// The Controller update API performs whole-resource replacement. Starting from
-/// the live document preserves labels, annotations, visibility, resourceVersion,
-/// and fields introduced by newer Edgion versions.
-fn update_selector_document(body: &[u8], active_profile: &str) -> Result<Vec<u8>, String> {
-    let mut document: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|error| format!("invalid Selector response: {error}"))?;
+/// The Controller update API performs whole-resource replacement. Mutating
+/// the live cached document in place (rather than building a fresh one)
+/// preserves labels, annotations, visibility, resourceVersion, and fields
+/// introduced by newer Edgion versions.
+fn set_selector_active(
+    document: &mut serde_json::Value,
+    active_profile: &str,
+) -> Result<(), String> {
     let data = document
         .pointer_mut("/spec/data")
         .and_then(serde_json::Value::as_object_mut)
-        .ok_or_else(|| "Selector response is missing spec.data".to_string())?;
+        .ok_or_else(|| "Selector document is missing spec.data".to_string())?;
     if data.get("type").and_then(serde_json::Value::as_str) != Some("Selector") {
         return Err("referenced EdgionConfigData is not a Selector".to_string());
     }
     let config = data
         .get_mut("config")
         .and_then(serde_json::Value::as_object_mut)
-        .ok_or_else(|| "Selector response is missing spec.data.config".to_string())?;
+        .ok_or_else(|| "Selector document is missing spec.data.config".to_string())?;
     config.insert(
         "active".to_string(),
         serde_json::Value::String(active_profile.to_string()),
     );
-    serde_json::to_vec(&document).map_err(|error| format!("failed to serialize Selector: {error}"))
+    Ok(())
 }
 
+/// Classify a [`WriteOutcome`] into `detail`/`error`, using the same split
+/// [`region_route_handlers::failover_response`] uses: `Converged`,
+/// `Superseded`, `Accepted`, and `Unknown` all mean the write landed on that
+/// controller, so they populate `detail`, not `error`; only `Failed` and
+/// `Conflict` mean nothing was applied, so only those populate `error`. The
+/// full outcome is always attached so callers that want the richer
+/// `converged`/`superseded`/... vocabulary can read `outcome.state` instead.
+fn controller_op_result_from_outcome(outcome: WriteOutcome) -> ControllerOpResult {
+    let is_failure = matches!(outcome.state, OutcomeState::Failed | OutcomeState::Conflict);
+    ControllerOpResult {
+        controller_id: outcome.controller_id.clone(),
+        detail: (!is_failure).then(|| outcome_state_label(outcome.state).to_string()),
+        error: is_failure.then(|| {
+            outcome
+                .reason
+                .clone()
+                .unwrap_or_else(|| outcome_state_label(outcome.state).to_string())
+        }),
+        status_code: None,
+        outcome: Some(outcome),
+    }
+}
+
+fn outcome_state_label(state: OutcomeState) -> &'static str {
+    match state {
+        OutcomeState::Converged => "converged",
+        OutcomeState::Superseded => "superseded",
+        OutcomeState::Accepted => "accepted",
+        OutcomeState::Conflict => "conflict",
+        OutcomeState::Failed => "failed",
+        OutcomeState::Unknown => "unknown",
+    }
+}
+
+/// Fan out the active-profile switch to every target through the shared
+/// `config_data_ops::write_config_data` core: for each controller, set
+/// `/spec/data/config/active` on its own Selector document (namespace/name
+/// resolved per-controller from `selector_refs`) and observe convergence
+/// locally, exactly like `region_route_handlers::direct_override_failover`
+/// does for RegionRoute failover.
 async fn fan_out_selector_update(
     state: &ApiState,
-    controllers: Vec<(String, String)>,
+    controllers: Vec<(String, String, String)>,
     active_profile: String,
 ) -> Vec<ControllerOpResult> {
-    let futs = controllers.into_iter().map(|(controller_id, path)| {
-        let proxy = state.proxy.clone();
-        let active_profile = active_profile.clone();
-        async move {
-            let current = match proxy
-                .forward(
+    let futs = controllers
+        .into_iter()
+        .map(|(controller_id, namespace, name)| {
+            let state = state.clone();
+            let active_profile = active_profile.clone();
+            async move {
+                let mutate = |document: &mut serde_json::Value| -> Result<(), String> {
+                    set_selector_active(document, &active_profile)
+                };
+                let predicate = |document: &serde_json::Value| -> bool {
+                    selector_active_matches(document, &active_profile)
+                };
+                let outcome = write_config_data(
+                    &state,
                     &controller_id,
-                    "GET".to_string(),
-                    path.clone(),
-                    HashMap::new(),
-                    Vec::new(),
+                    &namespace,
+                    &name,
+                    &mutate,
+                    &predicate,
                 )
-                .await
-            {
-                Ok(response) if (200..300).contains(&response.status_code) => response,
-                Ok(response) => {
-                    return ControllerOpResult {
-                        controller_id,
-                        detail: None,
-                        error: Some(format!("read failed with status {}", response.status_code)),
-                        status_code: Some(response.status_code as u16),
-                    };
-                }
-                Err((status, error)) => {
-                    return ControllerOpResult {
-                        controller_id,
-                        detail: None,
-                        error: Some(format!("read failed: {error}")),
-                        status_code: Some(status.as_u16()),
-                    };
-                }
-            };
-            let body = match update_selector_document(&current.body, &active_profile) {
-                Ok(body) => body,
-                Err(error) => {
-                    return ControllerOpResult {
-                        controller_id,
-                        detail: None,
-                        error: Some(error),
-                        status_code: None,
-                    };
-                }
-            };
-            let mut headers = HashMap::new();
-            headers.insert("content-type".to_string(), "application/json".to_string());
-            if let Ok(document) = serde_json::from_slice::<serde_json::Value>(&current.body) {
-                if let Some(resource_version) = document
-                    .pointer("/metadata/resourceVersion")
-                    .and_then(serde_json::Value::as_str)
-                {
-                    headers.insert("if-match".to_string(), format!("\"{resource_version}\""));
-                }
+                .await;
+                controller_op_result_from_outcome(outcome)
             }
-            match proxy
-                .forward(&controller_id, "PUT".to_string(), path, headers, body)
-                .await
-            {
-                Ok(response) if (200..300).contains(&response.status_code) => ControllerOpResult {
-                    controller_id,
-                    detail: Some(format!("status {}", response.status_code)),
-                    error: None,
-                    status_code: Some(response.status_code as u16),
-                },
-                Ok(response) => ControllerOpResult {
-                    controller_id,
-                    detail: None,
-                    error: Some(format!("status {}", response.status_code)),
-                    status_code: Some(response.status_code as u16),
-                },
-                Err((status, error)) => ControllerOpResult {
-                    controller_id,
-                    detail: None,
-                    error: Some(error),
-                    status_code: Some(status.as_u16()),
-                },
-            }
-        }
-    });
+        });
     futures::future::join_all(futs).await
 }
 
@@ -467,7 +478,8 @@ pub async fn patch_active_profile(
             };
             selector_targets.push((
                 controller_id,
-                selector_path(selector_namespace, &reference.name),
+                selector_namespace.to_string(),
+                reference.name.clone(),
             ));
         } else {
             results.push(ControllerOpResult {
@@ -477,6 +489,7 @@ pub async fn patch_active_profile(
                     "controller has no active-profile selector in its effective view".to_string(),
                 ),
                 status_code: None,
+                outcome: None,
             });
         }
     }
@@ -506,7 +519,6 @@ mod tests {
     /// Minimal `ApiState` for handler tests — mirrors the builder in `region_route_handlers.rs`.
     fn test_api_state() -> ApiState {
         use crate::aggregator::ResourceAggregator;
-        use crate::commander::Commander;
         use crate::fed_sync::registry::ControllerRegistry;
         use crate::metadata_store::CenterMetaDataStore;
         use crate::proxy::ProxyForwarder;
@@ -521,11 +533,6 @@ mod tests {
         let sync_client = Arc::new(CenterSyncClient {
             plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
         });
-        let commander = Arc::new(Commander::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
         let proxy = Arc::new(ProxyForwarder::new(
             registry.clone(),
             Arc::new(Mutex::new(HashMap::new())),
@@ -533,10 +540,8 @@ mod tests {
         ));
         ApiState {
             aggregator: Arc::new(ResourceAggregator::new()),
-            commander,
             proxy,
             controller_directory: None,
-            global_resources: None,
             global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,
@@ -741,12 +746,7 @@ mod tests {
     /// Selector updates must preserve the complete live resource and change only
     /// the active profile, because the downstream API performs full replacement.
     #[test]
-    fn update_selector_document_preserves_metadata_and_unknown_fields() {
-        let path = selector_path("prod-ns", "my-selector");
-        assert_eq!(
-            path,
-            "/api/v1/namespaced/edgionconfigdata/prod-ns/my-selector"
-        );
+    fn set_selector_active_preserves_metadata_and_unknown_fields() {
         let original = serde_json::json!({
             "apiVersion": "edgion.io/v1",
             "kind": "EdgionConfigData",
@@ -767,27 +767,134 @@ mod tests {
                 }
             }
         });
-        let body = serde_json::to_vec(&original).expect("serialize fixture");
-        let updated = update_selector_document(&body, "strict").expect("update Selector");
-        let v: serde_json::Value = serde_json::from_slice(&updated).expect("valid JSON");
+        let mut updated = original.clone();
+        set_selector_active(&mut updated, "strict").expect("update Selector");
         assert_eq!(
-            v.pointer("/spec/data/config/active"),
+            updated.pointer("/spec/data/config/active"),
             Some(&serde_json::json!("strict"))
         );
         let mut expected = original;
         expected["spec"]["data"]["config"]["active"] = serde_json::json!("strict");
-        assert_eq!(v, expected);
+        assert_eq!(updated, expected);
     }
 
     #[test]
-    fn update_selector_document_rejects_non_selector_data() {
-        let body = serde_json::to_vec(&serde_json::json!({
+    fn set_selector_active_rejects_non_selector_data() {
+        let mut document = serde_json::json!({
             "spec": { "data": { "type": "Yaml", "config": {} } }
-        }))
-        .expect("serialize fixture");
+        });
         assert_eq!(
-            update_selector_document(&body, "strict").unwrap_err(),
+            set_selector_active(&mut document, "strict").unwrap_err(),
             "referenced EdgionConfigData is not a Selector"
+        );
+    }
+
+    #[test]
+    fn selector_active_matches_is_false_for_non_selector_data() {
+        let document = serde_json::json!({
+            "spec": { "data": { "type": "Yaml", "config": { "active": "strict" } } }
+        });
+        assert!(
+            !selector_active_matches(&document, "strict"),
+            "a non-Selector document must never report a match, even with a coincidentally equal field"
+        );
+    }
+
+    /// The active-profile switch (Task 4) must now write through the shared
+    /// `config_data_ops::write_config_data` core: each `ControllerOpResult`
+    /// carries a `WriteOutcome` (`outcome.state`), and a target whose
+    /// Selector already has the requested `active` profile is reported as
+    /// an idempotent skip (`converged`, no write dispatched) rather than
+    /// going through a blind GET+PUT.
+    #[tokio::test]
+    async fn patch_active_profile_reports_outcome_and_idempotent_skip() {
+        let state = test_api_state();
+        let mut view = make_gir_view("gir1", "strict");
+        view.active_profile_ref = Some(crate::metadata_store::EffectiveConfigDataRef {
+            namespace: "default".to_string(),
+            name: "selector".to_string(),
+            permitted: true,
+        });
+        state
+            .metadata_store
+            .replace_gir("ctrl-a", vec![view.clone()]);
+        state.metadata_store.replace_gir("ctrl-b", vec![view]);
+
+        let selector_doc = |active: &str, version: &str| {
+            serde_json::json!({
+                "metadata": {
+                    "namespace": "default",
+                    "name": "selector",
+                    "resourceVersion": version
+                },
+                "spec": {
+                    "data": {
+                        "type": "Selector",
+                        "config": { "active": active }
+                    }
+                }
+            })
+        };
+        // ctrl-a's Selector already has the requested profile, seeded
+        // through the local watch cache that `write_config_data` actually
+        // reads -> idempotent skip.
+        state
+            .sync_client
+            .plugin_metadata
+            .get_or_create("ctrl-a")
+            .replace_all(
+                vec![("default/selector".to_string(), selector_doc("open", "5"))],
+                1,
+                "server-1".to_string(),
+            );
+        // ctrl-b is a valid target but has no cached Selector document at
+        // all -> the write core must fail it before ever dispatching.
+
+        let (status, Json(response)) = patch_active_profile(
+            State(state),
+            Path(("default".to_string(), "gir1".to_string())),
+            Json(PatchActiveProfileRequest {
+                active_profile: "open".to_string(),
+                controllers: vec!["ctrl-a".to_string(), "ctrl-b".to_string()],
+            }),
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "GIR fan-out stays 200 on partial failure"
+        );
+        let data = response.data.expect("data must be present");
+        assert_eq!(data.success.len(), 1);
+        assert_eq!(data.failed.len(), 1);
+
+        let ctrl_a = data
+            .success
+            .iter()
+            .find(|result| result.controller_id == "ctrl-a")
+            .expect("ctrl-a must be in success");
+        let outcome = ctrl_a.outcome.as_ref().expect("outcome must be attached");
+        assert_eq!(
+            outcome.state,
+            crate::api::config_data_ops::OutcomeState::Converged
+        );
+        assert_eq!(
+            outcome.convergence_ms,
+            Some(0),
+            "idempotent skip must report convergence without a write"
+        );
+
+        let ctrl_b = data
+            .failed
+            .iter()
+            .find(|result| result.controller_id == "ctrl-b")
+            .expect("ctrl-b must be in failed");
+        assert!(ctrl_b.error.is_some());
+        let ctrl_b_outcome = ctrl_b.outcome.as_ref().expect("outcome must be attached");
+        assert_eq!(
+            ctrl_b_outcome.state,
+            crate::api::config_data_ops::OutcomeState::Failed
         );
     }
 

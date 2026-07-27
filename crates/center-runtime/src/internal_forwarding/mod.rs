@@ -14,9 +14,8 @@ use edgion_center_core::{ControllerOwnerRoute, OwnershipFence};
 use http::StatusCode;
 use prost::Message;
 
-use crate::federation::proto::{command_request::Command, CommandResponse, HttpProxyResponse};
+use crate::federation::proto::HttpProxyResponse;
 use crate::{
-    commander::{Commander, FencedCommandError},
     eviction::LocalControllerEvictor,
     proxy::{FencedProxyError, ProxyForwarder},
 };
@@ -50,14 +49,6 @@ impl ForwardError {
 
 #[async_trait]
 pub trait InternalForwardTransport: Send + Sync {
-    async fn forward_command(
-        &self,
-        route: &ControllerOwnerRoute,
-        controller_id: &str,
-        command: Command,
-        timeout: Duration,
-    ) -> Result<CommandResponse, ForwardError>;
-
     async fn forward_http(
         &self,
         route: &ControllerOwnerRoute,
@@ -90,10 +81,6 @@ pub struct OwnerForwarding {
 
 pub fn expected_fence(route: &ControllerOwnerRoute) -> (&str, &OwnershipFence) {
     (&route.holder, &route.ownership_fence)
-}
-
-pub fn command_error(error: ForwardError) -> anyhow::Error {
-    anyhow::anyhow!(error.message)
 }
 
 pub fn proxy_error(error: ForwardError) -> (StatusCode, String) {
@@ -193,38 +180,6 @@ fn target(route: &ControllerOwnerRoute) -> proto::OwnershipTarget {
 
 #[async_trait]
 impl InternalForwardTransport for GrpcInternalForwardTransport {
-    async fn forward_command(
-        &self,
-        route: &ControllerOwnerRoute,
-        controller_id: &str,
-        command: Command,
-        timeout: Duration,
-    ) -> Result<CommandResponse, ForwardError> {
-        let mut client = self.client(&route.endpoint, timeout).await?;
-        let operation_id = uuid::Uuid::new_v4().to_string();
-        let request = proto::ForwardCommandRequest {
-            operation_id: operation_id.clone(),
-            controller_id: controller_id.to_string(),
-            target: Some(target(route)),
-            hop_count: 1,
-            command: crate::federation::proto::CommandRequest {
-                request_id: operation_id,
-                command: Some(command),
-            }
-            .encode_to_vec(),
-        };
-        let payload = client
-            .forward_command(tonic::Request::new(request))
-            .await
-            .map_err(from_status)?
-            .into_inner()
-            .payload;
-        CommandResponse::decode(payload.as_slice()).map_err(|error| ForwardError {
-            kind: ForwardErrorKind::Rejected,
-            message: error.to_string(),
-        })
-    }
-
     async fn forward_http(
         &self,
         route: &ControllerOwnerRoute,
@@ -313,7 +268,6 @@ pub fn sanitize_headers(headers: HashMap<String, String>) -> HashMap<String, Str
 
 #[derive(Clone)]
 pub struct InternalForwardingService {
-    commander: Arc<Commander>,
     proxy: Arc<ProxyForwarder>,
     evictor: Arc<LocalControllerEvictor>,
     local_holder: String,
@@ -361,17 +315,6 @@ impl ValidationError {
     }
 }
 
-fn command_dispatch_status(error: FencedCommandError) -> tonic::Status {
-    match error {
-        FencedCommandError::StaleOwnership => {
-            tonic::Status::failed_precondition("controller ownership is stale")
-        }
-        FencedCommandError::Dispatch(_) => {
-            tonic::Status::unavailable("controller dispatch result is uncertain")
-        }
-    }
-}
-
 fn proxy_dispatch_status(error: FencedProxyError) -> tonic::Status {
     match error {
         FencedProxyError::StaleOwnership => {
@@ -385,7 +328,6 @@ fn proxy_dispatch_status(error: FencedProxyError) -> tonic::Status {
 
 impl InternalForwardingService {
     pub fn new(
-        commander: Arc<Commander>,
         proxy: Arc<ProxyForwarder>,
         evictor: Arc<LocalControllerEvictor>,
         local_holder: String,
@@ -394,7 +336,6 @@ impl InternalForwardingService {
         expected_peer_spiffe_id: String,
     ) -> Self {
         Self {
-            commander,
             proxy,
             evictor,
             local_holder,
@@ -456,37 +397,6 @@ impl InternalForwardingService {
 
 #[tonic::async_trait]
 impl proto::internal_forwarding_server::InternalForwarding for InternalForwardingService {
-    async fn forward_command(
-        &self,
-        request: tonic::Request<proto::ForwardCommandRequest>,
-    ) -> Result<tonic::Response<proto::ForwardPayload>, tonic::Status> {
-        self.validate_peer(&request)
-            .map_err(ValidationError::status)?;
-        self.validate_request_size(request.get_ref())
-            .map_err(ValidationError::status)?;
-        let request = request.into_inner();
-        let fence = self
-            .validate_target(request.hop_count, request.target)
-            .map_err(ValidationError::status)?;
-        let command = crate::federation::proto::CommandRequest::decode(request.command.as_slice())
-            .map_err(|_| tonic::Status::invalid_argument("command is invalid"))?
-            .command
-            .ok_or_else(|| tonic::Status::invalid_argument("command is required"))?;
-        let response = self
-            .commander
-            .send_fenced_local_command(&request.controller_id, command, &self.local_holder, &fence)
-            .await
-            .map_err(command_dispatch_status)?;
-        if response.encoded_len() > self.max_response_bytes {
-            return Err(tonic::Status::resource_exhausted(
-                "command response exceeds limit",
-            ));
-        }
-        Ok(tonic::Response::new(proto::ForwardPayload {
-            payload: response.encode_to_vec(),
-        }))
-    }
-
     async fn forward_http(
         &self,
         request: tonic::Request<proto::ForwardHttpRequest>,
@@ -579,15 +489,6 @@ mod tests {
     #[test]
     fn only_pre_dispatch_stale_errors_are_retryable() {
         assert_eq!(
-            command_dispatch_status(FencedCommandError::StaleOwnership).code(),
-            tonic::Code::FailedPrecondition
-        );
-        assert_eq!(
-            command_dispatch_status(FencedCommandError::Dispatch(anyhow::anyhow!("timeout")))
-                .code(),
-            tonic::Code::Unavailable
-        );
-        assert_eq!(
             proxy_dispatch_status(FencedProxyError::Dispatch(
                 StatusCode::GATEWAY_TIMEOUT,
                 "timeout".to_string(),
@@ -598,13 +499,8 @@ mod tests {
     }
 
     #[test]
-    fn complete_command_and_proxy_envelopes_obey_request_limit() {
+    fn complete_proxy_envelope_obeys_request_limit() {
         let registry = crate::federation::registry::ControllerRegistry::new();
-        let commander = Arc::new(Commander::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            1,
-        ));
         let proxy = Arc::new(ProxyForwarder::new(
             registry.clone(),
             Arc::new(Mutex::new(HashMap::new())),
@@ -620,7 +516,6 @@ mod tests {
             sync_client,
         ));
         let service = InternalForwardingService::new(
-            commander,
             proxy,
             evictor,
             "center-0/uid-0".to_string(),
@@ -628,22 +523,10 @@ mod tests {
             64,
             "spiffe://edgion.io/center".to_string(),
         );
-        let command = proto::ForwardCommandRequest {
-            operation_id: "x".repeat(64),
-            ..Default::default()
-        };
         let proxy = proto::ForwardHttpRequest {
             request: vec![0; 64],
             ..Default::default()
         };
-        assert_eq!(
-            service
-                .validate_request_size(&command)
-                .unwrap_err()
-                .status()
-                .code(),
-            tonic::Code::ResourceExhausted
-        );
         assert_eq!(
             service
                 .validate_request_size(&proxy)

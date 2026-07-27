@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type {
   CenterRegionRouteOverride,
   RegionRouteOverrideResource,
+  WriteOutcomeSummary,
 } from '@/api/regionRoute'
 import {
+  describeObservedRegions,
+  flattenRegionOutcomes,
   overrideConsistent,
   overrideMatchesFilters,
 } from './RegionRouteOverridePage'
@@ -65,5 +68,54 @@ describe('RegionRoute override filters', () => {
   it('combines namespace and name filters', () => {
     expect(overrideMatchesFilters(row, 'SHOP', 'ROUTE')).toBe(true)
     expect(overrideMatchesFilters(row, 'shop', 'payment')).toBe(false)
+  })
+})
+
+describe('flattenRegionOutcomes', () => {
+  const summary = (): WriteOutcomeSummary => ({
+    modified: 1,
+    failed: 1,
+    outcomes: [
+      { controllerId: 'ctrl-a', state: 'converged' },
+      { controllerId: 'ctrl-b', state: 'failed', reason: 'not in the local watch cache' },
+    ],
+  })
+
+  it('produces one labeled row per (region, controller) outcome, across every applied region', () => {
+    const items = flattenRegionOutcomes([
+      { region: 'east', summary: summary() },
+      { region: 'west', summary: summary() },
+    ])
+    expect(items).toHaveLength(4)
+    expect(items.map((item) => item.key)).toEqual([
+      'east:ctrl-a', 'east:ctrl-b', 'west:ctrl-a', 'west:ctrl-b',
+    ])
+    expect(items[0].label).toContain('east')
+    expect(items[0].label).toContain('ctrl-a')
+    expect(items[1].outcome.state).toBe('failed')
+  })
+
+  it('returns an empty list for no applied regions', () => {
+    expect(flattenRegionOutcomes([])).toEqual([])
+  })
+})
+
+describe('describeObservedRegions', () => {
+  it('summarizes every region\'s current failoverTo from the observed document', () => {
+    const observed = {
+      spec: { data: { config: { regions: [
+        { name: 'east', failoverTo: 'west' },
+        { name: 'west' },
+      ] } } },
+    }
+    const text = describeObservedRegions(observed)
+    expect(text).toContain('east')
+    expect(text).toContain('west')
+  })
+
+  it('returns an empty string for an unrecognized or missing observed shape', () => {
+    expect(describeObservedRegions(undefined)).toBe('')
+    expect(describeObservedRegions({})).toBe('')
+    expect(describeObservedRegions({ spec: {} })).toBe('')
   })
 })

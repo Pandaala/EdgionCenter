@@ -115,6 +115,13 @@ spec:
                   type: integer
                   minimum: 0
                   nullable: true
+                resourceCountsByKind:
+                  type: object
+                  nullable: true
+                  additionalProperties:
+                    type: integer
+                    format: int32
+                    minimum: 0
                 statsUpdatedUnixMs:
                   type: integer
                   format: int64

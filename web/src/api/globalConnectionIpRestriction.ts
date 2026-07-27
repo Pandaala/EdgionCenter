@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import type { WriteOutcome } from './writeOutcome'
 
 // ===== Type definitions (mirroring backend types) =====
 
@@ -38,6 +39,14 @@ export interface ControllerOpResult {
   detail?: string
   error?: string
   statusCode?: number
+  /**
+   * The shared write core's outcome for this controller, when the result
+   * came from a `write_config_data` fan-out (e.g. the active-profile
+   * switch). Absent from a result that never reached the write core (e.g.
+   * "controller has no active-profile selector") — those already carry a
+   * generic `error` instead.
+   */
+  outcome?: WriteOutcome
 }
 
 export interface FanOutResponse {

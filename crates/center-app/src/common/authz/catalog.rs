@@ -21,8 +21,6 @@ pub const REGION_ROUTES_READ: &str = "region-routes:read";
 pub const REGION_ROUTES_WRITE: &str = "region-routes:write";
 // Global resource catalog and cross-cluster inventory.
 pub const GLOBAL_RESOURCES_READ: &str = "global-resources:read";
-// Global resource ownership and reachability diagnostics.
-pub const GLOBAL_RESOURCES_DIAGNOSE: &str = "global-resources:diagnose";
 // Durable Center-owned GlobalResource desired state.
 pub const GLOBAL_RESOURCE_SYNC_READ: &str = "global-resource-sync:read";
 pub const GLOBAL_RESOURCE_SYNC_WRITE: &str = "global-resource-sync:write";
@@ -103,7 +101,6 @@ pub fn all_keys() -> &'static [&'static str] {
         REGION_ROUTES_READ,
         REGION_ROUTES_WRITE,
         GLOBAL_RESOURCES_READ,
-        GLOBAL_RESOURCES_DIAGNOSE,
         GLOBAL_RESOURCE_SYNC_READ,
         GLOBAL_RESOURCE_SYNC_WRITE,
         GLOBAL_RESOURCE_SYNC_PLAN,
@@ -175,7 +172,7 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         },
         PermissionGroup {
             group: "Global Resources",
-            keys: vec![GLOBAL_RESOURCES_READ, GLOBAL_RESOURCES_DIAGNOSE],
+            keys: vec![GLOBAL_RESOURCES_READ],
         },
         PermissionGroup {
             group: "Global Resource Sync",
@@ -298,10 +295,6 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         || under_segment(path, "/api/v1/center/global-resources/resources")
     {
         return is_read.then_some(GLOBAL_RESOURCES_READ);
-    }
-
-    if under_segment(path, "/api/v1/center/global-resources/preflight") {
-        return is_read.then_some(GLOBAL_RESOURCES_DIAGNOSE);
     }
 
     const GLOBAL_RESOURCE_SYNC_COLLECTION: &str = "/api/v1/center/global-resource-sync/resources";
@@ -1254,7 +1247,7 @@ mod tests {
     }
 
     #[test]
-    fn global_resource_routes_use_narrow_read_and_diagnose_permissions() {
+    fn global_resource_routes_use_narrow_read_permissions() {
         for path in [
             "/api/v1/center/global-resources/catalog",
             "/api/v1/center/global-resources/resources",
@@ -1279,29 +1272,6 @@ mod tests {
                 );
             }
         }
-
-        for path in [
-            "/api/v1/center/global-resources/preflight",
-            "/api/v1/center/global-resources/preflight/cluster-a",
-        ] {
-            assert_eq!(
-                route_permission(&Method::GET, path),
-                Some(GLOBAL_RESOURCES_DIAGNOSE),
-                "GET {path}"
-            );
-            assert_eq!(
-                route_permission(&Method::HEAD, path),
-                Some(GLOBAL_RESOURCES_DIAGNOSE),
-                "HEAD {path}"
-            );
-            for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
-                assert_eq!(
-                    route_permission(&method, path),
-                    None,
-                    "{method} {path} must fail closed"
-                );
-            }
-        }
     }
 
     #[test]
@@ -1312,7 +1282,6 @@ mod tests {
             "/api/v1/center/global-resources/catalog/v2",
             "/api/v1/center/global-resources/catalog-v2",
             "/api/v1/center/global-resources/resources-v2",
-            "/api/v1/center/global-resources/preflight-v2",
         ] {
             assert_eq!(
                 route_permission(&Method::GET, path),

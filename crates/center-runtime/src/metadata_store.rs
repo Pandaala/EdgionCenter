@@ -528,17 +528,17 @@ impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
         controller_id: &str,
         add: HashMap<String, Arc<WatchedConfigData>>,
         update: HashMap<String, Arc<WatchedConfigData>>,
-        remove: HashSet<String>,
+        remove: HashMap<String, Arc<WatchedConfigData>>,
     ) {
-        for key in remove {
+        for key in remove.keys() {
             remove_override_key_for_controller(
                 &mut self.region_route_overrides.write(),
-                &key,
+                key,
                 controller_id,
             );
             remove_override_key_for_controller(
                 &mut self.service_region_route_overrides.write(),
-                &key,
+                key,
                 controller_id,
             );
         }
@@ -665,6 +665,40 @@ fn gir_key(g: &EffectiveGirView) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_store_handles_remove_values() {
+        let store = CenterMetaDataStore::new();
+        let region = serde_json::json!({
+            "metadata": { "namespace": "shop", "name": "shared" },
+            "spec": {
+                "data": {
+                    "type": "RegionRouteOverride",
+                    "config": { "regions": [{ "name": "east" }] }
+                }
+            }
+        });
+        store.full_set(
+            "ctrl-a",
+            &HashMap::from([("shop/shared".to_string(), Arc::new(region.clone()))]),
+        );
+        assert_eq!(store.list_region_route_overrides().len(), 1);
+
+        // partial_update's `remove` now carries the removed *values*, not
+        // just keys; the handler only needs the keys but must still accept
+        // and correctly apply the new signature.
+        store.partial_update(
+            "ctrl-a",
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::from([("shop/shared".to_string(), Arc::new(region))]),
+        );
+
+        assert!(
+            store.list_region_route_overrides().is_empty(),
+            "removed override row must be gone after partial_update with value-carrying remove"
+        );
+    }
 
     #[test]
     fn watched_overrides_are_split_and_aggregated_by_namespace_name() {

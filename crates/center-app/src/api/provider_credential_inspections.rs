@@ -128,7 +128,6 @@ mod tests {
     use super::*;
     use crate::{
         aggregator::ResourceAggregator,
-        commander::Commander,
         fed_sync::registry::ControllerRegistry,
         metadata_store::CenterMetaDataStore,
         proxy::ProxyForwarder,
@@ -213,18 +212,12 @@ mod tests {
         capabilities.provider_credential_inspection = advertise_capability;
         super::super::ApiState {
             aggregator: Arc::new(ResourceAggregator::new()),
-            commander: Arc::new(Commander::new(
-                registry.clone(),
-                Arc::new(Mutex::new(HashMap::new())),
-                5,
-            )),
             proxy: Arc::new(ProxyForwarder::new(
                 registry.clone(),
                 Arc::new(Mutex::new(HashMap::new())),
                 5,
             )),
             controller_directory: None,
-            global_resources: None,
             global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,

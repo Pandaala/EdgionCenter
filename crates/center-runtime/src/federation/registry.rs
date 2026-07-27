@@ -391,7 +391,6 @@ mod tests {
             cluster: "cluster".to_string(),
             env: vec![],
             tag: vec![],
-            supported_kinds: vec![],
         }
     }
 

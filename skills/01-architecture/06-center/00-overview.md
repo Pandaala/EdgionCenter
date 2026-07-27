@@ -7,7 +7,7 @@ Kubernetes additionally binds internal replica forwarding on `12252`.
 ```text
 Controllers -> mTLS FederationSync -> center-runtime -> Admin API/dashboard
                                       |              |
-                                      |              +-> command/proxy response paths
+                                      |              +-> proxy response paths
                                       +-> directory, ownership, audit adapters
 ```
 

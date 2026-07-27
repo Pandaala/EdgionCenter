@@ -101,6 +101,10 @@ pub struct ControllerRecord {
     pub sync_version: Option<u64>,
     pub watch_server_id: Option<String>,
     pub resource_count: Option<u64>,
+    /// Per-kind resource counts from the latest StatsReport. `None` when no
+    /// bounded report has been observed yet, or the latest report violated
+    /// the ingest bounds (see `bounded_per_kind` in the federation server).
+    pub resource_counts_by_kind: Option<std::collections::BTreeMap<String, u32>>,
     pub stats_updated_unix_ms: Option<i64>,
     pub watch_updated_unix_ms: Option<i64>,
     pub phase: ControllerPhase,
@@ -115,6 +119,9 @@ pub struct ControllerRuntimeObservation {
     pub sync_version: Option<u64>,
     pub watch_server_id: Option<String>,
     pub resource_count: Option<u64>,
+    /// Per-kind resource counts from the latest StatsReport, already bounds
+    /// checked at ingest.
+    pub resource_counts_by_kind: Option<std::collections::BTreeMap<String, u32>>,
     pub stats_updated_unix_ms: Option<i64>,
     pub watch_updated_unix_ms: Option<i64>,
     pub observed_at_unix_ms: i64,

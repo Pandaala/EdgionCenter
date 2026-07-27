@@ -1,5 +1,8 @@
 import { apiClient } from './client'
 import { getActiveControllerId, getAppMode } from '@/utils/proxy'
+import type { WriteOutcome, WriteOutcomeSummary } from './writeOutcome'
+
+export type { WriteOutcome, OutcomeState, WriteOutcomeSummary } from './writeOutcome'
 
 // ---------------------------------------------------------------------------
 // Types — match the FROZEN backend contract (camelCase on the wire)
@@ -137,6 +140,37 @@ function prefix(): string {
   return 'center/'
 }
 
+/**
+ * Post through the shared write core and always resolve to a
+ * `WriteOutcomeSummary`, even on a non-2xx response — the write core's own
+ * fan-out endpoints (`failover_response` / `sync_watched_override`) attach
+ * `outcomes` on partial (207) AND total (502, "every controller failed")
+ * failure alike, so the per-controller detail must survive either way.
+ * Rethrows only when the backend never reached the write core at all (e.g.
+ * "no online controllers", "override not found") — those responses carry no
+ * `outcomes` to recover, so there is nothing to render per controller.
+ */
+async function postForOutcomes(url: string, body: unknown): Promise<WriteOutcomeSummary> {
+  try {
+    const { data } = await apiClient.post(url, body)
+    return {
+      modified: data?.data?.modified ?? 0,
+      failed: data?.data?.failed ?? 0,
+      outcomes: (data?.data?.outcomes ?? []) as WriteOutcome[],
+    }
+  } catch (error: any) {
+    const responseData = error?.response?.data?.data
+    if (Array.isArray(responseData?.outcomes)) {
+      return {
+        modified: responseData.modified ?? 0,
+        failed: responseData.failed ?? 0,
+        outcomes: responseData.outcomes as WriteOutcome[],
+      }
+    }
+    throw error
+  }
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -152,53 +186,44 @@ export const regionRouteApi = {
     return data
   },
 
+  /**
+   * RegionRoute failover, region_name form — writes through the shared
+   * `write_config_data` core on every online Controller. Resolves to the
+   * per-controller `WriteOutcomeSummary` instead of throwing on partial or
+   * total failure, so the caller can render all six outcome states; only a
+   * pre-flight error (no `outcomes` to recover) still rejects.
+   */
   overrideFailover: async (
     scope: 'region' | 'service',
     namespace: string,
     name: string,
     regionName: string,
     failoverTo: string,
-  ): Promise<void> => {
+  ): Promise<WriteOutcomeSummary> => {
     const url = scope === 'region'
       ? 'center/region-route-overrides/failover'
       : 'center/service-region-route-overrides/failover'
-    const { data } = await apiClient.post(url, {
-      namespace,
-      name,
-      regionName,
-      failoverTo,
-    })
-    if (!data.success || data.data?.failed > 0) {
-      throw new Error(
-        `Failover was not applied to every Controller (${data.data?.modified ?? 0} modified, ${data.data?.failed ?? 0} failed)`,
-      )
-    }
+    return postForOutcomes(url, { namespace, name, regionName, failoverTo })
   },
 
+  /**
+   * Row-level override sync — copies the source Controller's `spec.data`
+   * document to the target Controllers through the shared write core.
+   * Resolves to the per-controller `WriteOutcomeSummary` (the backend's
+   * `targets[]` field was renamed to `outcomes[]`; this reads the current
+   * name) instead of throwing on partial or total failure.
+   */
   syncOverride: async (
     scope: 'region' | 'service',
     namespace: string,
     name: string,
     sourceControllerId: string,
     targetControllerIds: string[],
-  ): Promise<void> => {
+  ): Promise<WriteOutcomeSummary> => {
     const url = scope === 'region'
       ? 'center/region-route-overrides/sync'
       : 'center/service-region-route-overrides/sync'
-    const { data } = await apiClient.post(url, {
-      namespace,
-      name,
-      sourceControllerId,
-      targetControllerIds,
-    })
-    if (!data.success || data.data?.failed > 0) {
-      const detail = (data.data?.targets ?? [])
-        .filter((target: RegionRouteSyncTargetResult) => !target.success)
-        .map((target: RegionRouteSyncTargetResult) =>
-          `${target.controllerId}: ${target.error ?? 'failed'}`)
-        .join('; ')
-      throw new Error(detail || 'Override sync failed')
-    }
+    return postForOutcomes(url, { namespace, name, sourceControllerId, targetControllerIds })
   },
 
   listRegionRoutes: async (): Promise<{ success: boolean; data: CenterRegionRoute[] | EffectiveRegionRoute[] }> => {

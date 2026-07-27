@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Multi-source ConfHandler for Center.
@@ -9,12 +9,17 @@ pub trait CenterConfHandler<T>: Send + Sync {
     fn full_set(&self, controller_id: &str, data: &HashMap<String, Arc<T>>);
 
     /// Partial update for a specific controller (called after watch events).
+    ///
+    /// `remove` carries the removed *values* (looked up before deletion), not
+    /// just their keys, so handlers that need to know what was removed (e.g.
+    /// to reverse a type-specific side effect) do not have to keep their own
+    /// shadow copy.
     fn partial_update(
         &self,
         controller_id: &str,
         add: HashMap<String, Arc<T>>,
         update: HashMap<String, Arc<T>>,
-        remove: HashSet<String>,
+        remove: HashMap<String, Arc<T>>,
     );
 
     /// Controller disconnected (keep data, mark offline).

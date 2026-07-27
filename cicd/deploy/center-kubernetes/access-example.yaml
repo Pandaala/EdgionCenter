@@ -42,10 +42,6 @@ rules:
       - /edgion-center-authz/permissions/global-resources:read
     verbs: [get]
   - nonResourceURLs:
-      - /edgion-center-authz/api/v1/center/global-resources/preflight
-      - /edgion-center-authz/permissions/global-resources:diagnose
-    verbs: [get]
-  - nonResourceURLs:
       - /edgion-center-authz/api/v1/center/global-resource-sync/resources
       - /edgion-center-authz/api/v1/center/global-resource-sync/resources/*
       - /edgion-center-authz/permissions/global-resource-sync:read

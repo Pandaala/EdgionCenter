@@ -1,17 +1,22 @@
 import { apiClient } from './client'
-import type { K8sResource, ListResponse, ResourceKind, ResourceScope } from './types'
 
 function safeId(id: string): string {
   return id.replace(/\//g, '~')
 }
 
-export function controllerResourcePath(id: string, kind: ResourceKind, scope: ResourceScope): string {
-  return `/api/v1/proxy/${safeId(id)}/api/v1/${scope === 'cluster' ? 'cluster' : 'namespaced'}/${kind}`
-}
-
 // ---------------------------------------------------------------------------
 // Common types
 // ---------------------------------------------------------------------------
+
+/**
+ * Freshness of a controller's reported resource counts (`key_count` /
+ * `per_kind`), derived by Center from liveness rather than elapsed time:
+ * - `fresh`: counts are present and the Controller is online.
+ * - `stale`: counts are present but frozen at their last value because the
+ *   Controller is offline.
+ * - `missing`: the Controller has never pushed a StatsReport.
+ */
+export type StatsState = 'fresh' | 'stale' | 'missing'
 
 export interface ControllerSummary {
   controller_id: string
@@ -26,6 +31,11 @@ export interface ControllerSummary {
   last_seen_secs_ago?: number | null
   stats_updated_secs_ago?: number | null
   key_count: number | null
+  // Per-kind resource counts from the latest StatsReport, keyed by the
+  // Controller's own Kind name as pushed on the wire (e.g. "HTTPRoute").
+  // `null` until the first StatsReport arrives.
+  per_kind?: Record<string, number> | null
+  stats_state: StatsState
 }
 
 export interface AdminControllerDto {
@@ -53,18 +63,6 @@ export const centerApi = {
   },
   reloadController: async (id: string): Promise<{ success: boolean }> => {
     const { data } = await apiClient.post(`controllers/${safeId(id)}/reload`)
-    return data
-  },
-  listControllerResources: async (
-    id: string,
-    kind: ResourceKind,
-    scope: ResourceScope,
-  ): Promise<ListResponse<K8sResource>> => {
-    const path = controllerResourcePath(id, kind, scope)
-    const { data } = await apiClient.get(path, {
-      _skipControllerProxy: true,
-      _silent: true,
-    } as any)
     return data
   },
   // ── Admin ──────────────────────────────────────────────────────────────

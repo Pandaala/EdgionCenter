@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(config.server.probe_addr, "0.0.0.0:12200");
         assert_eq!(config.server.metrics_addr, "0.0.0.0:12290");
         assert_eq!(config.sync.ping_interval_secs, 30);
-        assert_eq!(config.sync.command_timeout_secs, 30);
+        assert_eq!(config.sync.command_timeout_secs, 25);
         assert_eq!(
             config.global_resources.platform_namespaces,
             ["edgion-system", "edgion-global"]
@@ -483,7 +483,7 @@ sync:
         let config: CenterConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.server.grpc_addr, "0.0.0.0:50100");
         assert_eq!(config.sync.ping_interval_secs, 60);
-        assert_eq!(config.sync.command_timeout_secs, 30); // default
+        assert_eq!(config.sync.command_timeout_secs, 25); // default
     }
 
     #[test]

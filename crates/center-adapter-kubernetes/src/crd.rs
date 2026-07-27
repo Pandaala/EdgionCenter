@@ -74,6 +74,11 @@ pub struct EdgionControllerStatus {
     /// Total resource count from the latest StatsReport.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_count: Option<u64>,
+    /// Per-kind resource counts from the latest StatsReport, bounds checked
+    /// at ingest. `None` when unavailable or the latest report violated the
+    /// ingest bounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_counts_by_kind: Option<std::collections::BTreeMap<String, u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stats_updated_unix_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

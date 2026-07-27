@@ -8,7 +8,10 @@ import {
   globalConnectionIpRestrictionApi,
   type CenterGirAggregatedView,
   type EffectiveGirView,
+  type FanOutResponse,
 } from '@/api/globalConnectionIpRestriction'
+import { isOutcomeFailure, OUTCOME_MESSAGE_SEVERITY, type WriteOutcome } from '@/api/writeOutcome'
+import { outcomeDetailText } from '@/components/WriteOutcome/WriteOutcomeTag'
 import DetailModal from './DetailModal'
 import PageHeader from '@/components/PageHeader'
 import { useT } from '@/i18n'
@@ -21,6 +24,25 @@ interface FlatRow {
   namespace: string
   pluginName: string
   entry: EffectiveGirView
+}
+
+/** Find the fan-out result for one controller and return its attached `WriteOutcome`, if any. */
+export function resolveWriteOutcome(
+  fanOut: Pick<FanOutResponse, 'success' | 'failed'>,
+  controllerId: string,
+): WriteOutcome | undefined {
+  return [...fanOut.success, ...fanOut.failed].find((result) => result.controllerId === controllerId)?.outcome
+}
+
+/**
+ * Extract the active profile name from a write outcome's `observed` Selector
+ * document — used to satisfy the `superseded` outcome's requirement to show
+ * what is actually in effect now.
+ */
+export function describeSelectorActiveProfile(observed: unknown): string {
+  const active = (observed as { spec?: { data?: { config?: { active?: unknown } } } } | undefined)
+    ?.spec?.data?.config?.active
+  return typeof active === 'string' ? active : ''
 }
 
 export default function GlobalConnectionIpRestrictionList() {
@@ -61,11 +83,34 @@ export default function GlobalConnectionIpRestrictionList() {
       globalConnectionIpRestrictionApi.patchActiveProfile(ns, name, profile, [ctrl]),
     onSuccess: (res, variables) => {
       const fanOut = res?.data
-      if (fanOut?.failed?.length > 0) {
-        message.error(`Profile switch failed: ${fanOut.failed[0].error ?? 'unknown'}`)
+      const outcome = fanOut ? resolveWriteOutcome(fanOut, variables.ctrl) : undefined
+
+      if (outcome) {
+        // The write core reported a state for this controller — six outcomes,
+        // not just "did it fail": show the state-specific wording (and, for
+        // `superseded`, what is actually in effect now) instead of a generic
+        // success/failure toast.
+        const text = `${t(`writeOutcome.state.${outcome.state}`)}: ${outcomeDetailText(t, outcome, describeSelectorActiveProfile)}`
+        message[OUTCOME_MESSAGE_SEVERITY[outcome.state]](text)
+      } else if ((fanOut?.failed?.length ?? 0) > 0) {
+        message.error(`Profile switch failed: ${fanOut?.failed[0]?.error ?? 'unknown'}`)
+      } else {
+        message.success('Active profile switched')
+      }
+
+      if (outcome ? isOutcomeFailure(outcome.state) : (fanOut?.failed?.length ?? 0) > 0) {
+        // Nothing landed on this controller — leave the cached active
+        // profile untouched.
         return
       }
-      message.success('Active profile switched')
+      if (outcome?.state === 'superseded') {
+        // The write landed but was immediately overwritten by something
+        // else, so the requested profile is NOT what is in effect — an
+        // optimistic set to `variables.profile` here would be wrong.
+        // Refresh from the read model instead of guessing.
+        queryClient.invalidateQueries({ queryKey: ['global-connection-ip-restrictions'] })
+        return
+      }
 
       // Optimistic local cache update — metadata_store is updated via fed_sync watch events,
       // so an immediate invalidate would pull stale data and revert the UI.

@@ -1,6 +1,5 @@
 use crate::aggregator::ResourceAggregator;
 use crate::api::{router, ApiState};
-use crate::commander::Commander;
 use crate::common::config::ConfSyncSecurityConfig;
 use crate::common::fed_sync::proto::federation_sync_server::FederationSyncServer;
 use crate::config::CenterConfig;
@@ -302,29 +301,12 @@ impl EdgionCenterCli {
             Some(sink) => grpc_server.with_audit_writer(sink),
             None => grpc_server,
         };
-        let pending_commands = grpc_server.pending_commands.clone();
-
-        let commander = Arc::new(Commander::new(
-            registry.clone(),
-            pending_commands,
-            config.sync.command_timeout_secs,
-        ));
 
         let proxy = Arc::new(ProxyForwarder::new(
             registry.clone(),
             pending_proxies,
             config.sync.command_timeout_secs,
         ));
-        let global_resources = controller_directory.as_ref().map(|directory| {
-            Arc::new(
-                edgion_center_runtime::global_resources::GlobalResourcesService::new_standalone(
-                    directory.clone(),
-                    registry.clone(),
-                    proxy.clone(),
-                    config.global_resources.clone(),
-                ),
-            )
-        });
         let global_resource_sync = match (db.clone(), controller_directory.clone()) {
             (Some(store), Some(directory)) => {
                 let planner = Arc::new(
@@ -362,10 +344,8 @@ impl EdgionCenterCli {
 
         let api_state = ApiState {
             aggregator: aggregator.clone(),
-            commander,
             proxy: proxy.clone(),
             controller_directory: controller_directory.clone(),
-            global_resources: global_resources.clone(),
             global_resource_sync: global_resource_sync.clone(),
             controller_evictor,
             user_admin: sql_admin
@@ -411,7 +391,10 @@ impl EdgionCenterCli {
                     credential_inspection_service.is_some(),
                 );
                 capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
-                capabilities.global_resources_inventory = global_resources.is_some();
+                // GlobalResources is served entirely from the federation watch
+                // read model now (CCI-04); the route only needs the capability
+                // flag, with no fan-out service to compose.
+                capabilities.global_resources_inventory = true;
                 capabilities.global_resource_sync = global_resource_sync.is_some();
                 capabilities.cloudflare_waf_read =
                     config.cloudflare_waf.read_enabled && cloudflare_waf_admin.is_some();
@@ -493,7 +476,11 @@ impl EdgionCenterCli {
         // gRPC server
         let grpc_handle = tokio::spawn(
             server_builder
-                .add_service(FederationSyncServer::new(grpc_server))
+                .add_service(
+                    FederationSyncServer::new(grpc_server).max_decoding_message_size(
+                        edgion_center_runtime::federation::server::MAX_FED_DECODE_MESSAGE_BYTES,
+                    ),
+                )
                 .serve(grpc_addr),
         );
 

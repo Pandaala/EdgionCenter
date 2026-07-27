@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { K8sResource } from '@/api/types'
 import {
-  buildConsistencyRows,
   isCertificateExpiring,
   resourceFingerprint,
   resourceIssues,
-  type ControllerResourceSnapshot,
 } from './controller-observability'
 
 function route(name: string, backend: string, status?: unknown): K8sResource {
@@ -71,26 +69,6 @@ describe('controller observability', () => {
     orderedA.spec.rules = [{ backendRefs: [{ name: 'a' }, { name: 'b' }] }]
     orderedB.spec.rules = [{ backendRefs: [{ name: 'b' }, { name: 'a' }] }]
     expect(resourceFingerprint(orderedA, 'httproute')).not.toBe(resourceFingerprint(orderedB, 'httproute'))
-  })
-
-  it('reports missing and divergent resources across controllers', () => {
-    const snapshots: ControllerResourceSnapshot[] = [
-      { controllerId: 'a', cluster: 'east', resources: { httproute: [route('web', 'svc-a'), route('only-a', 'svc')] }, errors: [] },
-      { controllerId: 'b', cluster: 'west', resources: { httproute: [route('web', 'svc-b')] }, errors: [] },
-    ]
-    const rows = buildConsistencyRows(snapshots)
-    expect(rows.find((row) => row.name === 'web')?.consistent).toBe(false)
-    expect(rows.find((row) => row.name === 'only-a')?.controllers.b.present).toBe(false)
-  })
-
-  it('does not report drift when a Controller/kind snapshot is unavailable', () => {
-    const snapshots: ControllerResourceSnapshot[] = [
-      { controllerId: 'a', cluster: 'east', resources: { httproute: [route('web', 'svc')] }, errors: [] },
-      { controllerId: 'b', cluster: 'west', resources: {}, errors: ['httproute'] },
-    ]
-    const row = buildConsistencyRows(snapshots)[0]
-    expect(row.consistent).toBeNull()
-    expect(row.controllers.b.available).toBe(false)
   })
 
   it('uses a bounded 30-day certificate window', () => {

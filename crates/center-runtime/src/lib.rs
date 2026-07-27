@@ -6,7 +6,6 @@
 
 pub mod aggregator;
 pub mod cloud;
-pub mod commander;
 pub mod eviction;
 pub mod federation;
 pub mod global_resource_planner;

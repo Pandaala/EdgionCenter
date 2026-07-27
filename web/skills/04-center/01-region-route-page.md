@@ -46,19 +46,32 @@ not aggregate pluginName, alias, entryIndex, routing rules, or service usage.
 
 ## Operations
 
-Failover actions fan out the same compact patch to every online Controller.
-Center concurrently waits for every POST, calculates the dispatch duration,
-then allows the federation list/watch stream the same convergence duration
-(capped at ten seconds) before returning the aggregate result.
+Failover writes `failoverTo` directly onto the identified `EdgionConfigData`
+document, once per online Controller, through the shared
+`config_data_ops::write_config_data` core: the payload is built from that
+Controller's LOCAL watch cache and the write carries a CAS `If-Match`
+precondition, so a 409 is terminal and never retried. After a successful
+write, Center polls its own local watch cache (never the Controller) every
+500ms for a flat 10s budget, watching for two independent signals — the
+document's `resourceVersion` leaving the precondition (the watch caught up)
+and the requested failover actually being in effect. Each controller's
+outcome is one of `converged`, `superseded` (the write landed but was then
+overwritten — the response carries the document as last observed),
+`accepted` (written, but this replica cannot observe that Controller's
+convergence locally), `conflict`, `failed`, or `unknown`. The response
+aggregates these into `modified` (`converged`/`superseded`/`accepted`/
+`unknown` — the write landed) and `failed` (`failed`/`conflict` — nothing was
+applied), alongside the full per-controller `outcomes` list.
 
 Consistency compares only managed spec fields. Server-owned metadata such as
 `resourceVersion`, UID, generation, and status never creates a conflict.
 Missing online Controllers are inconsistent.
 
 The warning action lets an operator choose a Controller that has the resource
-and synchronize that complete `EdgionConfigData` document to the other online
-Controllers. Sync preserves each target's update precondition and strips
-server-owned metadata. Controller federation RBAC remains the final authority.
+and copy its `spec.data` payload to the other online Controllers, through the
+same shared write core. Each target write uses that target's own cached
+`resourceVersion` as its CAS precondition; the source document's metadata is
+never copied. Controller federation RBAC remains the final authority.
 
 ## Validation
 

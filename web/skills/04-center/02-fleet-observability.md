@@ -27,17 +27,23 @@ contents are not loaded by fleet observability.
 
 ## Dashboard resource overview
 
-The Center Dashboard is an inventory summary, not a diagnostics console. It shows
-Controller membership plus the total number of readable first-class resource instances,
-broken down by kind. A resource reported by two Controllers counts as two fleet instances;
-the Dashboard does not deduplicate or compare resource identities.
+The Center Dashboard is an inventory summary, not a diagnostics console. `ResourceOverviewPanel`
+renders entirely from the `ControllerSummary.per_kind` counts already present in
+`GET /api/v1/controllers` — each Controller pushes its own per-kind counts to Center via
+`StatsReport` over fed_sync, and Center persists them; the panel makes zero network calls of
+its own and never proxies to Controllers. It shows Controller membership plus the total number
+of resource instances, broken down by kind, summed across every online Controller whose
+`stats_state` is not `missing`. A resource reported by two Controllers counts as two fleet
+instances; the Dashboard does not deduplicate or compare resource identities. Offline
+Controllers (`stats_state: 'stale'`) are excluded from the sum even though Center still holds
+their last-reported counts.
 
-Every first-class kind remains visible when its count is zero. If any Controller/kind read
-is denied, unsupported, offline, malformed, or times out, the Dashboard renders that kind
-as unavailable (or a lower bound when partial data exists) and adds `+` to the fleet total
-instead of presenting it as complete. Drift, unresolved references, rejected
-conditions, file conflicts, certificate expiry, watch ownership, and metadata-store
-coverage are not Dashboard metrics.
+Every first-class kind remains visible when its count is zero. If any online Controller has
+`stats_state: 'missing'` (it has never pushed a StatsReport), the Dashboard cannot know that
+Controller's contribution, so it renders the fleet total and any nonzero per-kind count with a
+trailing `+`, and a zero per-kind count as `—`, instead of presenting the numbers as complete.
+Drift, unresolved references, rejected conditions, file conflicts, certificate expiry, watch
+ownership, and metadata-store coverage are not Dashboard metrics.
 
 ## Consistency semantics
 

@@ -30,12 +30,9 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
 
+use super::config_data_ops::{write_config_data, OutcomeState, WriteOutcome};
 use super::ApiState;
-
-const REGION_ROUTE_PROPAGATION_WAIT_LIMIT: Duration = Duration::from_secs(10);
-const REGION_ROUTE_PROPAGATION_WAIT_MIN: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -221,14 +218,14 @@ async fn sync_watched_override(
             Json(serde_json::json!({ "success": false, "error": "override not found" })),
         );
     };
-    let Some(source) = row.controllers.get(&req.source_controller_id).cloned() else {
+    if !row.controllers.contains_key(&req.source_controller_id) {
         return (
             StatusCode::BAD_REQUEST,
             Json(
                 serde_json::json!({ "success": false, "error": "source Controller does not have this override" }),
             ),
         );
-    };
+    }
     let mut seen = HashSet::new();
     let targets: Vec<_> = if req.target_controller_ids.is_empty() {
         online
@@ -249,49 +246,72 @@ async fn sync_watched_override(
             ),
         );
     }
-    let started = Instant::now();
-    let futures = targets.into_iter().map(|controller_id| {
-        let state = state.clone();
-        let source = source.clone();
-        let namespace = req.namespace.clone();
-        let name = req.name.clone();
-        async move {
-            let result = upsert_resource(
-                &state,
-                &controller_id,
-                "edgionconfigdata",
-                &namespace,
-                &name,
-                &source,
-            )
-            .await;
-            RegionRouteSyncTargetResult {
-                controller_id,
-                success: result.is_ok(),
-                error: result.err(),
-            }
-        }
-    });
-    let results = futures::future::join_all(futures).await;
-    let modified = results.iter().filter(|result| result.success).count();
-    let failed = results.len() - modified;
-    if modified > 0 {
-        tokio::time::sleep(region_route_propagation_wait(started.elapsed())).await;
-    }
-    let status = if failed == 0 {
-        StatusCode::OK
-    } else if modified == 0 {
-        StatusCode::BAD_GATEWAY
-    } else {
-        StatusCode::MULTI_STATUS
+    // The source document comes from the SOURCE controller's own local watch
+    // cache — never from `metadata_store`'s derived override view (used only
+    // for the existence/membership check above) and never from a proxied
+    // GET. `row` already established that the source controller reports
+    // this override; this is the same document, read the same way the
+    // write core reads its own CAS precondition.
+    let key = format!("{}/{}", req.namespace, req.name);
+    let Some(source_document) = state
+        .sync_client
+        .plugin_metadata
+        .raw_document(&req.source_controller_id, &key)
+    else {
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "success": false,
+                "error": "source document is not in the local watch cache"
+            })),
+        );
     };
-    (
-        status,
-        Json(serde_json::json!({
-            "success": failed == 0,
-            "data": { "modified": modified, "failed": failed, "targets": results },
-        })),
-    )
+    let Some(source_data) = source_document.pointer("/spec/data").cloned() else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "success": false,
+                "error": "source document is missing spec.data"
+            })),
+        );
+    };
+    let mutate = |document: &mut serde_json::Value| -> Result<(), String> {
+        replace_spec_data(document, &source_data)
+    };
+    let predicate = |document: &serde_json::Value| -> bool {
+        document.pointer("/spec/data") == Some(&source_data)
+    };
+
+    let outcomes: Vec<WriteOutcome> =
+        futures::future::join_all(targets.iter().map(|controller_id| {
+            write_config_data(
+                state,
+                controller_id,
+                &req.namespace,
+                &req.name,
+                &mutate,
+                &predicate,
+            )
+        }))
+        .await;
+
+    failover_response(outcomes)
+}
+
+/// Replace `/spec/data` wholesale with `source_data`. Used by
+/// `sync_watched_override`'s `mutate` closure: row-level sync copies the
+/// entire `spec.data` payload from the source controller's document, not
+/// individual fields.
+fn replace_spec_data(
+    document: &mut serde_json::Value,
+    source_data: &serde_json::Value,
+) -> Result<(), String> {
+    let spec = document
+        .get_mut("spec")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| "target resource is missing spec".to_string())?;
+    spec.insert("data".to_string(), source_data.clone());
+    Ok(())
 }
 
 // ============= Configuration Sync Handler =============
@@ -696,23 +716,31 @@ fn response_detail(body: &[u8]) -> String {
 
 /// `POST /api/v1/center/region-routes/failover`
 ///
-/// Fans out `POST /api/v1/cluster-region-routes/failover` to all online controllers
-/// with the same request body.  Both the old cluster- and service- paths redirect
-/// (308) to this unified endpoint.
+/// The request shape selects one of two different code paths:
 ///
-/// Response: `{ modified: N, failed: N }`
+/// - `region_name` alone (no `plugin_name`/`entry_index`): delegates to
+///   [`direct_override_failover`], which writes `failoverTo` on the
+///   identified `namespace`/`name` `EdgionConfigData` directly through the
+///   shared `config_data_ops::write_config_data` core on every online
+///   controller. Response `data` carries the `modified`/`failed` counts
+///   alongside the full per-controller `outcomes` list — see
+///   [`failover_response`].
+/// - `plugin_name` + `entry_index`: resolves each online controller's
+///   permitted `RegionRouteOverride` reference from `list_region_routes()`
+///   and fans out `POST /api/v1/cluster-region-routes/failover` to each
+///   Controller's dedicated endpoint (see [`fan_out_failover`]).
+///   `list_region_routes()` is empty in production, so this branch is
+///   effectively dead; it is kept only until CCI-09 removes it. Response
+///   `data` is `{ modified: N, failed: N }`.
+///
+/// Both the old cluster- and service- paths redirect (308) to this unified
+/// endpoint.
 pub async fn region_route_failover(
     State(state): State<ApiState>,
     Json(req): Json<FailoverRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     if req.plugin_name.is_none() && req.entry_index.is_none() {
-        return direct_override_failover(
-            &state,
-            req,
-            "/api/v1/cluster-region-routes/failover",
-            false,
-        )
-        .await;
+        return direct_override_failover(&state, req).await;
     }
     let online = match state.online_controller_ids().await {
         Ok(online) if !online.is_empty() => online,
@@ -826,14 +854,18 @@ pub async fn service_region_route_failover(
     State(state): State<ApiState>,
     Json(req): Json<FailoverRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    direct_override_failover(&state, req, "/api/v1/service-region-routes/failover", true).await
+    direct_override_failover(&state, req).await
 }
 
+/// Writes the requested `failoverTo` to every online controller through the
+/// shared [`write_config_data`] core: for each controller, locate `region_name`
+/// under `/spec/data/config/regions` in the cached `EdgionConfigData` document
+/// and set its `failoverTo`, then observe convergence locally. Region and
+/// service overrides are the same resource kind (`edgionconfigdata`) from the
+/// write core's point of view, so both callers share this path.
 async fn direct_override_failover(
     state: &ApiState,
     req: FailoverRequest,
-    path: &str,
-    service: bool,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let online = match state.online_controller_ids().await {
         Ok(online) if !online.is_empty() => online,
@@ -850,47 +882,58 @@ async fn direct_override_failover(
             );
         }
     };
-    let target_controller_ids = online.clone();
-    let targets = online
-        .into_iter()
-        .map(|controller_id| {
-            (
+
+    let mutate = |document: &mut serde_json::Value| -> Result<(), String> {
+        set_region_failover_to(document, &req.region_name, &req.failover_to)
+    };
+    let predicate = |document: &serde_json::Value| -> bool {
+        region_failover_matches(document, &req.region_name, &req.failover_to)
+    };
+
+    let outcomes: Vec<WriteOutcome> =
+        futures::future::join_all(online.iter().map(|controller_id| {
+            write_config_data(
+                state,
                 controller_id,
-                ControllerFailoverRequest {
-                    namespace: req.namespace.clone(),
-                    name: req.name.clone(),
-                    region_name: req.region_name.clone(),
-                    failover_to: req.failover_to.clone(),
-                },
+                &req.namespace,
+                &req.name,
+                &mutate,
+                &predicate,
             )
-        })
-        .collect();
-    let (modified, failed) = fan_out_failover(state, path.to_string(), targets, 0)
-        .await
-        .unwrap_or((0, 1));
-    if modified > 0
-        && !wait_for_override_projection(
-            state,
-            service,
-            &req.namespace,
-            &req.name,
-            &req.region_name,
-            &req.failover_to,
-            &target_controller_ids,
-        )
-        .await
+        }))
+        .await;
+
+    failover_response(outcomes)
+}
+
+/// Aggregate per-controller [`WriteOutcome`]s into the failover HTTP response:
+/// 200 when every controller converged, 502 when every controller failed,
+/// 207 for anything mixed in between. `modified`/`failed` are kept alongside
+/// the outcome list for existing web callers, split by whether the write
+/// actually landed on that controller — NOT by whether convergence was
+/// observed:
+///   - `modified`: `Converged`, `Superseded`, `Accepted`, `Unknown` — all of
+///     these had a 2xx write accepted by the Controller; `Unknown` only means
+///     this replica could not *observe* convergence, not that the write
+///     failed.
+///   - `failed`: `Failed`, `Conflict` — nothing was applied on that
+///     controller. A `Conflict` (409) means the CAS precondition was
+///     rejected outright, so it must not be counted as modified.
+fn failover_response(outcomes: Vec<WriteOutcome>) -> (StatusCode, Json<serde_json::Value>) {
+    let failed = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome.state, OutcomeState::Failed | OutcomeState::Conflict))
+        .count();
+    let modified = outcomes.len() - failed;
+    let status = if outcomes
+        .iter()
+        .all(|outcome| outcome.state == OutcomeState::Converged)
     {
-        tracing::warn!(
-            component = "center",
-            namespace = %req.namespace,
-            name = %req.name,
-            service,
-            "RegionRoute override write succeeded but the federation watch projection did not converge before the timeout"
-        );
-    }
-    let status = if failed == 0 {
         StatusCode::OK
-    } else if modified == 0 {
+    } else if outcomes
+        .iter()
+        .all(|outcome| outcome.state == OutcomeState::Failed)
+    {
         StatusCode::BAD_GATEWAY
     } else {
         StatusCode::MULTI_STATUS
@@ -898,62 +941,78 @@ async fn direct_override_failover(
     (
         status,
         Json(serde_json::json!({
-            "success": failed == 0,
-            "data": { "modified": modified, "failed": failed },
+            "success": status == StatusCode::OK,
+            "data": {
+                "modified": modified,
+                "failed": failed,
+                "outcomes": outcomes,
+            },
         })),
     )
 }
 
-async fn wait_for_override_projection(
-    state: &ApiState,
-    service: bool,
-    namespace: &str,
-    name: &str,
+/// JSON pointer to the regions array inside an `EdgionConfigData` document's
+/// failover-relevant config. Centralized so a future path change cannot be
+/// applied to the mutate side and missed on the predicate side (or vice
+/// versa) — see [`region_index`], which is the single lookup both use.
+const REGIONS_POINTER: &str = "/spec/data/config/regions";
+
+/// Index of the region named `region_name` under [`REGIONS_POINTER`], or
+/// `None` if the document has no such array or no region with that name.
+/// Both [`region_failover_matches`] (predicate) and [`set_region_failover_to`]
+/// (mutate) resolve the region through this one function, so the lookup rule
+/// — path plus match field — lives in exactly one place.
+fn region_index(document: &serde_json::Value, region_name: &str) -> Option<usize> {
+    document
+        .pointer(REGIONS_POINTER)?
+        .as_array()?
+        .iter()
+        .position(|region| {
+            region.get("name").and_then(serde_json::Value::as_str) == Some(region_name)
+        })
+}
+
+/// Report whether `region_name`'s `failoverTo` already equals `failover_to`.
+/// Used both as the write core's idempotent-skip check and its convergence
+/// predicate. Reports `false` (not an error) when the region is absent — the
+/// mutate path ([`set_region_failover_to`]) is what surfaces a missing
+/// region as an error.
+fn region_failover_matches(
+    document: &serde_json::Value,
     region_name: &str,
     failover_to: &str,
-    controller_ids: &[String],
 ) -> bool {
-    let deadline = Instant::now() + REGION_ROUTE_PROPAGATION_WAIT_LIMIT;
-    loop {
-        let rows = if service {
-            state.metadata_store.list_service_region_route_overrides()
-        } else {
-            state.metadata_store.list_region_route_overrides()
-        };
-        let converged = rows
-            .iter()
-            .find(|row| row.namespace == namespace && row.name == name)
-            .is_some_and(|row| {
-                controller_ids.iter().all(|controller_id| {
-                    row.controllers
-                        .get(controller_id)
-                        .and_then(|resource| {
-                            resource.pointer("/spec/data/config/regions")?.as_array()
-                        })
-                        .and_then(|regions| {
-                            regions.iter().find(|region| {
-                                region.get("name").and_then(serde_json::Value::as_str)
-                                    == Some(region_name)
-                            })
-                        })
-                        .map(|region| {
-                            region
-                                .get("failoverTo")
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or_default()
-                                == failover_to
-                        })
-                        .unwrap_or(false)
-                })
-            });
-        if converged {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    let Some(index) = region_index(document, region_name) else {
+        return false;
+    };
+    document
+        .pointer(REGIONS_POINTER)
+        .and_then(serde_json::Value::as_array)
+        .and_then(|regions| regions.get(index))
+        .and_then(|region| region.get("failoverTo"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        == failover_to
+}
+
+/// Set `failoverTo` on the region named `region_name` under
+/// [`REGIONS_POINTER`]. Errors (rather than silently no-oping) when the
+/// region is absent, so the write core surfaces it as `Failed` for that
+/// controller instead of reporting a false convergence.
+fn set_region_failover_to(
+    document: &mut serde_json::Value,
+    region_name: &str,
+    failover_to: &str,
+) -> Result<(), String> {
+    let index = region_index(document, region_name)
+        .ok_or_else(|| format!("region '{region_name}' was not found under {REGIONS_POINTER}"))?;
+    let region = document
+        .pointer_mut(REGIONS_POINTER)
+        .and_then(serde_json::Value::as_array_mut)
+        .and_then(|regions| regions.get_mut(index))
+        .ok_or_else(|| format!("region '{region_name}' was not found under {REGIONS_POINTER}"))?;
+    region["failoverTo"] = serde_json::Value::String(failover_to.to_string());
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -977,7 +1036,6 @@ async fn fan_out_failover(
     targets: Vec<(String, ControllerFailoverRequest)>,
     failed_before_dispatch: usize,
 ) -> edgion_center_core::CoreResult<(usize, usize)> {
-    let dispatch_started = Instant::now();
     let futs = targets.into_iter().map(|(controller_id, request)| {
         let proxy = state.proxy.clone();
         let path = path.clone();
@@ -1024,16 +1082,7 @@ async fn fan_out_failover(
     let results = futures::future::join_all(futs).await;
     let modified = results.iter().filter(|&&ok| ok).count();
     let failed = results.iter().filter(|&&ok| !ok).count() + failed_before_dispatch;
-    if modified > 0 {
-        tokio::time::sleep(region_route_propagation_wait(dispatch_started.elapsed())).await;
-    }
     Ok((modified, failed))
-}
-
-fn region_route_propagation_wait(dispatch_elapsed: Duration) -> Duration {
-    dispatch_elapsed
-        .max(REGION_ROUTE_PROPAGATION_WAIT_MIN)
-        .min(REGION_ROUTE_PROPAGATION_WAIT_LIMIT)
 }
 
 #[cfg(test)]
@@ -1047,7 +1096,6 @@ mod tests {
     /// Minimal `ApiState` for handler tests; mirrors the builder in `src/api/mod.rs`.
     fn test_api_state() -> ApiState {
         use crate::aggregator::ResourceAggregator;
-        use crate::commander::Commander;
         use crate::fed_sync::registry::ControllerRegistry;
         use crate::metadata_store::CenterMetaDataStore;
         use crate::proxy::ProxyForwarder;
@@ -1061,11 +1109,6 @@ mod tests {
         let sync_client = Arc::new(CenterSyncClient {
             plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
         });
-        let commander = Arc::new(Commander::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
         let proxy = Arc::new(ProxyForwarder::new(
             registry.clone(),
             Arc::new(Mutex::new(HashMap::new())),
@@ -1073,10 +1116,8 @@ mod tests {
         ));
         ApiState {
             aggregator: Arc::new(ResourceAggregator::new()),
-            commander,
             proxy,
             controller_directory: None,
-            global_resources: None,
             global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,
@@ -1182,49 +1223,6 @@ mod tests {
         assert_eq!(service["data"][0]["name"], "checkout");
     }
 
-    #[tokio::test]
-    async fn override_projection_waits_for_the_watch_map() {
-        use crate::watch_cache::CenterConfHandler;
-        let state = test_api_state();
-        let metadata_store = state.metadata_store.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            metadata_store.full_set(
-                "ctrl-a",
-                &HashMap::from([(
-                    "shop/checkout".to_string(),
-                    Arc::new(serde_json::json!({
-                        "metadata": {"namespace": "shop", "name": "checkout"},
-                        "spec": {
-                            "data": {
-                                "type": "ServiceRegionRouteOverride",
-                                "config": {
-                                    "regions": [{
-                                        "name": "east",
-                                        "failoverTo": "west"
-                                    }]
-                                }
-                            }
-                        }
-                    })),
-                )]),
-            );
-        });
-
-        assert!(
-            wait_for_override_projection(
-                &state,
-                true,
-                "shop",
-                "checkout",
-                "east",
-                "west",
-                &["ctrl-a".to_string()],
-            )
-            .await
-        );
-    }
-
     #[test]
     fn failover_request_rejects_unknown_fields() {
         let json = r#"{
@@ -1277,6 +1275,123 @@ mod tests {
         assert_eq!(v["success"], false);
     }
 
+    /// Failover now writes through the shared `config_data_ops::write_config_data`
+    /// core instead of fanning out blind POSTs and sleeping. Two online
+    /// controllers: one whose cached document already carries the requested
+    /// `failoverTo` (idempotent skip -> Converged), one absent from the local
+    /// watch cache entirely (-> Failed). The response must carry both
+    /// per-controller outcomes and report 207 for the mixed result.
+    #[tokio::test]
+    async fn failover_reports_per_controller_outcomes() {
+        use crate::aggregator::ControllerInfo;
+
+        let state = test_api_state();
+
+        let online_info = |controller_id: &str| ControllerInfo {
+            controller_id: controller_id.to_string(),
+            cluster: "cluster-a".into(),
+            environments: Vec::new(),
+            tags: Vec::new(),
+        };
+        state
+            .aggregator
+            .set_controller_info("ctrl-a", online_info("ctrl-a"));
+        state
+            .aggregator
+            .set_controller_info("ctrl-b", online_info("ctrl-b"));
+
+        // ctrl-a already has the requested failoverTo cached -> idempotent skip.
+        state
+            .sync_client
+            .plugin_metadata
+            .get_or_create("ctrl-a")
+            .replace_all(
+                vec![(
+                    "default/rr-override".to_string(),
+                    serde_json::json!({
+                        "metadata": {
+                            "namespace": "default",
+                            "name": "rr-override",
+                            "resourceVersion": "1"
+                        },
+                        "spec": {
+                            "data": {
+                                "config": {
+                                    "regions": [{"name": "east", "failoverTo": "west"}]
+                                }
+                            }
+                        }
+                    }),
+                )],
+                1,
+                "server-1".to_string(),
+            );
+        // ctrl-b is online but has no cached document for this key at all.
+
+        let req = FailoverRequest {
+            namespace: "default".into(),
+            name: "rr-override".into(),
+            plugin_name: None,
+            entry_index: None,
+            region_name: "east".into(),
+            failover_to: "west".into(),
+        };
+        let (status, Json(v)) = region_route_failover(State(state), Json(req)).await;
+
+        assert_eq!(status, StatusCode::MULTI_STATUS);
+        assert_eq!(v["data"]["modified"], 1);
+        assert_eq!(v["data"]["failed"], 1);
+        let outcomes = v["data"]["outcomes"].as_array().expect("outcomes array");
+        assert_eq!(outcomes.len(), 2);
+        let outcome_for = |controller_id: &str| {
+            outcomes
+                .iter()
+                .find(|outcome| outcome["controllerId"] == controller_id)
+                .unwrap_or_else(|| panic!("missing outcome for {controller_id}"))
+        };
+        assert_eq!(outcome_for("ctrl-a")["state"], "converged");
+        assert_eq!(outcome_for("ctrl-b")["state"], "failed");
+    }
+
+    /// A `Conflict` (409: the CAS precondition was rejected outright) must be
+    /// counted as `failed`, not `modified` — nothing was actually applied on
+    /// that controller. Exercises `failover_response` directly: reproducing
+    /// a real 409 would require a live proxied session, which is exactly why
+    /// `config_data_ops`'s own tests use `write_config_data_with_dispatch`'s
+    /// injectable seam instead — `write_config_data` exposes no such seam to
+    /// callers, by design.
+    #[test]
+    fn failover_response_counts_conflict_as_failed_not_modified() {
+        let outcomes = vec![
+            WriteOutcome {
+                controller_id: "ctrl-a".into(),
+                state: OutcomeState::Converged,
+                reason: None,
+                observed: None,
+                convergence_ms: Some(0),
+            },
+            WriteOutcome {
+                controller_id: "ctrl-b".into(),
+                state: OutcomeState::Conflict,
+                reason: Some("CAS precondition no longer matched".into()),
+                observed: None,
+                convergence_ms: None,
+            },
+        ];
+
+        let (status, Json(v)) = failover_response(outcomes);
+
+        assert_eq!(status, StatusCode::MULTI_STATUS);
+        assert_eq!(
+            v["data"]["modified"], 1,
+            "only the Converged outcome counts as modified"
+        );
+        assert_eq!(
+            v["data"]["failed"], 1,
+            "a Conflict outcome must count as failed, since nothing landed"
+        );
+    }
+
     #[test]
     fn failover_request_roundtrip_canonical() {
         let json = r#"{"namespace":"default","name":"r","regionName":"east","failoverTo":"west"}"#;
@@ -1289,22 +1404,6 @@ mod tests {
         assert!(s.contains("\"regionName\":\"east\""));
         assert!(!s.contains("myRegion"));
         assert!(!s.contains("spec"));
-    }
-
-    #[test]
-    fn propagation_wait_matches_dispatch_time_and_is_capped() {
-        assert_eq!(
-            region_route_propagation_wait(Duration::from_millis(25)),
-            Duration::from_millis(100)
-        );
-        assert_eq!(
-            region_route_propagation_wait(Duration::from_millis(750)),
-            Duration::from_millis(750)
-        );
-        assert_eq!(
-            region_route_propagation_wait(Duration::from_secs(12)),
-            REGION_ROUTE_PROPAGATION_WAIT_LIMIT
-        );
     }
 
     #[test]
@@ -1329,6 +1428,99 @@ mod tests {
         assert!(document["metadata"].get("uid").is_none());
         assert!(document["metadata"].get("managedFields").is_none());
         assert!(document.get("status").is_none());
+    }
+
+    /// `sync_watched_override` (Task 4) must now write through the shared
+    /// `config_data_ops::write_config_data` core and aggregate results with
+    /// `failover_response`, exactly like `direct_override_failover` does:
+    /// per-controller `outcomes` with a `state` field, and an idempotent
+    /// skip (target already carries the source's `spec.data`) reported as
+    /// `converged` without a write ever being dispatched.
+    #[tokio::test]
+    async fn override_sync_reports_per_controller_outcomes_and_idempotent_skip() {
+        use crate::aggregator::ControllerInfo;
+
+        let state = test_api_state();
+        let online_info = |controller_id: &str| ControllerInfo {
+            controller_id: controller_id.to_string(),
+            cluster: "cluster-a".into(),
+            environments: Vec::new(),
+            tags: Vec::new(),
+        };
+        for id in ["ctrl-src", "ctrl-a", "ctrl-b"] {
+            state.aggregator.set_controller_info(id, online_info(id));
+        }
+
+        let override_doc = |version: &str| {
+            serde_json::json!({
+                "metadata": {
+                    "namespace": "default",
+                    "name": "rr-override",
+                    "resourceVersion": version
+                },
+                "spec": {
+                    "data": {
+                        "type": "RegionRouteOverride",
+                        "config": { "regions": [{"name": "east", "hashRange": [0, 100]}] }
+                    }
+                }
+            })
+        };
+        // Source document, seeded through the watch cache so both the local
+        // cache (read by write_config_data) and the metadata_store's
+        // derived override view (read by sync_watched_override's row
+        // lookup) agree, exactly as the federation watch stream keeps them
+        // in production.
+        state
+            .sync_client
+            .plugin_metadata
+            .get_or_create("ctrl-src")
+            .replace_all(
+                vec![("default/rr-override".to_string(), override_doc("1"))],
+                1,
+                "server-1".to_string(),
+            );
+        // ctrl-a already carries the same spec.data as the source -> the
+        // write core's idempotent skip must fire without ever dispatching.
+        state
+            .sync_client
+            .plugin_metadata
+            .get_or_create("ctrl-a")
+            .replace_all(
+                vec![("default/rr-override".to_string(), override_doc("9"))],
+                1,
+                "server-1".to_string(),
+            );
+        // ctrl-b is online (a valid sync target) but has no cached document
+        // for this key at all, so the write core must fail it before ever
+        // dispatching.
+
+        let req = OverrideSyncRequest {
+            namespace: "default".into(),
+            name: "rr-override".into(),
+            source_controller_id: "ctrl-src".into(),
+            target_controller_ids: vec!["ctrl-a".into(), "ctrl-b".into()],
+        };
+        let (status, Json(v)) = region_route_override_sync(State(state), Json(req)).await;
+
+        assert_eq!(status, StatusCode::MULTI_STATUS);
+        assert_eq!(v["data"]["modified"], 1);
+        assert_eq!(v["data"]["failed"], 1);
+        let outcomes = v["data"]["outcomes"].as_array().expect("outcomes array");
+        assert_eq!(outcomes.len(), 2);
+        let outcome_for = |controller_id: &str| {
+            outcomes
+                .iter()
+                .find(|outcome| outcome["controllerId"] == controller_id)
+                .unwrap_or_else(|| panic!("missing outcome for {controller_id}"))
+        };
+        assert_eq!(outcome_for("ctrl-a")["state"], "converged");
+        assert_eq!(
+            outcome_for("ctrl-a")["convergenceMs"],
+            0,
+            "idempotent skip must report convergence without a write"
+        );
+        assert_eq!(outcome_for("ctrl-b")["state"], "failed");
     }
 
     #[test]

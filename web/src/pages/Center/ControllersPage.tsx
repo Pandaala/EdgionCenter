@@ -184,8 +184,20 @@ export default function ControllersPage() {
           },
           {
             title: t('center.resourceCount'),
-            dataIndex: 'key_count',
-            render: (value: number | null) => value ?? '—',
+            render: (_: unknown, row: ControllerRow) => {
+              if (row.stats_state === 'missing') return '—'
+              if (row.stats_state === 'stale') {
+                return (
+                  <Space size={4}>
+                    <span>{row.key_count ?? '—'}</span>
+                    <Tag color="orange" data-testid="controller-resources-stale">
+                      {t('globalResources.syncState.stale')}
+                    </Tag>
+                  </Space>
+                )
+              }
+              return row.key_count ?? '—'
+            },
           },
           {
             title: t('col.actions'),

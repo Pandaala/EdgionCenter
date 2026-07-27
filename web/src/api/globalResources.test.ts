@@ -19,12 +19,11 @@ describe('Global Resources Center API', () => {
 
     await globalResourcesApi.catalog()
     await globalResourcesApi.detail(
-      'http-route',
+      'edgion-config-data',
       'edgion system',
       'route/name',
       'cluster-a',
     )
-    await globalResourcesApi.preflight('cluster-b')
 
     expect(get).toHaveBeenNthCalledWith(
       1,
@@ -33,19 +32,12 @@ describe('Global Resources Center API', () => {
     )
     expect(get).toHaveBeenNthCalledWith(
       2,
-      '/api/v1/center/global-resources/resources/http-route/edgion%20system/route%2Fname',
-      expect.objectContaining({ _skipControllerProxy: true }),
-    )
-    expect(get).toHaveBeenNthCalledWith(
-      3,
-      '/api/v1/center/global-resources/preflight',
+      '/api/v1/center/global-resources/resources/edgion-config-data/edgion%20system/route%2Fname',
       expect.objectContaining({ _skipControllerProxy: true }),
     )
 
     const detailParams = get.mock.calls[1][1]?.params as URLSearchParams
-    const preflightParams = get.mock.calls[2][1]?.params as URLSearchParams
     expect([...detailParams.entries()]).toEqual([['cluster', 'cluster-a']])
-    expect([...preflightParams.entries()]).toEqual([['cluster', 'cluster-b']])
   })
 
   it('encodes repeated clusters, exact ConfigData type, limit, and continuation', async () => {
@@ -71,9 +63,26 @@ describe('Global Resources Center API', () => {
               retryable: true,
             },
           ],
+          syncState: 'overflowed',
+          freshnessUnixMs: 1_700_000_000_000,
+          revision: 42,
         },
       ],
-      groups: [],
+      groups: [
+        {
+          key: { kind: 'EdgionConfigData', namespace: 'edgion-system', name: 'trusted-proxies' },
+          members: [
+            {
+              cluster: 'cluster-a',
+              controllerId: 'controller-a',
+              object: { apiVersion: 'edgion.io/v1', kind: 'EdgionConfigData' },
+              syncState: 'ok',
+              freshnessUnixMs: 1_700_000_001_000,
+              revision: 1,
+            },
+          ],
+        },
+      ],
       continueToken: 'gr1.opaque',
     }
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: response } as never)
@@ -126,6 +135,7 @@ describe('Global Resource descriptors', () => {
     expect(
       findGlobalResourceDescriptor('/global-resources/edgion-config-data/ip-list/extra'),
     ).toBeUndefined()
+    // 'http-route' is no longer a valid slug now that the server only serves EdgionConfigData.
     expect(findGlobalResourceDescriptor('/global-resources/http-route')).toBeUndefined()
     expect(
       findGlobalResourceDescriptor('/global-resources/edgion-config-data/region-route-override'),

@@ -1024,6 +1024,7 @@ mod tests {
             sync_version: None,
             watch_server_id: None,
             resource_count: None,
+            resource_counts_by_kind: None,
             stats_updated_unix_ms: None,
             watch_updated_unix_ms: None,
             phase,

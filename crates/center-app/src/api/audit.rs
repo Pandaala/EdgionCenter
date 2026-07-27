@@ -147,7 +147,6 @@ mod tests {
     /// is a default/empty construction sufficient for the audit handler.
     fn state_with_db(db: Option<Arc<Store>>) -> ApiState {
         use crate::aggregator::ResourceAggregator;
-        use crate::commander::Commander;
         use crate::fed_sync::registry::ControllerRegistry;
         use crate::metadata_store::CenterMetaDataStore;
         use crate::proxy::ProxyForwarder;
@@ -160,11 +159,6 @@ mod tests {
         let sync_client = Arc::new(CenterSyncClient {
             plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
         });
-        let commander = Arc::new(Commander::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
         let proxy = Arc::new(ProxyForwarder::new(
             registry.clone(),
             Arc::new(Mutex::new(HashMap::new())),
@@ -177,10 +171,8 @@ mod tests {
         });
         ApiState {
             aggregator: Arc::new(ResourceAggregator::new()),
-            commander,
             proxy,
             controller_directory: None,
-            global_resources: None,
             global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,

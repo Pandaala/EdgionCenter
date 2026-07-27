@@ -11,19 +11,9 @@ const centerRequest: CenterRequestConfig = {
   _skipControllerProxy: true,
 }
 
-export type GlobalResourceKind =
-  | 'HTTPRoute'
-  | 'GRPCRoute'
-  | 'EdgionPlugins'
-  | 'EdgionConfigData'
-  | 'ReferenceGrant'
+export type GlobalResourceKind = 'EdgionConfigData'
 
-export type GlobalResourceApiSlug =
-  | 'http-route'
-  | 'grpc-route'
-  | 'edgion-plugins'
-  | 'edgion-config-data'
-  | 'reference-grant'
+export type GlobalResourceApiSlug = 'edgion-config-data'
 
 export type EdgionConfigDataType =
   | 'KeyList'
@@ -53,12 +43,6 @@ export type InventoryErrorCode =
   | 'pagination_invalid'
   | 'pagination_limit'
 
-export type NamespacePreflightState =
-  | 'available'
-  | 'access_denied'
-  | 'backend_rejected'
-  | 'unavailable'
-
 export type JsonPrimitive = boolean | number | string | null
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
 export interface JsonObject {
@@ -81,7 +65,6 @@ export interface GlobalResourceCatalogKind {
 export interface GlobalResourceCatalogResponse {
   catalogRevision: string
   configRevision: string
-  platformNamespaces: string[]
   kinds: GlobalResourceCatalogKind[]
   clusters: GlobalResourceClusterResolution[]
 }
@@ -93,9 +76,14 @@ export interface GlobalResourceClusterError {
   retryable: boolean
 }
 
+export type WatchSyncState = 'ok' | 'stale' | 'overflowed'
+
 export interface GlobalResourceClusterResult extends GlobalResourceClusterResolution {
   complete: boolean
   errors: GlobalResourceClusterError[]
+  syncState?: WatchSyncState
+  freshnessUnixMs?: number
+  revision?: number
 }
 
 export interface GlobalResourceGroupKey {
@@ -108,6 +96,9 @@ export interface GlobalResourceComparisonMember {
   cluster: string
   controllerId: string | null
   object: JsonObject
+  syncState?: WatchSyncState
+  freshnessUnixMs?: number
+  revision?: number
 }
 
 export interface GlobalResourceComparisonGroup {
@@ -132,37 +123,6 @@ export interface GlobalResourceDetailResponse extends GlobalResourceClusterResul
   namespace: string
   name: string
   object: JsonObject | null
-}
-
-export interface GlobalResourceKindPreflight {
-  kind: string
-  canGet: boolean
-  canList: boolean
-  canCreate: boolean
-  canUpdate: boolean
-  mutationAvailable: boolean
-}
-
-export interface GlobalResourceNamespacePreflight {
-  namespace: string
-  kind: string
-  state: NamespacePreflightState
-  detail: string | null
-}
-
-export interface ControllerGlobalResourcesPreflight {
-  controllerId: string
-  accessRevision: string
-  catalogRevision: string
-  inventoryAvailable: boolean
-  syncAvailable: boolean
-  kinds: GlobalResourceKindPreflight[]
-  namespaces: GlobalResourceNamespacePreflight[]
-}
-
-export interface GlobalResourcePreflightResponse {
-  cluster: string
-  preflight: ControllerGlobalResourcesPreflight
 }
 
 export interface GlobalResourceListOptions {
@@ -224,16 +184,6 @@ export const globalResourcesApi = {
     params.set('cluster', cluster)
     const { data } = await apiClient.get<GlobalResourceDetailResponse>(
       `${resourcePath(kind)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
-      { ...centerRequest, params },
-    )
-    return data
-  },
-
-  preflight: async (cluster: string): Promise<GlobalResourcePreflightResponse> => {
-    const params = new URLSearchParams()
-    params.set('cluster', cluster)
-    const { data } = await apiClient.get<GlobalResourcePreflightResponse>(
-      `${GLOBAL_RESOURCES_BASE}/preflight`,
       { ...centerRequest, params },
     )
     return data

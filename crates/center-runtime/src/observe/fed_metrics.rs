@@ -97,6 +97,14 @@ pub mod labels {
         #[allow(dead_code)]
         pub const TIMEOUT: &str = "timeout";
         pub const RECV_ERROR: &str = "recv_error";
+        pub const TERMINAL: &str = "terminal";
+        /// A watch batch carried a non-monotonic `sync_version` relative to
+        /// the cache's current version — the caller must re-watch from 0.
+        pub const VERSION_GAP: &str = "version_gap";
+        /// A watch batch would have pushed the controller's cache beyond
+        /// `MAX_ENTRIES_PER_CONTROLLER` — the batch was rejected wholesale
+        /// and the watch was terminated (no re-watch storm).
+        pub const OVERFLOW: &str = "overflow";
     }
     pub mod offline_reason {
         pub const HEARTBEAT: &str = "heartbeat";
@@ -410,6 +418,7 @@ mod tests {
                 "watch_error_reason::RECV_ERROR",
                 watch_error_reason::RECV_ERROR,
             ),
+            ("watch_error_reason::OVERFLOW", watch_error_reason::OVERFLOW),
             ("offline_reason::HEARTBEAT", offline_reason::HEARTBEAT),
             ("offline_reason::DISCONNECT", offline_reason::DISCONNECT),
             (
@@ -530,8 +539,18 @@ mod tests {
                 watch_error_reason::PARSE_ERROR,
                 watch_error_reason::TIMEOUT,
                 watch_error_reason::RECV_ERROR,
+                watch_error_reason::TERMINAL,
+                watch_error_reason::VERSION_GAP,
+                watch_error_reason::OVERFLOW,
             ],
-            &["parse_error", "timeout", "recv_error"],
+            &[
+                "parse_error",
+                "timeout",
+                "recv_error",
+                "terminal",
+                "version_gap",
+                "overflow",
+            ],
         );
         check(
             "offline_reason",

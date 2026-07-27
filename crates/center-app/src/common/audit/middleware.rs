@@ -58,19 +58,22 @@ fn should_record(method: &Method, path: &str, log_reads: bool) -> bool {
     }
 }
 
-/// For `/api/v1/proxy/{controller_id}/...`, extract and decode the first path
-/// segment (`~` -> `/`, mirroring `api::proxy_handler`). `None` for other routes.
-///
-/// `path` here is `req.uri().path()`, which is NOT percent-decoded; for ordinary
-/// controller ids this matches `proxy_handler`'s `~`->`/` decode, but a controller
-/// id containing percent-encoded bytes could differ between the two.
+/// For `/api/v1/proxy/{controller_id}/...`, extract the first path segment,
+/// percent-decode it (matching axum's path-param decoding in
+/// `api::proxy_handler`), then map `~` -> `/`. Returns `None` for other
+/// routes and for ids that do not decode to valid UTF-8 — an absent target
+/// is preferable to auditing under a different string than the one
+/// dispatched.
 fn parse_target_controller(path: &str) -> Option<String> {
     let rest = path.strip_prefix(PROXY_PREFIX)?;
     let seg = rest.split('/').next()?;
     if seg.is_empty() {
         return None;
     }
-    Some(seg.replace('~', "/"))
+    let decoded = percent_encoding::percent_decode_str(seg)
+        .decode_utf8()
+        .ok()?;
+    Some(decoded.replace('~', "/"))
 }
 
 /// Return a stable, body-independent action summary for Cloudflare WAF writes.
@@ -351,6 +354,26 @@ mod tests {
     use axum::Router;
     use tokio::sync::mpsc;
     use tower::ServiceExt;
+
+    #[test]
+    fn parse_target_controller_decodes_percent_encoding() {
+        // Percent-encoded and tilde forms must audit under the same id that
+        // proxy dispatch resolves (axum percent-decodes path params).
+        assert_eq!(
+            parse_target_controller("/api/v1/proxy/cluster%2Fname/api/v1/x"),
+            Some("cluster/name".to_string())
+        );
+        assert_eq!(
+            parse_target_controller("/api/v1/proxy/cluster~name/api/v1/x"),
+            Some("cluster/name".to_string())
+        );
+        // Invalid UTF-8 after decoding: record no target rather than a wrong one.
+        assert_eq!(
+            parse_target_controller("/api/v1/proxy/bad%FF/api/v1/x"),
+            None
+        );
+        assert_eq!(parse_target_controller("/api/v1/other"), None);
+    }
 
     #[test]
     fn waf_action_is_stable_and_contains_no_request_data() {

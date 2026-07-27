@@ -7,12 +7,51 @@ import {
   regionRouteApi,
   type CenterRegionRouteOverride,
   type RegionRouteOverrideResource,
+  type WriteOutcomeSummary,
 } from '@/api/regionRoute'
+import { isOutcomeFailure } from '@/api/writeOutcome'
+import { WriteOutcomeList, type WriteOutcomeItem } from '@/components/WriteOutcome/WriteOutcomeTag'
 import { useCan } from '@/utils/permissions'
+import { useT } from '@/i18n'
 
 const { Text } = Typography
 
 export type RegionRouteOverrideScope = 'region' | 'service'
+
+/**
+ * Summarize every region's current `failoverTo` from a write outcome's
+ * `observed` document (the full RegionRouteOverride/ServiceRegionRouteOverride
+ * resource as last seen in the local watch cache). Used to satisfy the
+ * `superseded` outcome's requirement to show what is actually in effect now.
+ */
+export function describeObservedRegions(observed: unknown): string {
+  const regions = (observed as { spec?: { data?: { config?: { regions?: unknown } } } } | undefined)
+    ?.spec?.data?.config?.regions
+  if (!Array.isArray(regions) || regions.length === 0) return ''
+  return regions
+    .map((region: { name?: string; failoverTo?: string }) =>
+      region?.failoverTo ? `${region.name} → ${region.failoverTo}` : `${region?.name}`)
+    .join(', ')
+}
+
+/**
+ * Flatten one `WriteOutcomeSummary` per applied region into a single list of
+ * (region, controller) rows for `WriteOutcomeList`. A failover apply can
+ * touch several regions in one submit; the operator needs every controller's
+ * outcome for every region, not just the last one.
+ */
+export function flattenRegionOutcomes(
+  results: readonly { region: string; summary: WriteOutcomeSummary }[],
+): WriteOutcomeItem[] {
+  return results.flatMap(({ region, summary }) =>
+    summary.outcomes.map((outcome) => ({
+      key: `${region}:${outcome.controllerId}`,
+      label: `${region} → ${outcome.controllerId}`,
+      outcome,
+      describeObserved: describeObservedRegions,
+    })),
+  )
+}
 
 function regions(resource: RegionRouteOverrideResource) {
   return resource.spec.data.config.regions ?? []
@@ -84,37 +123,56 @@ function FailoverEditor({
   resource: RegionRouteOverrideResource
   onDone?: () => void
 }) {
+  const t = useT()
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const values = regions(resource)
   const [pending, setPending] = useState<Record<string, string>>(
     () => Object.fromEntries(values.map((region) => [region.name, region.failoverTo ?? ''])),
   )
+  const [outcomeItems, setOutcomeItems] = useState<WriteOutcomeItem[]>([])
   const changed = values.filter(
     (region) => (region.failoverTo ?? '') !== (pending[region.name] ?? ''),
   )
   const mutation = useMutation({
     mutationFn: async () => {
+      const results: { region: string; summary: WriteOutcomeSummary }[] = []
       for (const region of changed) {
-        await regionRouteApi.overrideFailover(
+        const summary = await regionRouteApi.overrideFailover(
           scope,
           row.namespace,
           row.name,
           region.name,
           pending[region.name] ?? '',
         )
+        results.push({ region: region.name, summary })
       }
       await queryClient.refetchQueries({ queryKey: ['region-route-overrides', scope] })
+      return results
     },
-    onSuccess: () => {
-      message.success('Failover updated on every Controller')
-      onDone?.()
+    onSuccess: (results) => {
+      const items = flattenRegionOutcomes(results)
+      setOutcomeItems(items)
+      const failedCount = items.filter((item) => isOutcomeFailure(item.outcome.state)).length
+      const allConverged = items.length > 0 && items.every((item) => item.outcome.state === 'converged')
+      if (allConverged) {
+        message.success(t('center.regionRoute.failoverUpdateOk'))
+        setOutcomeItems([])
+        onDone?.()
+      } else if (failedCount === items.length) {
+        message.error(t('writeOutcome.summary.allFailed'))
+      } else {
+        message.warning(t('writeOutcome.summary.mixed', {
+          modified: items.length - failedCount,
+          failed: failedCount,
+        }))
+      }
     },
     onError: (error: Error) => message.error(error.message),
   })
 
   return (
-    <Space direction="vertical" size={8}>
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
       {values.map((region) => (
         <Space key={region.name}>
           <Text strong style={{ width: 140 }}>{region.name}</Text>
@@ -147,6 +205,11 @@ function FailoverEditor({
       >
         Apply to all Controllers
       </Button>
+      {outcomeItems.length > 0 && (
+        <div style={{ borderTop: '1px solid var(--ec-color-border)', paddingTop: 8, width: '100%' }}>
+          <WriteOutcomeList items={outcomeItems} />
+        </div>
+      )}
     </Space>
   )
 }
@@ -213,11 +276,13 @@ function SyncOverrideButton({
   row: CenterRegionRouteOverride
   onlineControllerIds: string[]
 }) {
+  const t = useT()
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const sources = Object.keys(row.controllers).sort()
   const [source, setSource] = useState(sources[0] ?? '')
   const targets = onlineControllerIds.filter((controllerId) => controllerId !== source)
+  const [outcomeItems, setOutcomeItems] = useState<WriteOutcomeItem[]>([])
   const mutation = useMutation({
     mutationFn: () => regionRouteApi.syncOverride(
       scope,
@@ -226,8 +291,26 @@ function SyncOverrideButton({
       source,
       targets,
     ),
-    onSuccess: async () => {
-      message.success('Override synchronized')
+    onSuccess: async (summary) => {
+      const items: WriteOutcomeItem[] = summary.outcomes.map((outcome) => ({
+        key: outcome.controllerId,
+        label: outcome.controllerId,
+        outcome,
+        describeObserved: describeObservedRegions,
+      }))
+      setOutcomeItems(items)
+      const allConverged = items.length > 0 && items.every((item) => item.outcome.state === 'converged')
+      if (allConverged) {
+        message.success(t('center.regionRoute.syncOk'))
+        setOutcomeItems([])
+      } else if (summary.failed === items.length) {
+        message.error(t('writeOutcome.summary.allFailed'))
+      } else {
+        message.warning(t('writeOutcome.summary.mixed', {
+          modified: summary.modified,
+          failed: summary.failed,
+        }))
+      }
       await queryClient.refetchQueries({
         queryKey: ['region-route-overrides', scope],
       })
@@ -235,25 +318,28 @@ function SyncOverrideButton({
     onError: (error: Error) => message.error(error.message),
   })
   return (
-    <Space>
-      <Select
-        size="small"
-        value={source}
-        options={sources.map((controllerId) => ({
-          value: controllerId,
-          label: controllerId,
-        }))}
-        onChange={setSource}
-        style={{ width: 210 }}
-      />
-      <Button
-        size="small"
-        loading={mutation.isPending}
-        disabled={!source || !targets.length}
-        onClick={() => mutation.mutate()}
-      >
-        Sync to {targets.length}
-      </Button>
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Space>
+        <Select
+          size="small"
+          value={source}
+          options={sources.map((controllerId) => ({
+            value: controllerId,
+            label: controllerId,
+          }))}
+          onChange={setSource}
+          style={{ width: 210 }}
+        />
+        <Button
+          size="small"
+          loading={mutation.isPending}
+          disabled={!source || !targets.length}
+          onClick={() => mutation.mutate()}
+        >
+          Sync to {targets.length}
+        </Button>
+      </Space>
+      {outcomeItems.length > 0 && <WriteOutcomeList items={outcomeItems} />}
     </Space>
   )
 }

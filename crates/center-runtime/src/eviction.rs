@@ -179,7 +179,7 @@ impl ControllerEviction for OwnerAwareControllerEvictor {
 mod tests {
     use super::*;
     use crate::{
-        federation::proto::{command_request::Command, CommandResponse, HttpProxyResponse},
+        federation::proto::HttpProxyResponse,
         internal_forwarding::{ForwardError, ForwardHttpOperation, InternalForwardTransport},
         metadata_store::CenterMetaDataStore,
         watch_cache::{CenterSyncClient, CenterWatchCacheRegistry},
@@ -205,16 +205,6 @@ mod tests {
 
     #[async_trait]
     impl InternalForwardTransport for Transport {
-        async fn forward_command(
-            &self,
-            _: &ControllerOwnerRoute,
-            _: &str,
-            _: Command,
-            _: Duration,
-        ) -> Result<CommandResponse, ForwardError> {
-            unreachable!()
-        }
-
         async fn forward_http(
             &self,
             _: &ControllerOwnerRoute,

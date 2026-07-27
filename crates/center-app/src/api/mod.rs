@@ -9,11 +9,10 @@
 //!   GET  /api/v1/server-info                              → public platform and capability discovery
 //!   GET  /api/v1/controllers                              → list all controller summaries
 //!   GET  /api/v1/clusters                                 → list distinct cluster names
-//!   POST /api/v1/controllers/{id}/reload                  → send reload command
+//!   POST /api/v1/controllers/{id}/reload                  → reload via the proxy tunnel
 //!   GET  /api/v1/center/global-resources/catalog          → supported kinds, namespaces, and clusters
 //!   GET  /api/v1/center/global-resources/resources/{kind} → grouped cross-cluster inventory
 //!   GET  /api/v1/center/global-resources/resources/{kind}/{namespace}/{name} → exact fenced cluster detail
-//!   GET  /api/v1/center/global-resources/preflight          → fenced Controller capability diagnostics
 //!   GET  /api/v1/center/region-routes                              → aggregated effective region routes (unified)
 //!   POST /api/v1/center/region-routes/failover                     → fan-out failover to all online controllers (unified)
 //!   POST /api/v1/center/region-routes/sync                         → explicit source-to-target base + override sync
@@ -97,6 +96,7 @@ pub mod aws_waf;
 pub mod cloudflare_dns;
 pub mod cloudflare_waf;
 pub mod cloudfront;
+pub mod config_data_ops;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
 pub mod global_resource_sync;
@@ -112,10 +112,7 @@ mod users;
 pub mod web;
 
 use crate::aggregator::ResourceAggregator;
-use crate::commander::Commander;
 use crate::common::api::{ApiResponse, ListResponse};
-use crate::common::fed_sync::proto::command_request::Command;
-use crate::common::fed_sync::proto::ReloadCommand;
 use crate::fed_sync::registry::ControllerRegistry;
 use crate::metadata_store::CenterMetaDataStore;
 use crate::proxy::ProxyForwarder;
@@ -124,11 +121,8 @@ use crate::watch_cache::CenterSyncClient;
 #[derive(Clone)]
 pub struct ApiState {
     pub aggregator: Arc<ResourceAggregator>,
-    pub commander: Arc<Commander>,
     pub proxy: Arc<ProxyForwarder>,
     pub controller_directory: Option<Arc<dyn edgion_center_core::ControllerDirectory>>,
-    pub global_resources:
-        Option<Arc<edgion_center_runtime::global_resources::GlobalResourcesService>>,
     pub global_resource_sync: Option<Arc<global_resource_sync::GlobalResourceSyncApi>>,
     pub controller_evictor: Arc<dyn edgion_center_runtime::eviction::ControllerEviction>,
     pub user_admin: Option<Arc<dyn edgion_center_core::UserAdmin>>,
@@ -218,18 +212,27 @@ impl ApiState {
             .map(|record| {
                 let id = record.controller_id.to_string();
                 let enrichment = enrichments.get(&id);
+                let online = record.phase == edgion_center_core::ControllerPhase::Online;
+                let key_count = record
+                    .resource_count
+                    .or_else(|| enrichment.and_then(|summary| summary.key_count));
+                let per_kind = record
+                    .resource_counts_by_kind
+                    .or_else(|| enrichment.and_then(|summary| summary.per_kind.clone()));
+                let stats_updated_secs_ago = record
+                    .stats_updated_unix_ms
+                    .map(|updated_at| now_ms.saturating_sub(updated_at) as u64 / 1_000)
+                    .or_else(|| enrichment.and_then(|summary| summary.stats_updated_secs_ago));
                 crate::aggregator::ControllerSummary {
                     controller_id: id,
                     cluster: record.cluster,
                     env: record.environments,
                     tag: record.tags,
-                    online: record.phase == edgion_center_core::ControllerPhase::Online,
-                    key_count: record
-                        .resource_count
-                        .or_else(|| enrichment.and_then(|summary| summary.key_count)),
-                    stats_updated_secs_ago: record
-                        .stats_updated_unix_ms
-                        .map(|updated_at| now_ms.saturating_sub(updated_at) as u64 / 1_000),
+                    online,
+                    key_count,
+                    per_kind,
+                    stats_updated_secs_ago,
+                    stats_state: crate::aggregator::StatsState::derive(key_count.is_some(), online),
                     last_seen_secs_ago: Some(
                         now_ms.saturating_sub(record.last_seen_unix_ms) as u64 / 1_000,
                     ),
@@ -281,7 +284,6 @@ pub fn router(mut state: ApiState) -> Router {
         state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
     state.capabilities.provider_credential_inspection &=
         state.credential_inspection_service.is_some();
-    state.capabilities.global_resources_inventory &= state.global_resources.is_some();
     state.capabilities.global_resource_sync &= state.global_resource_sync.is_some();
     let capabilities = state.capabilities.clone();
     let mut app = Router::new()
@@ -389,8 +391,12 @@ pub fn router(mut state: ApiState) -> Router {
             "/api/v1/center/admin/metadata-store",
             get(metadata_store_status),
         )
-        // HTTP proxy to controllers
-        .route("/api/v1/proxy/{controller_id}/{*rest}", any(proxy_handler));
+        // HTTP proxy to controllers. Body cap mirrors the Controller-side
+        // 1 MiB federation proxy limit so oversized writes fail locally.
+        .route(
+            "/api/v1/proxy/{controller_id}/{*rest}",
+            any(proxy_handler).layer(axum::extract::DefaultBodyLimit::max(1024 * 1024)),
+        );
 
     if capabilities.controller_history {
         app = app
@@ -403,7 +409,7 @@ pub fn router(mut state: ApiState) -> Router {
                 delete(delete_admin_controller),
             );
     }
-    if capabilities.global_resources_inventory && state.global_resources.is_some() {
+    if capabilities.global_resources_inventory {
         app = app
             .route(
                 "/api/v1/center/global-resources/catalog",
@@ -416,10 +422,6 @@ pub fn router(mut state: ApiState) -> Router {
             .route(
                 "/api/v1/center/global-resources/resources/{kind}/{namespace}/{name}",
                 get(global_resources::detail),
-            )
-            .route(
-                "/api/v1/center/global-resources/preflight",
-                get(global_resources::preflight),
             );
     }
     if capabilities.global_resource_sync && state.global_resource_sync.is_some() {
@@ -952,23 +954,30 @@ async fn reload_controller(
 ) -> impl IntoResponse {
     let id = id_raw.replace('~', "/");
     match state
-        .commander
-        .send_command(&id, Command::Reload(ReloadCommand {}))
+        .proxy
+        .forward(
+            &id,
+            "POST".to_string(),
+            "/api/v1/reload".to_string(),
+            std::collections::HashMap::new(),
+            Vec::new(),
+        )
         .await
     {
-        Ok(resp) if resp.success => (StatusCode::OK, Json(ApiResponse::ok_body("ok".to_string()))),
-        Ok(resp) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<String>::err_body(resp.message)),
-        ),
-        Err(e) => {
-            let status = if e.to_string().contains("timed out") {
-                StatusCode::GATEWAY_TIMEOUT
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status, Json(ApiResponse::<String>::err_body(e.to_string())))
+        Ok(resp) if (200..300).contains(&resp.status_code) => {
+            (StatusCode::OK, Json(ApiResponse::ok_body("ok".to_string())))
         }
+        Ok(resp) => {
+            let status = StatusCode::from_u16(resp.status_code as u16)
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            (
+                status,
+                Json(ApiResponse::<String>::err_body(
+                    String::from_utf8_lossy(&resp.body).into_owned(),
+                )),
+            )
+        }
+        Err((status, message)) => (status, Json(ApiResponse::<String>::err_body(message))),
     }
 }
 
@@ -1667,11 +1676,6 @@ mod tests {
         let sync_client = Arc::new(CenterSyncClient {
             plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
         });
-        let commander = Arc::new(Commander::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
         let proxy = Arc::new(ProxyForwarder::new(
             registry.clone(),
             Arc::new(Mutex::new(HashMap::new())),
@@ -1679,10 +1683,8 @@ mod tests {
         ));
         ApiState {
             aggregator: Arc::new(ResourceAggregator::new()),
-            commander,
             proxy,
             controller_directory: None,
-            global_resources: None,
             global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,
@@ -1793,6 +1795,7 @@ mod tests {
             sync_version: Some(7),
             watch_server_id: Some("server-7".to_string()),
             resource_count: Some(42),
+            resource_counts_by_kind: None,
             stats_updated_unix_ms: Some(1),
             watch_updated_unix_ms: Some(1),
             phase: ControllerPhase::Online,
@@ -1807,6 +1810,113 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert_eq!(json["data"], serde_json::json!(["cluster-a"]));
+    }
+
+    /// A minimal directory record in the SQL-adapter shape: `resource_count`
+    /// and `stats_updated_unix_ms` are never persisted there (the SQL adapter
+    /// does not carry runtime diagnostics), so every diagnostic field must
+    /// fall back to whatever the in-memory aggregator holds for the same
+    /// controller id.
+    fn directory_record_without_stats(
+        controller_id: &str,
+        phase: ControllerPhase,
+    ) -> ControllerRecord {
+        ControllerRecord {
+            controller_id: ControllerId::new(controller_id).unwrap(),
+            current_session_id: Some(SessionId::new("session-1").unwrap()),
+            cluster: "cluster-a".to_string(),
+            environments: vec!["prod".to_string()],
+            tags: vec![],
+            connected_replica: None,
+            ownership_fence: None,
+            sync_version: None,
+            watch_server_id: None,
+            resource_count: None,
+            resource_counts_by_kind: None,
+            stats_updated_unix_ms: None,
+            watch_updated_unix_ms: None,
+            phase,
+            last_seen_unix_ms: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn summaries_fall_back_to_the_aggregator_when_the_directory_lacks_stats() {
+        let mut state = state_with_authz_mode(AuthzMode::Rbac, false);
+        state.platform_mode = edgion_center_core::CenterMode::Kubernetes;
+
+        let aggregator = ResourceAggregator::new();
+        aggregator.set_controller_info(
+            "cluster-a/controller-0",
+            crate::aggregator::ControllerInfo {
+                controller_id: "cluster-a/controller-0".to_string(),
+                cluster: "cluster-a".to_string(),
+                environments: vec!["prod".to_string()],
+                tags: vec![],
+            },
+        );
+        let mut per_kind = std::collections::BTreeMap::new();
+        per_kind.insert("Pod".to_string(), 4u32);
+        per_kind.insert("Service".to_string(), 1u32);
+        aggregator.update_stats("cluster-a/controller-0", Some(per_kind), 5);
+        state.aggregator = Arc::new(aggregator);
+
+        state.controller_directory = Some(Arc::new(GlobalDirectory(vec![
+            directory_record_without_stats("cluster-a/controller-0", ControllerPhase::Online),
+        ])));
+
+        let summaries = state.controller_summaries().await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        let summary = &summaries[0];
+        assert_eq!(summary.key_count, Some(5));
+        assert_eq!(summary.stats_updated_secs_ago, Some(0));
+        let per_kind = summary
+            .per_kind
+            .as_ref()
+            .expect("per_kind falls back to the aggregator");
+        assert_eq!(per_kind.get("Pod"), Some(&4));
+        assert_eq!(per_kind.get("Service"), Some(&1));
+        assert_eq!(summary.stats_state, crate::aggregator::StatsState::Fresh);
+    }
+
+    #[tokio::test]
+    async fn summaries_report_missing_and_stale_states() {
+        let mut state = state_with_authz_mode(AuthzMode::Rbac, false);
+        state.platform_mode = edgion_center_core::CenterMode::Kubernetes;
+
+        // No stats anywhere (directory nor aggregator) -> Missing, regardless
+        // of online/offline phase.
+        let missing =
+            directory_record_without_stats("cluster-a/controller-missing", ControllerPhase::Online);
+
+        // Offline record that DOES carry counts (the K8s adapter preserves
+        // counts on mark_offline) -> Stale, counts retained.
+        let mut stale = directory_record_without_stats(
+            "cluster-a/controller-offline",
+            ControllerPhase::Offline,
+        );
+        stale.resource_count = Some(9);
+        let mut counts_by_kind = std::collections::BTreeMap::new();
+        counts_by_kind.insert("Pod".to_string(), 9u32);
+        stale.resource_counts_by_kind = Some(counts_by_kind);
+        stale.stats_updated_unix_ms = Some(1);
+
+        state.controller_directory = Some(Arc::new(GlobalDirectory(vec![missing, stale])));
+
+        let summaries = state.controller_summaries().await.unwrap();
+        assert_eq!(summaries.len(), 2);
+        let by_id = |id: &str| summaries.iter().find(|s| s.controller_id == id).unwrap();
+
+        let missing = by_id("cluster-a/controller-missing");
+        assert_eq!(missing.stats_state, crate::aggregator::StatsState::Missing);
+        assert_eq!(missing.key_count, None);
+        assert_eq!(missing.per_kind, None);
+
+        let stale = by_id("cluster-a/controller-offline");
+        assert_eq!(stale.stats_state, crate::aggregator::StatsState::Stale);
+        assert!(!stale.online);
+        assert_eq!(stale.key_count, Some(9));
+        assert!(stale.per_kind.is_some());
     }
 
     #[tokio::test]
@@ -1835,35 +1945,61 @@ mod tests {
         }
     }
 
+    /// The proxy route must reject request bodies above the Controller's
+    /// 1 MiB federation cap locally, instead of letting axum's 2 MiB default
+    /// through only for the Controller to 413 it after a full tunnel trip.
     #[tokio::test]
-    async fn global_resources_routes_require_both_capability_and_service() {
+    async fn proxy_route_rejects_body_over_controller_limit() {
         use tower::ServiceExt;
 
-        let path = "/api/v1/center/global-resources/catalog";
-        let mut capability_only = state_with_authz_mode(AuthzMode::AllowAll, false);
-        capability_only.capabilities.global_resources_inventory = true;
-        let response = router(capability_only)
+        let app = router(state_with_authz_mode(AuthzMode::AllowAll, false));
+        let oversized = vec![b'x'; 1024 * 1024 + 1];
+        let response = app
             .oneshot(
                 axum::http::Request::builder()
-                    .uri(path)
+                    .method("PUT")
+                    .uri("/api/v1/proxy/cluster~c0/api/v1/namespaced/edgionconfigdata/ns/name")
+                    .header("content-type", "application/yaml")
+                    .body(axum::body::Body::from(oversized))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// Reload rides the proxy tunnel now. With no live federation session the
+    /// ProxyForwarder answers 404 (unknown controller), which must pass
+    /// through instead of the old Commander 500/504 mapping.
+    #[tokio::test]
+    async fn reload_uses_proxy_tunnel_and_maps_unknown_controller_to_404() {
+        use tower::ServiceExt;
+
+        let app = router(state_with_authz_mode(AuthzMode::AllowAll, false));
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/controllers/cluster~c0/reload")
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 
-        let mut composed = state_with_authz_mode(AuthzMode::AllowAll, false);
-        composed.capabilities.global_resources_inventory = true;
-        composed.global_resources = Some(Arc::new(
-            edgion_center_runtime::global_resources::GlobalResourcesService::new_standalone(
-                Arc::new(GlobalDirectory(Vec::new())),
-                composed.registry.clone(),
-                composed.proxy.clone(),
-                edgion_center_core::GlobalResourcesConfig::default(),
-            ),
-        ));
-        let response = router(composed)
+    /// GlobalResources is served entirely from the federation watch read
+    /// model now (CCI-04): the route gate depends only on the capability
+    /// flag, with no `global_resources` fan-out service to compose.
+    #[tokio::test]
+    async fn global_resources_routes_mount_without_a_fanout_service() {
+        use tower::ServiceExt;
+
+        let path = "/api/v1/center/global-resources/catalog";
+        let mut state = state_with_authz_mode(AuthzMode::AllowAll, false);
+        state.capabilities.global_resources_inventory = true;
+        let response = router(state)
             .oneshot(
                 axum::http::Request::builder()
                     .uri(path)
@@ -1872,6 +2008,7 @@ mod tests {
             )
             .await
             .unwrap();
+        assert_ne!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(response.status(), StatusCode::OK);
     }
 

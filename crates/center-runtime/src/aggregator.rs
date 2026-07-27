@@ -6,7 +6,7 @@
 //! the Admin DELETE API (see ticket #20).
 
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -22,10 +22,12 @@ struct ControllerSnapshot {
 struct StatsEntry {
     /// Sum of `per_kind` values from the latest StatsReport.
     total: u64,
-    /// Per-kind counts from the latest report. Stored for future per-kind
-    /// surfaces; not yet exposed in `controller_summaries`.
-    #[allow(dead_code)]
-    per_kind: HashMap<String, u32>,
+    /// Per-kind counts from the latest report, exposed via
+    /// `ControllerSummary::per_kind`. `None` when the report's map violated
+    /// an ingest bound and was dropped by the caller (see
+    /// `bounded_per_kind` in `federation::server`) — the scalar `total`
+    /// still flows in that case, only the breakdown is withheld.
+    per_kind: Option<BTreeMap<String, u32>>,
     /// Wall-clock instant the latest report was received.
     updated_at: std::time::Instant,
 }
@@ -82,6 +84,13 @@ impl ResourceAggregator {
     }
 
     /// Called when controller registers (or reconnects).
+    ///
+    /// Mirrors the Kubernetes directory's `upsert_registration`, which
+    /// deliberately resets the record's counts to `None` on re-registration:
+    /// a fresh session has reported nothing yet, so the previous session's
+    /// `stats` must not be served as this session's `Fresh` counts. If the
+    /// reconnected Controller is not yet ready, its stats task is gated off,
+    /// so this window is not necessarily brief.
     pub fn set_controller_info(&self, controller_id: &str, info: ControllerInfo) {
         let snapshot = {
             let mut map = self.inner.write();
@@ -90,6 +99,7 @@ impl ResourceAggregator {
                 .or_insert_with(|| ControllerSnapshot::new(info.clone()));
             snap.info = info;
             snap.offline_since = None;
+            snap.stats = None;
             Self::compute_gauge_snapshot(&map)
         };
         self.emit_gauges(&snapshot);
@@ -195,7 +205,18 @@ impl ResourceAggregator {
     /// Called from the fed_sync server task on each `StatsReport`. Silently
     /// drops if the controller is unknown to the aggregator (this would only
     /// happen if a stats message races a removal).
-    pub fn update_stats(&self, controller_id: &str, per_kind: HashMap<String, u32>, total: u64) {
+    ///
+    /// `per_kind` must already be bounds-checked by the caller (via
+    /// `bounded_per_kind` in `federation::server`) — `None` means the
+    /// report's map violated an ingest bound and was dropped, not merely
+    /// that the report carried no kinds. The scalar `total` is always
+    /// stored, even when `per_kind` is `None`.
+    pub fn update_stats(
+        &self,
+        controller_id: &str,
+        per_kind: Option<BTreeMap<String, u32>>,
+        total: u64,
+    ) {
         let mut map = self.inner.write();
         if let Some(snap) = map.get_mut(controller_id) {
             snap.stats = Some(StatsEntry {
@@ -215,15 +236,24 @@ impl ResourceAggregator {
         self.inner
             .read()
             .values()
-            .map(|s| ControllerSummary {
-                controller_id: s.info.controller_id.clone(),
-                cluster: s.info.cluster.clone(),
-                env: s.info.environments.clone(),
-                tag: s.info.tags.clone(),
-                online: s.offline_since.is_none(),
-                key_count: s.stats.as_ref().map(|e| e.total),
-                stats_updated_secs_ago: s.stats.as_ref().map(|e| e.updated_at.elapsed().as_secs()),
-                last_seen_secs_ago: None,
+            .map(|s| {
+                let online = s.offline_since.is_none();
+                let key_count = s.stats.as_ref().map(|e| e.total);
+                ControllerSummary {
+                    controller_id: s.info.controller_id.clone(),
+                    cluster: s.info.cluster.clone(),
+                    env: s.info.environments.clone(),
+                    tag: s.info.tags.clone(),
+                    online,
+                    key_count,
+                    per_kind: s.stats.as_ref().and_then(|e| e.per_kind.clone()),
+                    stats_updated_secs_ago: s
+                        .stats
+                        .as_ref()
+                        .map(|e| e.updated_at.elapsed().as_secs()),
+                    stats_state: StatsState::derive(key_count.is_some(), online),
+                    last_seen_secs_ago: None,
+                }
             })
             .collect()
     }
@@ -232,6 +262,43 @@ impl ResourceAggregator {
 impl Default for ResourceAggregator {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Three-state freshness discriminator for a controller's reported resource
+/// counts.
+///
+/// Derived from LIVENESS, never from a time threshold: a Controller only
+/// pushes `StatsReport` when its counts change, so a long silence means
+/// "unchanged", not "stale". Do not add elapsed-time comparisons here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StatsState {
+    /// Counts are present and the controller is currently online.
+    Fresh,
+    /// Counts are present but frozen at their last value because the
+    /// controller is offline. The K8s adapter deliberately preserves counts
+    /// on `mark_offline` so this state is renderable.
+    Stale,
+    /// No counts have ever been observed for this controller.
+    Missing,
+}
+
+impl StatsState {
+    /// Single derivation rule, shared by every call site so the aggregator-only
+    /// and directory-composed summary paths can never disagree:
+    ///
+    /// ```text
+    /// counts present && online  -> Fresh
+    /// counts present && !online -> Stale
+    /// no counts                 -> Missing
+    /// ```
+    pub fn derive(counts_present: bool, online: bool) -> Self {
+        match (counts_present, online) {
+            (true, true) => StatsState::Fresh,
+            (true, false) => StatsState::Stale,
+            (false, _) => StatsState::Missing,
+        }
     }
 }
 
@@ -245,9 +312,15 @@ pub struct ControllerSummary {
     /// Total resource count pushed by the controller (sum of per-kind counts).
     /// `None` until the first StatsReport arrives.
     pub key_count: Option<u64>,
+    /// Per-kind resource counts from the latest StatsReport.
+    /// `None` until the first StatsReport arrives.
+    pub per_kind: Option<std::collections::BTreeMap<String, u32>>,
     /// Seconds since the last StatsReport from this controller.
     /// `None` until the first StatsReport arrives.
     pub stats_updated_secs_ago: Option<u64>,
+    /// Freshness of `key_count` / `per_kind`, derived from liveness (see
+    /// [`StatsState`]).
+    pub stats_state: StatsState,
     /// Seconds since the last inbound fed_sync message from this controller.
     /// Filled in by the API layer using the registry session table — the
     /// aggregator leaves this as `None`.
@@ -295,5 +368,104 @@ mod tests {
         assert!(!agg.controller_summaries()[0].online);
         agg.set_controller_info("ctrl-1", mock_register_info("ctrl-1", "cluster-a"));
         assert!(agg.controller_summaries()[0].online);
+    }
+
+    /// Mirrors the Kubernetes directory's `upsert_registration`, which
+    /// deliberately resets the record's counts to `None` on re-registration.
+    /// Without this, a reconnected controller would have the PREVIOUS
+    /// session's stale counts served as `Fresh` via the aggregator fallback
+    /// path (the only path standalone-SQL deployments ever take) until its
+    /// stats task — gated behind readiness — pushes a new report.
+    #[test]
+    fn reconnect_clears_stale_stats() {
+        let agg = ResourceAggregator::new();
+        agg.set_controller_info("ctrl-1", mock_register_info("ctrl-1", "cluster-a"));
+        let mut per_kind = BTreeMap::new();
+        per_kind.insert("Pod".to_string(), 3u32);
+        agg.update_stats("ctrl-1", Some(per_kind), 3);
+
+        let summaries = agg.controller_summaries();
+        assert_eq!(summaries[0].stats_state, StatsState::Fresh);
+        assert_eq!(summaries[0].key_count, Some(3));
+        assert!(summaries[0].per_kind.is_some());
+
+        // Controller drops off and reconnects: registration must wipe the
+        // stale session's stats, not merely clear offline_since.
+        agg.mark_offline("ctrl-1");
+        agg.set_controller_info("ctrl-1", mock_register_info("ctrl-1", "cluster-a"));
+
+        let summaries = agg.controller_summaries();
+        assert!(summaries[0].online);
+        assert_eq!(
+            summaries[0].stats_state,
+            StatsState::Missing,
+            "stale stats from the previous session must not be reported as Fresh"
+        );
+        assert_eq!(summaries[0].key_count, None);
+        assert_eq!(summaries[0].per_kind, None);
+    }
+
+    /// Freshness is derived from liveness, never from a time threshold: a
+    /// Controller only pushes `StatsReport` when its counts change, so
+    /// `stats_state` must track `online` / presence-of-counts, not elapsed
+    /// time since the last report.
+    #[test]
+    fn summaries_expose_per_kind_and_freshness() {
+        let agg = ResourceAggregator::new();
+
+        // A controller with no stats at all: Missing, key_count None, per_kind None.
+        agg.set_controller_info(
+            "ctrl-missing",
+            mock_register_info("ctrl-missing", "cluster-a"),
+        );
+
+        // A controller that has reported stats and is online: Fresh.
+        agg.set_controller_info("ctrl-1", mock_register_info("ctrl-1", "cluster-a"));
+        let mut per_kind = BTreeMap::new();
+        per_kind.insert("Pod".to_string(), 3u32);
+        per_kind.insert("Service".to_string(), 2u32);
+        agg.update_stats("ctrl-1", Some(per_kind), 5);
+
+        let summaries = agg.controller_summaries();
+        let by_id = |id: &str| {
+            summaries
+                .iter()
+                .find(|s| s.controller_id == id)
+                .unwrap_or_else(|| panic!("missing summary for {id}"))
+                .clone()
+        };
+
+        let fresh = by_id("ctrl-1");
+        assert_eq!(fresh.stats_state, StatsState::Fresh);
+        assert!(fresh.online);
+        assert_eq!(fresh.key_count, Some(5));
+        let per_kind = fresh
+            .per_kind
+            .expect("per_kind present when stats reported");
+        assert_eq!(per_kind.get("Pod"), Some(&3));
+        assert_eq!(per_kind.get("Service"), Some(&2));
+
+        let missing = by_id("ctrl-missing");
+        assert_eq!(missing.stats_state, StatsState::Missing);
+        assert_eq!(missing.key_count, None);
+        assert_eq!(missing.per_kind, None);
+
+        // Going offline must NOT clear the counts: the K8s adapter deliberately
+        // preserves counts on mark_offline so Stale is renderable, frozen at
+        // their last reported value.
+        agg.mark_offline("ctrl-1");
+        let summaries = agg.controller_summaries();
+        let stale = summaries
+            .iter()
+            .find(|s| s.controller_id == "ctrl-1")
+            .unwrap();
+        assert_eq!(stale.stats_state, StatsState::Stale);
+        assert!(!stale.online);
+        assert_eq!(stale.key_count, Some(5));
+        let per_kind = stale
+            .per_kind
+            .as_ref()
+            .expect("per_kind retained after going offline");
+        assert_eq!(per_kind.get("Pod"), Some(&3));
     }
 }

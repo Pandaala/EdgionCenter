@@ -10,6 +10,8 @@ import type {
 import { globalResourcesApi } from '@/api/globalResources'
 import YamlEditor from '@/components/YamlEditor'
 import { useT } from '@/i18n'
+import dayjs from '@/lib/dayjs'
+import { SYNC_STATE_TAG_COLOR } from './globalResourceSyncState'
 
 interface Props {
   apiSlug: GlobalResourceApiSlug
@@ -96,6 +98,18 @@ export default function GlobalResourceComparisonDrawer({ apiSlug, group, onClose
               </Button>
             ))}
           </Space>
+
+          {selectedMember?.freshnessUnixMs !== undefined ? (
+            <Typography.Paragraph type="secondary" data-testid="global-resource-member-freshness">
+              {t('globalResources.member.freshness')}
+              {': '}
+              {dayjs(selectedMember.freshnessUnixMs).fromNow()}
+              {' '}
+              <Tag color={SYNC_STATE_TAG_COLOR[selectedMember.syncState ?? 'ok']}>
+                {t(`globalResources.syncState.${selectedMember.syncState ?? 'ok'}`)}
+              </Tag>
+            </Typography.Paragraph>
+          ) : null}
 
           {selectedMember === null ? (
             <Empty description={t('globalResources.drawer.noMemberSelected')} />
