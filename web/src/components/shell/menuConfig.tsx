@@ -17,7 +17,7 @@ import {
 } from '@ant-design/icons'
 
 export type AppMode = 'center' | 'controller'
-export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin' | 'providerAccountAdmin' | 'providerCapabilityRead' | 'providerCredentialInspection' | 'cloudflareDnsRead' | 'cloudflareDnsWrite' | 'cloudflareWafRead' | 'cloudflareWafWrite' | 'route53DnsRead' | 'route53DnsWrite' | 'route53ZoneLifecycle' | 'cloudfrontRead' | 'cloudfrontWrite' | 'awsWafRead' | 'awsWafWrite' | 'awsWafAttach' | 'awsWafDetach' | 'awsWafSecurityWeaken' | 'globalResourcesInventory' | 'globalResourceSync'
+export type CenterCapability = 'userAdmin' | 'roleAdmin' | 'auditQuery' | 'controllerHistory' | 'nativeRbac' | 'leaderElection' | 'passwordLogin' | 'providerAccountAdmin' | 'providerCapabilityRead' | 'providerCredentialInspection' | 'cloudflareDnsRead' | 'cloudflareDnsWrite' | 'cloudflareWafRead' | 'cloudflareWafWrite' | 'route53DnsRead' | 'route53DnsWrite' | 'route53ZoneLifecycle' | 'cloudfrontRead' | 'cloudfrontWrite' | 'awsWafRead' | 'awsWafWrite' | 'awsWafAttach' | 'awsWafDetach' | 'awsWafSecurityWeaken' | 'globalResourcesInventory'
 
 interface MenuGate {
   /** Permission key the caller must hold for this item to be visible. */

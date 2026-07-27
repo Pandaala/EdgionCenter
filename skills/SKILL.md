@@ -12,7 +12,7 @@ smallest relevant subtree.
 | Need | Entry |
 |---|---|
 | Crate boundaries, federation, ownership, persistence | [01-architecture/SKILL.md](01-architecture/SKILL.md) |
-| GlobalResources inventory and GlobalResource synchronization | [01-architecture/06-center/04-global-resource-management.md](01-architecture/06-center/04-global-resource-management.md) |
+| GlobalResources read model | [01-architecture/06-center/04-global-resource-management.md](01-architecture/06-center/04-global-resource-management.md) |
 | Binaries, config, ports, auth, deployment | [02-features/SKILL.md](02-features/SKILL.md) |
 | Validation matrices | [05-testing/SKILL.md](05-testing/SKILL.md) |
 | Dashboard | [web/skills/SKILL.md](../web/skills/SKILL.md) |

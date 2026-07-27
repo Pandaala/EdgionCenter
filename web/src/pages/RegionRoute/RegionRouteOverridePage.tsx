@@ -161,6 +161,11 @@ function FailoverEditor({
         onDone?.()
       } else if (failedCount === items.length) {
         message.error(t('writeOutcome.summary.allFailed'))
+      } else if (failedCount === 0) {
+        // Everything landed; some target is superseded/accepted/unknown rather
+        // than converged. Reporting this as "N landed, 0 failed" reads as a
+        // partial failure that never happened.
+        message.warning(t('writeOutcome.summary.landedUnconfirmed', { modified: items.length }))
       } else {
         message.warning(t('writeOutcome.summary.mixed', {
           modified: items.length - failedCount,
@@ -305,6 +310,10 @@ function SyncOverrideButton({
         setOutcomeItems([])
       } else if (summary.failed === items.length) {
         message.error(t('writeOutcome.summary.allFailed'))
+      } else if (summary.failed === 0) {
+        // See the matching branch in FailoverEditor: a "0 failed" warning
+        // misreports an all-landed-but-not-all-confirmed batch.
+        message.warning(t('writeOutcome.summary.landedUnconfirmed', { modified: summary.modified }))
       } else {
         message.warning(t('writeOutcome.summary.mixed', {
           modified: summary.modified,

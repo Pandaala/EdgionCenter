@@ -307,29 +307,6 @@ impl EdgionCenterCli {
             pending_proxies,
             config.sync.command_timeout_secs,
         ));
-        let global_resource_sync = match (db.clone(), controller_directory.clone()) {
-            (Some(store), Some(directory)) => {
-                let planner = Arc::new(
-                    edgion_center_runtime::global_resource_planner::GlobalResourcePlanService::new_standalone(
-                        directory,
-                        registry.clone(),
-                        proxy.clone(),
-                        config.global_resources.clone(),
-                    ),
-                );
-                let store = edgion_center_adapter_sql::SqlGlobalResourceStore::new(
-                    store,
-                    config.global_resources.clone(),
-                )?;
-                Some(Arc::new(
-                    edgion_center_app::api::global_resource_sync::GlobalResourceSyncApi {
-                        store: Arc::new(store),
-                        planner,
-                    },
-                ))
-            }
-            _ => None,
-        };
         let local_evictor = Arc::new(
             edgion_center_runtime::eviction::LocalControllerEvictor::new(
                 registry.clone(),
@@ -346,7 +323,6 @@ impl EdgionCenterCli {
             aggregator: aggregator.clone(),
             proxy: proxy.clone(),
             controller_directory: controller_directory.clone(),
-            global_resource_sync: global_resource_sync.clone(),
             controller_evictor,
             user_admin: sql_admin
                 .clone()
@@ -395,7 +371,6 @@ impl EdgionCenterCli {
                 // read model now (CCI-04); the route only needs the capability
                 // flag, with no fan-out service to compose.
                 capabilities.global_resources_inventory = true;
-                capabilities.global_resource_sync = global_resource_sync.is_some();
                 capabilities.cloudflare_waf_read =
                     config.cloudflare_waf.read_enabled && cloudflare_waf_admin.is_some();
                 capabilities.cloudflare_waf_write =
@@ -736,10 +711,6 @@ fn validate_startup_policy(config: &CenterConfig) -> anyhow::Result<()> {
             "edgion-center-standalone requires database.enabled = true; use the Kubernetes binary for database-free operation"
         );
     }
-    config
-        .global_resources
-        .validate()
-        .map_err(anyhow::Error::msg)?;
     Ok(())
 }
 

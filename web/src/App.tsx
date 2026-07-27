@@ -45,8 +45,6 @@ import EdgionGatewayConfigPage from './pages/System/EdgionGatewayConfigPage'
 import LinkSysList from './pages/System/LinkSysList'
 import EdgionAcmeList from './pages/System/EdgionAcmeList'
 import TopologyPage from './pages/Topology/TopologyPage'
-import GlobalConnectionIpRestrictionList from './pages/GlobalConnectionIpRestriction/List'
-import GlobalConnectionIpRestrictionDetail from './pages/GlobalConnectionIpRestriction/Detail'
 import GlobalResourceInventoryPage from './pages/GlobalResources/GlobalResourceInventoryPage'
 import { GLOBAL_RESOURCE_DESCRIPTORS } from './pages/GlobalResources/globalResourceDescriptors'
 import ProviderAccountsPage from './pages/Cloud/ProviderAccountsPage'
@@ -145,22 +143,12 @@ function App() {
           <Route path="region-routes/topology" element={<Navigate to="/region-routes/region" replace />} />
           <Route path="region-routes/cluster" element={<Navigate to="/region-routes/region" replace />} />
           <Route path="region-routes/services" element={<Navigate to="/region-routes/service" replace />} />
-          <Route path="federation-diagnostics" element={<Navigate to="/" replace />} />
           {capabilities?.providerAccountAdmin && <Route path="cloud/provider-accounts" element={<RequirePermission permission="provider-accounts:read"><ProviderAccountsPage /></RequirePermission>} />}
           {capabilities?.cloudflareDnsRead && <Route path="cloud/cloudflare/dns" element={<RequirePermissions permissions={['cloudflare-dns:read', 'provider-accounts:read']}><CloudflareDnsPage /></RequirePermissions>} />}
           {capabilities?.cloudflareWafRead && <Route path="cloud/cloudflare/waf" element={<RequirePermissions permissions={['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read']}><CloudflareWafPage /></RequirePermissions>} />}
           {capabilities?.route53DnsRead && <Route path="cloud/aws/route53" element={<RequirePermissions permissions={['route53-dns:read', 'provider-accounts:read']}><Route53DnsPage dnsWriteAvailable={capabilities.route53DnsWrite === true} zoneLifecycleAvailable={capabilities.route53ZoneLifecycle === true} /></RequirePermissions>} />}
           {capabilities?.cloudfrontRead && <Route path="cloud/aws/cloudfront" element={<RequirePermissions permissions={['cloudfront:read', 'provider-accounts:read']}><CloudFrontPage writeAvailable={capabilities.cloudfrontWrite === true} /></RequirePermissions>} />}
           {capabilities?.awsWafRead && <Route path="cloud/aws/waf" element={<RequirePermissions permissions={['aws-waf:read', 'provider-accounts:read']}><AwsWafPage writeAvailable={capabilities.awsWafWrite === true} attachAvailable={capabilities.awsWafAttach === true} detachAvailable={capabilities.awsWafDetach === true} securityWeakenAvailable={capabilities.awsWafSecurityWeaken === true} cloudfrontWriteAvailable={capabilities.cloudfrontWrite === true} /></RequirePermissions>} />}
-          <Route path="global-rules" element={<Navigate to="/global-rules/ip-lists" replace />} />
-          <Route
-            path="global-rules/ip-lists"
-            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionList /></RequirePermission>}
-          />
-          <Route
-            path="global-rules/ip-lists/:namespace/:name/:controllerId"
-            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionDetail /></RequirePermission>}
-          />
           {capabilities?.globalResourcesInventory && (
             <>
               <Route
@@ -192,12 +180,6 @@ function App() {
               />
             </>
           )}
-          <Route path="global-resources/sync" element={<Navigate to={GLOBAL_RESOURCE_DESCRIPTORS[0].route} replace />} />
-          <Route path="global-connection-ip-restrictions" element={<Navigate to="/global-rules/ip-lists" replace />} />
-          <Route
-            path="global-connection-ip-restrictions/:namespace/:name/:controllerId"
-            element={<RequirePermission permission="ip-restrictions:read"><GlobalConnectionIpRestrictionDetail /></RequirePermission>}
-          />
           <Route path="admin" element={<Navigate to="/controllers" replace />} />
           {capabilities?.auditQuery && <Route path="audit" element={<RequirePermission permission="audit:read"><AuditLogPage /></RequirePermission>} />}
           {capabilities?.userAdmin && <Route path="users" element={<RequirePermission permission="users:manage"><UserManagementPage /></RequirePermission>} />}

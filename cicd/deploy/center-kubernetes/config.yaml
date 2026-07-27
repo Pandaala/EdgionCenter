@@ -16,10 +16,6 @@ data:
     sync:
       command_timeout_secs: 25
       ping_interval_secs: 30
-    global_resources:
-      platform_namespaces:
-        - edgion-system
-        - edgion-global
     auth:
       enabled: true
       discovery: https://idp.example.invalid/.well-known/openid-configuration

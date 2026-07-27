@@ -329,26 +329,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         )
         .with_owner_forwarding(owner_forwarding.clone()),
     );
-    let global_resource_sync = {
-        let planner = Arc::new(
-            edgion_center_runtime::global_resource_planner::GlobalResourcePlanService::new_kubernetes(
-                directory.clone(),
-                owner_locator.clone(),
-                proxy.clone(),
-                config.global_resources.clone(),
-            ),
-        );
-        let store = edgion_center_adapter_kubernetes::KubernetesGlobalResourceStore::new(
-            client.clone(),
-            config.global_resources.clone(),
-        )?;
-        Arc::new(
-            edgion_center_app::api::global_resource_sync::GlobalResourceSyncApi {
-                store: Arc::new(store),
-                planner,
-            },
-        )
-    };
     let local_evictor = Arc::new(
         edgion_center_runtime::eviction::LocalControllerEvictor::new(
             registry.clone(),
@@ -374,7 +354,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         aggregator: aggregator.clone(),
         proxy: proxy.clone(),
         controller_directory: Some(directory.clone()),
-        global_resource_sync: Some(global_resource_sync),
         controller_evictor,
         user_admin: None,
         role_admin: None,
@@ -399,7 +378,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         capabilities: {
             let mut capabilities = CenterCapabilities::for_mode(CenterMode::Kubernetes);
             capabilities.global_resources_inventory = true;
-            capabilities.global_resource_sync = true;
             capabilities.provider_account_admin = true;
             capabilities.provider_capability_read = true;
             capabilities.provider_credential_inspection = credential_inspection_service.is_some();

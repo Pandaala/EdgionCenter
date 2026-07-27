@@ -570,6 +570,15 @@ async fn list_config_data_from_watch(
         .collect();
     clusters.sort_by(|a, b| (&a.cluster, &a.controller_id).cmp(&(&b.cluster, &b.controller_id)));
 
+    // `statuses()` above and `list_all()` below are two separate snapshots,
+    // each taken under its own lock, so a controller that connects between
+    // them yields a member with no matching `CacheStatus`. That is accepted,
+    // not a defect: `sync_state` / `freshness_unix_ms` / `revision` are all
+    // `Option` and render as unknown, and the next request picks the
+    // controller up. A single combined accessor would not fix it either —
+    // `list_all` locks each per-controller cache individually after the
+    // registry snapshot, so no cross-controller atomic point exists short of
+    // a global lock over every cache.
     let type_filter = filter.map(watch_type_filter);
     let mut grouped = BTreeMap::<GroupKey, Vec<ComparisonMember>>::new();
     for entry in state.sync_client.plugin_metadata.list_all(type_filter) {
@@ -598,7 +607,16 @@ async fn list_config_data_from_watch(
     }
     let all_groups: Vec<ComparisonGroup> = grouped
         .into_iter()
-        .map(|(key, members)| ComparisonGroup { key, members })
+        .map(|(key, mut members)| {
+            // Same ordering as `clusters` above. `list_all` orders by
+            // `controller_id` alone, which diverges from `(cluster,
+            // controller_id)` whenever one cluster name is a strict prefix of
+            // another ("a" vs "a-b": '-' sorts before '/').
+            members.sort_by(|a, b| {
+                (&a.cluster, &a.controller_id).cmp(&(&b.cluster, &b.controller_id))
+            });
+            ComparisonGroup { key, members }
+        })
         .collect();
 
     let current_inventory_revision = watch_inventory_revision(&clusters, &all_groups);
@@ -982,7 +1000,6 @@ mod tests {
             aggregator: Arc::new(ResourceAggregator::new()),
             proxy,
             controller_directory: None,
-            global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,
             role_admin: None,

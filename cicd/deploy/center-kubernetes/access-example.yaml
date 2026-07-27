@@ -41,11 +41,6 @@ rules:
       - /edgion-center-authz/api/v1/center/global-resources/resources/*
       - /edgion-center-authz/permissions/global-resources:read
     verbs: [get]
-  - nonResourceURLs:
-      - /edgion-center-authz/api/v1/center/global-resource-sync/resources
-      - /edgion-center-authz/api/v1/center/global-resource-sync/resources/*
-      - /edgion-center-authz/permissions/global-resource-sync:read
-    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -59,36 +54,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: edgion-center-api-reader
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: edgion-center-global-resource-sync-operator
-rules:
-  - nonResourceURLs:
-      - /edgion-center-authz/api/v1/center/global-resource-sync/resources
-    verbs: [post]
-  - nonResourceURLs:
-      - /edgion-center-authz/api/v1/center/global-resource-sync/resources/*
-    verbs: [put, post]
-  - nonResourceURLs:
-      - /edgion-center-authz/permissions/global-resource-sync:write
-      - /edgion-center-authz/permissions/global-resource-sync:plan
-      - /edgion-center-authz/permissions/global-resource-sync:apply
-    verbs: [get]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: edgion-center-global-resource-sync-operator
-subjects:
-  - kind: Group
-    name: oidc:34:https://issuer.example/realms/main:group:edgion-global-resource-operators
-    apiGroup: rbac.authorization.k8s.io
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: edgion-center-global-resource-sync-operator
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

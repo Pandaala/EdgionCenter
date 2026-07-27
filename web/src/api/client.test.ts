@@ -37,7 +37,7 @@ describe('conflict guidance', () => {
     expect(isCreateRequest('post', 'center/admin/users')).toBe(true)
     expect(isCreateRequest('post', 'reload')).toBe(false)
     expect(isCreateRequest('post', '/services/acme/default/cert/trigger')).toBe(false)
-    expect(isCreateRequest('post', 'center/region-routes/failover')).toBe(false)
+    expect(isCreateRequest('post', 'center/region-route-overrides/failover')).toBe(false)
   })
 
   it('distinguishes create collisions, stale mutations, and action conflicts', () => {

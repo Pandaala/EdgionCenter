@@ -7,12 +7,6 @@ import {
   type ControllerMutationTarget,
 } from './resources'
 
-function allow(kind: string, verbs: string[]) {
-  vi.spyOn(controllerAccessApi, 'get').mockResolvedValue({
-    resources: [{ kind, verbs }],
-  } as never)
-}
-
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -41,14 +35,16 @@ describe('resource mutation execution boundary', () => {
     )
   })
 
-  it('uses the captured controller target and revalidates access before sending', async () => {
-    allow('Service', ['create'])
+  it('uses the captured controller target and sends the write as the only request', async () => {
+    // The Controller enforces the policy on the write itself. Re-reading
+    // /api/v1/access first would only double the round trips.
+    const access = vi.spyOn(controllerAccessApi, 'get')
     const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { success: true } })
     const target: ControllerMutationTarget = Object.freeze({ controllerId: 'east/controller-1' })
 
     await resourceApi.create(target, 'service', 'prod', 'kind: Service')
 
-    expect(controllerAccessApi.get).toHaveBeenCalledWith('east/controller-1')
+    expect(access).not.toHaveBeenCalled()
     expect(post).toHaveBeenCalledWith(
       '/namespaced/service/prod',
       'kind: Service',
@@ -59,17 +55,7 @@ describe('resource mutation execution boundary', () => {
     )
   })
 
-  it('fails closed when current access no longer permits the write', async () => {
-    allow('Service', ['get'])
-    const post = vi.spyOn(apiClient, 'post')
-
-    await expect(resourceApi.create({ controllerId: null }, 'service', 'prod', 'kind: Service'))
-      .rejects.toThrow('Controller denies create on Service')
-    expect(post).not.toHaveBeenCalled()
-  })
-
   it('preserves resourceVersion in YAML and forwards it as If-Match', async () => {
-    allow('Service', ['update'])
     const put = vi.spyOn(apiClient, 'put').mockResolvedValue({ data: { success: true } })
     const source = 'apiVersion: v1\nkind: Service\nmetadata:\n  name: api\n  namespace: prod\n  resourceVersion: "42"\nspec: {}\n'
 
@@ -88,7 +74,6 @@ describe('resource mutation execution boundary', () => {
   })
 
   it('requires and forwards resourceVersion for conditional deletion', async () => {
-    allow('Service', ['delete'])
     const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: { success: true } })
 
     await resourceApi.delete({ controllerId: null }, 'service', 'prod', 'api', '43')

@@ -1840,7 +1840,6 @@ mod tests {
             aggregator: Arc::new(ResourceAggregator::new()),
             proxy,
             controller_directory: None,
-            global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,
             role_admin: None,

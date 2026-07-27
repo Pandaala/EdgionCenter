@@ -40,7 +40,7 @@
 #   8.   gcir_list_after_create     — GET list shows gcir-test with >= 2 controller entries
 #   9.   gcir_get_detail            — GET detail confirms fields on both controllers
 #   10.  gcir_patch_enable          — PATCH /enable=false, verify all controllers disabled
-#   11.  gcir_patch_active_profile  — PUT adds second profile, PATCH /active-profile switches
+#   11.  (removed — the /active-profile switch endpoint no longer exists)
 #   12.  gcir_consistency_ok        — GET /consistency reports gcir-test as consistent
 #   13.  gcir_delete_fanout         — DELETE fan-out, verify gcir-test disappears
 #
@@ -1061,89 +1061,11 @@ print('ok')
   fi
 fi
 
-# ─── Test 11: gcir_patch_active_profile ───────────────────────────────────────
-# Step 1: re-enable and add a second profile via PUT.
-# Step 2: PATCH /active-profile to switch to "permissive".
-# Step 3: GET detail and verify all controllers have activeProfile == "permissive".
-
-# Re-enable and add "permissive" profile via PUT
-PUT_BODY='{
-  "controllers": ["all"],
-  "data": {
-    "enable": true,
-    "activeProfile": "strict",
-    "profiles": {
-      "strict": {
-        "defaultAction": "deny",
-        "allow": [{"name": "office", "cidrs": ["192.168.1.0/24"]}]
-      },
-      "permissive": {
-        "defaultAction": "allow",
-        "deny": [{"name": "bad", "cidrs": ["1.2.3.4/32"]}]
-      }
-    }
-  }
-}'
-out=$(auth_put "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/edgion-test/gcir-test" "$PUT_BODY")
-put_ok=$(echo "$out" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    fanout = d.get('data', {})
-    f = len(fanout.get('failed', []))
-    print('ok' if f == 0 else f'failed={f}')
-except:
-    print('parse_error')
-" 2>/dev/null || echo "error")
-if [[ "$put_ok" != "ok" ]]; then
-  fail "gcir_patch_active_profile" "PUT to add permissive profile failed: $put_ok. Response: $out"
-else
-  log "Waiting 2s for PUT to propagate..."
-  sleep 2
-
-  # Now PATCH active-profile to "permissive"
-  PATCH_PROFILE_BODY='{"activeProfile": "permissive", "controllers": ["all"]}'
-  out=$(auth_patch "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/edgion-test/gcir-test/active-profile" "$PATCH_PROFILE_BODY")
-  patch_ok=$(echo "$out" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    fanout = d.get('data', {})
-    f = len(fanout.get('failed', []))
-    print('ok' if f == 0 else f'failed={f}')
-except:
-    print('parse_error')
-" 2>/dev/null || echo "error")
-  if [[ "$patch_ok" != "ok" ]]; then
-    fail "gcir_patch_active_profile" "PATCH /active-profile failed: $patch_ok. Response: $out"
-  else
-    log "Waiting 2s for active-profile patch to propagate..."
-    sleep 2
-
-    # Verify via GET detail
-    out2=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/edgion-test/gcir-test")
-    result=$(echo "$out2" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-item = d.get('data', {})
-ctrls = item.get('controllers', {})
-if len(ctrls) < 2:
-    print(f'only {len(ctrls)} controllers')
-    sys.exit(0)
-for cid, entry in ctrls.items():
-    ap = entry.get('activeProfile')
-    if ap != 'permissive':
-        print(f'ctrl {cid} activeProfile={ap}')
-        sys.exit(0)
-print('ok')
-" 2>/dev/null || echo "error")
-    if [[ "$result" == "ok" ]]; then
-      pass "gcir_patch_active_profile"
-    else
-      fail "gcir_patch_active_profile" "not all controllers switched to permissive: $result. Response: $out2"
-    fi
-  fi
-fi
+# ─── Test 11: removed ─────────────────────────────────────────────────────────
+# `gcir_patch_active_profile` exercised
+# `PATCH /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile`,
+# which no longer exists: switching a Selector's active profile is now a plain
+# EdgionConfigData write through the generic resource path.
 
 # ─── Test 12: gcir_consistency_ok ─────────────────────────────────────────────
 # GET /global-connection-ip-restrictions/consistency

@@ -32,10 +32,9 @@ function defaultDescribeObserved(observed: unknown): string {
 
 /**
  * Human-readable detail line for one `WriteOutcome`, shared between the
- * inline `WriteOutcomeTag` and any toast-style caller (e.g. the Selector
- * active-profile switch, which reports a single-controller result). Kept
- * as a plain function so callers that don't want a full React tag can still
- * produce on-brand wording per state.
+ * inline `WriteOutcomeTag` and any toast-style caller reporting a
+ * single-controller result. Kept as a plain function so callers that don't
+ * want a full React tag can still produce on-brand wording per state.
  */
 export function outcomeDetailText(
   t: (key: string, params?: Record<string, string | number>) => string,

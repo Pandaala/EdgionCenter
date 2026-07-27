@@ -123,7 +123,6 @@ export interface CenterCapabilities {
   auditQuery: boolean
   controllerHistory: boolean
   globalResourcesInventory?: boolean
-  globalResourceSync?: boolean
   nativeRbac: boolean
   leaderElection: boolean
   passwordLogin: boolean

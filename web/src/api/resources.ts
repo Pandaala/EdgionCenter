@@ -1,7 +1,6 @@
 import { apiClient } from './client'
 import type { ApiResponse, ListResponse, K8sResource, ResourceKey, ResourceKind } from './types'
 import * as yaml from 'js-yaml'
-import { controllerAccessApi, controllerKindFor } from './access'
 import type { AxiosRequestConfig } from 'axios'
 
 export interface ControllerMutationTarget {
@@ -68,22 +67,6 @@ function resourceVersionHeader(resource: K8sResource | string): Record<string, s
 function requiredResourceVersionHeader(version: string): Record<string, string> {
   if (!version) throw new Error('A current resourceVersion is required for deletion')
   return resourceVersionHeader({ apiVersion: '', kind: '', metadata: { name: '', resourceVersion: version } })
-}
-
-async function requireResourceMutation(
-  target: ControllerMutationTarget,
-  kind: ResourceKind,
-  verb: 'create' | 'update' | 'delete',
-): Promise<AxiosRequestConfig> {
-  // Re-read the effective policy immediately before every mutation. Cached UI
-  // state controls presentation only; it is never authority for a write.
-  const access = await controllerAccessApi.get(target.controllerId)
-  const controllerKind = controllerKindFor(kind)
-  const allowed = access.resources
-    .find((row) => row.kind === controllerKind)
-    ?.verbs.includes(verb) === true
-  if (!allowed) throw new Error(`Controller denies ${verb} on ${controllerKind}`)
-  return mutationRequestConfig(target)
 }
 
 export const resourceApi = {
@@ -179,9 +162,8 @@ export const resourceApi = {
     resource: T | string
   ): Promise<ApiResponse<string>> => {
     const content = typeof resource === 'string' ? resource : yaml.dump(resource)
-    const config = await requireResourceMutation(target, kind, 'create')
     const { data } = await apiClient.post(`/namespaced/${kind}/${namespace}`, content, {
-      ...config,
+      ...mutationRequestConfig(target),
       headers: { 'Content-Type': 'application/yaml' },
     })
     return data
@@ -198,9 +180,8 @@ export const resourceApi = {
     resource: T | string
   ): Promise<ApiResponse<string>> => {
     const content = typeof resource === 'string' ? resource : yaml.dump(resource)
-    const config = await requireResourceMutation(target, kind, 'update')
     const { data } = await apiClient.put(`/namespaced/${kind}/${namespace}/${name}`, content, {
-      ...config,
+      ...mutationRequestConfig(target),
       headers: { 'Content-Type': 'application/yaml', ...resourceVersionHeader(resource) },
     })
     return data
@@ -216,9 +197,8 @@ export const resourceApi = {
     name: string,
     resourceVersion: string,
   ): Promise<ApiResponse<string>> => {
-    const config = await requireResourceMutation(target, kind, 'delete')
     const { data } = await apiClient.delete(`/namespaced/${kind}/${namespace}/${name}`, {
-      ...config,
+      ...mutationRequestConfig(target),
       headers: requiredResourceVersionHeader(resourceVersion),
     })
     return data
@@ -296,9 +276,8 @@ export const clusterResourceApi = {
     resource: T | string
   ): Promise<ApiResponse<string>> => {
     const content = typeof resource === 'string' ? resource : yaml.dump(resource)
-    const config = await requireResourceMutation(target, kind, 'create')
     const { data } = await apiClient.post(`/cluster/${kind}`, content, {
-      ...config,
+      ...mutationRequestConfig(target),
       headers: { 'Content-Type': 'application/yaml' },
     })
     return data
@@ -311,18 +290,16 @@ export const clusterResourceApi = {
     resource: T | string
   ): Promise<ApiResponse<string>> => {
     const content = typeof resource === 'string' ? resource : yaml.dump(resource)
-    const config = await requireResourceMutation(target, kind, 'update')
     const { data } = await apiClient.put(`/cluster/${kind}/${name}`, content, {
-      ...config,
+      ...mutationRequestConfig(target),
       headers: { 'Content-Type': 'application/yaml', ...resourceVersionHeader(resource) },
     })
     return data
   },
 
   delete: async (target: ControllerMutationTarget, kind: ResourceKind, name: string, resourceVersion: string): Promise<ApiResponse<string>> => {
-    const config = await requireResourceMutation(target, kind, 'delete')
     const { data } = await apiClient.delete(`/cluster/${kind}/${name}`, {
-      ...config,
+      ...mutationRequestConfig(target),
       headers: requiredResourceVersionHeader(resourceVersion),
     })
     return data

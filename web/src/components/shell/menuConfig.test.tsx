@@ -193,9 +193,7 @@ describe('Center navigation structure', () => {
     expect(leaves.map((item) => item.key)).not.toContain('center-global-shared-plugins')
     expect(leaves.map((item) => item.key)).not.toContain('center-global-waf-control')
     expect(leaves.map((item) => item.key)).not.toContain('center-global-ip-lists')
-    expect(leaves.map((item) => item.key)).not.toContain('center-global-resource-sync')
     expect(leaves.map((item) => item.path)).not.toContain('/global-rules/ip-lists')
-    expect(leaves.map((item) => item.path)).not.toContain('/global-resources/sync')
   })
 
   it('keeps the existing Cloud Services permission composition', () => {

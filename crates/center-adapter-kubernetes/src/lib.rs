@@ -7,8 +7,6 @@ mod cloud_capability_crd;
 mod cloud_capability_store;
 mod controller_directory;
 mod crd;
-mod global_resource_crd;
-mod global_resource_store;
 mod lease;
 mod owner_locator;
 mod provider_account_crd;
@@ -27,8 +25,6 @@ pub use controller_directory::{controller_resource_name, KubernetesControllerDir
 pub use crd::{
     EdgionController, EdgionControllerPhase, EdgionControllerSpec, EdgionControllerStatus,
 };
-pub use global_resource_crd::{EdgionGlobalResource, EdgionGlobalResourceSpec};
-pub use global_resource_store::{global_resource_resource_name, KubernetesGlobalResourceStore};
 pub use lease::KubernetesLeaseCoordinator;
 pub use owner_locator::KubernetesControllerOwnerLocator;
 pub use provider_account_crd::{EdgionProviderAccount, EdgionProviderAccountSpec};

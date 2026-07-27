@@ -5,13 +5,10 @@ description: Multi-Controller resource inventory, consistency, condition health,
 
 # Fleet observability
 
-## Federation diagnostics
-
-The Center-only `/federation-diagnostics` page consumes the read-only
-`/api/v1/center/admin/watch-status` and `/api/v1/center/admin/metadata-store` endpoints. It shows
-watch ownership/sync versions plus effective RegionRoute and GlobalConnectionIpRestriction key
-coverage. The navigation entry requires `server:read` and is available in both Center deployment
-modes; it does not depend on SQL persistence or Kubernetes-native RBAC.
+There is no federation diagnostics page. Watch ownership, sync versions, and metadata-store
+key coverage are not exposed over the Admin API; the endpoints that once served them
+(`/api/v1/center/admin/watch-status`, `/api/v1/center/admin/metadata-store`) were removed
+together with the page. Do not reintroduce them without a live consumer.
 
 ## Data boundaries
 

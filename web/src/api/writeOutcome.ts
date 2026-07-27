@@ -3,9 +3,8 @@
 // `center-app::api::config_data_ops::WriteOutcome`, camelCase on the wire).
 //
 // Every Center-initiated write to an EdgionConfigData resource (RegionRoute
-// failover, row-level override sync, the Selector active-profile switch)
-// reports one outcome per target Controller through this shape. The six
-// states are not interchangeable:
+// failover, row-level override sync) reports one outcome per target
+// Controller through this shape. The six states are not interchangeable:
 //
 // - converged  — the write landed and the intent is currently in effect.
 // - superseded — the write landed and was then overwritten by someone else;
@@ -47,15 +46,6 @@ export interface WriteOutcomeSummary {
   outcomes: WriteOutcome[]
 }
 
-export const OUTCOME_STATES: readonly OutcomeState[] = [
-  'converged',
-  'superseded',
-  'accepted',
-  'conflict',
-  'failed',
-  'unknown',
-]
-
 /**
  * `failed` and `conflict` are the only states where nothing landed on that
  * controller. `converged`/`superseded`/`accepted`/`unknown` all mean the
@@ -63,16 +53,4 @@ export const OUTCOME_STATES: readonly OutcomeState[] = [
  */
 export function isOutcomeFailure(state: OutcomeState): boolean {
   return state === 'failed' || state === 'conflict'
-}
-
-export type OutcomeMessageSeverity = 'success' | 'info' | 'warning' | 'error'
-
-/** Toast/message severity to pair with each outcome state's text. */
-export const OUTCOME_MESSAGE_SEVERITY: Record<OutcomeState, OutcomeMessageSeverity> = {
-  converged: 'success',
-  superseded: 'warning',
-  accepted: 'info',
-  conflict: 'error',
-  failed: 'error',
-  unknown: 'warning',
 }

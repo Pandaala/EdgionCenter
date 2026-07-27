@@ -54,16 +54,6 @@ impl<T: Send + Sync + 'static> CenterWatchCacheRegistry<T> {
             .clone()
     }
 
-    /// List all controllers with their sync state.
-    /// Returns (controller_id, sync_version, server_id).
-    pub fn list_controllers(&self) -> Vec<(String, u64, String)> {
-        self.caches
-            .read()
-            .iter()
-            .map(|(id, cache)| (id.clone(), cache.get_sync_version(), cache.get_server_id()))
-            .collect()
-    }
-
     /// Snapshot of every known controller's cache status (revision,
     /// staleness, overflow, entry count).
     pub fn statuses(&self) -> Vec<(String, CacheStatus)> {

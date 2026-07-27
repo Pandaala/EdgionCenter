@@ -27,13 +27,10 @@
     "/user": ["user-refresh"],
     "/topology": ["topology-refresh", "topology-namespace-filter", "topology-legend", "topology-node"],
     "/region-routes/region": ["region-refresh", "region-failover", "region-failover-apply"],
-    "/region-routes/service": ["region-service-refresh", "region-service-search", "region-service-table", "region-service-manage-region"],
-    "/federation-diagnostics": ["federation-diagnostics", "federation-diagnostics-refresh", "federation-watch-table", "federation-region-metadata-table", "federation-gir-metadata-table"],
     "/admin": ["admin-refresh", "admin-controller-delete", "admin-delete-cancel"],
     "/audit": ["audit-refresh", "audit-actor-filter", "audit-controller-filter", "audit-since-filter", "audit-until-filter", "audit-apply", "audit-reset", "audit-prev", "audit-next"],
     "/users": ["users-refresh", "user-create", "user-edit-roles", "user-enable", "user-disable", "user-reset-password", "user-delete", "user-confirm", "user-cancel"],
-    "/roles": ["roles-refresh", "role-create", "role-edit", "role-permissions-save", "role-delete", "role-confirm", "role-cancel"],
-    "/global-connection-ip-restrictions": ["gcir-refresh", "gcir-search", "gcir-namespace", "gcir-controller", "gcir-row-open", "gcir-profile-select", "gcir-profile-confirm", "gcir-profile-cancel"]
+    "/roles": ["roles-refresh", "role-create", "role-edit", "role-permissions-save", "role-delete", "role-confirm", "role-cancel"]
   },
   "resourceActionTemplates": ["{kind}-refresh", "{kind}-row-view"],
   "searchableActionTemplates": ["{kind}-search"],

@@ -2,19 +2,16 @@ import { useEffect, useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   App, Table, Space, Tag, Typography, Spin, Empty, Button,
-  Collapse, Alert, Tooltip, Select, Popover, AutoComplete, Input,
+  Alert, Tooltip, Select, Popover, AutoComplete, Input,
 } from 'antd'
 import type { FilterDropdownProps } from 'antd/es/table/interface'
-import { ReloadOutlined, WarningOutlined, SearchOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import {
   regionRouteApi,
-  type CenterRegionRoute,
   type EffectiveRegionRoute,
   type RegionDef,
   type RegionRouteOverrideRef,
-  type ConsistencyResult,
 } from '@/api/regionRoute'
-import { getActiveControllerId, getAppMode } from '@/utils/proxy'
 import { useCan } from '@/utils/permissions'
 import { useT } from '@/i18n'
 import PageHeader from '@/components/PageHeader'
@@ -26,33 +23,15 @@ const { Text } = Typography
 // Types
 // ---------------------------------------------------------------------------
 
-export type RegionRouteRow = CenterRegionRoute | EffectiveRegionRoute
-
-function isCenterRow(r: RegionRouteRow): r is CenterRegionRoute {
-  return 'controllers' in r
-}
-
-export function regionRouteConsistencyKey(route: RegionRouteRow): string {
-  return `${route.namespace}/${route.pluginName}${route.alias ? `/${route.alias}` : ''} (#${route.entryIndex})`
-}
+/** One row is one Controller-local RegionRoute entry. */
+export type RegionRouteRow = EffectiveRegionRoute
 
 export function regionRouteRowKey(route: RegionRouteRow): string {
   return `${route.namespace}/${route.pluginName}/${route.entryIndex}`
 }
 
 export function writableOverrideRef(route: RegionRouteRow): RegionRouteOverrideRef | null {
-  if (isCenterRow(route)) {
-    return Object.values(route.controllers).find((entry) => entry.overrideRef?.permitted)?.overrideRef ?? null
-  }
   return route.overrideRef?.permitted ? route.overrideRef : null
-}
-
-export function regionRouteSyncTargets(
-  route: CenterRegionRoute,
-  sourceControllerId: string,
-): string[] {
-  return (route.onlineControllerIds ?? Object.keys(route.controllers))
-    .filter((controllerId) => controllerId !== sourceControllerId)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,117 +82,16 @@ function RouteConfigSummary({ entry }: { entry: EffectiveRegionRoute }) {
 }
 
 // ---------------------------------------------------------------------------
-// ConsistencyTag
-// ---------------------------------------------------------------------------
-
-function SyncPanel({ item }: { item: CenterRegionRoute }) {
-  const t = useT()
-  const { message } = App.useApp()
-  const queryClient = useQueryClient()
-  const sourceIds = Object.keys(item.controllers).sort()
-  const [sourceControllerId, setSourceControllerId] = useState(sourceIds[0] ?? '')
-  const targetControllerIds = regionRouteSyncTargets(item, sourceControllerId)
-  const syncMutation = useMutation({
-    mutationFn: () => regionRouteApi.syncRegionRoute(
-      {
-        namespace: item.namespace,
-        pluginName: item.pluginName,
-        entryIndex: item.entryIndex,
-      },
-      sourceControllerId,
-      targetControllerIds,
-    ),
-    onSuccess: async () => {
-      message.success(t('center.regionRoute.syncOk'))
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      queryClient.invalidateQueries({ queryKey: ['region-routes'] })
-      queryClient.invalidateQueries({ queryKey: ['region-routes-consistency'] })
-    },
-    onError: (error: unknown) => {
-      message.error(t('center.regionRoute.syncFail', { err: (error as Error).message }))
-    },
-  })
-
-  return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Text type="secondary">{t('center.regionRoute.syncDescription')}</Text>
-      <Space wrap>
-        <Text>{t('center.regionRoute.syncHint')}</Text>
-        <Select
-          data-testid="region-sync-source"
-          value={sourceControllerId}
-          onChange={setSourceControllerId}
-          options={sourceIds.map((controllerId) => ({ value: controllerId, label: controllerId }))}
-          style={{ minWidth: 220 }}
-          disabled={syncMutation.isPending}
-        />
-        <Button
-          data-testid="region-sync-apply"
-          type="primary"
-          loading={syncMutation.isPending}
-          disabled={!sourceControllerId || targetControllerIds.length === 0}
-          onClick={() => syncMutation.mutate()}
-        >
-          {t('center.regionRoute.syncToTargets', { n: targetControllerIds.length })}
-        </Button>
-      </Space>
-      <Text type="secondary">
-        {t('center.regionRoute.syncTargets')}: {targetControllerIds.join(', ') || '—'}
-      </Text>
-    </Space>
-  )
-}
-
-function ConsistencyTag({
-  result,
-  item,
-  canWrite,
-}: {
-  result?: ConsistencyResult
-  item?: CenterRegionRoute
-  canWrite?: boolean
-}) {
-  const t = useT()
-  if (!result) return <Text type="secondary">—</Text>
-  if (result.consistent) return <Tag color="green">{t('center.regionRoute.consistent')}</Tag>
-
-  const content = (
-    <div style={{ maxWidth: 400 }}>
-      {result.conflicts.map((c, i) => (
-        <div key={i} style={{ marginBottom: 6 }}>
-          <Text strong>{c}</Text>
-        </div>
-      ))}
-      {item && canWrite && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--ec-color-border)' }}>
-          <SyncPanel item={item} />
-        </div>
-      )}
-    </div>
-  )
-
-  return (
-    <Popover title={t('center.regionRoute.consistencyDetail')} content={content} trigger="click">
-      <span style={{ fontSize: 18, cursor: 'pointer' }}>⚠️</span>
-    </Popover>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // FailoverPanel
 // ---------------------------------------------------------------------------
 
 function FailoverPanel({
   regions,
-  namespace,
   overrideRef,
-  routeIdentity,
   onDone,
 }: {
   regions: RegionDef[]
-  namespace: string
   overrideRef: { namespace: string; name: string }
-  routeIdentity?: { pluginName: string; entryIndex: number }
   onDone?: () => void
 }) {
   const t = useT()
@@ -242,21 +120,17 @@ function FailoverPanel({
       await Promise.all(
         changed.map((region) =>
           regionRouteApi.regionRouteFailover(
-            routeIdentity ? namespace : overrideRef.namespace,
-            routeIdentity ? '' : overrideRef.name,
+            overrideRef.namespace,
+            overrideRef.name,
             region.name,
             pending[region.name] ?? '',
-            routeIdentity,
           ),
         ),
       )
-      // Center delays its response long enough for the list/watch projection to
-      // converge, so refresh from the authoritative read model after success.
       await queryClient.refetchQueries({ queryKey: ['region-routes'] })
     },
     onSuccess: () => {
       message.success(t('center.regionRoute.failoverUpdateOk'))
-      queryClient.invalidateQueries({ queryKey: ['region-routes-consistency'] })
       onDone?.()
     },
     onError: (e: unknown) => {
@@ -310,27 +184,12 @@ function FailoverPanel({
 // RowActions
 // ---------------------------------------------------------------------------
 
-function RowActions({
-  row,
-  consistencyResult,
-}: {
-  row: RegionRouteRow
-  consistencyResult?: ConsistencyResult
-}) {
+function RowActions({ row }: { row: RegionRouteRow }) {
   const t = useT()
   const canWrite = useCan('region-routes:write')
   const [open, setOpen] = useState(false)
 
-  const representative = isCenterRow(row)
-    ? Object.entries(row.controllers).sort(([left], [right]) => left.localeCompare(right))[0]?.[1]
-    : row
-  const regions: RegionDef[] = isCenterRow(row)
-    ? (representative?.regions ?? [])
-    : row.regions
-
-  // For a Center aggregated row all controllers share the same git-owned base, so the
-  // first controller's overrideRef is representative.  For a single-controller row use
-  // the field directly.
+  const regions: RegionDef[] = row.regions
   const overrideRef = writableOverrideRef(row)
 
   const failoverDisabled = !overrideRef || !canWrite
@@ -366,9 +225,7 @@ function RowActions({
               ) : (
                 <FailoverPanel
                   regions={regions}
-                  namespace={row.namespace}
                   overrideRef={overrideRef}
-                  routeIdentity={isCenterRow(row) ? { pluginName: row.pluginName, entryIndex: row.entryIndex } : undefined}
                   onDone={() => setOpen(false)}
                 />
               )}
@@ -378,125 +235,12 @@ function RowActions({
           {failoverButton}
         </Popover>
       )}
-      {consistencyResult && !consistencyResult.consistent && (
-        <ConsistencyTag
-          result={consistencyResult}
-          item={isCenterRow(row) ? row : undefined}
-          canWrite={canWrite}
-        />
-      )}
     </span>
   )
 }
 
 // ---------------------------------------------------------------------------
-// ExpandedDetail (center mode — per-controller Collapse)
-// ---------------------------------------------------------------------------
-
-function CenterExpandedDetail({
-  item,
-  consistencyResult,
-}: {
-  item: CenterRegionRoute
-  consistencyResult?: ConsistencyResult
-}) {
-  const t = useT()
-  const canWrite = useCan('region-routes:write')
-  const controllerEntries = Object.entries(item.controllers)
-
-  if (controllerEntries.length === 0) return <Empty description={t('center.regionRoute.noData')} />
-
-  return (
-    <div style={{ padding: '8px 0' }}>
-      {consistencyResult && !consistencyResult.consistent && (
-        <Alert
-          type="warning"
-          showIcon
-          icon={<WarningOutlined />}
-          style={{ marginBottom: 12 }}
-          message={t('center.regionRoute.conflictAlert')}
-          description={
-            <div style={{ marginTop: 4 }}>
-              {consistencyResult.conflicts.map((c, i) => (
-                <div key={i} style={{ marginBottom: 6 }}>
-                  <Text strong>{c}</Text>
-                </div>
-              ))}
-              {canWrite && (
-                <div style={{ marginTop: 12 }}>
-                  <SyncPanel item={item} />
-                </div>
-              )}
-            </div>
-          }
-        />
-      )}
-      {controllerEntries.map(([controllerId, entry]) => (
-        <Collapse
-          key={controllerId}
-          size="small"
-          style={{ marginBottom: 8 }}
-          items={[{
-            key: 'main',
-            label: (
-              <Space>
-                <Text strong>{controllerId}</Text>
-                {entry.myRegion && (
-                  <Tag color="green">{t('center.regionRoute.myRegion')}: {entry.myRegion}</Tag>
-                )}
-                <Tag color="blue">{entry.regions.length} {t('center.regionRoute.regions')}</Tag>
-                {entry.overrideApplied && <Tag color="orange">Override Applied</Tag>}
-              </Space>
-            ),
-            children: (
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                <RouteConfigSummary entry={entry} />
-                <Table
-                  size="small"
-                  pagination={false}
-                  dataSource={entry.regions.map((r, i) => ({ ...r, key: i }))}
-                  columns={[
-                  {
-                    title: t('center.regionRoute.regionName'),
-                    dataIndex: 'name',
-                    render: (v: string) => <Text strong>{v}</Text>,
-                  },
-                  {
-                    title: t('center.regionRoute.hashRange'),
-                    dataIndex: 'hashRange',
-                    render: (v: [number, number]) => <Tag color="blue">[{v[0]}, {v[1]}]</Tag>,
-                  },
-                  {
-                    title: t('center.regionRoute.endpoint'),
-                    dataIndex: 'backendEndpoint',
-                    render: (v: string) => <Text code>{v}</Text>,
-                  },
-                  {
-                    title: t('center.regionRoute.tls'),
-                    dataIndex: 'tls',
-                    render: (v: boolean) => (
-                      <Tag color={v ? 'green' : 'default'}>{v ? 'TLS' : t('center.regionRoute.tlsPlain')}</Tag>
-                    ),
-                  },
-                  {
-                    title: t('center.regionRoute.failover'),
-                    dataIndex: 'failoverTo',
-                    render: (v: string | undefined) =>
-                      v ? <Tag color="orange">{v}</Tag> : <Text type="secondary">—</Text>,
-                  },
-                  ]}
-                />
-              </Space>
-            ),
-          }]}
-        />
-      ))}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// ExpandedDetail (controller mode — direct regions table)
+// ExpandedDetail — per-region table for one Controller
 // ---------------------------------------------------------------------------
 
 function ControllerExpandedDetail({ item }: { item: EffectiveRegionRoute }) {
@@ -549,8 +293,6 @@ function ControllerExpandedDetail({ item }: { item: EffectiveRegionRoute }) {
 
 export default function RegionRouteList() {
   const t = useT()
-  // Center aggregated view: app mode is center AND no specific controller is selected.
-  const isCenter = getAppMode() === 'center' && !getActiveControllerId()
   const [searchParams] = useSearchParams()
   const [filter, setFilter] = useState(() => searchParams.get('q') ?? '')
 
@@ -560,25 +302,10 @@ export default function RegionRouteList() {
     staleTime: 30_000,
   })
 
-  const { data: consistencyData } = useQuery({
-    queryKey: ['region-routes-consistency'],
-    queryFn: () => regionRouteApi.regionRoutesConsistency(),
-    staleTime: 30_000,
-    enabled: isCenter,
-  })
-
   const allItems = useMemo(
     () => (data?.data ?? []) as RegionRouteRow[],
     [data],
   )
-
-  const consistencyMap = useMemo(() => {
-    const map = new Map<string, ConsistencyResult>()
-    for (const r of consistencyData?.data ?? []) {
-      map.set(`${r.namespace}/${r.name}`, r)
-    }
-    return map
-  }, [consistencyData])
 
   const filteredItems = useMemo(() => {
     if (!filter) return allItems
@@ -664,49 +391,27 @@ export default function RegionRouteList() {
     const myRegionCol = {
       title: t('center.regionRoute.myRegion'),
       key: 'myRegion',
-      render: (_: unknown, r: RegionRouteRow) => {
-        const myRegion = isCenterRow(r)
-          ? Object.values(r.controllers)[0]?.myRegion
-          : r.myRegion
-        return myRegion ? <Tag color="green">{myRegion}</Tag> : <Text type="secondary">—</Text>
-      },
+      render: (_: unknown, r: RegionRouteRow) =>
+        r.myRegion ? <Tag color="green">{r.myRegion}</Tag> : <Text type="secondary">—</Text>,
     }
 
     const regionsCol = {
       title: t('center.regionRoute.regions'),
       key: 'regions',
-      render: (_: unknown, r: RegionRouteRow) => {
-        const regions = isCenterRow(r)
-          ? (Object.values(r.controllers)[0]?.regions ?? [])
-          : r.regions
-        return <RegionsCell regions={regions} />
-      },
+      render: (_: unknown, r: RegionRouteRow) => <RegionsCell regions={r.regions} />,
     }
 
     const actionsCol = {
       title: t('center.regionRoute.failoverBtn'),
       key: 'actions',
-      render: (_: unknown, r: RegionRouteRow) => (
-        <RowActions
-          row={r}
-          consistencyResult={
-            isCenter
-              ? consistencyMap.get(regionRouteConsistencyKey(r))
-              : undefined
-          }
-        />
-      ),
-    }
-
-    if (isCenter) {
-      return [nameCol, myRegionCol, regionsCol, actionsCol]
+      render: (_: unknown, r: RegionRouteRow) => <RowActions row={r} />,
     }
 
     const overrideCol = {
       title: t('center.regionRoute.override'),
       key: 'overrideApplied',
       render: (_: unknown, r: RegionRouteRow) =>
-        !isCenterRow(r) && r.overrideApplied ? (
+        r.overrideApplied ? (
           <Tag color="orange">{t('center.regionRoute.applied')}</Tag>
         ) : (
           <Text type="secondary">—</Text>
@@ -714,12 +419,12 @@ export default function RegionRouteList() {
     }
 
     return [nameCol, myRegionCol, regionsCol, overrideCol, actionsCol]
-  }, [t, isCenter, consistencyMap])
+  }, [t])
 
   return (
     <div>
       <PageHeader
-        title={isCenter ? t('center.regionRoute.regionTitle') : t('center.nav.regionRoutes')}
+        title={t('center.nav.regionRoutes')}
         subtitle={t('page.subtitle.regionRoutes')}
         actions={
           <Button data-testid="region-refresh" icon={<ReloadOutlined />} onClick={() => refetch()}>
@@ -757,15 +462,7 @@ export default function RegionRouteList() {
           rowKey={regionRouteRowKey}
           pagination={{ pageSize: 10, showTotal: (n) => t('table.totalItems', { n }) }}
           expandable={{
-            expandedRowRender: (record) =>
-              isCenterRow(record) ? (
-                <CenterExpandedDetail
-                  item={record}
-                  consistencyResult={consistencyMap.get(regionRouteConsistencyKey(record))}
-                />
-              ) : (
-                <ControllerExpandedDetail item={record} />
-              ),
+            expandedRowRender: (record) => <ControllerExpandedDetail item={record} />,
           }}
         />
       )}

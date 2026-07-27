@@ -16,45 +16,6 @@ use std::time::{Duration, Instant};
 use crate::watch_cache::CenterConfHandler;
 use crate::watch_cache::WatchedConfigData;
 
-/// Sorted diagnostic counters keyed by effective-state resource identity.
-pub type DiagnosticEntries = Vec<(String, usize)>;
-
-/// Region-route and global-IP-restriction diagnostic summaries.
-pub type MetadataStatusEntries = (DiagnosticEntries, DiagnosticEntries);
-
-/// One controller's effective region route (deserialized from the controller's
-/// /api/v1/region-routes/effective response; field names match that DTO).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct EffectiveRegionRouteView {
-    pub namespace: String,
-    pub plugin_name: String,
-    #[serde(default)]
-    pub alias: Option<String>,
-    #[serde(default)]
-    pub entry_index: usize,
-    pub my_region: String,
-    pub regions: serde_json::Value,
-    #[serde(default = "empty_json_array")]
-    pub key_get: serde_json::Value,
-    #[serde(default)]
-    pub hash_key_get: Option<serde_json::Value>,
-    #[serde(default)]
-    pub hash_calc: Option<serde_json::Value>,
-    #[serde(default = "empty_json_array")]
-    pub route_rules: serde_json::Value,
-    #[serde(default)]
-    pub route_by_key_conf_match: Option<serde_json::Value>,
-    #[serde(default)]
-    pub dye: Option<serde_json::Value>,
-    #[serde(default)]
-    pub override_ref: Option<EffectiveConfigDataRef>,
-    #[serde(default)]
-    pub override_applied: bool,
-    #[serde(default)]
-    pub service_usages: Vec<RegionRouteServiceUsage>,
-}
-
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveConfigDataRef {
@@ -106,41 +67,6 @@ impl<'de> serde::Deserialize<'de> for EffectiveConfigDataRef {
     }
 }
 
-fn empty_json_array() -> serde_json::Value {
-    serde_json::Value::Array(Vec::new())
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RegionRouteServiceUsage {
-    pub route_kind: String,
-    pub route_namespace: String,
-    pub route_name: String,
-    pub rule_index: usize,
-    #[serde(default)]
-    pub backend_services: Vec<RegionRouteBackendService>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RegionRouteBackendService {
-    pub namespace: String,
-    pub name: String,
-    #[serde(default)]
-    pub port: Option<u16>,
-}
-
-/// Aggregated region route across controllers (one row per (ns, plugin, alias)).
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CenterRegionRouteView {
-    pub namespace: String,
-    pub plugin_name: String,
-    pub alias: Option<String>,
-    pub entry_index: usize,
-    pub controllers: HashMap<String, EffectiveRegionRouteView>,
-}
-
 /// One watched override resource aggregated across Controllers by namespace/name.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -181,7 +107,6 @@ pub struct CenterGirView {
 /// Aggregates EdgionConfigData across all controllers.
 ///
 /// Internal structure:
-/// - `region_routes`: route_key ("ns/plugin/alias") → { controller_id → EffectiveRegionRouteView }
 /// - `gir_effective`: gir_key ("ns/pluginName") → { controller_id → EffectiveGirView }
 ///
 /// Effective GIR remains populated by its background poller. RegionRoute
@@ -189,9 +114,6 @@ pub struct CenterGirView {
 pub struct CenterMetaDataStore {
     region_route_overrides: RwLock<HashMap<String, HashMap<String, serde_json::Value>>>,
     service_region_route_overrides: RwLock<HashMap<String, HashMap<String, serde_json::Value>>>,
-    // route_key ("ns/plugin/entry-index") → { controller_id → EffectiveRegionRouteView }
-    // Populated by the background poller (poll module); not fed by the conf_sync path.
-    region_routes: RwLock<HashMap<String, HashMap<String, EffectiveRegionRouteView>>>,
     // gir_key ("ns/pluginName") → { controller_id → EffectiveGirView }
     // Populated by the background poller; replaces the dead fed-sync GIR feed.
     gir_effective: RwLock<HashMap<String, HashMap<String, EffectiveGirView>>>,
@@ -202,7 +124,6 @@ pub struct CenterMetaDataStore {
 #[derive(Debug, Clone, Default)]
 struct ControllerCoverage {
     revision: Option<String>,
-    region_routes_at: Option<Instant>,
     gir_at: Option<Instant>,
 }
 
@@ -211,7 +132,6 @@ impl CenterMetaDataStore {
         Self {
             region_route_overrides: RwLock::new(HashMap::new()),
             service_region_route_overrides: RwLock::new(HashMap::new()),
-            region_routes: RwLock::new(HashMap::new()),
             gir_effective: RwLock::new(HashMap::new()),
             coverage: RwLock::new(HashMap::new()),
             expected_revisions: RwLock::new(HashMap::new()),
@@ -224,81 +144,6 @@ impl CenterMetaDataStore {
 
     pub fn list_service_region_route_overrides(&self) -> Vec<CenterRegionRouteOverrideView> {
         list_override_map(&self.service_region_route_overrides)
-    }
-
-    /// Replace all region routes for one controller (full snapshot from a poll).
-    /// Prunes all old entries for this controller across all route keys, then inserts
-    /// the new snapshot; drops any outer key that becomes empty.
-    pub fn replace_region_routes(
-        &self,
-        controller_id: &str,
-        routes: Vec<EffectiveRegionRouteView>,
-    ) {
-        let mut map = self.region_routes.write();
-        // Prune this controller's old entries across all keys.
-        for inner in map.values_mut() {
-            inner.remove(controller_id);
-        }
-        // Insert new entries.
-        for r in routes {
-            let key = region_route_key(&r);
-            map.entry(key)
-                .or_default()
-                .insert(controller_id.to_string(), r);
-        }
-        // Drop outer keys that became empty.
-        map.retain(|_, inner| !inner.is_empty());
-        self.coverage
-            .write()
-            .entry(controller_id.to_string())
-            .or_default()
-            .region_routes_at = Some(Instant::now());
-    }
-
-    pub fn replace_region_routes_fenced(
-        &self,
-        controller_id: &str,
-        revision: &str,
-        routes: Vec<EffectiveRegionRouteView>,
-    ) -> bool {
-        let expected = self.expected_revisions.read();
-        if expected.get(controller_id).map(String::as_str) != Some(revision) {
-            return false;
-        }
-        let mut map = self.region_routes.write();
-        for inner in map.values_mut() {
-            inner.remove(controller_id);
-        }
-        for route in routes {
-            map.entry(region_route_key(&route))
-                .or_default()
-                .insert(controller_id.to_string(), route);
-        }
-        map.retain(|_, inner| !inner.is_empty());
-        let mut coverage = self.coverage.write();
-        let entry = coverage.entry(controller_id.to_string()).or_default();
-        entry.revision = Some(revision.to_string());
-        entry.region_routes_at = Some(Instant::now());
-        true
-    }
-
-    /// Return aggregated effective region routes across all controllers.
-    /// Each element represents one unique (ns, plugin, alias) key, with a map
-    /// of controller_id → that controller's effective view for the same key.
-    pub fn list_region_routes(&self) -> Vec<CenterRegionRouteView> {
-        let map = self.region_routes.read();
-        map.values()
-            .filter_map(|inner| {
-                let any = inner.values().next()?;
-                Some(CenterRegionRouteView {
-                    namespace: any.namespace.clone(),
-                    plugin_name: any.plugin_name.clone(),
-                    alias: any.alias.clone(),
-                    entry_index: any.entry_index,
-                    controllers: inner.clone(),
-                })
-            })
-            .collect()
     }
 
     /// Replace all GIR effective views for one controller (full snapshot from a poll).
@@ -377,10 +222,6 @@ impl CenterMetaDataStore {
         if changed.is_empty() {
             return;
         }
-        self.region_routes.write().retain(|_, controllers| {
-            controllers.retain(|id, _| !changed.contains(id));
-            !controllers.is_empty()
-        });
         self.gir_effective.write().retain(|_, controllers| {
             controllers.retain(|id, _| !changed.contains(id));
             !controllers.is_empty()
@@ -412,26 +253,6 @@ impl CenterMetaDataStore {
             .collect()
     }
 
-    /// Lightweight diagnostic summary used by the Admin API. Values are
-    /// derived from the live read model rather than legacy placeholder maps.
-    pub fn status_entries(&self) -> MetadataStatusEntries {
-        let mut routes: Vec<_> = self
-            .region_routes
-            .read()
-            .iter()
-            .map(|(key, controllers)| (key.clone(), controllers.len()))
-            .collect();
-        let mut restrictions: Vec<_> = self
-            .gir_effective
-            .read()
-            .iter()
-            .map(|(key, controllers)| (key.clone(), controllers.len()))
-            .collect();
-        routes.sort_by(|left, right| left.0.cmp(&right.0));
-        restrictions.sort_by(|left, right| left.0.cmp(&right.0));
-        (routes, restrictions)
-    }
-
     /// Retain snapshots only for Controllers still present in the durable
     /// directory. This lets a fresh active-active replica rebuild its local
     /// read model while also removing projections hidden by an eviction fence.
@@ -441,13 +262,6 @@ impl CenterMetaDataStore {
             &mut self.service_region_route_overrides.write(),
             controller_ids,
         );
-        {
-            let mut routes = self.region_routes.write();
-            routes.retain(|_, controllers| {
-                controllers.retain(|id, _| controller_ids.contains(id));
-                !controllers.is_empty()
-            });
-        }
         {
             let mut restrictions = self.gir_effective.write();
             restrictions.retain(|_, controllers| {
@@ -484,13 +298,6 @@ impl CenterMetaDataStore {
             &mut self.service_region_route_overrides.write(),
             controller_id,
         );
-        {
-            let mut rr = self.region_routes.write();
-            rr.retain(|_, inner| {
-                inner.remove(controller_id);
-                !inner.is_empty()
-            });
-        }
         self.coverage.write().remove(controller_id);
         {
             let mut ge = self.gir_effective.write();
@@ -650,13 +457,6 @@ fn retain_override_controllers(
     });
 }
 
-/// Build the canonical storage key for a region route: "namespace/plugin_name/entry_index".
-/// The index is stable within the ordered requestPlugins list and prevents duplicate or
-/// absent aliases from silently overwriting another RegionRoute entry.
-fn region_route_key(r: &EffectiveRegionRouteView) -> String {
-    format!("{}/{}/{}", r.namespace, r.plugin_name, r.entry_index)
-}
-
 /// Build the canonical storage key for a GIR entry: "namespace/plugin_name".
 fn gir_key(g: &EffectiveGirView) -> String {
     format!("{}/{}", g.namespace, g.plugin_name)
@@ -774,61 +574,6 @@ mod tests {
         );
         assert!(list[0].controllers.contains_key("ctrl-a"));
         assert!(list[0].controllers.contains_key("ctrl-b"));
-    }
-
-    // ── RegionRoute aggregation tests ──
-
-    #[test]
-    fn region_route_replace_and_list_aggregates_by_route_key() {
-        let store = CenterMetaDataStore::new();
-        let r = EffectiveRegionRouteView {
-            namespace: "default".into(),
-            plugin_name: "ep1".into(),
-            alias: Some("rr1".into()),
-            entry_index: 0,
-            my_region: "east".into(),
-            regions: serde_json::json!([]),
-            key_get: serde_json::json!([]),
-            hash_key_get: None,
-            hash_calc: None,
-            route_rules: serde_json::json!([]),
-            route_by_key_conf_match: None,
-            dye: None,
-            override_ref: None,
-            override_applied: false,
-            service_usages: Vec::new(),
-        };
-        store.replace_region_routes("ctrl-a", vec![r.clone()]);
-        store.replace_region_routes("ctrl-b", vec![r.clone()]);
-        let list = store.list_region_routes();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].controllers.len(), 2);
-    }
-
-    #[test]
-    fn region_route_entry_index_prevents_duplicate_alias_overwrite() {
-        let store = CenterMetaDataStore::new();
-        let base = EffectiveRegionRouteView {
-            namespace: "default".into(),
-            plugin_name: "ep1".into(),
-            alias: None,
-            entry_index: 0,
-            my_region: "east".into(),
-            regions: serde_json::json!([]),
-            key_get: serde_json::json!([]),
-            hash_key_get: None,
-            hash_calc: None,
-            route_rules: serde_json::json!([]),
-            route_by_key_conf_match: None,
-            dye: None,
-            override_ref: None,
-            override_applied: false,
-            service_usages: Vec::new(),
-        };
-        let mut second = base.clone();
-        second.entry_index = 1;
-        store.replace_region_routes("ctrl-a", vec![base, second]);
-        assert_eq!(store.list_region_routes().len(), 2);
     }
 
     #[test]

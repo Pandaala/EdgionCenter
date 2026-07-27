@@ -1,5 +1,4 @@
 import { apiClient } from './client'
-import { getActiveControllerId, getAppMode } from '@/utils/proxy'
 import type { WriteOutcome, WriteOutcomeSummary } from './writeOutcome'
 
 export type { WriteOutcome, OutcomeState, WriteOutcomeSummary } from './writeOutcome'
@@ -55,38 +54,6 @@ export interface EffectiveRegionRoute {
   serviceUsages: RegionRouteServiceUsage[]
 }
 
-/** Center aggregated region route — one row per (namespace, pluginName, alias) tuple. */
-export interface CenterRegionRoute {
-  namespace: string
-  pluginName: string
-  alias: string | null
-  entryIndex: number
-  controllers: Record<string, EffectiveRegionRoute>
-  /** Online fleet membership, emitted under the same region-routes:read permission. */
-  onlineControllerIds?: string[]
-}
-
-export interface ConsistencyResult {
-  namespace: string
-  name: string
-  consistent: boolean
-  controllerCount: number
-  /** Field names that differ across online controllers, e.g. ["regions"]. */
-  conflicts: string[]
-}
-
-export interface RegionRouteSyncTargetResult {
-  controllerId: string
-  success: boolean
-  error?: string
-}
-
-export interface RegionRouteSyncResult {
-  modified: number
-  failed: number
-  targets: RegionRouteSyncTargetResult[]
-}
-
 export interface RegionRouteOverrideResource {
   apiVersion: string
   kind: string
@@ -127,18 +94,6 @@ export interface RegionRouteOverrideListResult {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Path prefix based on viewing context:
- * - Center aggregated view (mode=center, no active controller): 'center/'
- * - Controller proxy view (active controller set): ''
- * - Standalone controller view (mode=controller): ''
- */
-function prefix(): string {
-  if (getActiveControllerId()) return ''
-  if (getAppMode() === 'controller') return ''
-  return 'center/'
-}
 
 /**
  * Post through the shared write core and always resolve to a
@@ -226,62 +181,26 @@ export const regionRouteApi = {
     return postForOutcomes(url, { namespace, name, sourceControllerId, targetControllerIds })
   },
 
-  listRegionRoutes: async (): Promise<{ success: boolean; data: CenterRegionRoute[] | EffectiveRegionRoute[] }> => {
-    const center = prefix() === 'center/'
-    const url = center ? 'center/region-routes' : 'region-routes/effective'
-    const { data } = await apiClient.get(url)
+  /**
+   * One Controller's own effective RegionRoute view, derived by that Controller
+   * from its `EdgionPlugins` entries. Center never aggregates this — the request
+   * reaches the selected Controller through the proxy tunnel.
+   */
+  listRegionRoutes: async (): Promise<{ success: boolean; data: EffectiveRegionRoute[] }> => {
+    const { data } = await apiClient.get('region-routes/effective')
     return data
   },
 
+  /** Failover on a single Controller, through its dedicated endpoint. */
   regionRouteFailover: async (
     namespace: string, name: string, regionName: string, failoverTo: string,
-    route?: { pluginName: string; entryIndex: number },
   ): Promise<{ success: boolean; data?: { modified: number; failed: number } }> => {
-    const center = prefix() === 'center/'
-    const url = center ? 'center/region-routes/failover' : 'cluster-region-routes/failover'
-    const { data } = await apiClient.post(url, {
+    const { data } = await apiClient.post('cluster-region-routes/failover', {
       namespace, name, regionName, failoverTo,
-      ...(center && route ? { pluginName: route.pluginName, entryIndex: route.entryIndex } : {}),
     })
     if (!data.success || (data.data?.failed ?? 0) > 0 || (data.data?.modified ?? 0) === 0) {
       throw new Error(`Failover was not applied to every target (${data.data?.modified ?? 0} modified, ${data.data?.failed ?? 0} failed)`)
     }
     return data
-  },
-
-  syncRegionRoute: async (
-    route: { namespace: string; pluginName: string; entryIndex: number },
-    sourceControllerId: string,
-    targetControllerIds: string[],
-  ): Promise<{ success: boolean; data: RegionRouteSyncResult }> => {
-    try {
-      const { data } = await apiClient.post('center/region-routes/sync', {
-        ...route,
-        sourceControllerId,
-        targetControllerIds,
-      })
-      if (!data.success || data.data?.failed > 0) {
-        const details = (data.data?.targets ?? [])
-          .filter((target: RegionRouteSyncTargetResult) => !target.success)
-          .map((target: RegionRouteSyncTargetResult) => `${target.controllerId}: ${target.error ?? 'failed'}`)
-          .join('; ')
-        throw new Error(details || 'RegionRoute sync was not applied to every target')
-      }
-      return data
-    } catch (error: any) {
-      const response = error?.response?.data
-      const details = (response?.data?.targets ?? [])
-        .filter((target: RegionRouteSyncTargetResult) => !target.success)
-        .map((target: RegionRouteSyncTargetResult) => `${target.controllerId}: ${target.error ?? 'failed'}`)
-        .join('; ')
-      if (details || response?.error) throw new Error(details || response.error)
-      throw error
-    }
-  },
-
-  // Center-only consistency check
-  regionRoutesConsistency: async (): Promise<{ success: boolean; data: ConsistencyResult[] }> => {
-    const { data } = await apiClient.get('center/region-routes/consistency')
-    return data
-  },
+  }
 }

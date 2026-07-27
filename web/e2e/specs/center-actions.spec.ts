@@ -13,21 +13,11 @@ async function configData(request: APIRequestContext, slot: 'A' | 'B', name: str
   return response.json() as Promise<{ metadata?: { labels?: Record<string, string> }; spec?: { data?: { config?: { active?: string; description?: string; regions?: Array<{ name?: string; failoverTo?: string }> } } } }>
 }
 
-async function restoreSelector(request: APIRequestContext, pluginName: string) {
-  const response = await request.patch(
-    `/api/v1/center/global-connection-ip-restrictions/${namespace}/${pluginName}/active-profile`,
-    { data: { activeProfile: 'open', controllers: [controllerId('A')] } },
-  )
-  expect(response.ok()).toBeTruthy()
-}
-
 async function setRegionFailover(request: APIRequestContext, failoverTo: string) {
-  const response = await request.post('/api/v1/center/region-routes/failover', {
+  const response = await request.post('/api/v1/center/region-route-overrides/failover', {
     data: {
       namespace,
-      name: '',
-      pluginName: `${prefix}-region-route`,
-      entryIndex: 0,
+      name: `${prefix}-region-route-override`,
       regionName: 'east',
       failoverTo,
     },
@@ -65,14 +55,6 @@ async function hasCapability(request: APIRequestContext, capability: CenterCapab
   if (!response.ok()) return false
   const body = await response.json() as { data?: { capabilities?: Partial<Record<CenterCapability, boolean>> } }
   return body.data?.capabilities?.[capability] === true
-}
-
-async function applyTableFilter(page: Page, titleTestId: string, value: string) {
-  const header = page.getByTestId(titleTestId).locator('xpath=ancestor::th')
-  await header.locator('.ant-table-filter-trigger').click()
-  const dropdown = page.locator('.ant-dropdown:visible')
-  await dropdown.locator('.ant-dropdown-menu-item').filter({ hasText: value }).click()
-  await dropdown.locator('.ant-table-filter-dropdown-btns .ant-btn-primary').click()
 }
 
 test.describe('Center and shell actions', () => {
@@ -353,83 +335,9 @@ test.describe('Center and shell actions', () => {
     }
   })
 
-  test('aggregated restrictions preserve Selector fields while switching and restoring a profile', async ({ page, request }) => {
-    await page.goto('/global-connection-ip-restrictions')
-    await clickAndWaitForGet(page, 'gcir-refresh', '/global-connection-ip-restrictions')
-
-    await expect(page.getByTestId('gcir-row-open').first()).toBeVisible()
-    const controller = controllerId('A')
-    const firstRow = page.getByRole('row').filter({ hasText: controller }).filter({ has: page.getByTestId('gcir-row-open') }).first()
-    await expect(firstRow).toBeVisible()
-    const namespace = (await firstRow.getByRole('cell').nth(1).textContent())?.trim() ?? ''
-    await applyTableFilter(page, 'gcir-controller', controller)
-    await expect(page.getByTestId('gcir-row-open').first()).toBeVisible()
-    await applyTableFilter(page, 'gcir-namespace', namespace)
-    await expect(page.getByTestId('gcir-row-open').first()).toBeVisible()
-
-    const nameHeader = page.getByRole('columnheader', { name: /^Name search$/ })
-    const filterTrigger = nameHeader.locator('.ant-table-filter-trigger')
-    if (await filterTrigger.count()) {
-      await filterTrigger.click()
-      const search = page.getByTestId('gcir-search')
-      await search.fill('__no_plugin_matches__')
-      await search.press('Enter')
-      await expect(page.getByTestId('gcir-row-open')).toHaveCount(0)
-      await filterTrigger.click()
-      await page.getByTestId('gcir-search').fill('')
-      await page.getByTestId('gcir-search').press('Enter')
-    }
-
-    expect(await openFirstAvailable(page.getByTestId('gcir-row-open'))).toBe(true)
-    const detailDialog = page.getByRole('dialog')
-    await expect(detailDialog).toBeVisible()
-    await detailDialog.locator('.ant-modal-footer').getByRole('button', { name: 'Close' }).click()
-
-    const targetRow = page.getByRole('row').filter({ hasText: controllerId('A') }).filter({ has: page.getByTestId('gcir-profile-select') }).first()
-    const profile = targetRow.getByTestId('gcir-profile-select')
-    const selectorName = `${prefix}-global-ip-selector`
-    const before = await configData(request, 'A', selectorName)
-    expect(before.spec?.data?.config).toMatchObject({
-      active: 'open',
-      description: 'E2E active-profile selector',
-    })
-    try {
-      await expect(profile).toBeVisible()
-      await profile.click()
-      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'locked' }).click()
-      await expect(page.getByRole('dialog')).toBeVisible()
-      await page.getByTestId('gcir-profile-cancel').click()
-      await expect(page.getByRole('dialog')).toBeHidden()
-      await profile.click()
-      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'locked' }).click()
-      await Promise.all([
-        page.waitForResponse((response) => response.request().method() === 'PATCH' && response.url().includes('/active-profile')),
-        page.getByTestId('gcir-profile-confirm').click(),
-      ])
-      await expect(profile).toContainText('locked')
-      await expect.poll(async () => (await configData(request, 'A', selectorName)).spec?.data?.config?.active).toBe('locked')
-      const locked = await configData(request, 'A', selectorName)
-      expect(locked.spec?.data?.config?.description).toBe('E2E active-profile selector')
-      expect(locked.metadata?.labels?.['edgion.io/e2e-run']).toBe(runId)
-
-      await profile.click()
-      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'open' }).click()
-      await Promise.all([
-        page.waitForResponse((response) => response.request().method() === 'PATCH' && response.url().includes('/active-profile')),
-        page.getByTestId('gcir-profile-confirm').click(),
-      ])
-    } finally {
-      await restoreSelector(request, `${prefix}-global-ip`)
-      await expect.poll(async () => (await configData(request, 'A', selectorName)).spec?.data?.config?.active).toBe('open')
-      const restored = await configData(request, 'A', selectorName)
-      expect(restored.spec?.data?.config).toEqual(before.spec?.data?.config)
-      expect(restored.metadata?.labels?.['edgion.io/e2e-run']).toBe(runId)
-    }
-  })
-
   test('region routes apply failover to both controllers and restore it', async ({ page, request }) => {
     await page.goto('/region-routes/region')
-    await clickAndWaitForGet(page, 'region-refresh', '/region-routes')
+    await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
     const filter = page.getByRole('combobox').first()
     await filter.fill('__no_region_route_matches__')
     await expect(page.getByTestId('region-failover')).toHaveCount(0)
@@ -446,7 +354,7 @@ test.describe('Center and shell actions', () => {
       await east.click()
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'west' }).click()
       const [response] = await Promise.all([
-        page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-routes/failover')),
+        page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-route-overrides/failover')),
         page.getByTestId('region-failover-apply').click(),
       ])
       expect(response.status()).toBe(200)
@@ -461,19 +369,19 @@ test.describe('Center and shell actions', () => {
       // then force a fresh read rather than asserting against React Query cache.
       await expect(page.locator('.ant-popover')).toBeHidden()
       await expect.poll(async () => {
-        const result = await request.get('/api/v1/center/region-routes')
-        const body = await result.json() as { data?: Array<{ controllers?: Record<string, { regions?: Array<{ name?: string; failoverTo?: string }> }> }> }
-        return Object.values(body.data?.[0]?.controllers ?? {})[0]?.regions
+        const result = await request.get('/api/v1/center/region-route-overrides')
+        const body = await result.json() as { data?: Array<{ controllers?: Record<string, { spec?: { data?: { config?: { regions?: Array<{ name?: string; failoverTo?: string }> } } } }> }> }
+        return Object.values(body.data?.[0]?.controllers ?? {})[0]?.spec?.data?.config?.regions
           ?.find((region) => region.name === 'east')?.failoverTo
       }, { timeout: 20_000 }).toBe('west')
       await page.goto('/region-routes/region')
-      await clickAndWaitForGet(page, 'region-refresh', '/region-routes')
+      await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
       await expect(page.getByText('east → west').first()).toBeVisible()
       await page.getByTestId('region-failover').first().click()
       await page.getByTestId('region-failover-select-east').click()
       await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: /Normal|Active/ }).click()
       const [restoreResponse] = await Promise.all([
-        page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-routes/failover')),
+        page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-route-overrides/failover')),
         page.getByTestId('region-failover-apply').click(),
       ])
       expect(restoreResponse.status()).toBe(200)
@@ -487,40 +395,4 @@ test.describe('Center and shell actions', () => {
     }
   })
 
-  test('region route service management, legacy routes, and federation diagnostics expose both controllers', async ({ page, request }) => {
-    await page.goto('/region-routes')
-    await expect.poll(() => new URL(page.url()).pathname).toBe('/region-routes/region')
-    const legacy = await request.get('/api/v1/center/cluster-region-routes')
-    expect(legacy.ok()).toBeTruthy()
-    expect(legacy.url()).toContain('/api/v1/center/region-routes')
-    await page.goto('/region-routes/service')
-    const serviceTable = page.getByTestId('region-service-table')
-    await expect(serviceTable).toBeVisible()
-    await expect(serviceTable).toContainText('2/2')
-    await serviceTable.locator('.ant-table-row-expand-icon').first().click()
-    await expect(serviceTable).toContainText('controller-a')
-    await expect(serviceTable).toContainText('controller-b')
-    const usageSearch = page.getByTestId('region-service-search').getByRole('combobox')
-    await usageSearch.fill('__no_usage_matches__')
-    await expect(page.getByTestId('region-service-table')).toBeHidden()
-    await usageSearch.fill('')
-    await clickAndWaitForGet(page, 'region-service-refresh', '/center/region-routes')
-    await page.getByTestId('region-service-manage-region').first().click()
-    await expect.poll(() => new URL(page.url()).pathname).toBe('/region-routes/region')
-    await expect(page.getByTestId('region-search').getByRole('combobox')).toHaveValue(`${namespace}/${prefix}-region-route`)
-    await page.goto('/region-routes/cluster')
-    await expect.poll(() => new URL(page.url()).pathname).toBe('/region-routes/region')
-
-    await page.goto('/federation-diagnostics')
-    await expect(page.getByTestId('federation-diagnostics')).toBeVisible()
-    await expect(page.getByTestId('federation-watch-table')).toContainText('controller-a')
-    await expect(page.getByTestId('federation-watch-table')).toContainText('controller-b')
-    await expect(page.getByTestId('federation-region-metadata-table')).toContainText('region-route')
-    await expect(page.getByTestId('federation-gir-metadata-table')).toContainText('global-ip')
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes('/center/admin/watch-status')),
-      page.waitForResponse((response) => response.url().includes('/center/admin/metadata-store')),
-      page.getByTestId('federation-diagnostics-refresh').click(),
-    ])
-  })
 })

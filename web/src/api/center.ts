@@ -24,10 +24,8 @@ export interface ControllerSummary {
   env: string[]
   tag: string[]
   online: boolean
-  // Legacy field retained for backwards compatibility with older Center
-  // builds. New builds emit `last_seen_secs_ago` (driven by the fed_sync
-  // registry) and `stats_updated_secs_ago` (driven by StatsReport push).
-  last_list_secs_ago?: number | null
+  // `last_seen_secs_ago` is driven by the fed_sync registry;
+  // `stats_updated_secs_ago` by the StatsReport push.
   last_seen_secs_ago?: number | null
   stats_updated_secs_ago?: number | null
   key_count: number | null

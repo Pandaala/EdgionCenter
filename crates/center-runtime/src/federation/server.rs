@@ -2290,6 +2290,81 @@ mod tests {
         assert_eq!(directory.attempts.load(Ordering::SeqCst), 3);
     }
 
+    /// `resource_counts_by_kind` coalesces on the same `is_some()` rule as the
+    /// scalar fields: a later report overwrites the slot, and a later report
+    /// that omits per-kind counts must not clobber the ones already held.
+    /// Asserted on the slot itself rather than through the projection worker,
+    /// so the coalescing rule is checked without depending on retry timing.
+    #[tokio::test]
+    async fn runtime_projector_coalesces_per_kind_counts_without_clobbering() {
+        let directory = Arc::new(ProjectionDirectory {
+            // Never succeeds, so the slot is never removed and stays readable.
+            failures_remaining: AtomicUsize::new(usize::MAX),
+            attempts: AtomicUsize::new(0),
+            applied: std::sync::Mutex::new(None),
+        });
+        let projector = RuntimeProjector::new(Some(directory.clone()));
+        let base = ControllerRuntimeObservation {
+            controller_id: ControllerId::new("c1").unwrap(),
+            session_id: SessionId::new("s1").unwrap(),
+            ownership_fence: None,
+            sync_version: Some(1),
+            watch_server_id: None,
+            resource_count: None,
+            resource_counts_by_kind: None,
+            stats_updated_unix_ms: None,
+            watch_updated_unix_ms: None,
+            observed_at_unix_ms: 1,
+        };
+        let counts = |kind: &str, count: u32| {
+            Some(std::collections::BTreeMap::from([(
+                kind.to_string(),
+                count,
+            )]))
+        };
+
+        projector.submit(base.clone());
+        projector.submit(ControllerRuntimeObservation {
+            resource_counts_by_kind: counts("Pod", 3),
+            observed_at_unix_ms: 2,
+            ..base.clone()
+        });
+        let after_first = projector
+            .slots
+            .lock()
+            .get("c1")
+            .map(|slot| slot.observation.resource_counts_by_kind.clone())
+            .expect("slot retained while projection keeps failing");
+        assert_eq!(after_first, counts("Pod", 3));
+
+        projector.submit(ControllerRuntimeObservation {
+            resource_counts_by_kind: counts("Pod", 5),
+            observed_at_unix_ms: 3,
+            ..base.clone()
+        });
+        projector.submit(ControllerRuntimeObservation {
+            resource_counts_by_kind: None,
+            observed_at_unix_ms: 4,
+            ..base
+        });
+        let final_counts = projector
+            .slots
+            .lock()
+            .get("c1")
+            .map(|slot| slot.observation.resource_counts_by_kind.clone())
+            .expect("slot retained while projection keeps failing");
+        assert_eq!(
+            final_counts,
+            counts("Pod", 5),
+            "a report without per-kind counts must not clear the retained ones"
+        );
+
+        projector.handle.stop();
+        tokio::time::timeout(Duration::from_secs(1), projector.handle.wait())
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn runtime_projector_shutdown_cancels_retry_workers() {
         let directory = Arc::new(ProjectionDirectory {

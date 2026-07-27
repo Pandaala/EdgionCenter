@@ -13,19 +13,14 @@
 //!   GET  /api/v1/center/global-resources/catalog          → supported kinds, namespaces, and clusters
 //!   GET  /api/v1/center/global-resources/resources/{kind} → grouped cross-cluster inventory
 //!   GET  /api/v1/center/global-resources/resources/{kind}/{namespace}/{name} → exact fenced cluster detail
-//!   GET  /api/v1/center/region-routes                              → aggregated effective region routes (unified)
-//!   POST /api/v1/center/region-routes/failover                     → fan-out failover to all online controllers (unified)
-//!   POST /api/v1/center/region-routes/sync                         → explicit source-to-target base + override sync
-//!   GET  /api/v1/center/region-routes/consistency                  → cross-controller consistency check (unified, online-only)
-//!   GET  /api/v1/center/cluster-region-routes                      → 308 redirect → /api/v1/center/region-routes
-//!   GET  /api/v1/center/service-region-routes                      → 308 redirect → /api/v1/center/region-routes
-//!   POST /api/v1/center/cluster-region-routes/failover             → 308 redirect → /api/v1/center/region-routes/failover
-//!   POST /api/v1/center/service-region-routes/failover             → 308 redirect → /api/v1/center/region-routes/failover
-//!   GET  /api/v1/center/cluster-region-routes/consistency          → 308 redirect → /api/v1/center/region-routes/consistency
-//!   GET  /api/v1/center/service-region-routes/consistency          → 308 redirect → /api/v1/center/region-routes/consistency
+//!   GET  /api/v1/center/region-route-overrides                     → watch-fed RegionRouteOverride rows across controllers
+//!   GET  /api/v1/center/service-region-route-overrides             → watch-fed ServiceRegionRouteOverride rows across controllers
+//!   POST /api/v1/center/region-route-overrides/failover            → set failoverTo on a RegionRouteOverride on every online controller
+//!   POST /api/v1/center/service-region-route-overrides/failover    → set failoverTo on a ServiceRegionRouteOverride on every online controller
+//!   POST /api/v1/center/region-route-overrides/sync                → copy one controller's RegionRouteOverride to selected targets
+//!   POST /api/v1/center/service-region-route-overrides/sync        → copy one controller's ServiceRegionRouteOverride to selected targets
 //!   GET    /api/v1/center/global-connection-ip-restrictions                        → aggregated GlobalConnectionIpRestriction list from MetaDataStore
 //!   GET    /api/v1/center/global-connection-ip-restrictions/{ns}/{name}            → single GlobalConnectionIpRestriction detail
-//!   PATCH  /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile → switch active profile (fan-out Selector PUT to target controllers)
 //!   GET    /api/v1/center/global-connection-ip-restrictions/consistency            → consistency detection across controllers
 //!   GET    /api/v1/center/admin/users                              → list users (with role ids + names; no password_hash)
 //!   POST   /api/v1/center/admin/users                              → create user (bcrypt password; optional role bindings)
@@ -36,8 +31,6 @@
 //!   PUT    /api/v1/center/admin/roles/{id}/permissions            → replace a role's permission set
 //!   DELETE /api/v1/center/admin/roles/{id}                         → delete role (FK cascade removes bindings)
 //!   GET    /api/v1/center/admin/permission-catalog                → grouped permission catalog for the matrix UI
-//!   GET  /api/v1/center/admin/watch-status                          → watch cache sync status per controller
-//!   GET  /api/v1/center/admin/metadata-store                         → metadata store key summary
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones   → Cloudflare zone inventory
 //!   POST /api/v1/center/cloudflare/dns/accounts/{account_id}/zones   → create a Cloudflare zone
 //!   GET  /api/v1/center/cloudflare/dns/accounts/{account_id}/zones/{zone_id} → Cloudflare zone detail
@@ -99,7 +92,6 @@ pub mod cloudfront;
 pub mod config_data_ops;
 mod consistency_handlers;
 mod global_connection_ip_restriction_handlers;
-pub mod global_resource_sync;
 mod global_resources;
 pub mod provider_accounts;
 pub mod provider_capabilities;
@@ -123,7 +115,6 @@ pub struct ApiState {
     pub aggregator: Arc<ResourceAggregator>,
     pub proxy: Arc<ProxyForwarder>,
     pub controller_directory: Option<Arc<dyn edgion_center_core::ControllerDirectory>>,
-    pub global_resource_sync: Option<Arc<global_resource_sync::GlobalResourceSyncApi>>,
     pub controller_evictor: Arc<dyn edgion_center_runtime::eviction::ControllerEviction>,
     pub user_admin: Option<Arc<dyn edgion_center_core::UserAdmin>>,
     pub role_admin: Option<Arc<dyn edgion_center_core::RoleAdmin>>,
@@ -284,7 +275,6 @@ pub fn router(mut state: ApiState) -> Router {
         state.provider_account_store.is_some() && state.capability_snapshot_store.is_some();
     state.capabilities.provider_credential_inspection &=
         state.credential_inspection_service.is_some();
-    state.capabilities.global_resource_sync &= state.global_resource_sync.is_some();
     let capabilities = state.capabilities.clone();
     let mut app = Router::new()
         // Center-specific endpoints
@@ -292,11 +282,7 @@ pub fn router(mut state: ApiState) -> Router {
         .route("/api/v1/controllers", get(list_controllers))
         .route("/api/v1/clusters", get(list_clusters))
         .route("/api/v1/controllers/{id}/reload", post(reload_controller))
-        // MetaDataStore-backed RegionRoute endpoints
-        .route(
-            "/api/v1/center/region-routes",
-            get(region_route_handlers::list_region_routes),
-        )
+        // Watch-fed RegionRouteOverride endpoints
         .route(
             "/api/v1/center/region-route-overrides",
             get(region_route_handlers::list_region_route_overrides),
@@ -321,54 +307,8 @@ pub fn router(mut state: ApiState) -> Router {
             "/api/v1/center/service-region-route-overrides/sync",
             post(region_route_handlers::service_region_route_override_sync),
         )
-        // Legacy paths redirect permanently (308) to the unified endpoint above.
-        .route(
-            "/api/v1/center/cluster-region-routes",
-            get(|| async { axum::response::Redirect::permanent("/api/v1/center/region-routes") }),
-        )
-        .route(
-            "/api/v1/center/service-region-routes",
-            get(|| async { axum::response::Redirect::permanent("/api/v1/center/region-routes") }),
-        )
-        // RegionRoute failover (unified endpoint; legacy paths redirect 308)
-        .route(
-            "/api/v1/center/region-routes/failover",
-            post(region_route_handlers::region_route_failover),
-        )
-        .route(
-            "/api/v1/center/region-routes/sync",
-            post(region_route_handlers::region_route_sync),
-        )
-        .route(
-            "/api/v1/center/cluster-region-routes/failover",
-            post(|| async {
-                axum::response::Redirect::permanent("/api/v1/center/region-routes/failover")
-            }),
-        )
-        .route(
-            "/api/v1/center/service-region-routes/failover",
-            post(|| async {
-                axum::response::Redirect::permanent("/api/v1/center/region-routes/failover")
-            }),
-        )
-        // RegionRoute consistency (unified endpoint; legacy paths redirect 308)
-        .route(
-            "/api/v1/center/region-routes/consistency",
-            get(consistency_handlers::region_routes_consistency),
-        )
-        .route(
-            "/api/v1/center/cluster-region-routes/consistency",
-            get(|| async {
-                axum::response::Redirect::permanent("/api/v1/center/region-routes/consistency")
-            }),
-        )
-        .route(
-            "/api/v1/center/service-region-routes/consistency",
-            get(|| async {
-                axum::response::Redirect::permanent("/api/v1/center/region-routes/consistency")
-            }),
-        )
-        // GlobalConnectionIpRestriction endpoints (read + active-profile write only; base CRUD retired)
+        // GlobalConnectionIpRestriction endpoints (read only; base CRUD and the
+        // Selector active-profile switch are both retired)
         .route(
             "/api/v1/center/global-connection-ip-restrictions",
             get(global_connection_ip_restriction_handlers::list_global_ip_restrictions),
@@ -378,18 +318,8 @@ pub fn router(mut state: ApiState) -> Router {
             get(global_connection_ip_restriction_handlers::get_global_ip_restriction),
         )
         .route(
-            "/api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile",
-            patch(global_connection_ip_restriction_handlers::patch_active_profile),
-        )
-        .route(
             "/api/v1/center/global-connection-ip-restrictions/consistency",
             get(global_connection_ip_restriction_handlers::global_ip_restrictions_consistency),
-        )
-        // Watch cache admin endpoints
-        .route("/api/v1/center/admin/watch-status", get(watch_status))
-        .route(
-            "/api/v1/center/admin/metadata-store",
-            get(metadata_store_status),
         )
         // HTTP proxy to controllers. Body cap mirrors the Controller-side
         // 1 MiB federation proxy limit so oversized writes fail locally.
@@ -422,25 +352,6 @@ pub fn router(mut state: ApiState) -> Router {
             .route(
                 "/api/v1/center/global-resources/resources/{kind}/{namespace}/{name}",
                 get(global_resources::detail),
-            );
-    }
-    if capabilities.global_resource_sync && state.global_resource_sync.is_some() {
-        app = app
-            .route(
-                "/api/v1/center/global-resource-sync/resources",
-                get(global_resource_sync::list).post(global_resource_sync::create),
-            )
-            .route(
-                "/api/v1/center/global-resource-sync/resources/{id}",
-                get(global_resource_sync::get).put(global_resource_sync::replace),
-            )
-            .route(
-                "/api/v1/center/global-resource-sync/resources/{id}/plan",
-                post(global_resource_sync::plan),
-            )
-            .route(
-                "/api/v1/center/global-resource-sync/resources/{id}/apply",
-                post(global_resource_sync::apply),
             );
     }
     #[cfg(feature = "password-auth")]
@@ -1077,92 +988,6 @@ async fn delete_admin_controller(
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WatchControllerStatus {
-    controller_id: String,
-    sync_version: u64,
-    server_id: String,
-}
-
-async fn watch_status(State(state): State<ApiState>) -> impl IntoResponse {
-    if state.platform_mode == edgion_center_core::CenterMode::Kubernetes {
-        let Some(directory) = &state.controller_directory else {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ListResponse::<WatchControllerStatus>::error(
-                    "global watch status unavailable".to_string(),
-                )),
-            )
-                .into_response();
-        };
-        return match directory.list().await {
-            Ok(records) => Json(ListResponse::success(
-                records
-                    .into_iter()
-                    .map(|record| WatchControllerStatus {
-                        controller_id: record.controller_id.to_string(),
-                        sync_version: record.sync_version.unwrap_or_default(),
-                        server_id: record.watch_server_id.unwrap_or_default(),
-                    })
-                    .collect(),
-            ))
-            .into_response(),
-            Err(error) => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ListResponse::<WatchControllerStatus>::error(
-                    error.to_string(),
-                )),
-            )
-                .into_response(),
-        };
-    }
-    let entries = state.sync_client.plugin_metadata.list_controllers();
-    let dtos: Vec<WatchControllerStatus> = entries
-        .into_iter()
-        .map(|(id, ver, sid)| WatchControllerStatus {
-            controller_id: id,
-            sync_version: ver,
-            server_id: sid,
-        })
-        .collect();
-    Json(ListResponse::success(dtos)).into_response()
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MetaDataStoreStatus {
-    region_routes: Vec<MetaDataStoreEntry>,
-    global_connection_ip_restrictions: Vec<MetaDataStoreEntry>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MetaDataStoreEntry {
-    key: String,
-    controller_count: usize,
-}
-
-async fn metadata_store_status(State(state): State<ApiState>) -> impl IntoResponse {
-    let (region_routes, restrictions) = state.metadata_store.status_entries();
-    Json(ApiResponse::ok_body(MetaDataStoreStatus {
-        region_routes: region_routes
-            .into_iter()
-            .map(|(key, controller_count)| MetaDataStoreEntry {
-                key,
-                controller_count,
-            })
-            .collect(),
-        global_connection_ip_restrictions: restrictions
-            .into_iter()
-            .map(|(key, controller_count)| MetaDataStoreEntry {
-                key,
-                controller_count,
-            })
-            .collect(),
-    }))
-}
-
 async fn proxy_handler(
     State(state): State<ApiState>,
     Path((controller_id_raw, rest)): Path<(String, String)>,
@@ -1685,7 +1510,6 @@ mod tests {
             aggregator: Arc::new(ResourceAggregator::new()),
             proxy,
             controller_directory: None,
-            global_resource_sync: None,
             controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
             user_admin: None,
             role_admin: None,
@@ -1917,6 +1741,48 @@ mod tests {
         assert!(!stale.online);
         assert_eq!(stale.key_count, Some(9));
         assert!(stale.per_kind.is_some());
+    }
+
+    /// The last cell of the stats 2×2: the directory carries no counts and the
+    /// record is offline, but the in-memory aggregator still holds counts from
+    /// this replica's own session. The counts must survive the fallback and be
+    /// labelled `Stale` — deriving `Missing` here would erase numbers Center
+    /// can still render.
+    #[tokio::test]
+    async fn summaries_report_stale_when_only_the_aggregator_has_counts_for_an_offline_controller()
+    {
+        let mut state = state_with_authz_mode(AuthzMode::Rbac, false);
+        state.platform_mode = edgion_center_core::CenterMode::Kubernetes;
+
+        let aggregator = ResourceAggregator::new();
+        aggregator.set_controller_info(
+            "cluster-a/controller-0",
+            crate::aggregator::ControllerInfo {
+                controller_id: "cluster-a/controller-0".to_string(),
+                cluster: "cluster-a".to_string(),
+                environments: vec!["prod".to_string()],
+                tags: vec![],
+            },
+        );
+        let mut per_kind = std::collections::BTreeMap::new();
+        per_kind.insert("Pod".to_string(), 4u32);
+        aggregator.update_stats("cluster-a/controller-0", Some(per_kind), 4);
+        state.aggregator = Arc::new(aggregator);
+
+        state.controller_directory = Some(Arc::new(GlobalDirectory(vec![
+            directory_record_without_stats("cluster-a/controller-0", ControllerPhase::Offline),
+        ])));
+
+        let summaries = state.controller_summaries().await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        let summary = &summaries[0];
+        assert!(!summary.online);
+        assert_eq!(summary.key_count, Some(4));
+        assert_eq!(
+            summary.per_kind.as_ref().and_then(|kinds| kinds.get("Pod")),
+            Some(&4)
+        );
+        assert_eq!(summary.stats_state, crate::aggregator::StatsState::Stale);
     }
 
     #[tokio::test]

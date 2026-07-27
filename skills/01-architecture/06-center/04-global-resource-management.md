@@ -1,15 +1,25 @@
 ---
 name: center-global-resource-management
-description: Architecture boundary for federated GlobalResources inventory and durable GlobalResource synchronization across managed clusters.
+description: Architecture boundary for the read-only federated GlobalResources view across managed clusters.
 ---
 
 # Global resource management
 
-Center has two intentionally separate global-resource capabilities.
+`GlobalResources` is a **read-only**, non-durable view over cluster-owned namespaced
+resources. Center holds no durable desired state for it and exposes no write route: the
+durable template plus target-selector model was removed, and the surviving write surfaces
+(RegionRouteOverride failover and row-level copy) live under the dedicated RegionRoute
+endpoints, not here.
 
-## GlobalResources inventory
+## Surface
 
-`GlobalResources` is a virtual, non-durable view over cluster-owned namespaced resources in configured platform namespaces. The default namespaces are `edgion-system` and `edgion-global`; this convention does not change Kubernetes resource scope.
+Three GET routes, all gated by the single `global-resources:read` permission key:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/center/global-resources/catalog` | Supported kinds and per-Controller cluster rows |
+| GET | `/api/v1/center/global-resources/resources/{kind}` | Grouped cross-cluster inventory |
+| GET | `/api/v1/center/global-resources/resources/{kind}/{namespace}/{name}` | Exact per-Controller detail |
 
 The live global kind is `EdgionConfigData`. `HTTPRoute`, `GRPCRoute`, `EdgionPlugins`, and
 `ReferenceGrant` remain Controller-local resources: Center enters them through a selected
@@ -19,80 +29,76 @@ The GlobalResources dashboard exposes `IpList`, `KeyList`, `Selector`, and `Misc
 children, each backed by an exact `EdgionConfigData` type filter. `RegionRouteOverride`
 remains an EdgionConfigData variant but is operated through the dedicated RegionRoute views.
 
-Center resolves exactly one eligible Controller per cluster, fans out bounded list/get requests through the existing federation HTTP proxy, and returns per-cluster observations and errors. It does not persist observed resource payloads or merge same-named cluster objects into one mutable object.
+## Read model
 
-## GlobalResource desired state
+All three routes are served entirely from the in-memory federation watch cache, with **zero
+Controller HTTP on the read path**. Center does not persist observed resource payloads and
+does not merge same-named cluster objects into one mutable object.
 
-`GlobalResource` is a durable Center-owned template, target selector, desired revision, and synchronization policy. Standalone persists it through the SQL adapter; Kubernetes mode uses a dedicated Center CRD and coordination boundary. Observed target payloads remain non-durable.
+Rows are emitted **per Controller, not per cluster**. The `cluster` field is derived by
+taking the prefix of a `<cluster>/<suffix>` watch controller id — a convention, not an
+enforced invariant: registration does not require the separator, and an id without one falls
+back to the whole id. Two Controllers in the same cluster therefore produce two rows carrying
+the same `cluster` and different `controllerId`, and a single comparison group may hold
+members from both. Detail narrows to one Controller by first match on the
+requested cluster; that is selection, not authoritative-target resolution — the resolution
+machinery that once backed it was removed with the durable sync feature.
 
-GR-06 is deliberately plan-only: the Admin API can create, list, read, replace, and plan desired intent, but cannot apply, adopt, prune, or delete. Replacement uses a strong `If-Match` generation. A later apply must carry the fresh Controller `metadata.resourceVersion` in the full PUT body because that is the Controller's current CAS contract.
+Consequently `ClusterResolution.candidates` is always empty and the `Ambiguous` /
+`Indeterminate` states are never constructed on this path. The `errors` array on
+`ClusterResult` / `DetailResponse` is likewise always empty; it stays on the wire shape only
+because the dashboard drawer renders it. When extending this surface, do not assume those
+fields carry signal — populate them deliberately or read them as absent.
 
-Synchronization follows plan then apply:
+Namespace scoping is **not** a Center policy. Center applies no namespace predicate: the
+visible set is whatever each Controller streams under its own `watch_namespaces`. The former
+`global_resources.platform_namespaces` config field was removed together with the durable
+sync feature; there is no configurable platform-namespace set in Center any more.
 
-1. Resolve the target cluster to exactly one eligible Controller.
-2. Fresh-read the target object.
-3. Normalize cluster-owned metadata and status for diff.
-4. Produce a per-target plan.
-5. Apply only the confirmed desired revision and target set.
-6. Create when absent or update with the target's current `resourceVersion`.
-7. Record each target result independently.
+Failures surface as HTTP error codes from the handler, not as per-cluster error entries:
+`invalid_global_resource_kind`, `invalid_query`, `invalid_cluster`, `invalid_limit`,
+`invalid_config_data_type`, `invalid_continue_token`, `stale_continue_token`,
+`cluster_required`, `cluster_not_found`, and `global_resource_not_found`.
 
-The first release does not adopt unowned objects, automatically retry ambiguous outcomes, or delete/prune.
+A **watch-level** Controller RBAC denial *is* observable, just not through `errors`: the
+Controller answers the watch with `Forbidden`, Center treats it as terminal and marks the
+cache stale, and this API then reports that Controller as `offline` with `syncState: "stale"`
+and `complete: false`. What is invisible is **per-object** filtering — a single resource the
+Controller declines to stream is simply absent from the cache with no signal.
 
 ## Responsibility boundary
 
-Center owns orchestration, targeting, aggregation, drift, desired-state persistence, operation records, Center authorization, and audit.
+Center owns aggregation, presentation, Center authorization, and audit.
 
-Controller remains authoritative for federation identity authorization, resource CRUD, optimistic concurrency, schema validation, reference resolution, status, ConfCenter persistence, requeue, and Gateway synchronization. Gateway remains the runtime enforcement boundary.
+Controller remains authoritative for federation identity authorization, resource CRUD,
+optimistic concurrency, schema validation, reference resolution, status, ConfCenter
+persistence, requeue, and Gateway synchronization. Gateway remains the runtime enforcement
+boundary.
 
-The MVP uses the existing generic Controller Admin HTTP proxy. It adds no resource-specific Controller endpoint, ResourceKind, or federation protobuf message; the federation Command channel (apply/delete/reload) has been removed entirely, so this proxy is the only path. Generic multi-kind reverse-watch multiplexing is an optional later optimization; the current Controller keeps one active reverse-watch task.
+Writes elsewhere in Center use the generic Controller Admin HTTP proxy. They add no
+resource-specific Controller endpoint, ResourceKind, or federation protobuf message; the
+federation Command channel (apply/delete/reload) has been removed entirely, so this proxy is
+the only path.
 
-## Failure rules
+## Watch constraints
 
-- Zero or multiple eligible Controllers for a cluster: report unavailable/ambiguous and do not write.
-- Missing Controller permission: report denied, never empty or synchronized.
-- Platform namespace outside configuration: reject.
-- Namespace excluded by Controller `watch_namespaces`: report unavailable.
-- Existing object without matching Center ownership: conflict, do not overwrite.
-- Stale resource version: conflict, do not retry without a precondition.
-- Ambiguous transport outcome: record unknown outcome, do not replay automatically.
-- `Secret`: never supported by inventory or desired-state synchronization.
+`FedWatchRequest` carries a single `kind` and a `from_version`; `from_version = 0` means
+"full list then watch", with no namespace scoping in the protocol. Center keeps **one active
+watch per Controller session**, for `EdgionConfigData`. The request issued at registration
+resumes from the cached sync version rather than always starting at 0, and Center re-watches
+from 0 when the Controller's `server_id` changes or after a transient error.
 
-Drift is a fresh comparison against the persisted desired revision, never a durable observed-object cache. Apply does not retry unknown writes; the operator must re-plan and confirm. Any future continuous reconciler must preserve all existing fences and use bounded exponential backoff.
+Bounding is Center-side only — a per-Controller entry cap, with an overflowing batch dropped
+whole. Overflow is terminal for that watch: it does not re-watch on its own, so the
+Controller stays stale until it re-registers.
 
-## Authorization
+**Generic multi-kind reverse-watch multiplexing is an optional later optimization; the
+current Controller keeps one active reverse-watch task.** Read this before adding a second
+watched kind.
 
-Controller's built-in Center policy permits reads for the initial non-Secret kinds but permits writes only for `EdgionConfigData`. Synchronizing `HTTPRoute`, `GRPCRoute`, `EdgionPlugins`, or `ReferenceGrant` requires explicit concrete create/update grants in Controller configuration.
-
-## Task handoff
-
-The ordered implementation ledger is `tasks/pending/global-resource-management/03-subtasks.md`. Read the task's `01-design.md` and open issues before implementing any numbered task.
-
-## Namespace-scoped global configuration evolution
-
-The initial five-kind catalog is being retired as a global inventory model. The configured
-namespace set is the inclusion rule for global `EdgionConfigData` only. The target default
-namespace set is `edgion-system` and `edgion-global`.
-
-The policy remains Center-owned. Controller must not know that a namespace is "global".
-Center owns the EdgionConfigData global namespace policy and type presentation, resolves the
-authoritative Controller for a cluster, and maintains an in-memory real-time view through
-bounded initial namespaced lists plus federated watch events for EdgionConfigData in each
-configured namespace. There is no separate Controller inventory-catalog protocol. Controller
-status reporting (identity, liveness, and resource counts) remains a separate compact
-federation projection.
+## Scope
 
 "Global" does not mean all Controller resources or arbitrary Kubernetes objects. `Secret` is
 permanently absent. Resources such as routes, plugins, and grants retain Controller-local
 navigation and authorization. A raw `ConfigMap` is excluded because its data can contain
-credentials. Center must report a denied or unavailable ConfigData namespace observation rather
-than treating it as an empty list.
-
-An unsupported kind is reported as `not_supported`; a forbidden list/watch is `denied`; only
-a successful empty list in a ready subscription is `empty`. Writes return only after their
-Controller acknowledgement and corresponding watch convergence, never by optimistically
-mutating Center's view. The first expanded-inventory release is inventory-only. Durable desired-state synchronization
-continues to use its explicit safe-kind policy until per-kind create/update contracts,
-normalization rules, ownership markers, and schema validation guarantees are reviewed.
-The implementation ledger is
-`tasks/pending/namespace-scoped-global-resources/03-subtasks.md`.
+credentials.

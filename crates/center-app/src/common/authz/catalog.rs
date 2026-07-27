@@ -21,18 +21,12 @@ pub const REGION_ROUTES_READ: &str = "region-routes:read";
 pub const REGION_ROUTES_WRITE: &str = "region-routes:write";
 // Global resource catalog and cross-cluster inventory.
 pub const GLOBAL_RESOURCES_READ: &str = "global-resources:read";
-// Durable Center-owned GlobalResource desired state.
-pub const GLOBAL_RESOURCE_SYNC_READ: &str = "global-resource-sync:read";
-pub const GLOBAL_RESOURCE_SYNC_WRITE: &str = "global-resource-sync:write";
-// Read-only planning exposes target selection, ownership, and reachability evidence.
-pub const GLOBAL_RESOURCE_SYNC_PLAN: &str = "global-resource-sync:plan";
-pub const GLOBAL_RESOURCE_SYNC_APPLY: &str = "global-resource-sync:apply";
 // Global connection IP restrictions page.
 pub const IP_RESTRICTIONS_READ: &str = "ip-restrictions:read";
 pub const IP_RESTRICTIONS_WRITE: &str = "ip-restrictions:write";
 // Audit log page.
 pub const AUDIT_READ: &str = "audit:read";
-// Server / diagnostics reads (server-info, watch-status, metadata-store).
+// Server reads (server-info).
 pub const SERVER_READ: &str = "server:read";
 // HTTP proxy to controllers (any method).
 pub const PROXY_ACCESS: &str = "proxy:access";
@@ -101,10 +95,6 @@ pub fn all_keys() -> &'static [&'static str] {
         REGION_ROUTES_READ,
         REGION_ROUTES_WRITE,
         GLOBAL_RESOURCES_READ,
-        GLOBAL_RESOURCE_SYNC_READ,
-        GLOBAL_RESOURCE_SYNC_WRITE,
-        GLOBAL_RESOURCE_SYNC_PLAN,
-        GLOBAL_RESOURCE_SYNC_APPLY,
         IP_RESTRICTIONS_READ,
         IP_RESTRICTIONS_WRITE,
         AUDIT_READ,
@@ -173,15 +163,6 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         PermissionGroup {
             group: "Global Resources",
             keys: vec![GLOBAL_RESOURCES_READ],
-        },
-        PermissionGroup {
-            group: "Global Resource Sync",
-            keys: vec![
-                GLOBAL_RESOURCE_SYNC_READ,
-                GLOBAL_RESOURCE_SYNC_WRITE,
-                GLOBAL_RESOURCE_SYNC_PLAN,
-                GLOBAL_RESOURCE_SYNC_APPLY,
-            ],
         },
         PermissionGroup {
             group: "IP Restrictions",
@@ -295,27 +276,6 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         || under_segment(path, "/api/v1/center/global-resources/resources")
     {
         return is_read.then_some(GLOBAL_RESOURCES_READ);
-    }
-
-    const GLOBAL_RESOURCE_SYNC_COLLECTION: &str = "/api/v1/center/global-resource-sync/resources";
-    if let Some(suffix) = path.strip_prefix(GLOBAL_RESOURCE_SYNC_COLLECTION) {
-        if suffix.is_empty() {
-            return match *method {
-                Method::GET | Method::HEAD => Some(GLOBAL_RESOURCE_SYNC_READ),
-                Method::POST => Some(GLOBAL_RESOURCE_SYNC_WRITE),
-                _ => None,
-            };
-        }
-        let suffix = suffix.strip_prefix('/')?;
-        let mut segments = suffix.split('/');
-        let _id = segments.next().filter(|value| !value.is_empty())?;
-        return match (segments.next(), segments.next(), method) {
-            (None, None, &Method::GET | &Method::HEAD) => Some(GLOBAL_RESOURCE_SYNC_READ),
-            (None, None, &Method::PUT) => Some(GLOBAL_RESOURCE_SYNC_WRITE),
-            (Some("plan"), None, &Method::POST) => Some(GLOBAL_RESOURCE_SYNC_PLAN),
-            (Some("apply"), None, &Method::POST) => Some(GLOBAL_RESOURCE_SYNC_APPLY),
-            _ => None,
-        };
     }
 
     // HTTP proxy — any method forwards to a controller.
@@ -444,12 +404,6 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         return Some(AUDIT_READ);
     }
 
-    // Watch-cache / metadata-store diagnostics.
-    if path == "/api/v1/center/admin/watch-status" || path == "/api/v1/center/admin/metadata-store"
-    {
-        return Some(SERVER_READ);
-    }
-
     // DB-backed admin controllers (list GET / delete DELETE).
     if path == "/api/v1/center/admin/controllers"
         || path.starts_with("/api/v1/center/admin/controllers/")
@@ -474,13 +428,9 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         return Some(ROLES_MANAGE);
     }
 
-    // Region routes: list/consistency are GET reads, failover/sync are writes.
-    // Keep the two legacy prefixes mapped while their redirect routes remain.
-    if under_segment(path, "/api/v1/center/region-routes")
-        || under_segment(path, "/api/v1/center/region-route-overrides")
+    // RegionRoute overrides: list is a GET read, failover/sync are writes.
+    if under_segment(path, "/api/v1/center/region-route-overrides")
         || under_segment(path, "/api/v1/center/service-region-route-overrides")
-        || under_segment(path, "/api/v1/center/cluster-region-routes")
-        || under_segment(path, "/api/v1/center/service-region-routes")
     {
         return Some(if is_read {
             REGION_ROUTES_READ
@@ -679,26 +629,23 @@ mod tests {
             (Method::GET, "/api/v1/controllers"),
             (Method::GET, "/api/v1/clusters"),
             (Method::POST, "/api/v1/controllers/c1/reload"),
-            (Method::GET, "/api/v1/center/cluster-region-routes"),
-            (Method::GET, "/api/v1/center/service-region-routes"),
-            (
-                Method::POST,
-                "/api/v1/center/cluster-region-routes/failover",
-            ),
-            (
-                Method::POST,
-                "/api/v1/center/service-region-routes/failover",
-            ),
-            (Method::POST, "/api/v1/center/region-routes/sync"),
-            (Method::POST, "/api/v1/center/cluster-region-routes/sync"),
-            (Method::POST, "/api/v1/center/service-region-routes/sync"),
+            (Method::GET, "/api/v1/center/region-route-overrides"),
             (
                 Method::GET,
-                "/api/v1/center/cluster-region-routes/consistency",
+                "/api/v1/center/service-region-route-overrides",
             ),
             (
-                Method::GET,
-                "/api/v1/center/service-region-routes/consistency",
+                Method::POST,
+                "/api/v1/center/region-route-overrides/failover",
+            ),
+            (
+                Method::POST,
+                "/api/v1/center/service-region-route-overrides/failover",
+            ),
+            (Method::POST, "/api/v1/center/region-route-overrides/sync"),
+            (
+                Method::POST,
+                "/api/v1/center/service-region-route-overrides/sync",
             ),
             (
                 Method::GET,
@@ -748,8 +695,6 @@ mod tests {
             (Method::DELETE, "/api/v1/center/admin/roles/1"),
             (Method::GET, "/api/v1/center/admin/permission-catalog"),
             (Method::GET, "/api/v1/center/admin/audit-logs"),
-            (Method::GET, "/api/v1/center/admin/watch-status"),
-            (Method::GET, "/api/v1/center/admin/metadata-store"),
             (
                 Method::GET,
                 "/api/v1/center/cloudflare/dns/accounts/account-1/zones",
@@ -1296,69 +1241,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn global_resource_sync_routes_use_separate_read_write_and_plan_permissions() {
-        let collection = "/api/v1/center/global-resource-sync/resources";
-        let detail = "/api/v1/center/global-resource-sync/resources/shared-allow-list";
-        let plan = "/api/v1/center/global-resource-sync/resources/shared-allow-list/plan";
-
-        for method in [Method::GET, Method::HEAD] {
-            assert_eq!(
-                route_permission(&method, collection),
-                Some(GLOBAL_RESOURCE_SYNC_READ)
-            );
-            assert_eq!(
-                route_permission(&method, detail),
-                Some(GLOBAL_RESOURCE_SYNC_READ)
-            );
-        }
-        assert_eq!(
-            route_permission(&Method::POST, collection),
-            Some(GLOBAL_RESOURCE_SYNC_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::PUT, detail),
-            Some(GLOBAL_RESOURCE_SYNC_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, plan),
-            Some(GLOBAL_RESOURCE_SYNC_PLAN)
-        );
-
-        assert_eq!(
-            route_permission(
-                &Method::POST,
-                "/api/v1/center/global-resource-sync/resources/shared-allow-list/apply"
-            ),
-            Some(GLOBAL_RESOURCE_SYNC_APPLY)
-        );
-
-        for (method, path) in [
-            (Method::DELETE, collection),
-            (Method::DELETE, detail),
-            (Method::POST, detail),
-            (Method::GET, plan),
-            (
-                Method::POST,
-                "/api/v1/center/global-resource-sync/resources/shared-allow-list/adopt",
-            ),
-            (
-                Method::POST,
-                "/api/v1/center/global-resource-sync/resources/shared-allow-list/prune",
-            ),
-            (
-                Method::GET,
-                "/api/v1/center/global-resource-sync/resources-v2",
-            ),
-        ] {
-            assert_eq!(
-                route_permission(&method, path),
-                None,
-                "{method} {path} must fail closed"
-            );
-        }
-    }
-
     /// GET endpoints resolve to `:read`, mutations to `:write`.
     #[test]
     fn read_vs_write_keys() {
@@ -1417,25 +1299,31 @@ mod tests {
             Some(PROVIDER_CAPABILITIES_READ)
         );
         assert_eq!(
-            route_permission(&Method::GET, "/api/v1/center/region-routes"),
-            Some(REGION_ROUTES_READ)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, "/api/v1/center/region-routes/failover"),
-            Some(REGION_ROUTES_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, "/api/v1/center/region-routes/sync"),
-            Some(REGION_ROUTES_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::GET, "/api/v1/center/cluster-region-routes"),
+            route_permission(&Method::GET, "/api/v1/center/region-route-overrides"),
             Some(REGION_ROUTES_READ)
         );
         assert_eq!(
             route_permission(
                 &Method::POST,
-                "/api/v1/center/cluster-region-routes/failover"
+                "/api/v1/center/region-route-overrides/failover"
+            ),
+            Some(REGION_ROUTES_WRITE)
+        );
+        assert_eq!(
+            route_permission(&Method::POST, "/api/v1/center/region-route-overrides/sync"),
+            Some(REGION_ROUTES_WRITE)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::GET,
+                "/api/v1/center/service-region-route-overrides"
+            ),
+            Some(REGION_ROUTES_READ)
+        );
+        assert_eq!(
+            route_permission(
+                &Method::POST,
+                "/api/v1/center/service-region-route-overrides/failover"
             ),
             Some(REGION_ROUTES_WRITE)
         );
@@ -1656,11 +1544,14 @@ mod tests {
     fn segment_safe_prefixes() {
         // Sibling paths sharing a textual prefix must NOT resolve to the base key.
         assert_eq!(
-            route_permission(&Method::GET, "/api/v1/center/cluster-region-routes-v2"),
+            route_permission(&Method::GET, "/api/v1/center/region-route-overrides-v2"),
             None
         );
         assert_eq!(
-            route_permission(&Method::GET, "/api/v1/center/service-region-routes-v2"),
+            route_permission(
+                &Method::GET,
+                "/api/v1/center/service-region-route-overrides-v2"
+            ),
             None
         );
         assert_eq!(
@@ -1676,13 +1567,13 @@ mod tests {
         );
         // Exact base and segment-boundary children still resolve.
         assert_eq!(
-            route_permission(&Method::GET, "/api/v1/center/cluster-region-routes"),
+            route_permission(&Method::GET, "/api/v1/center/region-route-overrides"),
             Some(REGION_ROUTES_READ)
         );
         assert_eq!(
             route_permission(
                 &Method::GET,
-                "/api/v1/center/cluster-region-routes/consistency"
+                "/api/v1/center/region-route-overrides/some-row"
             ),
             Some(REGION_ROUTES_READ)
         );

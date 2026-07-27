@@ -22,7 +22,6 @@ use std::{
 pub mod audit;
 mod cloud_capabilities;
 pub mod controllers;
-mod global_resources;
 mod provider_accounts;
 mod users;
 
@@ -30,7 +29,6 @@ mod users;
 pub(crate) static MYSQL_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub use controllers::DbController;
-pub use global_resources::SqlGlobalResourceStore;
 pub use users::{Role, User};
 
 /// Reports whether a store operation failed because of a UNIQUE constraint.

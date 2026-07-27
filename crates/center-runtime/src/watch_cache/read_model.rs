@@ -416,7 +416,7 @@ mod tests {
         // The trap `get_or_create` would fall into: looking up an unknown
         // controller must not have inserted a cache for it.
         assert_eq!(
-            registry.list_controllers().len(),
+            registry.statuses().len(),
             1,
             "raw_document must not create a cache for an unknown controller"
         );

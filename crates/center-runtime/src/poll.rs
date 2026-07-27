@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::metadata_store::{CenterMetaDataStore, EffectiveGirView, EffectiveRegionRouteView};
+use crate::metadata_store::{CenterMetaDataStore, EffectiveGirView};
 use edgion_center_core::{ControllerDirectory, ControllerOwnerRoute, ControllerPhase, CoreResult};
 
 /// HTTP response returned through a connected Controller.
@@ -53,23 +53,6 @@ pub trait ControllerHttpClient: Send + Sync {
     }
 }
 
-/// Tolerant element-wise parse: a single bad element is dropped, not the whole batch.
-/// A non-JSON body yields an empty Vec.
-pub fn parse_region_effective(body: &[u8]) -> Vec<EffectiveRegionRouteView> {
-    let v: serde_json::Value = match serde_json::from_slice(body) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-    let arr = v
-        .get("data")
-        .and_then(|d| d.as_array())
-        .cloned()
-        .unwrap_or_default();
-    arr.into_iter()
-        .filter_map(|el| serde_json::from_value::<EffectiveRegionRouteView>(el).ok())
-        .collect()
-}
-
 /// Tolerant element-wise parse for GIR effective views.
 /// A single bad element is dropped, not the whole batch.
 pub fn parse_gir_effective(body: &[u8]) -> Vec<EffectiveGirView> {
@@ -99,15 +82,6 @@ pub async fn poll_controller_once<C: ControllerHttpClient + ?Sized>(
     controller_id: &str,
 ) -> Result<(), String> {
     poll_controller_once_inner(client, store, controller_id, None, None).await
-}
-
-pub async fn poll_controller_once_fenced<C: ControllerHttpClient + ?Sized>(
-    client: &C,
-    store: &CenterMetaDataStore,
-    controller_id: &str,
-    revision: &str,
-) -> Result<(), String> {
-    poll_controller_once_inner(client, store, controller_id, Some(revision), None).await
 }
 
 pub async fn poll_controller_once_owner_fenced<C: ControllerHttpClient + ?Sized>(
@@ -219,7 +193,7 @@ mod tests {
     use super::*;
     use edgion_center_core::{
         ControllerId, ControllerRecord, ControllerRegistration, EvictionResult, OfflineOutcome,
-        SessionId,
+        OwnershipFence, SessionId,
     };
     use std::sync::Mutex;
 
@@ -270,47 +244,30 @@ mod tests {
                 .remove(&path)
                 .unwrap_or_else(|| Err("missing fake response".to_string()))
         }
+
+        async fn request_fenced(
+            &self,
+            controller_id: &str,
+            method: String,
+            path: String,
+            headers: HashMap<String, String>,
+            body: Vec<u8>,
+            _expected_owner: &ControllerOwnerRoute,
+        ) -> Result<ControllerHttpResponse, String> {
+            self.request(controller_id, method, path, headers, body)
+                .await
+        }
     }
 
-    #[test]
-    fn tolerant_parse_drops_bad_keeps_good() {
-        let body = br#"{"success":true,"data":[
-            {"namespace":"default","pluginName":"ep1","myRegion":"east","regions":[],
-             "keyGet":[{"type":"header","name":"X-Tenant"}],
-             "hashCalc":{"algorithm":"crc32","modulo":1000},
-             "routeRules":[{"type":"RouteByHashRange"}],
-             "dye":{"headerName":"X-Edgion-Dye","headerValue":"canary"},
-             "serviceUsages":[{"routeKind":"HTTPRoute","routeNamespace":"default","routeName":"api","ruleIndex":0,"backendServices":[{"namespace":"default","name":"api","port":8080}]}]},
-            {"garbage":true}
-        ]}"#;
-        let parsed = parse_region_effective(body);
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0].plugin_name, "ep1");
-        assert_eq!(parsed[0].key_get[0]["name"], "X-Tenant");
-        assert_eq!(parsed[0].route_rules[0]["type"], "RouteByHashRange");
-        assert_eq!(
-            parsed[0].dye,
-            Some(serde_json::json!({
-                "headerName": "X-Edgion-Dye",
-                "headerValue": "canary"
-            }))
-        );
-        assert_eq!(
-            parsed[0].service_usages[0].backend_services[0].port,
-            Some(8080)
-        );
-    }
-
-    #[test]
-    fn tolerant_parse_non_json_body_yields_empty() {
-        let parsed = parse_region_effective(b"not json at all");
-        assert!(parsed.is_empty());
-    }
-
-    #[test]
-    fn tolerant_parse_missing_data_field_yields_empty() {
-        let parsed = parse_region_effective(br#"{"success":true}"#);
-        assert!(parsed.is_empty());
+    fn owner_route() -> ControllerOwnerRoute {
+        ControllerOwnerRoute {
+            holder: "replica-a".to_string(),
+            endpoint: "https://replica-a:12252".to_string(),
+            ownership_fence: OwnershipFence {
+                token: "fence-1".to_string(),
+                epoch: 1,
+            },
+        }
     }
 
     #[test]
@@ -339,14 +296,12 @@ mod tests {
         };
 
         poll_controller_once(&client, &store, "c1").await.unwrap();
-        assert!(store.list_region_routes().is_empty());
         assert_eq!(store.list_gir_effective().len(), 1);
 
         let failing = FakeClient {
             responses: Mutex::new(HashMap::new()),
         };
         assert!(poll_controller_once(&failing, &store, "c1").await.is_err());
-        assert!(store.list_region_routes().is_empty());
         assert_eq!(store.list_gir_effective().len(), 1);
     }
 
@@ -390,7 +345,6 @@ mod tests {
                 .unwrap(),
             1
         );
-        assert!(store.list_region_routes().is_empty());
         assert_eq!(store.list_gir_effective()[0].controllers.len(), 1);
     }
 
@@ -411,7 +365,7 @@ mod tests {
                 }),
             )])),
         };
-        poll_controller_once_fenced(&client, &store, "c1", "session-a")
+        poll_controller_once_owner_fenced(&client, &store, "c1", "session-a", &owner_route())
             .await
             .unwrap();
         assert!(store.has_fresh_coverage(&ids, std::time::Duration::from_secs(30)));
@@ -430,11 +384,15 @@ mod tests {
                 }),
             )])),
         };
-        assert!(
-            poll_controller_once_fenced(&late, &store, "c1", "session-a")
-                .await
-                .is_err()
-        );
+        assert!(poll_controller_once_owner_fenced(
+            &late,
+            &store,
+            "c1",
+            "session-a",
+            &owner_route()
+        )
+        .await
+        .is_err());
         assert!(!store.has_fresh_coverage(&ids, std::time::Duration::from_secs(30)));
     }
 }

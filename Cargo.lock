@@ -1775,11 +1775,9 @@ name = "edgion-center-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "hex",
  "idna",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tokio",
 ]
 
@@ -1892,7 +1890,6 @@ dependencies = [
  "rcgen",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tokio",
  "tokio-stream",
  "tokio-util",

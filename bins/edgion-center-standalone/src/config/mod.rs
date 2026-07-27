@@ -88,9 +88,6 @@ impl Default for AuditConfig {
 pub struct CenterConfig {
     pub server: CenterServerConfig,
     pub sync: CenterSyncConfig,
-    /// Fleet-level namespaced resource conventions.
-    #[serde(default)]
-    pub global_resources: edgion_center_core::GlobalResourcesConfig,
     /// SQLite database configuration.
     #[serde(default)]
     pub database: DatabaseConfig,
@@ -164,7 +161,6 @@ impl Default for CenterConfig {
         Self {
             server: CenterServerConfig::default(),
             sync: CenterSyncConfig::default(),
-            global_resources: edgion_center_core::GlobalResourcesConfig::default(),
             database: DatabaseConfig::default(),
             auth: None,
             local_auth: None,
@@ -274,10 +270,6 @@ mod tests {
         assert_eq!(config.server.metrics_addr, "0.0.0.0:12290");
         assert_eq!(config.sync.ping_interval_secs, 30);
         assert_eq!(config.sync.command_timeout_secs, 25);
-        assert_eq!(
-            config.global_resources.platform_namespaces,
-            ["edgion-system", "edgion-global"]
-        );
     }
 
     #[test]

@@ -58,25 +58,3 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: edgion-center-subject-access-review
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: edgion-center-global-resources
-rules:
-  - apiGroups: [center.edgion.io]
-    resources: [edgionglobalresources]
-    verbs: [get, list, create, update]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: edgion-center-global-resources
-subjects:
-  - kind: ServiceAccount
-    name: edgion-center
-    namespace: edgion-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: edgion-center-global-resources

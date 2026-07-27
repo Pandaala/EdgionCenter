@@ -27,13 +27,6 @@ sync:
   # Heartbeat ping interval sent to controllers (seconds, default: 30)
   ping_interval_secs: 30
 
-# Namespaced resources in these namespaces are presented as fleet-level
-# GlobalResources. This convention does not change Kubernetes resource scope.
-global_resources:
-  platform_namespaces:
-    - edgion-system
-    - edgion-global
-
 # ============================================================================
 # Access control — three orthogonal axes (full reference:
 # skills/02-features/access-control.md)

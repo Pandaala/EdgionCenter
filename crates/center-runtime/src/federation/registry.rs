@@ -171,17 +171,6 @@ impl ControllerRegistry {
         })
     }
 
-    /// Check that a specific live session is still the dispatch target.
-    ///
-    /// GlobalResources pagination uses this as a read fence so an upstream
-    /// continuation token is never replayed after a Controller reconnect.
-    pub fn is_dispatchable_session(&self, controller_id: &str, expected_session_id: &str) -> bool {
-        self.inner
-            .read()
-            .get(controller_id)
-            .is_some_and(|session| session.session_id == expected_session_id && session.is_online())
-    }
-
     /// Fence a locally owned session before attempting a same-replica Lease
     /// reacquire. This closes the interval in which Kubernetes has committed a
     /// newer fence but the displaced stream has not reached its next renewal.

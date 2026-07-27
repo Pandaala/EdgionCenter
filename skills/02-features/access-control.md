@@ -124,7 +124,6 @@ bundle keys; users get roles.
 | Controllers | `controllers:read`, `controllers:write` |
 | Region Routes | `region-routes:read`, `region-routes:write` |
 | Global Resources | `global-resources:read` |
-| Global Resource Sync | `global-resource-sync:read`, `global-resource-sync:write`, `global-resource-sync:plan`, `global-resource-sync:apply` |
 | IP Restrictions | `ip-restrictions:read`, `ip-restrictions:write` |
 | Audit | `audit:read` |
 | Server | `server:read` |
@@ -138,12 +137,6 @@ GET endpoints map to a `:read` key, mutating endpoints to a `:write` key.
 three GlobalResources routes. There is no separate preflight route or `diagnose`
 permission; both were removed when GlobalResources moved to being served entirely from
 the in-memory federation watch read model, with zero Controller HTTP on the read path.
-`global-resource-sync:read` gates durable desired-state list/detail reads;
-`global-resource-sync:write` gates create and generation-guarded replacement.
-`global-resource-sync:plan` is separate because a read-only plan still exposes target
-selection, ownership, Controller reachability, and authorization evidence. It grants no
-apply authority. `global-resource-sync:apply` is required for manual fenced apply; it grants
-no adoption, prune, or delete authority.
 
 ## How RBAC enforcement works (`authz.mode: rbac`)
 

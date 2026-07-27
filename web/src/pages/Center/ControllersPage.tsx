@@ -14,7 +14,7 @@ type ControllerRow = ControllerSummary & { lastSeenAt?: number }
 
 const formatLastSeen = (t: ReturnType<typeof useT>, row: ControllerRow) => {
   if (row.lastSeenAt) return new Date(row.lastSeenAt * 1000).toLocaleString()
-  const seconds = row.last_seen_secs_ago ?? row.last_list_secs_ago
+  const seconds = row.last_seen_secs_ago
   if (seconds == null) return t('center.never')
   if (seconds < 60) return t('center.secsAgo', { n: seconds })
   if (seconds < 3600) return t('center.minsAgo', { n: Math.floor(seconds / 60) })
