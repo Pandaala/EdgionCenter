@@ -41,12 +41,6 @@ pub mod names {
     pub const SESSION_REENTRY_TOTAL: &str = "edgion_fed_session_reentry_total";
     /// Gauge: controllers known to the aggregator, broken down by cluster.
     pub const AGGREGATOR_CONTROLLERS: &str = "edgion_fed_aggregator_controllers";
-    /// Counter: consistency-check API detected cross-controller divergence.
-    // NOTE(migration): unused after cluster/service route consistency handlers were stubbed.
-    #[allow(dead_code)]
-    pub const CONSISTENCY_MISMATCH_TOTAL: &str = "edgion_fed_consistency_mismatch_total";
-    /// Counter: fan-out patch operations' aggregate outcome.
-    pub const FANOUT_TOTAL: &str = "edgion_fed_fanout_total";
     /// Gauge: last observed ready-gate wait in seconds (Controller side).
     #[allow(dead_code)]
     pub const READY_GATE_WAIT_LAST: &str = "edgion_fed_ready_gate_wait_seconds_last";
@@ -116,14 +110,6 @@ pub mod labels {
     pub mod evict_source {
         pub const REGISTRY: &str = "registry";
         pub const AGGREGATOR: &str = "aggregator";
-    }
-    pub mod fanout_op {
-        pub const PATCH_PROFILE: &str = "patch_profile";
-    }
-    pub mod fanout_result {
-        pub const OK: &str = "ok";
-        pub const PARTIAL: &str = "partial";
-        pub const FAIL: &str = "fail";
     }
     pub mod peer_identity_result {
         pub const OK: &str = "ok";
@@ -231,18 +217,6 @@ pub fn set_aggregator_controllers(cluster: &str, count: u64) {
     gauge!(names::AGGREGATOR_CONTROLLERS, "cluster" => cluster.to_string()).set(count as f64);
 }
 
-// NOTE(migration): unused after cluster/service route consistency handlers were stubbed.
-#[allow(dead_code)]
-#[inline]
-pub fn record_consistency_mismatch() {
-    counter!(names::CONSISTENCY_MISMATCH_TOTAL).increment(1);
-}
-
-#[inline]
-pub fn record_fanout(op: &'static str, result: &'static str) {
-    counter!(names::FANOUT_TOTAL, "op" => op, "result" => result).increment(1);
-}
-
 // ---------- Ready gate (Controller) ----------
 
 #[allow(dead_code)]
@@ -344,8 +318,6 @@ mod tests {
             EVICT_STALE_TOTAL,
             SESSION_REENTRY_TOTAL,
             AGGREGATOR_CONTROLLERS,
-            CONSISTENCY_MISMATCH_TOTAL,
-            FANOUT_TOTAL,
             READY_GATE_WAIT_LAST,
         ] {
             assert!(
@@ -428,10 +400,6 @@ mod tests {
             ("offline_reason::RELOAD", offline_reason::RELOAD),
             ("evict_source::REGISTRY", evict_source::REGISTRY),
             ("evict_source::AGGREGATOR", evict_source::AGGREGATOR),
-            ("fanout_op::PATCH_PROFILE", fanout_op::PATCH_PROFILE),
-            ("fanout_result::OK", fanout_result::OK),
-            ("fanout_result::PARTIAL", fanout_result::PARTIAL),
-            ("fanout_result::FAIL", fanout_result::FAIL),
             ("rbac_source::CENTER", rbac_source::CENTER),
             ("rbac_source::CLI_TOKEN", rbac_source::CLI_TOKEN),
             ("rbac_source::UNKNOWN", rbac_source::UNKNOWN),
@@ -459,8 +427,6 @@ mod tests {
             EVICT_STALE_TOTAL,
             SESSION_REENTRY_TOTAL,
             AGGREGATOR_CONTROLLERS,
-            CONSISTENCY_MISMATCH_TOTAL,
-            FANOUT_TOTAL,
             READY_GATE_WAIT_LAST,
         ];
         for n in names {
@@ -567,16 +533,6 @@ mod tests {
             &[evict_source::REGISTRY, evict_source::AGGREGATOR],
             &["registry", "aggregator"],
         );
-        check("fanout_op", &[fanout_op::PATCH_PROFILE], &["patch_profile"]);
-        check(
-            "fanout_result",
-            &[
-                fanout_result::OK,
-                fanout_result::PARTIAL,
-                fanout_result::FAIL,
-            ],
-            &["ok", "partial", "fail"],
-        );
         check(
             "rbac_source",
             &[
@@ -603,8 +559,6 @@ mod tests {
         super::record_evict_stale(evict_source::REGISTRY);
         super::record_session_reentry();
         super::set_aggregator_controllers("default", 3);
-        super::record_consistency_mismatch();
-        super::record_fanout(fanout_op::PATCH_PROFILE, fanout_result::OK);
         super::record_ready_gate_wait(0.25);
     }
 }

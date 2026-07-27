@@ -28,7 +28,7 @@ opt-in and never touches the user's current context during the default matrix.
 | Kubernetes audit boundary | Structured stdout and SQL audit contract tests | Runtime logs plus kube-apiserver audit policy |
 | Lease expiry, fencing, same-holder reconnect, and takeover | Lease/registry/runtime tests | Two coordinators take over one real Lease after expiry |
 | Multi-replica command/proxy routing | Owner locator and internal-forwarding tests | Deployment uses two replicas and the internal mTLS Service |
-| Active-active global reads | Capability/directory API tests | Fresh replica reconstructs reads without a local federation registry |
+| Active-active directory reads | Capability/directory API tests | Fresh replica serves directory-backed reads without a local federation registry |
 
 ## Hermetic cloud matrix
 

@@ -124,7 +124,6 @@ bundle keys; users get roles.
 | Controllers | `controllers:read`, `controllers:write` |
 | Region Routes | `region-routes:read`, `region-routes:write` |
 | Global Resources | `global-resources:read` |
-| IP Restrictions | `ip-restrictions:read`, `ip-restrictions:write` |
 | Audit | `audit:read` |
 | Server | `server:read` |
 | Proxy | `proxy:access` |

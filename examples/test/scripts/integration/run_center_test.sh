@@ -3,10 +3,9 @@
 # Center Integration Test Script
 #
 # Consolidated test for the Center watch-sync pipeline + admin APIs, covering
-# both RegionRoute and GlobalConnectionIpRestriction (GCIR) resources.
+# the RegionRoute aggregate read and failover surface.
 # Starts 1 center + 2 controllers with different clusters and PluginMetaData,
-# then validates watch sync, failover fan-out, consistency detection, and
-# GCIR fan-out lifecycle (create/list/get/patch/update/delete).
+# then validates watch sync, failover fan-out, and consistency detection.
 #
 # Also validates the Center RBAC policy that the Controller enforces on the
 # federation path:
@@ -33,16 +32,6 @@
 #   4.   failover_fanout             — POST failover, wait 2s, verify center + controller sides
 #   5.   consistency_detect          — consistency endpoint detects regions.length conflict
 #   6.   svc_consistency_ok          — service-region-routes consistency is all consistent
-#
-# Test cases — GlobalConnectionIpRestriction (8):
-#   7.   gcir_create_fanout         — POST creates GCIR PM on both controllers
-#   7b.  gcir_create_validation_400 — POST with invalid body returns HTTP 400 + success=false
-#   8.   gcir_list_after_create     — GET list shows gcir-test with >= 2 controller entries
-#   9.   gcir_get_detail            — GET detail confirms fields on both controllers
-#   10.  gcir_patch_enable          — PATCH /enable=false, verify all controllers disabled
-#   11.  (removed — the /active-profile switch endpoint no longer exists)
-#   12.  gcir_consistency_ok        — GET /consistency reports gcir-test as consistent
-#   13.  gcir_delete_fanout         — DELETE fan-out, verify gcir-test disappears
 #
 # Test cases — Federation RBAC (5):
 #   4b2. rbac_default_allows_region_route_list — proxy GET /api/v1/cluster-region-routes returns
@@ -163,16 +152,6 @@ auth_post() {
 # auth_put TOKEN URL BODY — PUT with Bearer token + JSON, returns response body
 auth_put() {
   curl -sf --max-time 10 -X PUT -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "$3" "$2" 2>/dev/null || true
-}
-
-# auth_patch TOKEN URL BODY — PATCH with Bearer token + JSON, returns response body
-auth_patch() {
-  curl -sf --max-time 10 -X PATCH -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "$3" "$2" 2>/dev/null || true
-}
-
-# auth_delete TOKEN URL BODY — DELETE with Bearer token + JSON body, returns response body
-auth_delete() {
-  curl -sf --max-time 10 -X DELETE -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "$3" "$2" 2>/dev/null || true
 }
 
 # login URL USER PASS — returns JWT token
@@ -854,287 +833,6 @@ else:
   fi
 fi
 
-# ══ GlobalConnectionIpRestriction tests ══════════════════════════════════════
-# GCIR tests use namespace=edgion-test / name=gcir-test, isolated from
-# the RegionRoute tests above (default namespace / different PM names).
-
-# ─── Test 7: gcir_create_fanout ──────────────────────────────────────────────
-# POST a new GCIR via Center; it should fan-out to both controllers.
-# Response shape: ApiResponse<FanOutResponse>
-#   { success: true, data: { success: [...], failed: [...], warnings: [...] } }
-CREATE_BODY='{
-  "namespace": "edgion-test",
-  "name": "gcir-test",
-  "controllers": ["all"],
-  "data": {
-    "enable": true,
-    "activeProfile": "strict",
-    "profiles": {
-      "strict": {
-        "defaultAction": "deny",
-        "allow": [{"name": "office", "cidrs": ["192.168.1.0/24"]}]
-      }
-    }
-  }
-}'
-out=$(auth_post "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions" "$CREATE_BODY")
-if [[ -z "$out" ]]; then
-  fail "gcir_create_fanout" "empty response from POST /global-connection-ip-restrictions"
-else
-  result=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-fanout = d.get('data', {})
-s = len(fanout.get('success', []))
-f = len(fanout.get('failed', []))
-if s >= 2 and f == 0:
-    print('ok')
-else:
-    print(f'success={s} failed={f}')
-" 2>/dev/null || echo "error")
-  if [[ "$result" == "ok" ]]; then
-    pass "gcir_create_fanout"
-  else
-    fail "gcir_create_fanout" "expected success>=2 failed=0, got $result. Response: $out"
-  fi
-fi
-
-# ─── Test 7b: gcir_create_validation_400 ─────────────────────────────────────
-# POST with an invalid body (empty profiles) must return HTTP 400 with
-# {success:false, error:"..."} — locks in the cc-003 contract: pre-flight
-# validation failures surface as HTTP 4xx, not as success-wrapped FanOutResponse.
-INVALID_BODY='{
-  "namespace": "edgion-test",
-  "name": "gcir-invalid",
-  "controllers": ["all"],
-  "data": {
-    "enable": true,
-    "activeProfile": "strict",
-    "profiles": {}
-  }
-}'
-# Custom curl: capture body and HTTP code separately (auth_post uses -sf which
-# swallows 4xx responses).
-inv_resp=$(curl -s --max-time 10 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "$INVALID_BODY" \
-  -w "\n__HTTP_CODE__%{http_code}" \
-  "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions" 2>/dev/null || true)
-inv_code=$(echo "$inv_resp" | sed -n 's/.*__HTTP_CODE__\([0-9]*\)$/\1/p' | tail -n1)
-inv_body=$(echo "$inv_resp" | sed 's/__HTTP_CODE__[0-9]*$//')
-if [[ "$inv_code" != "400" ]]; then
-  fail "gcir_create_validation_400" "expected HTTP 400, got $inv_code. Body: $inv_body"
-else
-  result=$(echo "$inv_body" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-if d.get('success') is False and 'error' in d and d.get('data') is None:
-    print('ok')
-else:
-    print(f'success={d.get(\"success\")} has_error={\"error\" in d} data={d.get(\"data\")}')
-" 2>/dev/null || echo "error")
-  if [[ "$result" == "ok" ]]; then
-    pass "gcir_create_validation_400"
-  else
-    fail "gcir_create_validation_400" "expected success=false + error, got $result. Body: $inv_body"
-  fi
-fi
-
-# Wait for watch-sync to propagate the new PM back to center's metadata store
-log "Waiting 2s for watch-sync to propagate create..."
-sleep 2
-
-# ─── Test 8: gcir_list_after_create ──────────────────────────────────────────
-# GET /global-connection-ip-restrictions — list shows gcir-test with >= 2 controller entries.
-# Response shape: ApiResponse<Vec<CenterGlobalIpRestrictionView>>
-#   { success: true, data: [ { namespace, name, controllers: {...}, ... } ] }
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions")
-if [[ -z "$out" ]]; then
-  fail "gcir_list_after_create" "empty response from GET /global-connection-ip-restrictions"
-else
-  result=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-items = d.get('data', [])
-for item in items:
-    if item.get('name') == 'gcir-test':
-        ctrls = item.get('controllers', {})
-        n = len(ctrls)
-        if n >= 2:
-            print('ok')
-        else:
-            print(f'only {n} controllers')
-        sys.exit(0)
-print('not_found')
-" 2>/dev/null || echo "error")
-  if [[ "$result" == "ok" ]]; then
-    pass "gcir_list_after_create"
-  else
-    fail "gcir_list_after_create" "gcir-test not found or not enough controllers: $result. Response: $out"
-  fi
-fi
-
-# ─── Test 9: gcir_get_detail ─────────────────────────────────────────────────
-# GET /global-connection-ip-restrictions/edgion-test/gcir-test
-# Verify: name, namespace, controllers >= 2, each has enable/activeProfile/profiles.strict.defaultAction
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/edgion-test/gcir-test")
-if [[ -z "$out" ]]; then
-  fail "gcir_get_detail" "empty response from GET /global-connection-ip-restrictions/edgion-test/gcir-test"
-else
-  result=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-item = d.get('data', {})
-if item.get('name') != 'gcir-test':
-    print(f'wrong name: {item.get(\"name\")}')
-    sys.exit(0)
-if item.get('namespace') != 'edgion-test':
-    print(f'wrong namespace: {item.get(\"namespace\")}')
-    sys.exit(0)
-ctrls = item.get('controllers', {})
-if len(ctrls) < 2:
-    print(f'only {len(ctrls)} controllers')
-    sys.exit(0)
-# Check at least one controller entry has expected fields
-for cid, entry in ctrls.items():
-    if not entry.get('enable', False):
-        print(f'ctrl {cid} enable not true')
-        sys.exit(0)
-    if entry.get('activeProfile') != 'strict':
-        print(f'ctrl {cid} activeProfile={entry.get(\"activeProfile\")}')
-        sys.exit(0)
-    profiles = entry.get('profiles', {})
-    strict = profiles.get('strict', {})
-    if strict.get('defaultAction') != 'deny':
-        print(f'ctrl {cid} strict.defaultAction={strict.get(\"defaultAction\")}')
-        sys.exit(0)
-print('ok')
-" 2>/dev/null || echo "error")
-  if [[ "$result" == "ok" ]]; then
-    pass "gcir_get_detail"
-  else
-    fail "gcir_get_detail" "$result. Response: $out"
-  fi
-fi
-
-# ─── Test 10: gcir_patch_enable ───────────────────────────────────────────────
-# PATCH /enable with enable=false; then GET detail and verify all controllers show enable==false.
-PATCH_ENABLE_BODY='{"enable": false, "controllers": ["all"]}'
-out=$(auth_patch "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/edgion-test/gcir-test/enable" "$PATCH_ENABLE_BODY")
-if [[ -z "$out" ]]; then
-  fail "gcir_patch_enable" "empty response from PATCH /enable"
-else
-  fanout_ok=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-fanout = d.get('data', {})
-f = len(fanout.get('failed', []))
-print('ok' if f == 0 else f'failed={f}')
-" 2>/dev/null || echo "error")
-  if [[ "$fanout_ok" != "ok" ]]; then
-    fail "gcir_patch_enable" "fan-out had failures: $fanout_ok. Response: $out"
-  else
-    log "Waiting 2s for PATCH enable=false to propagate..."
-    sleep 2
-    # Verify via GET detail
-    out2=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/edgion-test/gcir-test")
-    result=$(echo "$out2" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-item = d.get('data', {})
-ctrls = item.get('controllers', {})
-if len(ctrls) < 2:
-    print(f'only {len(ctrls)} controllers')
-    sys.exit(0)
-for cid, entry in ctrls.items():
-    if entry.get('enable', True):
-        print(f'ctrl {cid} still enabled')
-        sys.exit(0)
-print('ok')
-" 2>/dev/null || echo "error")
-    if [[ "$result" == "ok" ]]; then
-      pass "gcir_patch_enable"
-    else
-      fail "gcir_patch_enable" "after patch, not all controllers have enable=false: $result. Response: $out2"
-    fi
-  fi
-fi
-
-# ─── Test 11: removed ─────────────────────────────────────────────────────────
-# `gcir_patch_active_profile` exercised
-# `PATCH /api/v1/center/global-connection-ip-restrictions/{ns}/{name}/active-profile`,
-# which no longer exists: switching a Selector's active profile is now a plain
-# EdgionConfigData write through the generic resource path.
-
-# ─── Test 12: gcir_consistency_ok ─────────────────────────────────────────────
-# GET /global-connection-ip-restrictions/consistency
-# Assert gcir-test entry has consistent == true (all controllers fanned out the same data).
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/consistency")
-if [[ -z "$out" ]]; then
-  fail "gcir_consistency_ok" "empty response from GET /consistency"
-else
-  result=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-reports = d.get('data', [])
-for r in reports:
-    if r.get('name') == 'gcir-test':
-        if r.get('consistent', False):
-            print('ok')
-        else:
-            conflicts = r.get('conflicts', [])
-            print(f'not consistent, conflicts={conflicts}')
-        sys.exit(0)
-print('not_found')
-" 2>/dev/null || echo "error")
-  if [[ "$result" == "ok" ]]; then
-    pass "gcir_consistency_ok"
-  else
-    fail "gcir_consistency_ok" "gcir-test not consistent: $result. Response: $out"
-  fi
-fi
-
-# ─── Test 13: gcir_delete_fanout ──────────────────────────────────────────────
-# DELETE /edgion-test/gcir-test with body {"controllers": ["all"]}
-# Assert failed.length == 0, then GET list to verify gcir-test is gone.
-DELETE_BODY='{"controllers": ["all"]}'
-out=$(auth_delete "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions/edgion-test/gcir-test" "$DELETE_BODY")
-if [[ -z "$out" ]]; then
-  fail "gcir_delete_fanout" "empty response from DELETE"
-else
-  fanout_ok=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-fanout = d.get('data', {})
-f = len(fanout.get('failed', []))
-print('ok' if f == 0 else f'failed={f}')
-" 2>/dev/null || echo "error")
-  if [[ "$fanout_ok" != "ok" ]]; then
-    fail "gcir_delete_fanout" "delete fan-out had failures: $fanout_ok. Response: $out"
-  else
-    log "Waiting 2s for delete to propagate via watch-sync..."
-    sleep 2
-    # Verify gcir-test is no longer in list
-    out2=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/global-connection-ip-restrictions")
-    result=$(echo "$out2" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-items = d.get('data', [])
-for item in items:
-    if item.get('name') == 'gcir-test':
-        print('still_present')
-        sys.exit(0)
-print('ok')
-" 2>/dev/null || echo "error")
-    if [[ "$result" == "ok" ]]; then
-      pass "gcir_delete_fanout"
-    else
-      fail "gcir_delete_fanout" "gcir-test still present in list after delete. Response: $out2"
-    fi
-  fi
-fi
-
 # ══ Federation RBAC tests ════════════════════════════════════════════════════
 # These cases verify the RBAC layer that the Controller enforces on requests
 # arriving via the Center federation path (both gRPC watch and HTTP proxy).
@@ -1210,10 +908,10 @@ fi
 #
 # NOTE: A live end-to-end test of explicit deny-all requires ctrl-silo to connect
 # to Center (enabled=true), which would require cert-based auth to be accepted and
-# a separate GCIR or proxy operation to drive through.  Adding a second enabled
-# controller with deny-all rbac in the existing harness would also break the GCIR
-# fan-out tests (success count == 2 assertions).  The structural verification above
-# and the Rust unit tests are the primary coverage for this case.
+# a separate proxy operation to drive through.  Adding a second enabled controller
+# with deny-all rbac in the existing harness would also perturb the failover
+# fan-out tests, which assert on a two-controller topology.  The structural
+# verification above and the Rust unit tests are the primary coverage for this case.
 
 # ─── Test 17: rbac_kill_switch_no_connect ─────────────────────────────────────
 # controller-3 was started with center.enabled=false. It should NOT appear in

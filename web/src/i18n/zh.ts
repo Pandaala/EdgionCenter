@@ -650,7 +650,6 @@ const zh = {
   'center.regionService.issue.regionMismatch': '不同 Controller 的有效 Region 配置不一致',
   'center.regionService.issue.membershipUnknown': '无法获取在线 Controller 成员列表，当前不能判断覆盖率',
   'center.nav.admin': '管理',
-  'center.nav.globalIpRestrictions': '全局 IP 限制',
   'center.regionRoute.subtitle': '共 {n} 个服务区域路由',
   'center.regionRoute.pmName': '服务 PM 名称',
   'center.regionRoute.pluginName': '插件名称',

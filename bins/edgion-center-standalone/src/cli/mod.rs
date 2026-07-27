@@ -424,24 +424,33 @@ impl EdgionCenterCli {
             TransportDecision::FailClose => unreachable!("FailClose returned earlier"),
         }
 
-        // Background poller: refresh RegionRoute + GIR effective views from online controllers.
+        // Periodic Controller directory sweep. It maintains no effective read
+        // model and gates no readiness; it exists solely to prune watch-fed
+        // override rows for Controllers the durable directory no longer lists
+        // (including durably evicted ones). Without it those rows would survive
+        // for the process lifetime: `CenterConfHandler::controller_offline`
+        // deliberately keeps an offline Controller's config queryable, and
+        // `controller_removed` has no production trigger.
         {
-            let proxy = proxy.clone();
             let metadata_store = metadata_store.clone();
-            let poll_directory = controller_directory.clone();
+            let sweep_directory = controller_directory.clone();
             tokio::spawn(async move {
+                let Some(directory) = sweep_directory else {
+                    return;
+                };
                 let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
                 loop {
                     ticker.tick().await;
-                    if let Some(directory) = poll_directory.as_ref() {
-                        if let Err(error) = crate::poll::poll_directory_once(
-                            directory.as_ref(),
-                            proxy.as_ref(),
-                            &metadata_store,
-                        )
-                        .await
-                        {
-                            tracing::warn!(%error, "Failed to refresh Controller directory read model");
+                    match directory.list().await {
+                        Ok(records) => {
+                            let visible: std::collections::HashSet<String> = records
+                                .into_iter()
+                                .map(|record| record.controller_id.to_string())
+                                .collect();
+                            metadata_store.retain_controllers(&visible);
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "Controller directory sweep failed");
                         }
                     }
                 }

@@ -650,7 +650,6 @@ const en = {
   'center.regionService.issue.regionMismatch': 'Effective regions differ across Controllers',
   'center.regionService.issue.membershipUnknown': 'Online Controller membership is unavailable; coverage cannot be determined',
   'center.nav.admin': 'Admin',
-  'center.nav.globalIpRestrictions': 'Global IP Restrictions',
   'center.regionRoute.subtitle': '{n} service region route(s)',
   'center.regionRoute.pmName': 'Service PM Name',
   'center.regionRoute.pluginName': 'Plugin Name',

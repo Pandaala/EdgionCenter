@@ -99,8 +99,9 @@ export interface RegionRouteOverrideListResult {
  * Post through the shared write core and always resolve to a
  * `WriteOutcomeSummary`, even on a non-2xx response — the write core's own
  * fan-out endpoints (`failover_response` / `sync_watched_override`) attach
- * `outcomes` on partial (207) AND total (502, "every controller failed")
- * failure alike, so the per-controller detail must survive either way.
+ * `outcomes` on partial (207) AND total failure alike — 409 when every
+ * controller rejected the CAS precondition, 502 when nothing landed for any
+ * other reason — so the per-controller detail must survive either way.
  * Rethrows only when the backend never reached the write core at all (e.g.
  * "no online controllers", "override not found") — those responses carry no
  * `outcomes` to recover, so there is nothing to render per controller.
@@ -191,15 +192,23 @@ export const regionRouteApi = {
     return data
   },
 
-  /** Failover on a single Controller, through its dedicated endpoint. */
+  /**
+   * Failover on a single Controller, through its dedicated endpoint.
+   *
+   * This is the Controller's own handler, not a Center fan-out, so the reply is
+   * a flat `{success, modified}` with `modified` a boolean — NOT Center's
+   * `{data: {modified, failed}}` envelope. The Controller answers 200 only when
+   * it actually patched: a missing override is 404 and a write failure is 500,
+   * both of which `apiClient` already turns into a rejection.
+   */
   regionRouteFailover: async (
     namespace: string, name: string, regionName: string, failoverTo: string,
-  ): Promise<{ success: boolean; data?: { modified: number; failed: number } }> => {
+  ): Promise<{ success: boolean; modified: boolean }> => {
     const { data } = await apiClient.post('cluster-region-routes/failover', {
       namespace, name, regionName, failoverTo,
     })
-    if (!data.success || (data.data?.failed ?? 0) > 0 || (data.data?.modified ?? 0) === 0) {
-      throw new Error(`Failover was not applied to every target (${data.data?.modified ?? 0} modified, ${data.data?.failed ?? 0} failed)`)
+    if (!data.success || !data.modified) {
+      throw new Error('Failover was not applied on the selected Controller')
     }
     return data
   }

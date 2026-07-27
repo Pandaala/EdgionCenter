@@ -19,9 +19,6 @@
 //!   POST /api/v1/center/service-region-route-overrides/failover    → set failoverTo on a ServiceRegionRouteOverride on every online controller
 //!   POST /api/v1/center/region-route-overrides/sync                → copy one controller's RegionRouteOverride to selected targets
 //!   POST /api/v1/center/service-region-route-overrides/sync        → copy one controller's ServiceRegionRouteOverride to selected targets
-//!   GET    /api/v1/center/global-connection-ip-restrictions                        → aggregated GlobalConnectionIpRestriction list from MetaDataStore
-//!   GET    /api/v1/center/global-connection-ip-restrictions/{ns}/{name}            → single GlobalConnectionIpRestriction detail
-//!   GET    /api/v1/center/global-connection-ip-restrictions/consistency            → consistency detection across controllers
 //!   GET    /api/v1/center/admin/users                              → list users (with role ids + names; no password_hash)
 //!   POST   /api/v1/center/admin/users                              → create user (bcrypt password; optional role bindings)
 //!   PATCH  /api/v1/center/admin/users/{id}                         → partial update (status / password reset / role rebind)
@@ -90,8 +87,6 @@ pub mod cloudflare_dns;
 pub mod cloudflare_waf;
 pub mod cloudfront;
 pub mod config_data_ops;
-mod consistency_handlers;
-mod global_connection_ip_restriction_handlers;
 mod global_resources;
 pub mod provider_accounts;
 pub mod provider_capabilities;
@@ -241,15 +236,6 @@ impl ApiState {
             .map(|summary| summary.controller_id)
             .collect())
     }
-
-    pub fn require_effective_read_model(&self) -> edgion_center_core::CoreResult<()> {
-        if self.platform_mode == edgion_center_core::CenterMode::Kubernetes && !self.is_ready() {
-            return Err(edgion_center_core::CoreError::Adapter(
-                "global effective read model is not ready".to_string(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 pub fn router(mut state: ApiState) -> Router {
@@ -306,20 +292,6 @@ pub fn router(mut state: ApiState) -> Router {
         .route(
             "/api/v1/center/service-region-route-overrides/sync",
             post(region_route_handlers::service_region_route_override_sync),
-        )
-        // GlobalConnectionIpRestriction endpoints (read only; base CRUD and the
-        // Selector active-profile switch are both retired)
-        .route(
-            "/api/v1/center/global-connection-ip-restrictions",
-            get(global_connection_ip_restriction_handlers::list_global_ip_restrictions),
-        )
-        .route(
-            "/api/v1/center/global-connection-ip-restrictions/{ns}/{name}",
-            get(global_connection_ip_restriction_handlers::get_global_ip_restriction),
-        )
-        .route(
-            "/api/v1/center/global-connection-ip-restrictions/consistency",
-            get(global_connection_ip_restriction_handlers::global_ip_restrictions_consistency),
         )
         // HTTP proxy to controllers. Body cap mirrors the Controller-side
         // 1 MiB federation proxy limit so oversized writes fail locally.

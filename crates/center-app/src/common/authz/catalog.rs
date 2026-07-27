@@ -21,9 +21,6 @@ pub const REGION_ROUTES_READ: &str = "region-routes:read";
 pub const REGION_ROUTES_WRITE: &str = "region-routes:write";
 // Global resource catalog and cross-cluster inventory.
 pub const GLOBAL_RESOURCES_READ: &str = "global-resources:read";
-// Global connection IP restrictions page.
-pub const IP_RESTRICTIONS_READ: &str = "ip-restrictions:read";
-pub const IP_RESTRICTIONS_WRITE: &str = "ip-restrictions:write";
 // Audit log page.
 pub const AUDIT_READ: &str = "audit:read";
 // Server reads (server-info).
@@ -95,8 +92,6 @@ pub fn all_keys() -> &'static [&'static str] {
         REGION_ROUTES_READ,
         REGION_ROUTES_WRITE,
         GLOBAL_RESOURCES_READ,
-        IP_RESTRICTIONS_READ,
-        IP_RESTRICTIONS_WRITE,
         AUDIT_READ,
         SERVER_READ,
         PROXY_ACCESS,
@@ -163,10 +158,6 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         PermissionGroup {
             group: "Global Resources",
             keys: vec![GLOBAL_RESOURCES_READ],
-        },
-        PermissionGroup {
-            group: "IP Restrictions",
-            keys: vec![IP_RESTRICTIONS_READ, IP_RESTRICTIONS_WRITE],
         },
         PermissionGroup {
             group: "Audit",
@@ -264,11 +255,14 @@ fn under_segment(path: &str, base: &str) -> bool {
 ///
 /// Returns `None` for non-business routes — the shared auth endpoints
 /// (`/api/v1/auth/*`) and probe/metrics paths — which carry no authorization
-/// requirement. A `None` result means the authz middleware lets the request
-/// through unconditionally.
+/// requirement, and the middleware lets those through unconditionally.
+///
+/// `None` on a *business* path does NOT mean "allow": the middleware fails
+/// closed on it via the synthetic `<unmapped-business-route>` action. See
+/// [`is_business_path`].
 ///
 /// `path` is the request URI path (no query string), e.g.
-/// `/api/v1/center/global-connection-ip-restrictions/default/foo`.
+/// `/api/v1/center/region-route-overrides/failover`.
 pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     let is_read = method == Method::GET || method == Method::HEAD;
 
@@ -436,16 +430,6 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
             REGION_ROUTES_READ
         } else {
             REGION_ROUTES_WRITE
-        });
-    }
-
-    // Global connection IP restrictions: all reads are GET, every mutation
-    // (POST/PUT/DELETE/PATCH) is a write.
-    if under_segment(path, "/api/v1/center/global-connection-ip-restrictions") {
-        return Some(if is_read {
-            IP_RESTRICTIONS_READ
-        } else {
-            IP_RESTRICTIONS_WRITE
         });
     }
 
@@ -646,42 +630,6 @@ mod tests {
             (
                 Method::POST,
                 "/api/v1/center/service-region-route-overrides/sync",
-            ),
-            (
-                Method::GET,
-                "/api/v1/center/global-connection-ip-restrictions",
-            ),
-            (
-                Method::POST,
-                "/api/v1/center/global-connection-ip-restrictions",
-            ),
-            (
-                Method::GET,
-                "/api/v1/center/global-connection-ip-restrictions/default/foo",
-            ),
-            (
-                Method::PUT,
-                "/api/v1/center/global-connection-ip-restrictions/default/foo",
-            ),
-            (
-                Method::DELETE,
-                "/api/v1/center/global-connection-ip-restrictions/default/foo",
-            ),
-            (
-                Method::PATCH,
-                "/api/v1/center/global-connection-ip-restrictions/default/foo/enable",
-            ),
-            (
-                Method::PATCH,
-                "/api/v1/center/global-connection-ip-restrictions/default/foo/active-profile",
-            ),
-            (
-                Method::POST,
-                "/api/v1/center/global-connection-ip-restrictions/default/foo/sync",
-            ),
-            (
-                Method::GET,
-                "/api/v1/center/global-connection-ip-restrictions/consistency",
             ),
             (Method::GET, "/api/v1/center/admin/controllers"),
             (Method::DELETE, "/api/v1/center/admin/controllers/c1"),
@@ -1328,20 +1276,6 @@ mod tests {
             Some(REGION_ROUTES_WRITE)
         );
         assert_eq!(
-            route_permission(
-                &Method::GET,
-                "/api/v1/center/global-connection-ip-restrictions"
-            ),
-            Some(IP_RESTRICTIONS_READ)
-        );
-        assert_eq!(
-            route_permission(
-                &Method::PATCH,
-                "/api/v1/center/global-connection-ip-restrictions/default/foo/enable"
-            ),
-            Some(IP_RESTRICTIONS_WRITE)
-        );
-        assert_eq!(
             route_permission(&Method::DELETE, "/api/v1/center/admin/controllers/c1"),
             Some(CONTROLLERS_WRITE)
         );
@@ -1551,13 +1485,6 @@ mod tests {
             route_permission(
                 &Method::GET,
                 "/api/v1/center/service-region-route-overrides-v2"
-            ),
-            None
-        );
-        assert_eq!(
-            route_permission(
-                &Method::GET,
-                "/api/v1/center/global-connection-ip-restrictions-v2"
             ),
             None
         );

@@ -21,7 +21,7 @@ use edgion_center_app::{
 use edgion_center_core::{
     Action, Authorizer, AuthzMode, CenterCapabilities, CenterMode, ControllerDirectory,
     ControllerOwnerLocator, ControllerPhase, ControllerRecord, CoordinationRole, Coordinator,
-    CoreError, OwnershipFence, Principal, SessionId,
+    CoreError, OwnershipFence, Principal,
 };
 use edgion_center_runtime::internal_forwarding::{
     proto::internal_forwarding_server::InternalForwardingServer, GrpcInternalForwardTransport,
@@ -40,18 +40,6 @@ use config::KubernetesCenterConfig;
 struct Cli {
     #[arg(short = 'c', long, default_value = "/etc/edgion-center/config.yaml")]
     config_file: String,
-}
-
-fn refresh_combined_readiness(
-    overall: &std::sync::atomic::AtomicBool,
-    platform: &std::sync::atomic::AtomicBool,
-    read_model: &std::sync::atomic::AtomicBool,
-) {
-    overall.store(
-        platform.load(std::sync::atomic::Ordering::Acquire)
-            && read_model.load(std::sync::atomic::Ordering::Acquire),
-        std::sync::atomic::Ordering::Release,
-    );
 }
 
 async fn reconcile_expired_owner(
@@ -93,45 +81,6 @@ async fn reconcile_expired_owner(
     projection.map_err(|error| error.to_string())?;
     release.map_err(|error| error.to_string())?;
     Ok(())
-}
-
-fn controller_revision(record: &ControllerRecord) -> String {
-    let phase = match record.phase {
-        ControllerPhase::Online => "online",
-        ControllerPhase::Offline => "offline",
-        ControllerPhase::Stale => "stale",
-    };
-    let session = record
-        .current_session_id
-        .as_ref()
-        .map(SessionId::as_str)
-        .unwrap_or("");
-    let (token, epoch) = record
-        .ownership_fence
-        .as_ref()
-        .map(|fence| (fence.token.as_str(), fence.epoch))
-        .unwrap_or(("", 0));
-    format!("{phase}\0{session}\0{epoch}\0{token}")
-}
-
-fn controller_revisions(records: &[ControllerRecord]) -> HashMap<String, String> {
-    records
-        .iter()
-        .map(|record| {
-            (
-                record.controller_id.to_string(),
-                controller_revision(record),
-            )
-        })
-        .collect()
-}
-
-fn owner_route_matches_record(
-    record: &ControllerRecord,
-    route: &edgion_center_core::ControllerOwnerRoute,
-) -> bool {
-    record.connected_replica.as_deref() == Some(route.holder.as_str())
-        && record.ownership_fence.as_ref() == Some(&route.ownership_fence)
 }
 
 pub async fn entrypoint() -> anyhow::Result<()> {
@@ -272,9 +221,10 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         Duration::from_secs(5),
     )
     .await?;
-    // A successful platform preflight is necessary but not sufficient: a
-    // fresh replica must also rebuild both effective read-model snapshots.
-    let platform_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Readiness tracks the platform health check alone: the startup preflight
+    // above already succeeded, and the periodic re-check below is what can
+    // later flip this back to false.
+    let platform_ready = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
     let registry = ControllerRegistry::with_metrics(Arc::new(FedRegistryMetrics));
     let aggregator = Arc::new(ResourceAggregator::with_metrics(Arc::new(
@@ -489,16 +439,11 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         });
     }
 
-    let platform_health_ready = Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let read_model_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
     let health_shutdown = shutdown.child_token();
     let health_directory = directory.clone();
     let health_coordinator = coordinator.clone();
     let health_authorizer = authorizer.clone();
-    let health_component = platform_health_ready.clone();
-    let health_model_component = read_model_ready.clone();
-    let health_overall = platform_ready.clone();
+    let health_component = platform_ready.clone();
     tasks.spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(10));
         let mut platform_failures = 0_u8;
@@ -527,7 +472,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
                     }
                 }
             }
-            refresh_combined_readiness(&health_overall, &health_component, &health_model_component);
         }
         ("platform-health", Ok(()))
     });
@@ -539,10 +483,12 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
     let sync_local_evictor = local_evictor.clone();
     let sync_registry = registry.clone();
     let sync_store = metadata_store.clone();
-    let sync_proxy = proxy.clone();
-    let sync_component = read_model_ready.clone();
-    let sync_health_component = platform_health_ready.clone();
-    let sync_overall = platform_ready.clone();
+    // Periodic Controller directory sweep. It does not gate readiness and it
+    // maintains no effective read model; it only reconciles local runtime state
+    // against the durable directory:
+    //   1. prune metadata-store rows for Controllers no longer in the directory,
+    //   2. evict local sessions for Controllers the directory no longer lists,
+    //   3. project a Controller offline once its owner Lease has expired.
     tasks.spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(10));
         loop {
@@ -554,12 +500,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
                 Ok(records) => records,
                 Err(error) => {
                     tracing::warn!(%error, "Global Controller directory sync failed");
-                    sync_component.store(false, std::sync::atomic::Ordering::Release);
-                    refresh_combined_readiness(
-                        &sync_overall,
-                        &sync_health_component,
-                        &sync_component,
-                    );
                     continue;
                 }
             };
@@ -568,23 +508,12 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
                 .map(|record| record.controller_id.to_string())
                 .collect();
             sync_store.retain_controllers(&visible);
-            let initial_revisions = controller_revisions(&records);
-            if !sync_store.revisions_match(&initial_revisions) {
-                sync_component.store(false, std::sync::atomic::Ordering::Release);
-                refresh_combined_readiness(&sync_overall, &sync_health_component, &sync_component);
-            }
-            sync_store.prepare_revisions(&initial_revisions);
             for controller_id in sync_registry.online_controller_ids() {
                 if !visible.contains(&controller_id) {
                     sync_local_evictor.evict_unfenced(&controller_id);
                 }
             }
-            let online_ids: std::collections::HashSet<String> = records
-                .iter()
-                .filter(|record| record.phase == ControllerPhase::Online)
-                .map(|record| record.controller_id.to_string())
-                .collect();
-            let mut polls = tokio::task::JoinSet::new();
+            let mut owner_checks = tokio::task::JoinSet::new();
             let limit = Arc::new(tokio::sync::Semaphore::new(8));
             for record in records
                 .into_iter()
@@ -594,34 +523,12 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
                 let locator = sync_owner_locator.clone();
                 let coordinator = sync_coordinator.clone();
                 let directory = sync_directory.clone();
-                let proxy = sync_proxy.clone();
-                let store = sync_store.clone();
-                let revision = initial_revisions
-                    .get(record.controller_id.as_str())
-                    .cloned()
-                    .expect("listed Controller has revision");
-                polls.spawn(async move {
+                owner_checks.spawn(async move {
                     let _permit = permit;
                     let id = record.controller_id.clone();
                     match locator.locate(&id).await {
-                        Ok(Some(route)) if owner_route_matches_record(&record, &route) => {
-                            tokio::time::timeout(
-                                Duration::from_secs(5),
-                                edgion_center_app::poll::poll_controller_once_owner_fenced(
-                                    proxy.as_ref(),
-                                    store.as_ref(),
-                                    id.as_str(),
-                                    &revision,
-                                    &route,
-                                ),
-                            )
-                            .await
-                            .map_err(|_| "effective snapshot poll timed out".to_string())?
-                        }
-                        Ok(Some(_)) => Err(
-                            "Controller owner route changed before CRD ownership projection"
-                                .to_string(),
-                        ),
+                        // No owner route means the owner Lease expired; project
+                        // the Controller offline under a freshly rotated fence.
                         Ok(None) => {
                             reconcile_expired_owner(
                                 directory.as_ref(),
@@ -629,30 +536,29 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
                                 &record,
                             )
                             .await?;
-                            Err("expired owner was reconciled; awaiting next sweep".to_string())
+                            // This is the only path that projects a Controller
+                            // offline after its owner Lease expires. Log the
+                            // success: it is otherwise invisible, because
+                            // mark_offline emits neither a log nor a metric.
+                            tracing::info!(
+                                controller_id = %id,
+                                "Projected Controller offline after owner Lease expiry"
+                            );
+                            Ok(())
                         }
+                        // A live owner needs no action from this sweep.
+                        Ok(Some(_)) => Ok(()),
                         Err(error) => Err(error.to_string()),
                     }
                 });
             }
-            while let Some(result) = polls.join_next().await {
+            while let Some(result) = owner_checks.join_next().await {
                 if let Err(error) = result.unwrap_or_else(|error| Err(error.to_string())) {
-                    tracing::warn!(%error, "Global effective snapshot sync incomplete");
+                    tracing::warn!(%error, "Controller owner reconciliation failed");
                 }
             }
-            let final_revisions = match sync_directory.list().await {
-                Ok(records) => controller_revisions(&records),
-                Err(error) => {
-                    tracing::warn!(%error, "Final Controller directory verification failed");
-                    HashMap::new()
-                }
-            };
-            let complete = initial_revisions == final_revisions
-                && sync_store.has_fresh_coverage(&online_ids, Duration::from_secs(30));
-            sync_component.store(complete, std::sync::atomic::Ordering::Release);
-            refresh_combined_readiness(&sync_overall, &sync_health_component, &sync_component);
         }
-        ("global-read-model", Ok(()))
+        ("controller-directory-sweep", Ok(()))
     });
 
     tracing::info!(%grpc_addr, %http_addr, %internal_addr, namespace = %identity.namespace, holder = %identity.holder, "Kubernetes-native Edgion Center started");
@@ -939,62 +845,6 @@ mod tests {
                 .is_err()
         );
         assert_eq!(directory.0.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn lease_ahead_of_crd_cannot_publish_under_stale_revision() {
-        let record = ControllerRecord {
-            controller_id: ControllerId::new("c1").unwrap(),
-            current_session_id: Some(SessionId::new("session-a").unwrap()),
-            cluster: "cluster-a".to_string(),
-            environments: Vec::new(),
-            tags: Vec::new(),
-            connected_replica: Some("center-a/uid-a".to_string()),
-            ownership_fence: Some(OwnershipFence {
-                token: "token-a".to_string(),
-                epoch: 1,
-            }),
-            sync_version: None,
-            watch_server_id: None,
-            resource_count: None,
-            resource_counts_by_kind: None,
-            stats_updated_unix_ms: None,
-            watch_updated_unix_ms: None,
-            phase: ControllerPhase::Online,
-            last_seen_unix_ms: 1,
-        };
-        let projected_route = edgion_center_core::ControllerOwnerRoute {
-            holder: "center-a/uid-a".to_string(),
-            endpoint: "https://10.0.0.1:12252".to_string(),
-            ownership_fence: OwnershipFence {
-                token: "token-a".to_string(),
-                epoch: 1,
-            },
-        };
-        assert!(owner_route_matches_record(&record, &projected_route));
-
-        let lease_ahead_route = edgion_center_core::ControllerOwnerRoute {
-            holder: "center-b/uid-b".to_string(),
-            endpoint: "https://10.0.0.2:12252".to_string(),
-            ownership_fence: OwnershipFence {
-                token: "token-b".to_string(),
-                epoch: 2,
-            },
-        };
-        assert!(!owner_route_matches_record(&record, &lease_ahead_route));
-
-        let rotated_fence_same_holder = edgion_center_core::ControllerOwnerRoute {
-            holder: "center-a/uid-a".to_string(),
-            endpoint: "https://10.0.0.1:12252".to_string(),
-            ownership_fence: OwnershipFence {
-                token: "token-b".to_string(),
-                epoch: 2,
-            },
-        };
-        assert!(!owner_route_matches_record(
-            &record,
-            &rotated_fence_same_holder
-        ));
     }
 
     struct TestAuthorizer(bool);
