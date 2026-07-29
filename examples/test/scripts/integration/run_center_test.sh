@@ -1,48 +1,78 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Center Integration Test Script
+# Center Federation Integration Test — two-controller end-to-end
 #
-# Consolidated test for the Center watch-sync pipeline + admin APIs, covering
-# the RegionRoute aggregate read and failover surface.
-# Starts 1 center + 2 controllers with different clusters and PluginMetaData,
-# then validates watch sync, failover fan-out, and consistency detection.
+# Proves the converged Center<->Controller architecture with real binaries:
+# 1 Center (standalone, SQLite) + 2 synced Controllers + 1 lifecycle Controller
+# that first validates the center.enabled=false kill switch and is then
+# restarted with an explicit deny-all rbac to validate the terminal watch
+# denial. Federation runs mTLS with SPIFFE peer-identity binding.
 #
-# Also validates the Center RBAC policy that the Controller enforces on the
-# federation path:
-#   - Built-in default: read on all kinds except Secret; write on PluginMetaData;
-#     get/list/failover on RegionRoute.  Nothing else (reload, server-info, etc.) is allowed.
-#   - Explicit rbac override: an operator-supplied allow list fully replaces
-#     the built-in default (deny-all for empty list; custom rules otherwise).
-#   - Kill-switch: center.enabled=false prevents the controller from connecting
-#     to Center at all.
+# Covered surfaces (test IDs in run order):
+#   Registration / stats
+#     A1 controllers_online        — both controllers online via GET /api/v1/controllers;
+#                                    kill-switch controller absent
+#     A2 stats_counts              — key_count arrives via StatsReport (never a list)
+#   Watch-cache reads (GlobalResources; no proxy involved)
+#     B1 global_list               — initial full list is served from the watch cache
+#     B2 multi_namespace_identity  — same name in two namespaces stays two rows
+#     B3 global_detail             — detail matches the fixture document
+#   Proxy reads & the EdgionConfigData write surface
+#     C1 proxy_get                 — drill-in GET through the tunnel, version present
+#     C2 proxy_create_watch_add    — POST creates a Selector; add event reaches the cache
+#     C3 selector_active_switch    — PUT flips /spec/data/config/active (the only way
+#                                    to switch an active profile)
+#     C4 put_conflict_recover      — stale If-Match -> 409, terminal; fresh version succeeds
+#     C5 delete_stale_precondition — DELETE with stale If-Match -> 409
+#     C6 proxy_delete_watch_del    — DELETE with fresh If-Match; delete event reaches cache
+#     C7 rbac_deny_secret          — proxy GET /api/v1/cluster/Secret -> 403
+#     C8 rbac_allow_region_route   — proxy GET /api/v1/region-routes/effective -> 200
+#     C9 rbac_deny_other_kind_write— proxy POST on a non-EdgionConfigData kind -> 403
+#   Center write core (RegionRouteOverride fan-out) & outcomes
+#     D1 failover_converged        — fan-out failover: modified=2, all outcomes converged,
+#                                    both controllers observe failoverTo
+#     D2 failover_idempotent_skip  — same failover again: controller versions unchanged
+#     D3 failover_type_pinning     — wrong-type (IpList) target is refused
+#     D4 failover_unknown_field    — deny_unknown_fields on the request body
+#     D5 sync_source_to_target     — east's spec.data replaces west's row
+#     D6 failover_clear            — empty failoverTo clears on both controllers
+#   Reload & ConfigSyncServer lifecycle
+#     E1 reload_converged          — Center reports a terminal outcome (never bare 200);
+#                                    reload allowed under the default policy
+#     E2 post_reload_watch        — server_id change re-established the watch
+#   Disconnect / reconnect / eviction
+#     F1 disconnect_offline        — killed controller goes offline on missed heartbeats
+#     F2 reconnect_resync          — restart re-registers and re-lists (full resync)
+#     F3 eviction                  — admin DELETE evicts the durable record; a later
+#                                    restart re-registers cleanly
+#   Large proxied response
+#     H1 big_list_over_4mib        — a >4 MiB proxied list completes and the federation
+#                                    stream survives it
+#   Terminal watch denial (explicit deny-all rbac)
+#     G1 watch_denied_terminal     — silo registers, watch is denied Forbidden, terminal
+#                                    (no retry storm), reads and writes 403
 #
-# Federation runs mTLS (SPIFFE peer-identity binding).
+# Deliberately NOT covered here, with the evidence that covers each instead:
+#   - superseded/accepted/unknown/conflict write outcomes: need races, replicas, or
+#     stalled watches that a single-host script cannot stage deterministically.
+#     Evidence: center-app unit tests (config_data_ops, reload_ops, the
+#     region_route_handlers status mapping) and web unit tests
+#     (WriteOutcomeTag.test.tsx, reloadOutcomeText.test.ts) for distinct rendering.
+#   - watch overflow: watch_cache::cache::tests::apply_events_overflow_rejects_batch_and_flags.
+#   - unsupported watch kind: Center subscribes exactly EDGION_CONFIG_DATA
+#     (federation/server.rs); the Controller-side denial path is unit-tested in
+#     fed_client.
+#   - version gap -> full resync: gap detection is unit-tested in center-runtime;
+#     the e2e re-list path is exercised by E2/F2.
+#   - DELETE without a precondition: the refusal lives in the dashboard client
+#     (web/src/api/resources.ts requiredResourceVersionHeader) and its unit test;
+#     the server contract deliberately mirrors Kubernetes (opt-in CAS).
 #
-# Port allocation (all on 127.0.0.1, avoids loopback alias):
+# Port allocation (all on 127.0.0.1):
 #   center:       gRPC 50952, HTTP 5910, probe 5919, metrics 5918
-#   controller-1: gRPC 50953, admin 5911, probe 5931, metrics 5941  (cluster=east-cluster, name=ctrl-east)
-#   controller-2: gRPC 50954, admin 5912, probe 5932, metrics 5942  (cluster=west-cluster, name=ctrl-west)
-#   controller-3: gRPC 50955, admin 5913, probe 5933, metrics 5943  (cluster=silo-cluster,  name=ctrl-silo)
-#                 kill-switch test: started with center.enabled=false, never connects
-#
-# Test cases — RegionRoute (6):
-#   1.   watch_sync                  — watch-status shows both controllers with sync_version > 0
-#   2.   metadata_store_cluster      — metadata-store clusterRoutes has controllerCount >= 2
-#   3.   metadata_store_service      — metadata-store serviceRoutes has >= 3 entries
-#   4.   failover_fanout             — POST failover, wait 2s, verify center + controller sides
-#   5.   consistency_detect          — consistency endpoint detects regions.length conflict
-#   6.   svc_consistency_ok          — service-region-routes consistency is all consistent
-#
-# Test cases — Federation RBAC (5):
-#   4b2. rbac_default_allows_region_route_list — proxy GET /api/v1/cluster-region-routes returns
-#                                    200 (not 403) under the built-in default (get/list RegionRoute
-#                                    now included)
-#   14.  rbac_default_deny_reload   — proxy POST /api/v1/reload is denied (verb=reload not in default)
-#   15.  rbac_default_deny_secret   — proxy GET /api/v1/cluster/Secret is denied (Secret excluded)
-#   16.  rbac_explicit_deny_all     — ctrl-silo with explicit empty rbac: write is denied even
-#                                    though the built-in default would allow it
-#   17.  rbac_kill_switch_no_connect — ctrl-silo started with center.enabled=false never appears
-#                                    in watch-status
+#   controller-1: gRPC 50953, admin 5911, probe 5931, metrics 5941  (east-cluster/ctrl-east)
+#   controller-2: gRPC 50954, admin 5912, probe 5932, metrics 5942  (west-cluster/ctrl-west)
+#   controller-3: gRPC 50955, admin 5913, probe 5933, metrics 5943  (silo-cluster/ctrl-silo)
 #
 # Usage:
 #   ./run_center_test.sh             # Full run (build + test + cleanup)
@@ -75,7 +105,6 @@ CTRL2_GRPC_PORT=50954
 CTRL2_ADMIN_PORT=5912
 CTRL2_PROBE_PORT=5932
 CTRL2_METRICS_PORT=5942
-# controller-3: kill-switch test (center.enabled=false) + explicit-rbac test
 CTRL3_GRPC_PORT=50955
 CTRL3_ADMIN_PORT=5913
 CTRL3_PROBE_PORT=5933
@@ -83,13 +112,18 @@ CTRL3_METRICS_PORT=5943
 
 CENTER_HTTP="http://127.0.0.1:${CENTER_HTTP_PORT}"
 CENTER_PROBE="http://127.0.0.1:${CENTER_PROBE_PORT}"
-CTRL1_HTTP="http://127.0.0.1:${CTRL1_ADMIN_PORT}"
-CTRL2_HTTP="http://127.0.0.1:${CTRL2_ADMIN_PORT}"
 
 AUTH_USER="admin"
 AUTH_PASS="test-center-pass"
 JWT_SECRET="test-jwt-secret-center"
 TRUST_DOMAIN="edgion.io"
+
+CTRL1_ID="east-cluster/ctrl-east"
+CTRL2_ID="west-cluster/ctrl-west"
+CTRL3_ID="silo-cluster/ctrl-silo"
+CTRL1_TID="east-cluster~ctrl-east"
+CTRL2_TID="west-cluster~ctrl-west"
+CTRL3_TID="silo-cluster~ctrl-silo"
 
 # ── State ────────────────────────────────────────────────────────────────────
 WORK_DIR=""
@@ -104,7 +138,6 @@ FAIL=0
 # ── Colours ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -114,7 +147,6 @@ fail() { echo -e "[$(date '+%H:%M:%S')] ${RED}FAIL${NC}: $1 — $2"; ((FAIL++)) 
 
 cleanup() {
   log "Cleaning up..."
-  # Use shared kill_all.sh to ensure no stale processes (covers center + controller + gateway)
   "$KILL_ALL" 2>/dev/null || true
   if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
     rm -rf "$WORK_DIR"
@@ -122,11 +154,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# wait_for_http URL TIMEOUT_SECS
 wait_for_http() {
-  local url="$1"
-  local timeout="$2"
-  local elapsed=0
+  local url="$1" timeout="$2" elapsed=0
   log "Waiting for HTTP endpoint: $url (timeout ${timeout}s)"
   while ! curl -sf --max-time 2 "$url" >/dev/null 2>&1; do
     if [[ $elapsed -ge $timeout ]]; then
@@ -139,31 +168,63 @@ wait_for_http() {
   log "HTTP endpoint ready after ${elapsed}s"
 }
 
-# auth_get TOKEN URL — GET with Bearer token, returns response body
-auth_get() {
-  curl -sf --max-time 10 -H "Authorization: Bearer $1" "$2" 2>/dev/null || true
+# request METHOD URL [BODY] [EXTRA_HEADER] — prints "<code>\n<body>"
+request() {
+  local method="$1" url="$2" body="${3:-}" extra="${4:-}"
+  local args=(-s --max-time 35 -X "$method" -H "Authorization: Bearer $TOKEN" -o /dev/stdout -w '\n__CODE__%{http_code}')
+  [[ -n "$body" ]] && args+=(-H "Content-Type: application/json" --data-binary "$body")
+  [[ -n "$extra" ]] && args+=(-H "$extra")
+  local out
+  out=$(curl "${args[@]}" "$url" 2>/dev/null || true)
+  local code="${out##*__CODE__}"
+  local resp="${out%$'\n'__CODE__*}"
+  printf '%s\n%s' "$code" "$resp"
+}
+req_code() { head -n1 <<<"$1"; }
+req_body() { tail -n +2 <<<"$1"; }
+
+# jsonq JSON PY_EXPR — run a python expression over parsed JSON `d`; prints result
+jsonq() {
+  python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    print('PARSE_ERROR'); sys.exit(0)
+try:
+    print($2)
+except Exception as e:
+    print('EXPR_ERROR:' + str(e))
+" "$1"
 }
 
-# auth_post TOKEN URL BODY — POST with Bearer token, returns response body
-auth_post() {
-  curl -sf --max-time 10 -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "$3" "$2" 2>/dev/null || true
-}
-
-# auth_put TOKEN URL BODY — PUT with Bearer token + JSON, returns response body
-auth_put() {
-  curl -sf --max-time 10 -X PUT -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "$3" "$2" 2>/dev/null || true
-}
-
-# login URL USER PASS — returns JWT token
 do_login() {
-  local url="$1"
-  local user="$2"
-  local pass="$3"
   local resp
   resp=$(curl -sf --max-time 10 -H "Content-Type: application/json" \
-    -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" \
-    "${url}/api/v1/auth/login" 2>/dev/null || true)
-  echo "$resp" | grep -o '"token":"[^"]*"' | head -1 | sed 's/"token":"//;s/"//'
+    -d "{\"username\":\"${AUTH_USER}\",\"password\":\"${AUTH_PASS}\"}" \
+    "${CENTER_HTTP}/api/v1/auth/login" 2>/dev/null || true)
+  jsonq "$resp" "d['data']['token']"
+}
+
+# poll_until DESC TIMEOUT_SECS CMD... — retries CMD (a function) every second
+# until it returns 0. Returns 1 on timeout.
+poll_until() {
+  local desc="$1" timeout="$2"; shift 2
+  local elapsed=0
+  while ! "$@"; do
+    if [[ $elapsed -ge $timeout ]]; then
+      log "poll_until timed out: $desc"
+      return 1
+    fi
+    sleep 1
+    ((elapsed++)) || true
+  done
+  return 0
+}
+
+online_count() {
+  local r; r=$(request GET "$CENTER_HTTP/api/v1/controllers")
+  jsonq "$(req_body "$r")" "sum(1 for c in d['data'] if c.get('online'))"
 }
 
 # ── Parse args ────────────────────────────────────────────────────────────────
@@ -201,112 +262,45 @@ CERTS_DIR="$WORK_DIR/certs"
 # ── Generate mTLS certificates ────────────────────────────────────────────────
 log "Generating mTLS certificates (trust domain: ${TRUST_DOMAIN})..."
 
-# ─── CA ───────────────────────────────────────────────────────────────────────
 openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout "$CERTS_DIR/ca.key" \
-  -out    "$CERTS_DIR/ca.crt" \
-  -days   30 \
-  -subj   "/CN=Edgion Fed Test CA/O=EdgionTest" \
-  2>/dev/null
+  -keyout "$CERTS_DIR/ca.key" -out "$CERTS_DIR/ca.crt" -days 30 \
+  -subj "/CN=Edgion Fed Test CA/O=EdgionTest" 2>/dev/null
 
-# ─── Center server cert (SAN: IP:127.0.0.1 + DNS:localhost) ──────────────────
 openssl req -newkey rsa:2048 -nodes \
-  -keyout "$CERTS_DIR/server.key" \
-  -out    "$CERTS_DIR/server.csr" \
-  -subj   "/CN=edgion-center/O=EdgionTest" \
-  2>/dev/null
-
+  -keyout "$CERTS_DIR/server.key" -out "$CERTS_DIR/server.csr" \
+  -subj "/CN=edgion-center/O=EdgionTest" 2>/dev/null
 cat > "$CERTS_DIR/server.ext" <<EOF
 subjectAltName=IP:127.0.0.1,DNS:localhost
 extendedKeyUsage=serverAuth
 EOF
+openssl x509 -req -in "$CERTS_DIR/server.csr" -CA "$CERTS_DIR/ca.crt" \
+  -CAkey "$CERTS_DIR/ca.key" -CAcreateserial -out "$CERTS_DIR/server.crt" \
+  -days 30 -extfile "$CERTS_DIR/server.ext" 2>/dev/null
 
-openssl x509 -req \
-  -in     "$CERTS_DIR/server.csr" \
-  -CA     "$CERTS_DIR/ca.crt" \
-  -CAkey  "$CERTS_DIR/ca.key" \
-  -CAcreateserial \
-  -out    "$CERTS_DIR/server.crt" \
-  -days   30 \
-  -extfile "$CERTS_DIR/server.ext" \
-  2>/dev/null
-log "  Server cert: SAN=IP:127.0.0.1,DNS:localhost"
-
-# ─── ctrl-east client cert ────────────────────────────────────────────────────
-openssl req -newkey rsa:2048 -nodes \
-  -keyout "$CERTS_DIR/ctrl-east.key" \
-  -out    "$CERTS_DIR/ctrl-east.csr" \
-  -subj   "/CN=ctrl-east/O=EdgionTest" \
-  2>/dev/null
-
-cat > "$CERTS_DIR/ctrl-east.ext" <<EOF
-subjectAltName=URI:spiffe://${TRUST_DOMAIN}/controllers/east-cluster/ctrl-east
+# gen_client_cert NAME CLUSTER
+gen_client_cert() {
+  local name="$1" cluster="$2"
+  openssl req -newkey rsa:2048 -nodes \
+    -keyout "$CERTS_DIR/${name}.key" -out "$CERTS_DIR/${name}.csr" \
+    -subj "/CN=${name}/O=EdgionTest" 2>/dev/null
+  cat > "$CERTS_DIR/${name}.ext" <<EOF
+subjectAltName=URI:spiffe://${TRUST_DOMAIN}/controllers/${cluster}/${name}
 extendedKeyUsage=clientAuth
 EOF
-
-openssl x509 -req \
-  -in     "$CERTS_DIR/ctrl-east.csr" \
-  -CA     "$CERTS_DIR/ca.crt" \
-  -CAkey  "$CERTS_DIR/ca.key" \
-  -CAcreateserial \
-  -out    "$CERTS_DIR/ctrl-east.crt" \
-  -days   30 \
-  -extfile "$CERTS_DIR/ctrl-east.ext" \
-  2>/dev/null
-log "  ctrl-east cert: spiffe://${TRUST_DOMAIN}/controllers/east-cluster/ctrl-east"
-
-# ─── ctrl-west client cert ────────────────────────────────────────────────────
-openssl req -newkey rsa:2048 -nodes \
-  -keyout "$CERTS_DIR/ctrl-west.key" \
-  -out    "$CERTS_DIR/ctrl-west.csr" \
-  -subj   "/CN=ctrl-west/O=EdgionTest" \
-  2>/dev/null
-
-cat > "$CERTS_DIR/ctrl-west.ext" <<EOF
-subjectAltName=URI:spiffe://${TRUST_DOMAIN}/controllers/west-cluster/ctrl-west
-extendedKeyUsage=clientAuth
-EOF
-
-openssl x509 -req \
-  -in     "$CERTS_DIR/ctrl-west.csr" \
-  -CA     "$CERTS_DIR/ca.crt" \
-  -CAkey  "$CERTS_DIR/ca.key" \
-  -CAcreateserial \
-  -out    "$CERTS_DIR/ctrl-west.crt" \
-  -days   30 \
-  -extfile "$CERTS_DIR/ctrl-west.ext" \
-  2>/dev/null
-log "  ctrl-west cert: spiffe://${TRUST_DOMAIN}/controllers/west-cluster/ctrl-west"
-
-# ─── ctrl-silo client cert (for explicit-rbac test) ───────────────────────────
-# ctrl-silo starts with center.enabled=false so it never uses this cert;
-# the cert is generated anyway so the config file is well-formed in case it is
-# re-enabled in a future reload test.
-openssl req -newkey rsa:2048 -nodes \
-  -keyout "$CERTS_DIR/ctrl-silo.key" \
-  -out    "$CERTS_DIR/ctrl-silo.csr" \
-  -subj   "/CN=ctrl-silo/O=EdgionTest" \
-  2>/dev/null
-
-cat > "$CERTS_DIR/ctrl-silo.ext" <<EOF
-subjectAltName=URI:spiffe://${TRUST_DOMAIN}/controllers/silo-cluster/ctrl-silo
-extendedKeyUsage=clientAuth
-EOF
-
-openssl x509 -req \
-  -in     "$CERTS_DIR/ctrl-silo.csr" \
-  -CA     "$CERTS_DIR/ca.crt" \
-  -CAkey  "$CERTS_DIR/ca.key" \
-  -CAcreateserial \
-  -out    "$CERTS_DIR/ctrl-silo.crt" \
-  -days   30 \
-  -extfile "$CERTS_DIR/ctrl-silo.ext" \
-  2>/dev/null
-log "  ctrl-silo cert: spiffe://${TRUST_DOMAIN}/controllers/silo-cluster/ctrl-silo"
-
+  openssl x509 -req -in "$CERTS_DIR/${name}.csr" -CA "$CERTS_DIR/ca.crt" \
+    -CAkey "$CERTS_DIR/ca.key" -CAcreateserial -out "$CERTS_DIR/${name}.crt" \
+    -days 30 -extfile "$CERTS_DIR/${name}.ext" 2>/dev/null
+  log "  ${name} cert: spiffe://${TRUST_DOMAIN}/controllers/${cluster}/${name}"
+}
+gen_client_cert "ctrl-east" "east-cluster"
+gen_client_cert "ctrl-west" "west-cluster"
+gen_client_cert "ctrl-silo" "silo-cluster"
 log "Certificate generation complete."
 
 # ── Write center config ───────────────────────────────────────────────────────
+# `sync` accepts exactly ping_interval_secs + command_timeout_secs now; the old
+# list_interval/list_timeout keys were removed with the periodic list design and
+# are a hard parse error under deny_unknown_fields.
 cat > "$WORK_DIR/center.yaml" <<EOF
 server:
   grpc_addr: "0.0.0.0:${CENTER_GRPC_PORT}"
@@ -315,10 +309,8 @@ server:
   metrics_addr: "0.0.0.0:${CENTER_METRICS_PORT}"
 
 sync:
-  list_interval_secs: 5
-  list_timeout_secs: 10
-  command_timeout_secs: 10
   ping_interval_secs: 5
+  command_timeout_secs: 15
 
 database:
   enabled: true
@@ -345,12 +337,8 @@ local_auth:
 EOF
 
 # ── Write controller configs ─────────────────────────────────────────────────
-# write_controller_config IDX GRPC_PORT ADMIN_PORT PROBE_PORT METRICS_PORT CLUSTER CTRL_NAME [CENTER_ENABLED] [RBAC_YAML]
-#
-# CENTER_ENABLED defaults to "true".  Pass "false" for the kill-switch test.
-# RBAC_YAML is an optional indented YAML block that is appended verbatim under
-# the "center:" key (must start with newline + 2-space indent per the YAML schema).
-# Pass "" to omit (use built-in default policy).
+# write_controller_config IDX GRPC ADMIN PROBE METRICS CLUSTER NAME [ENABLED] [RBAC_YAML]
+# RBAC_YAML is appended verbatim under `center:` (newline + 2-space indent).
 write_controller_config() {
   local idx="$1" grpc_port="$2" admin_port="$3" probe_port="$4" metrics_port="$5"
   local cluster="$6" ctrl_name="$7"
@@ -379,12 +367,18 @@ conf_center:
 conf_sync:
   no_sync_kinds: ["ReferenceGrant", "Secret"]
 
+# The conf_sync (Controller->Gateway) channel refuses to start without an
+# explicit transport choice. No gateway connects in this harness; plaintext is
+# the deliberate, audited pick for the loopback-only test topology.
+conf_sync_security:
+  tls:
+    skip_tls: true
+
 center:
   address: "https://127.0.0.1:${CENTER_GRPC_PORT}"
   name: "${ctrl_name}"
   cluster: "${cluster}"
   env: ["testing"]
-  ping_interval_secs: 5
   enabled: ${center_enabled}
   security:
     active: fed
@@ -399,43 +393,26 @@ EOF
 
 write_controller_config 1 "$CTRL1_GRPC_PORT" "$CTRL1_ADMIN_PORT" "$CTRL1_PROBE_PORT" "$CTRL1_METRICS_PORT" "east-cluster" "ctrl-east"
 write_controller_config 2 "$CTRL2_GRPC_PORT" "$CTRL2_ADMIN_PORT" "$CTRL2_PROBE_PORT" "$CTRL2_METRICS_PORT" "west-cluster" "ctrl-west"
+# Phase 1 for ctrl-silo: kill switch (enabled=false). Phase G restarts it with
+# enabled=true + explicit deny-all rbac to exercise the terminal watch denial.
+write_controller_config 3 "$CTRL3_GRPC_PORT" "$CTRL3_ADMIN_PORT" "$CTRL3_PROBE_PORT" "$CTRL3_METRICS_PORT" "silo-cluster" "ctrl-silo" "false"
 
-# controller-3: kill-switch + explicit-deny-all rbac test.
-#
-# center.enabled=false: the controller starts but never connects to Center.
-# rbac: explicit empty allow list (deny-all override) — this field is irrelevant
-# while enabled=false, but it allows test 16 (explicit-deny-all) to be verified
-# once we temporarily re-enable the center connection in a future reload test.
-# For now, test 17 only verifies the kill-switch (not-connected) behavior.
-#
-# NOTE on rbac for test 16: the deny-all rbac is injected here even though the
-# controller won't connect (enabled=false).  If a future test needs to flip
-# enabled=true and verify the deny-all rbac, the config is already in place.
-CTRL3_DENY_ALL_RBAC='
-  rbac:
-    allow: []'
-write_controller_config 3 "$CTRL3_GRPC_PORT" "$CTRL3_ADMIN_PORT" "$CTRL3_PROBE_PORT" "$CTRL3_METRICS_PORT" "silo-cluster" "ctrl-silo" \
-  "false" "$CTRL3_DENY_ALL_RBAC"
-
-# ── Copy CRD schemas + test resources ────────────────────────────────────────
+# ── Copy CRD schemas + fixture resources ─────────────────────────────────────
 for idx in 1 2; do
   local_dir="$WORK_DIR/ctrl${idx}"
   mkdir -p "${local_dir}/config"
   cp -r "$EDGION_DIR/config/crd" "${local_dir}/config/"
   cp "$CONF_SRC/ctrl${idx}/"*.yaml "${local_dir}/conf/"
 done
-# controller-3: kill-switch test — copy CRD schemas; no PluginMetaData resources
-# needed because it will not sync with Center.
 local_dir="$WORK_DIR/ctrl3"
 mkdir -p "${local_dir}/config"
 cp -r "$EDGION_DIR/config/crd" "${local_dir}/config/"
-log "Copied CRD schemas and PluginMetaData resources to controller dirs"
+log "Copied CRD schemas and EdgionConfigData fixtures"
 
-# ── Start center ──────────────────────────────────────────────────────────────
+# ── Start processes ──────────────────────────────────────────────────────────
 log "Starting edgion-center..."
 "$CENTER_BIN" -c "$WORK_DIR/center.yaml" > "$WORK_DIR/logs/center.log" 2>&1 &
 CENTER_PID=$!
-log "edgion-center PID: $CENTER_PID"
 sleep 1
 if ! kill -0 "$CENTER_PID" 2>/dev/null; then
   echo -e "${RED}ERROR${NC}: edgion-center exited immediately. Last log lines:" >&2
@@ -444,31 +421,32 @@ if ! kill -0 "$CENTER_PID" 2>/dev/null; then
 fi
 wait_for_http "$CENTER_PROBE/health" 15
 
-# ── Login to center ──────────────────────────────────────────────────────────
 log "Logging in to center..."
-TOKEN=$(do_login "$CENTER_HTTP" "$AUTH_USER" "$AUTH_PASS")
-if [[ -z "$TOKEN" ]]; then
-  echo -e "${RED}ERROR${NC}: Failed to login to center" >&2
-  tail -20 "$WORK_DIR/logs/center.log" >&2
-  exit 1
-fi
+# The probe listener comes up before the admin HTTP composition; retry until
+# the login route is mounted.
+login_elapsed=0
+while true; do
+  TOKEN=$(do_login)
+  [[ -n "$TOKEN" && "$TOKEN" != PARSE_ERROR* && "$TOKEN" != EXPR_ERROR* ]] && break
+  if [[ $login_elapsed -ge 15 ]]; then
+    echo -e "${RED}ERROR${NC}: Failed to login to center (token: $TOKEN)" >&2
+    tail -20 "$WORK_DIR/logs/center.log" >&2
+    exit 1
+  fi
+  sleep 1
+  ((login_elapsed++)) || true
+done
 log "Login successful"
 
-# ── Start controllers ────────────────────────────────────────────────────────
-log "Starting edgion-controller 1 (east-cluster)..."
-"$CTRL_BIN" -c "$WORK_DIR/ctrl1/controller.yaml" > "$WORK_DIR/logs/ctrl1.log" 2>&1 &
-CTRL1_PID=$!
-log "edgion-controller 1 PID: $CTRL1_PID"
-
-log "Starting edgion-controller 2 (west-cluster)..."
-"$CTRL_BIN" -c "$WORK_DIR/ctrl2/controller.yaml" > "$WORK_DIR/logs/ctrl2.log" 2>&1 &
-CTRL2_PID=$!
-log "edgion-controller 2 PID: $CTRL2_PID"
-
-log "Starting edgion-controller 3 (silo-cluster, center.enabled=false)..."
-"$CTRL_BIN" -c "$WORK_DIR/ctrl3/controller.yaml" > "$WORK_DIR/logs/ctrl3.log" 2>&1 &
-CTRL3_PID=$!
-log "edgion-controller 3 PID: $CTRL3_PID"
+start_controller() {
+  local idx="$1" pid_var="CTRL$1_PID"
+  "$CTRL_BIN" -c "$WORK_DIR/ctrl${idx}/controller.yaml" >> "$WORK_DIR/logs/ctrl${idx}.log" 2>&1 &
+  printf -v "$pid_var" '%s' "$!"
+  log "edgion-controller ${idx} PID: ${!pid_var}"
+}
+start_controller 1
+start_controller 2
+start_controller 3
 
 sleep 1
 for i in 1 2 3; do
@@ -480,472 +458,434 @@ for i in 1 2 3; do
   fi
 done
 
-# ── Wait for sync ────────────────────────────────────────────────────────────
-# Wait until both controllers appear in watch-status with sync_version > 0
-log "Waiting for watch sync to complete (timeout 30s)..."
-elapsed=0
-while true; do
-  out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/admin/watch-status")
-  # Count controllers with syncVersion > 0
-  synced=$(echo "$out" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    items = d.get('data', [])
-    print(sum(1 for i in items if i.get('syncVersion', 0) > 0))
-except:
-    print(0)
-" 2>/dev/null || echo "0")
-  if [[ "$synced" -ge 2 ]]; then
-    log "Both controllers synced after ${elapsed}s"
+# ── Wait for registration ────────────────────────────────────────────────────
+two_online() { [[ "$(online_count)" == "2" ]]; }
+if ! poll_until "two controllers online" 40 two_online; then
+  echo -e "${RED}ERROR${NC}: controllers never came online" >&2
+  echo "--- center.log ---" >&2
+  tail -30 "$WORK_DIR/logs/center.log" >&2
+  for i in 1 2; do
+    echo "--- ctrl${i} stdout ---" >&2
+    tail -10 "$WORK_DIR/logs/ctrl${i}.log" >&2
+    echo "--- ctrl${i} file logs ---" >&2
+    find "$WORK_DIR/ctrl${i}/logs" -type f -name '*.log' -exec tail -25 {} + >&2 2>/dev/null || true
+  done
+  trap - EXIT
+  "$KILL_ALL" 2>/dev/null || true
+  log "Work dir kept for inspection: $WORK_DIR"
+  exit 1
+fi
+log "Both controllers registered and online"
+
+# ══ A — registration & stats ═════════════════════════════════════════════════
+
+# ─── A1 controllers_online ───────────────────────────────────────────────────
+r=$(request GET "$CENTER_HTTP/api/v1/controllers")
+ids=$(jsonq "$(req_body "$r")" "sorted(c['controller_id'] for c in d['data'] if c.get('online'))")
+if [[ "$ids" == "['east-cluster/ctrl-east', 'west-cluster/ctrl-west']" ]]; then
+  pass "A1 controllers_online"
+else
+  fail "A1 controllers_online" "online set: $ids (kill-switch ctrl-silo must be absent)"
+fi
+
+# ─── A2 stats_counts (StatsReport, coalesced to 5 s) ─────────────────────────
+counts_arrived() {
+  local r; r=$(request GET "$CENTER_HTTP/api/v1/controllers")
+  local n; n=$(jsonq "$(req_body "$r")" "sum(1 for c in d['data'] if c.get('online') and (c.get('key_count') or 0) >= 2)")
+  [[ "$n" == "2" ]]
+}
+if poll_until "stats counts" 20 counts_arrived; then
+  pass "A2 stats_counts"
+else
+  r=$(request GET "$CENTER_HTTP/api/v1/controllers")
+  fail "A2 stats_counts" "key_count never reached fixtures count on both: $(req_body "$r")"
+fi
+
+# ══ B — watch-cache reads (GlobalResources) ══════════════════════════════════
+
+GR="$CENTER_HTTP/api/v1/center/global-resources/resources/edgion-config-data"
+
+# ─── B1 global_list ──────────────────────────────────────────────────────────
+gr_has_fixture() {
+  local r; r=$(request GET "$GR?limit=100")
+  local n; n=$(jsonq "$(req_body "$r")" "sum(1 for g in d.get('groups', []) if g['key']['name'] == 'region-route-override')")
+  [[ "$n" =~ ^[0-9]+$ ]] && [[ "$n" -ge 1 ]]
+}
+if poll_until "global list serves fixtures" 20 gr_has_fixture; then
+  pass "B1 global_list"
+else
+  r=$(request GET "$GR?limit=100")
+  fail "B1 global_list" "region-route-override absent from global list: $(req_body "$r" | head -c 600)"
+fi
+
+# ─── B2 multi_namespace_identity ─────────────────────────────────────────────
+iplist_pairs() {
+  local r; r=$(request GET "$GR?limit=100")
+  local pairs; pairs=$(jsonq "$(req_body "$r")" "sorted({(g['key']['namespace'], g['key']['name']) for g in d.get('groups', []) if g['key']['name'] == 'app-iplist'})")
+  [[ "$pairs" == "[('default', 'app-iplist'), ('edge-apps', 'app-iplist')]" ]]
+}
+if poll_until "app-iplist rows in both namespaces" 20 iplist_pairs; then
+  pass "B2 multi_namespace_identity"
+else
+  r=$(request GET "$GR?limit=100")
+  fail "B2 multi_namespace_identity" "expected the same name in two namespaces as two rows: $(req_body "$r" | head -c 400)"
+fi
+
+# ─── B3 global_detail ────────────────────────────────────────────────────────
+r=$(request GET "$GR/default/region-route-override?cluster=east-cluster")
+endpoint=$(jsonq "$(req_body "$r")" "d['object']['spec']['data']['config']['regions'][1]['backendEndpoint']")
+if [[ "$(req_code "$r")" == "200" && "$endpoint" == "127.0.0.1:30002" ]]; then
+  pass "B3 global_detail"
+else
+  fail "B3 global_detail" "code=$(req_code "$r") west endpoint=$endpoint (want 127.0.0.1:30002)"
+fi
+
+# ══ C — proxy reads & the EdgionConfigData write surface ═════════════════════
+
+ECD1="$CENTER_HTTP/api/v1/proxy/${CTRL1_TID}/api/v1/namespaced/edgionconfigdata"
+
+# ─── C1 proxy_get ────────────────────────────────────────────────────────────
+r=$(request GET "$ECD1/default/region-route-override")
+rv=$(jsonq "$(req_body "$r")" "d['metadata']['resourceVersion']")
+if [[ "$(req_code "$r")" == "200" && -n "$rv" && "$rv" != *ERROR* ]]; then
+  pass "C1 proxy_get"
+else
+  fail "C1 proxy_get" "code=$(req_code "$r") resourceVersion=$rv"
+fi
+
+# ─── C2 proxy_create_watch_add ───────────────────────────────────────────────
+create_body='{"apiVersion":"edgion.io/v1","kind":"EdgionConfigData","metadata":{"name":"canary-selector","namespace":"default"},"spec":{"data":{"type":"Selector","config":{"active":"stable"}}}}'
+r=$(request POST "$ECD1/default" "$create_body")
+code=$(req_code "$r")
+selector_in_cache() {
+  local rr; rr=$(request GET "$GR/default/canary-selector?cluster=east-cluster")
+  [[ "$(req_code "$rr")" == "200" ]]
+}
+if [[ "$code" == "200" || "$code" == "201" ]] && poll_until "selector add event" 15 selector_in_cache; then
+  pass "C2 proxy_create_watch_add"
+else
+  fail "C2 proxy_create_watch_add" "create code=$code or add event never reached the watch cache"
+fi
+
+# ─── C3 selector_active_switch ───────────────────────────────────────────────
+r=$(request GET "$ECD1/default/canary-selector")
+sel_rv=$(jsonq "$(req_body "$r")" "d['metadata']['resourceVersion']")
+update_body="{\"apiVersion\":\"edgion.io/v1\",\"kind\":\"EdgionConfigData\",\"metadata\":{\"name\":\"canary-selector\",\"namespace\":\"default\",\"resourceVersion\":\"${sel_rv}\"},\"spec\":{\"data\":{\"type\":\"Selector\",\"config\":{\"active\":\"canary\"}}}}"
+r=$(request PUT "$ECD1/default/canary-selector" "$update_body" "If-Match: \"${sel_rv}\"")
+active_switched() {
+  local rr; rr=$(request GET "$GR/default/canary-selector?cluster=east-cluster")
+  local a; a=$(jsonq "$(req_body "$rr")" "d['object']['spec']['data']['config']['active']")
+  [[ "$a" == "canary" ]]
+}
+if [[ "$(req_code "$r")" == "200" ]] && poll_until "selector active switch observed" 15 active_switched; then
+  pass "C3 selector_active_switch"
+else
+  fail "C3 selector_active_switch" "PUT code=$(req_code "$r") or active never became canary in the cache"
+fi
+
+# ─── C4 put_conflict_recover ─────────────────────────────────────────────────
+stale_body="{\"apiVersion\":\"edgion.io/v1\",\"kind\":\"EdgionConfigData\",\"metadata\":{\"name\":\"canary-selector\",\"namespace\":\"default\"},\"spec\":{\"data\":{\"type\":\"Selector\",\"config\":{\"active\":\"stale-write\"}}}}"
+r=$(request PUT "$ECD1/default/canary-selector" "$stale_body" "If-Match: \"${sel_rv}\"")
+conflict_code=$(req_code "$r")
+r=$(request GET "$ECD1/default/canary-selector")
+fresh_rv=$(jsonq "$(req_body "$r")" "d['metadata']['resourceVersion']")
+recover_body="{\"apiVersion\":\"edgion.io/v1\",\"kind\":\"EdgionConfigData\",\"metadata\":{\"name\":\"canary-selector\",\"namespace\":\"default\",\"resourceVersion\":\"${fresh_rv}\"},\"spec\":{\"data\":{\"type\":\"Selector\",\"config\":{\"active\":\"stable\"}}}}"
+r=$(request PUT "$ECD1/default/canary-selector" "$recover_body" "If-Match: \"${fresh_rv}\"")
+if [[ "$conflict_code" == "409" && "$(req_code "$r")" == "200" ]]; then
+  pass "C4 put_conflict_recover"
+else
+  fail "C4 put_conflict_recover" "stale PUT=$conflict_code (want 409), refreshed PUT=$(req_code "$r") (want 200)"
+fi
+
+# ─── C5 delete_stale_precondition ────────────────────────────────────────────
+r=$(request DELETE "$ECD1/default/canary-selector" "" "If-Match: \"${sel_rv}\"")
+if [[ "$(req_code "$r")" == "409" ]]; then
+  pass "C5 delete_stale_precondition"
+else
+  fail "C5 delete_stale_precondition" "expected 409 for stale If-Match delete, got $(req_code "$r")"
+fi
+
+# ─── C6 proxy_delete_watch_del ───────────────────────────────────────────────
+r=$(request GET "$ECD1/default/canary-selector")
+del_rv=$(jsonq "$(req_body "$r")" "d['metadata']['resourceVersion']")
+r=$(request DELETE "$ECD1/default/canary-selector" "" "If-Match: \"${del_rv}\"")
+del_code=$(req_code "$r")
+selector_gone() {
+  local rr; rr=$(request GET "$GR/default/canary-selector?cluster=east-cluster")
+  [[ "$(req_code "$rr")" == "404" ]]
+}
+if [[ "$del_code" == "200" || "$del_code" == "204" ]] && poll_until "selector delete event" 15 selector_gone; then
+  pass "C6 proxy_delete_watch_del"
+else
+  fail "C6 proxy_delete_watch_del" "delete code=$del_code or delete event never reached the watch cache"
+fi
+
+# ─── C7 rbac_deny_secret ─────────────────────────────────────────────────────
+r=$(request GET "$CENTER_HTTP/api/v1/proxy/${CTRL1_TID}/api/v1/cluster/Secret")
+if [[ "$(req_code "$r")" == "403" ]]; then
+  pass "C7 rbac_deny_secret"
+else
+  fail "C7 rbac_deny_secret" "expected 403, got $(req_code "$r")"
+fi
+
+# ─── C8 rbac_allow_region_route ──────────────────────────────────────────────
+r=$(request GET "$CENTER_HTTP/api/v1/proxy/${CTRL1_TID}/api/v1/region-routes/effective")
+if [[ "$(req_code "$r")" == "200" ]]; then
+  pass "C8 rbac_allow_region_route"
+else
+  fail "C8 rbac_allow_region_route" "expected 200 (list RegionRoute is in the default policy), got $(req_code "$r")"
+fi
+
+# ─── C9 rbac_deny_other_kind_write ───────────────────────────────────────────
+hr_body='{"apiVersion":"gateway.networking.k8s.io/v1","kind":"HTTPRoute","metadata":{"name":"denied","namespace":"default"},"spec":{}}'
+r=$(request POST "$CENTER_HTTP/api/v1/proxy/${CTRL1_TID}/api/v1/namespaced/httproute/default" "$hr_body")
+if [[ "$(req_code "$r")" == "403" ]]; then
+  pass "C9 rbac_deny_other_kind_write"
+else
+  fail "C9 rbac_deny_other_kind_write" "expected 403 (writes are EdgionConfigData-only), got $(req_code "$r")"
+fi
+
+# ══ D — Center write core (failover / sync) & outcomes ═══════════════════════
+
+FAILOVER="$CENTER_HTTP/api/v1/center/region-route-overrides/failover"
+SYNC="$CENTER_HTTP/api/v1/center/region-route-overrides/sync"
+
+ctrl_failover_to() { # CTRL_TID -> failoverTo of region east
+  local r; r=$(request GET "$CENTER_HTTP/api/v1/proxy/$1/api/v1/namespaced/edgionconfigdata/default/region-route-override")
+  jsonq "$(req_body "$r")" "next((x.get('failoverTo', '') for x in d['spec']['data']['config']['regions'] if x['name'] == 'east'), 'MISSING')"
+}
+ctrl_rv() { # CTRL_TID -> resourceVersion of the override doc
+  local r; r=$(request GET "$CENTER_HTTP/api/v1/proxy/$1/api/v1/namespaced/edgionconfigdata/default/region-route-override")
+  jsonq "$(req_body "$r")" "d['metadata']['resourceVersion']"
+}
+
+# ─── D1 failover_converged ───────────────────────────────────────────────────
+r=$(request POST "$FAILOVER" '{"namespace":"default","name":"region-route-override","regionName":"east","failoverTo":"west"}')
+code=$(req_code "$r")
+summary=$(jsonq "$(req_body "$r")" "(d['data']['modified'], d['data']['failed'], sorted({o['state'] for o in d['data']['outcomes']}))")
+both_failed_over() { [[ "$(ctrl_failover_to "$CTRL1_TID")" == "west" && "$(ctrl_failover_to "$CTRL2_TID")" == "west" ]]; }
+if [[ "$code" == "200" && "$summary" == "(2, 0, ['converged'])" ]] && poll_until "failover on both controllers" 10 both_failed_over; then
+  pass "D1 failover_converged"
+else
+  fail "D1 failover_converged" "code=$code summary=$summary ctrl1=$(ctrl_failover_to "$CTRL1_TID") ctrl2=$(ctrl_failover_to "$CTRL2_TID")"
+fi
+
+# ─── D2 failover_idempotent_skip ─────────────────────────────────────────────
+rv1_before=$(ctrl_rv "$CTRL1_TID"); rv2_before=$(ctrl_rv "$CTRL2_TID")
+r=$(request POST "$FAILOVER" '{"namespace":"default","name":"region-route-override","regionName":"east","failoverTo":"west"}')
+code=$(req_code "$r")
+rv1_after=$(ctrl_rv "$CTRL1_TID"); rv2_after=$(ctrl_rv "$CTRL2_TID")
+if [[ "$code" == "200" && "$rv1_before" == "$rv1_after" && "$rv2_before" == "$rv2_after" ]]; then
+  pass "D2 failover_idempotent_skip"
+else
+  fail "D2 failover_idempotent_skip" "code=$code rv1 $rv1_before->$rv1_after rv2 $rv2_before->$rv2_after (no-op must not write)"
+fi
+
+# ─── D3 failover_type_pinning ────────────────────────────────────────────────
+r=$(request POST "$FAILOVER" '{"namespace":"edge-apps","name":"app-iplist","regionName":"east","failoverTo":"west"}')
+code=$(req_code "$r")
+# The wrong-type document exists in the watch cache, so the refusal happens in
+# the write core's per-controller predicate — every outcome is `failed` with the
+# type-pinning reason and the aggregate status is 502 (nothing landed), not a
+# pre-flight 4xx.
+d3_summary=$(jsonq "$(req_body "$r")" "(d['data']['modified'], d['data']['failed'], all('not a RegionRouteOverride' in (o.get('reason') or '') for o in d['data']['outcomes']))")
+if [[ "$code" == "502" && "$d3_summary" == "(0, 2, True)" ]]; then
+  pass "D3 failover_type_pinning (refused with 502, all outcomes failed on type)"
+else
+  fail "D3 failover_type_pinning" "want 502 with (modified=0, failed=2, type reason), got $code $d3_summary: $(req_body "$r" | head -c 300)"
+fi
+
+# ─── D4 failover_unknown_field ───────────────────────────────────────────────
+r=$(request POST "$FAILOVER" '{"namespace":"default","name":"region-route-override","regionName":"east","failoverTo":"west","myRegion":"evil"}')
+code=$(req_code "$r")
+if [[ "$code" == "400" || "$code" == "422" ]]; then
+  pass "D4 failover_unknown_field"
+else
+  fail "D4 failover_unknown_field" "expected 400/422 for unknown body field, got $code"
+fi
+
+# ─── D5 sync_source_to_target ────────────────────────────────────────────────
+r=$(request POST "$SYNC" "{\"namespace\":\"default\",\"name\":\"region-route-override\",\"sourceControllerId\":\"${CTRL1_ID}\",\"targetControllerIds\":[\"${CTRL2_ID}\"]}")
+code=$(req_code "$r")
+west_endpoint_synced() {
+  local rr; rr=$(request GET "$CENTER_HTTP/api/v1/proxy/${CTRL2_TID}/api/v1/namespaced/edgionconfigdata/default/region-route-override")
+  local ep; ep=$(jsonq "$(req_body "$rr")" "next((x['backendEndpoint'] for x in d['spec']['data']['config']['regions'] if x['name'] == 'west'), 'MISSING')")
+  [[ "$ep" == "127.0.0.1:30002" ]]
+}
+if [[ "$code" == "200" || "$code" == "207" ]] && poll_until "west row replaced by east content" 10 west_endpoint_synced; then
+  pass "D5 sync_source_to_target"
+else
+  fail "D5 sync_source_to_target" "code=$code or ctrl-west's west endpoint never became the source's 30002"
+fi
+
+# ─── D6 failover_clear ───────────────────────────────────────────────────────
+r=$(request POST "$FAILOVER" '{"namespace":"default","name":"region-route-override","regionName":"east","failoverTo":""}')
+code=$(req_code "$r")
+both_cleared() { [[ "$(ctrl_failover_to "$CTRL1_TID")" == "" && "$(ctrl_failover_to "$CTRL2_TID")" == "" ]]; }
+if [[ "$code" == "200" ]] && poll_until "failover cleared on both controllers" 10 both_cleared; then
+  pass "D6 failover_clear"
+else
+  fail "D6 failover_clear" "code=$code ctrl1='$(ctrl_failover_to "$CTRL1_TID")' ctrl2='$(ctrl_failover_to "$CTRL2_TID")'"
+fi
+
+# ══ E — reload & ConfigSyncServer lifecycle ══════════════════════════════════
+
+# ─── E1 reload_converged ─────────────────────────────────────────────────────
+# Center holds the request up to 20 s and answers with a terminal outcome; the
+# Controller's own 200 ("queued") is never surfaced as success.
+r=$(request POST "$CENTER_HTTP/api/v1/controllers/${CTRL1_TID}/reload")
+code=$(req_code "$r")
+state=$(jsonq "$(req_body "$r")" "d['data']['state']")
+server_id=$(jsonq "$(req_body "$r")" "d['data'].get('serverId', '')")
+if [[ "$code" == "200" && "$state" == "converged" && -n "$server_id" ]]; then
+  pass "E1 reload_converged"
+else
+  fail "E1 reload_converged" "code=$code state=$state serverId=$server_id (want 200/converged/new id)"
+fi
+
+# ─── E2 post_reload_watch ────────────────────────────────────────────────────
+# The new server_id cascades into watch re-establishment and a full re-list;
+# the cache must keep serving the fixture documents afterwards.
+if poll_until "watch re-established after reload" 30 gr_has_fixture && two_online; then
+  pass "E2 post_reload_watch"
+else
+  fail "E2 post_reload_watch" "global list no longer serves fixtures after the reload"
+fi
+
+# ══ F — disconnect / reconnect / eviction ════════════════════════════════════
+
+# ─── F1 disconnect_offline ───────────────────────────────────────────────────
+kill -9 "$CTRL2_PID" 2>/dev/null || true
+west_offline() {
+  local r; r=$(request GET "$CENTER_HTTP/api/v1/controllers")
+  local o; o=$(jsonq "$(req_body "$r")" "next((c.get('online') for c in d['data'] if c['controller_id'] == '${CTRL2_ID}'), 'MISSING')")
+  [[ "$o" == "False" ]]
+}
+if poll_until "ctrl-west offline after kill" 40 west_offline; then
+  pass "F1 disconnect_offline"
+else
+  fail "F1 disconnect_offline" "ctrl-west never went offline after SIGKILL"
+fi
+
+# ─── F2 reconnect_resync ─────────────────────────────────────────────────────
+start_controller 2
+west_back() {
+  local r; r=$(request GET "$CENTER_HTTP/api/v1/controllers")
+  local o; o=$(jsonq "$(req_body "$r")" "next((c.get('online') for c in d['data'] if c['controller_id'] == '${CTRL2_ID}'), 'MISSING')")
+  [[ "$o" == "True" ]]
+}
+west_doc_served() {
+  local rr; rr=$(request GET "$GR/default/region-route-override?cluster=west-cluster")
+  [[ "$(req_code "$rr")" == "200" ]]
+}
+if poll_until "ctrl-west re-registered" 30 west_back && poll_until "west docs re-listed" 30 west_doc_served; then
+  pass "F2 reconnect_resync"
+else
+  fail "F2 reconnect_resync" "ctrl-west did not re-register or its documents were not re-listed"
+fi
+
+# ─── F3 eviction ─────────────────────────────────────────────────────────────
+kill -9 "$CTRL2_PID" 2>/dev/null || true
+poll_until "ctrl-west offline before eviction" 40 west_offline || true
+r=$(request DELETE "$CENTER_HTTP/api/v1/center/admin/controllers/${CTRL2_TID}")
+evict_code=$(req_code "$r")
+west_gone() {
+  local rr; rr=$(request GET "$CENTER_HTTP/api/v1/controllers")
+  local n; n=$(jsonq "$(req_body "$rr")" "sum(1 for c in d['data'] if c['controller_id'] == '${CTRL2_ID}')")
+  [[ "$n" == "0" ]]
+}
+if [[ "$evict_code" == "200" || "$evict_code" == "204" ]] && poll_until "ctrl-west evicted" 30 west_gone; then
+  start_controller 2
+  if poll_until "ctrl-west re-registered after eviction" 30 west_back; then
+    pass "F3 eviction"
+  else
+    fail "F3 eviction" "evicted controller could not re-register"
+  fi
+else
+  fail "F3 eviction" "evict code=$evict_code or ctrl-west still listed after eviction"
+  start_controller 2
+  poll_until "ctrl-west back for later phases" 30 west_back || true
+fi
+
+# ══ H — large proxied response ═══════════════════════════════════════════════
+
+# ─── H1 big_list_over_4mib ───────────────────────────────────────────────────
+# Six ~0.8 MiB Misc documents make the namespace list >4 MiB — above tonic's
+# default gRPC message limit, which is exactly the regression this guards. Each
+# create stays under both 1 MiB request-body caps (Center route + Controller).
+bulk_ok=true
+for i in 1 2 3 4 5 6; do
+  # The ~0.8 MiB body goes through a file: a single argv argument this large
+  # would exceed the platform ARG_MAX. curl reads @file for --data-binary.
+  python3 -c "
+import json, sys
+doc = {'apiVersion': 'edgion.io/v1', 'kind': 'EdgionConfigData',
+       'metadata': {'name': 'bulk-' + sys.argv[1], 'namespace': 'bulk'},
+       'spec': {'data': {'type': 'Misc', 'config': {'blob': 'A' * 800000}}}}
+open(sys.argv[2], 'w').write(json.dumps(doc))
+" "$i" "$WORK_DIR/bulk_body.json"
+  r=$(request POST "$ECD1/bulk" "@$WORK_DIR/bulk_body.json")
+  code=$(req_code "$r")
+  if [[ "$code" != "200" && "$code" != "201" ]]; then
+    bulk_ok=false
+    log "bulk-${i} create failed: $code $(req_body "$r" | head -c 200)"
     break
   fi
-  if [[ $elapsed -ge 30 ]]; then
-    echo -e "${RED}ERROR${NC}: Timed out waiting for watch sync" >&2
-    log "Last watch-status response: $out"
-    exit 1
+done
+if $bulk_ok; then
+  r=$(request GET "$ECD1/bulk")
+  code=$(req_code "$r")
+  size=$(req_body "$r" | wc -c | tr -d ' ')
+  r2=$(request GET "$ECD1/default/region-route-override")
+  if [[ "$code" == "200" && "$size" -gt 4194304 && "$(req_code "$r2")" == "200" ]] && two_online; then
+    pass "H1 big_list_over_4mib (list size: ${size} bytes)"
+  else
+    fail "H1 big_list_over_4mib" "list code=$code size=$size followup=$(req_code "$r2") (stream must survive)"
   fi
-  sleep 1
-  ((elapsed++)) || true
+else
+  fail "H1 big_list_over_4mib" "could not create the bulk documents"
+fi
+# Cleanup the bulk namespace so later assertions see the fixture-only view.
+for i in 1 2 3 4 5 6; do
+  r=$(request GET "$ECD1/bulk/bulk-${i}")
+  rv=$(jsonq "$(req_body "$r")" "d['metadata']['resourceVersion']")
+  [[ -n "$rv" && "$rv" != *ERROR* ]] && request DELETE "$ECD1/bulk/bulk-${i}" "" "If-Match: \"${rv}\"" >/dev/null
 done
 
-# ── Test cases ────────────────────────────────────────────────────────────────
-log "Running test cases..."
+# ══ G — terminal watch denial (explicit deny-all rbac) ═══════════════════════
 
-# ─── Test 1: watch_sync ─────────────────────────────────────────────────────
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/admin/watch-status")
-if [[ -z "$out" ]]; then
-  fail "watch_sync" "empty response from /admin/watch-status"
+# ─── G1 watch_denied_terminal ────────────────────────────────────────────────
+# Restart ctrl-silo with the federation enabled and an explicit empty rbac:
+# an explicit allow list fully replaces the built-in default, so [] = deny-all.
+# Registration succeeds (identity is mTLS, not rbac), the reverse watch is
+# denied with terminal Forbidden, and reads/writes through the proxy are 403.
+kill -9 "$CTRL3_PID" 2>/dev/null || true
+sleep 1
+CTRL3_DENY_ALL_RBAC='
+  rbac:
+    allow: []'
+write_controller_config 3 "$CTRL3_GRPC_PORT" "$CTRL3_ADMIN_PORT" "$CTRL3_PROBE_PORT" "$CTRL3_METRICS_PORT" "silo-cluster" "ctrl-silo" "true" "$CTRL3_DENY_ALL_RBAC"
+start_controller 3
+silo_online() {
+  local r; r=$(request GET "$CENTER_HTTP/api/v1/controllers")
+  local o; o=$(jsonq "$(req_body "$r")" "next((c.get('online') for c in d['data'] if c['controller_id'] == '${CTRL3_ID}'), 'MISSING')")
+  [[ "$o" == "True" ]]
+}
+if ! poll_until "ctrl-silo registered" 30 silo_online; then
+  fail "G1 watch_denied_terminal" "ctrl-silo (deny-all rbac) never registered"
 else
-  count=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-items = d.get('data', [])
-print(sum(1 for i in items if i.get('syncVersion', 0) > 0))
-" 2>/dev/null || echo "0")
-  if [[ "$count" -ge 2 ]]; then
-    pass "watch_sync"
+  denial_seen() { grep -q "federation watch terminated by Controller RBAC" "$WORK_DIR/logs/center.log"; }
+  poll_until "terminal watch denial logged" 20 denial_seen || true
+  denials_before=$(grep -c "federation watch terminated by Controller RBAC" "$WORK_DIR/logs/center.log" || true)
+  sleep 10
+  denials_after=$(grep -c "federation watch terminated by Controller RBAC" "$WORK_DIR/logs/center.log" || true)
+  r_read=$(request GET "$CENTER_HTTP/api/v1/proxy/${CTRL3_TID}/api/v1/namespaced/edgionconfigdata")
+  r_write=$(request POST "$CENTER_HTTP/api/v1/proxy/${CTRL3_TID}/api/v1/namespaced/edgionconfigdata/default" '{"apiVersion":"edgion.io/v1","kind":"EdgionConfigData","metadata":{"name":"denied","namespace":"default"},"spec":{"data":{"type":"Selector","config":{"active":"x"}}}}')
+  if [[ "$denials_before" -ge 1 && "$denials_after" == "$denials_before" \
+        && "$(req_code "$r_read")" == "403" && "$(req_code "$r_write")" == "403" ]]; then
+    pass "G1 watch_denied_terminal (denials: $denials_after, stable)"
   else
-    fail "watch_sync" "expected >= 2 controllers with syncVersion > 0, got $count. Response: $out"
-  fi
-fi
-
-# ─── Test 2: metadata_store_cluster ─────────────────────────────────────────
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/admin/metadata-store")
-if [[ -z "$out" ]]; then
-  fail "metadata_store_cluster" "empty response from /admin/metadata-store"
-else
-  has_entry=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-data = d.get('data', {})
-routes = data.get('clusterRoutes', [])
-print(sum(1 for r in routes if r.get('controllerCount', 0) >= 2))
-" 2>/dev/null || echo "0")
-  if [[ "$has_entry" -ge 1 ]]; then
-    pass "metadata_store_cluster"
-  else
-    fail "metadata_store_cluster" "expected clusterRoutes with controllerCount >= 2. Response: $out"
-  fi
-fi
-
-# ─── Test 3: metadata_store_service ─────────────────────────────────────────
-# Verify serviceRoutes has >= 3 entries (svc-route-a, svc-route-b, svc-route-c)
-if [[ -z "$out" ]]; then
-  fail "metadata_store_service" "empty response (reused from previous)"
-else
-  svc_count=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-data = d.get('data', {})
-routes = data.get('serviceRoutes', [])
-print(len(routes))
-" 2>/dev/null || echo "0")
-  if [[ "$svc_count" -ge 3 ]]; then
-    pass "metadata_store_service"
-  else
-    fail "metadata_store_service" "expected >= 3 serviceRoutes, got $svc_count. Response: $out"
-  fi
-fi
-
-# ─── Test 4: failover_fanout ────────────────────────────────────────────────
-# POST failover: set east region's failoverTo=west on ClusterRegionRoute
-# Body uses camelCase to match PluginMetadataFailoverRequest serde format
-failover_body='{"namespace":"default","name":"test-cluster-route","regionName":"east","failoverTo":"west"}'
-out=$(auth_post "$TOKEN" "$CENTER_HTTP/api/v1/center/cluster-region-routes/failover" "$failover_body")
-if [[ -z "$out" ]]; then
-  fail "failover_fanout" "empty response from failover endpoint"
-else
-  modified=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(d.get('data', {}).get('modified', 0))
-" 2>/dev/null || echo "0")
-  if [[ "$modified" -ge 1 ]]; then
-    pass "failover_fanout"
-  else
-    fail "failover_fanout" "expected modified >= 1, got $modified. Response: $out"
-  fi
-fi
-
-# Wait for failover to propagate back to center via watch sync
-log "Waiting 3s for failover to propagate..."
-sleep 3
-
-# ─── Test 4b: failover_verify_controller ────────────────────────────────────
-# Check that controller-1 has the failover in its stored PluginMetaData via the
-# namespaced endpoint (Get, PluginMetaData) — covered by default Rule 1.
-ctrl1_id="east-cluster/ctrl-east"
-ctrl1_id_encoded=$(echo "$ctrl1_id" | sed 's|/|~|g')
-out=$(auth_get "$TOKEN" \
-  "$CENTER_HTTP/api/v1/proxy/${ctrl1_id_encoded}/api/v1/namespaced/pluginmetadata/default/test-cluster-route")
-if [[ -z "$out" ]]; then
-  fail "failover_verify_controller" "empty response from controller proxy (namespaced PM GET)"
-else
-  has_failover=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-# PluginMetaData GET response shape: {success, data: {spec: {metadata: {type, config: {myRegion, regions: [...]}}}}}
-# After failover, the 'east' region entry gains a 'failoverTo' field.
-item = d.get('data', {})
-spec = item.get('spec', {})
-config = spec.get('metadata', {}).get('config', {})
-regions = config.get('regions', [])
-if isinstance(regions, str):
-    import json as j2
-    try:
-        regions = j2.loads(regions)
-    except Exception:
-        regions = []
-for r in regions:
-    if not isinstance(r, dict):
-        continue
-    name = r.get('name', '')
-    ft = r.get('failoverTo', r.get('failover_to', r.get('failover', '')))
-    if name == 'east' and ft == 'west':
-        print('found')
-        sys.exit(0)
-print('not_found:regions=' + str(regions))
-" 2>/dev/null || echo "error")
-  if [[ "$has_failover" == "found" ]]; then
-    pass "failover_verify_controller"
-  else
-    # Fallback: verify via the center's aggregated view (4c covers this more robustly).
-    # A "not_found" here may mean the PM schema stores regions differently; the
-    # center-side check in 4c is the authoritative propagation assertion.
-    fail "failover_verify_controller" "failoverTo not found in controller PM. Response: $out"
-  fi
-fi
-
-# ─── Test 4b2: rbac_default_allows_region_route_list ───────────────────────
-# The built-in default now includes (get, RegionRoute) and (list, RegionRoute)
-# so that the aggregate read endpoints are accessible via the Center proxy.
-# Here we verify that proxying GET /api/v1/cluster-region-routes through Center
-# to controller-1 returns HTTP 200 (not 403) under the default RBAC policy.
-log "Test 4b2: rbac_default_allows_region_route_list — proxy GET /api/v1/cluster-region-routes must be 200"
-rr_resp=$(curl -s --max-time 10 \
-  -H "Authorization: Bearer $TOKEN" \
-  -w "\n__HTTP_CODE__%{http_code}" \
-  "$CENTER_HTTP/api/v1/proxy/${ctrl1_id_encoded}/api/v1/cluster-region-routes" 2>/dev/null || true)
-rr_code=$(echo "$rr_resp" | sed -n 's/.*__HTTP_CODE__\([0-9]*\)$/\1/p' | tail -n1)
-if [[ "$rr_code" == "200" ]]; then
-  pass "rbac_default_allows_region_route_list"
-else
-  fail "rbac_default_allows_region_route_list" \
-    "expected 200 (RegionRoute list now in default RBAC), got ${rr_code}. Body: $(echo "$rr_resp" | sed 's/__HTTP_CODE__[0-9]*$//')"
-fi
-
-# ─── Test 4c: failover_verify_center ────────────────────────────────────────
-# Check that center's aggregated ClusterRegionRoutes reflect the failover
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/cluster-region-routes")
-if [[ -z "$out" ]]; then
-  fail "failover_verify_center" "empty response from center cluster-region-routes"
-else
-  has_failover=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-items = d.get('data', [])
-for item in items:
-  if item.get('name') == 'test-cluster-route':
-    controllers = item.get('controllers', {})
-    for cid, entry in controllers.items():
-      regions = entry.get('regions', [])
-      for r in regions:
-        if r.get('name') == 'east' and r.get('failoverTo') == 'west':
-          print('found')
-          sys.exit(0)
-print('not_found')
-" 2>/dev/null || echo "error")
-  if [[ "$has_failover" == "found" ]]; then
-    pass "failover_verify_center"
-  else
-    fail "failover_verify_center" "failoverTo not found on center side. Response: $out"
-  fi
-fi
-
-# ─── Test 4d: failover_preserves_my_region ──────────────────────────────────
-# Multi-controller setup: each controller has its own myRegion. Failover must NOT
-# homogenize them.
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/cluster-region-routes")
-if [[ -z "$out" ]]; then
-  fail "failover_preserves_my_region" "empty response from center cluster-region-routes"
-else
-  preserved=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-items = d.get('data', [])
-for item in items:
-  if item.get('name') == 'test-cluster-route':
-    controllers = item.get('controllers', {})
-    my_regions = sorted({entry.get('myRegion') for entry in controllers.values() if entry.get('myRegion')})
-    # Two distinct controllers must report two distinct (and non-empty) myRegion values.
-    if len(my_regions) >= 2 and all(my_regions):
-      print('ok')
-      sys.exit(0)
-print('homogenized:' + str(my_regions))
-" 2>/dev/null || echo "error")
-  if [[ "$preserved" == "ok" ]]; then
-    pass "failover_preserves_my_region"
-  else
-    fail "failover_preserves_my_region" "expected distinct myRegion per controller, got: $preserved. Response: $out"
-  fi
-fi
-
-# ─── Test 4e: failover_rejects_unknown_fields_cluster ───────────────────────
-# Spec contract: Center failover endpoint must reject any payload containing
-# fields beyond {namespace, name, regionName, failoverTo}. Type system enforces
-# this via deny_unknown_fields.
-evil_body='{"namespace":"default","name":"test-cluster-route","regionName":"east","failoverTo":"west","myRegion":"evil"}'
-status=$(curl -s -o /tmp/edgion_failover_neg_body \
-  -w "%{http_code}" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "content-type: application/json" \
-  -X POST \
-  --data "$evil_body" \
-  "$CENTER_HTTP/api/v1/center/cluster-region-routes/failover")
-if [[ "$status" == "400" || "$status" == "422" ]]; then
-  pass "failover_rejects_unknown_fields_cluster"
-else
-  fail "failover_rejects_unknown_fields_cluster" "expected 400/422 for unknown field, got $status. Body: $(cat /tmp/edgion_failover_neg_body 2>/dev/null)"
-fi
-
-# ─── Test 4f: failover_rejects_unknown_fields_service ───────────────────────
-evil_body_svc='{"namespace":"default","name":"svc-route-a","regionName":"east","failoverTo":"west","spec":{"metadata":{}}}'
-status=$(curl -s -o /tmp/edgion_failover_neg_body_svc \
-  -w "%{http_code}" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "content-type: application/json" \
-  -X POST \
-  --data "$evil_body_svc" \
-  "$CENTER_HTTP/api/v1/center/service-region-routes/failover")
-if [[ "$status" == "400" || "$status" == "422" ]]; then
-  pass "failover_rejects_unknown_fields_service"
-else
-  fail "failover_rejects_unknown_fields_service" "expected 400/422 for unknown field, got $status. Body: $(cat /tmp/edgion_failover_neg_body_svc 2>/dev/null)"
-fi
-
-# ─── Test 4g: failover_clear ────────────────────────────────────────────────
-# Empty failoverTo = clear the failover. Other regions and myRegion remain unchanged.
-clear_body='{"namespace":"default","name":"test-cluster-route","regionName":"east","failoverTo":""}'
-out=$(auth_post "$TOKEN" "$CENTER_HTTP/api/v1/center/cluster-region-routes/failover" "$clear_body")
-modified=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(d.get('data', {}).get('modified', 0))
-" 2>/dev/null || echo "0")
-if [[ "$modified" -lt 1 ]]; then
-  fail "failover_clear" "expected modified >= 1 after clear, got $modified. Response: $out"
-else
-  log "Waiting 3s for clear to propagate..."
-  sleep 3
-  out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/cluster-region-routes")
-  cleared=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-items = d.get('data', [])
-for item in items:
-  if item.get('name') == 'test-cluster-route':
-    controllers = item.get('controllers', {})
-    for cid, entry in controllers.items():
-      regions = entry.get('regions', [])
-      east = next((r for r in regions if r.get('name') == 'east'), None)
-      if east is None:
-        print('east_missing'); sys.exit(0)
-      # After clear: failoverTo absent OR empty.
-      ft = east.get('failoverTo', '')
-      if ft != '':
-        print('still_set:' + str(ft)); sys.exit(0)
-print('ok')
-" 2>/dev/null || echo "error")
-  if [[ "$cleared" == "ok" ]]; then
-    pass "failover_clear"
-  else
-    fail "failover_clear" "failoverTo not cleared: $cleared. Response: $out"
-  fi
-fi
-
-# ─── Test 5: consistency_detect ─────────────────────────────────────────────
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/cluster-region-routes/consistency")
-if [[ -z "$out" ]]; then
-  fail "consistency_detect" "empty response from consistency endpoint"
-else
-  has_conflict=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-reports = d.get('data', [])
-for r in reports:
-    if r.get('name') == 'test-cluster-route' and not r.get('consistent', True):
-        conflicts = r.get('conflicts', [])
-        for c in conflicts:
-            if c.get('field') == 'regions.length':
-                print('found')
-                sys.exit(0)
-print('not_found')
-" 2>/dev/null || echo "error")
-  if [[ "$has_conflict" == "found" ]]; then
-    pass "consistency_detect"
-  else
-    fail "consistency_detect" "expected regions.length conflict for test-cluster-route. Response: $out"
-  fi
-fi
-
-# ─── Test 6: svc_consistency_ok ─────────────────────────────────────────────
-# ServiceRegionRoutes have no myRegion, so both controllers should be consistent
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/service-region-routes/consistency")
-if [[ -z "$out" ]]; then
-  fail "svc_consistency_ok" "empty response from service consistency endpoint"
-else
-  all_consistent=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-reports = d.get('data', [])
-if not reports:
-    print('empty')
-elif all(r.get('consistent', False) for r in reports):
-    print('ok')
-else:
-    print('conflict')
-" 2>/dev/null || echo "error")
-  if [[ "$all_consistent" == "ok" ]]; then
-    pass "svc_consistency_ok"
-  else
-    fail "svc_consistency_ok" "expected all service routes consistent. Response: $out"
-  fi
-fi
-
-# ══ Federation RBAC tests ════════════════════════════════════════════════════
-# These cases verify the RBAC layer that the Controller enforces on requests
-# arriving via the Center federation path (both gRPC watch and HTTP proxy).
-#
-# Built-in default policy (when center.rbac is absent):
-#   Rule 1: read (get/list/watch/list-keys) on all ResourceKinds except Secret.
-#   Rule 2: write (create/update/delete) on PluginMetaData.
-#   Rule 3: get, list, and failover on RegionRoute (synthetic label, not a ResourceKind).
-#           get/list cover aggregate read endpoints; failover covers the POST failover endpoint.
-#
-# The proxy endpoint (ANY /api/v1/proxy/{id}/*rest) forwards through the
-# controller's fed_router, which has inject_center_identity (sets Role=Center)
-# and authz_layer (enforces the RBAC policy).  A denied request yields 403.
-# curl -sf eats 4xx responses; use raw curl + -w to capture the HTTP code.
-
-# ─── Test 14: rbac_default_deny_reload ────────────────────────────────────────
-# POST /api/v1/reload via proxy maps to (Reload, "*"). Reload is NOT in the
-# built-in default policy, so the fed authz_layer must deny it with 403.
-log "Test 14: rbac_default_deny_reload — proxy POST /api/v1/reload must be 403"
-ctrl1_id_encoded="east-cluster~ctrl-east"
-rbac_resp=$(curl -s --max-time 10 \
-  -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -w "\n__HTTP_CODE__%{http_code}" \
-  "$CENTER_HTTP/api/v1/proxy/${ctrl1_id_encoded}/api/v1/reload" 2>/dev/null || true)
-rbac_code=$(echo "$rbac_resp" | sed -n 's/.*__HTTP_CODE__\([0-9]*\)$/\1/p' | tail -n1)
-if [[ "$rbac_code" == "403" ]]; then
-  pass "rbac_default_deny_reload"
-else
-  fail "rbac_default_deny_reload" \
-    "expected 403 (reload not in default RBAC), got ${rbac_code}. Body: $(echo "$rbac_resp" | sed 's/__HTTP_CODE__[0-9]*$//')"
-fi
-
-# ─── Test 15: rbac_default_deny_secret ────────────────────────────────────────
-# GET /api/v1/cluster/Secret via proxy maps to (List, Secret). Secret is
-# explicitly excluded from the built-in default read set, so the fed
-# authz_layer must deny it with 403.
-log "Test 15: rbac_default_deny_secret — proxy GET /api/v1/cluster/Secret must be 403"
-rbac_resp=$(curl -s --max-time 10 \
-  -H "Authorization: Bearer $TOKEN" \
-  -w "\n__HTTP_CODE__%{http_code}" \
-  "$CENTER_HTTP/api/v1/proxy/${ctrl1_id_encoded}/api/v1/cluster/Secret" 2>/dev/null || true)
-rbac_code=$(echo "$rbac_resp" | sed -n 's/.*__HTTP_CODE__\([0-9]*\)$/\1/p' | tail -n1)
-if [[ "$rbac_code" == "403" ]]; then
-  pass "rbac_default_deny_secret"
-else
-  fail "rbac_default_deny_secret" \
-    "expected 403 (Secret excluded from default RBAC), got ${rbac_code}. Body: $(echo "$rbac_resp" | sed 's/__HTTP_CODE__[0-9]*$//')"
-fi
-
-# ─── Test 16: rbac_explicit_deny_all ──────────────────────────────────────────
-# controller-3 (ctrl-silo) was configured with an explicit empty rbac:
-#   rbac:
-#     allow: []
-# An explicit rbac fully overrides the built-in default — empty allow list means
-# deny-all.  Because center.enabled=false is also set, ctrl-silo never actually
-# connects to Center, so we cannot drive a live proxy request through it.
-#
-# Instead we verify the deny-all semantic via the built-in unit-level contract:
-# the Rust test `explicit_empty_rbac_overrides_to_deny_all` in default_policy.rs
-# already covers this path.  Here we document that the controller config was
-# written with `rbac.allow: []` and assert that the config file on disk contains
-# the expected RBAC section (structural verification).
-log "Test 16: rbac_explicit_deny_all — ctrl-silo config on disk has explicit empty rbac"
-if grep -q "rbac:" "$WORK_DIR/ctrl3/controller.yaml" && \
-   grep -q "allow: \[\]" "$WORK_DIR/ctrl3/controller.yaml"; then
-  pass "rbac_explicit_deny_all"
-else
-  fail "rbac_explicit_deny_all" \
-    "ctrl-silo controller.yaml does not contain expected 'rbac: ... allow: []' section. File: $WORK_DIR/ctrl3/controller.yaml"
-fi
-#
-# NOTE: A live end-to-end test of explicit deny-all requires ctrl-silo to connect
-# to Center (enabled=true), which would require cert-based auth to be accepted and
-# a separate proxy operation to drive through.  Adding a second enabled controller
-# with deny-all rbac in the existing harness would also perturb the failover
-# fan-out tests, which assert on a two-controller topology.  The structural
-# verification above and the Rust unit tests are the primary coverage for this case.
-
-# ─── Test 17: rbac_kill_switch_no_connect ─────────────────────────────────────
-# controller-3 was started with center.enabled=false. It should NOT appear in
-# the Center's watch-status — i.e. the Center should still see exactly 2
-# controllers (ctrl-east and ctrl-west), not 3.
-log "Test 17: rbac_kill_switch_no_connect — ctrl-silo (enabled=false) must NOT be in watch-status"
-# Wait a moment for any stray registration that should NOT arrive.
-sleep 3
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/admin/watch-status")
-if [[ -z "$out" ]]; then
-  fail "rbac_kill_switch_no_connect" "empty response from /admin/watch-status"
-else
-  result=$(echo "$out" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-items = d.get('data', [])
-ids = [i.get('controllerId', '') for i in items]
-# ctrl-silo must not appear in watch-status
-if any('ctrl-silo' in cid or 'silo-cluster' in cid for cid in ids):
-    print('silo_present:' + str(ids))
-    sys.exit(0)
-# ctrl-east and ctrl-west must still be present
-east_ok = any('ctrl-east' in cid or 'east-cluster' in cid for cid in ids)
-west_ok = any('ctrl-west' in cid or 'west-cluster' in cid for cid in ids)
-if east_ok and west_ok:
-    print('ok')
-else:
-    print('missing_expected_controllers:' + str(ids))
-" 2>/dev/null || echo "error")
-  if [[ "$result" == "ok" ]]; then
-    pass "rbac_kill_switch_no_connect"
-  else
-    fail "rbac_kill_switch_no_connect" \
-      "unexpected watch-status: $result. Response: $out"
+    fail "G1 watch_denied_terminal" "denials $denials_before->$denials_after (must be >=1 and stable), read=$(req_code "$r_read") write=$(req_code "$r_write") (want 403/403)"
   fi
 fi
 
@@ -961,6 +901,10 @@ else
   log "  Controller 1: $WORK_DIR/logs/ctrl1.log"
   log "  Controller 2: $WORK_DIR/logs/ctrl2.log"
   log "  Controller 3: $WORK_DIR/logs/ctrl3.log"
+  # Keep the work dir for post-mortem when something failed.
+  trap - EXIT
+  "$KILL_ALL" 2>/dev/null || true
+  log "Work dir kept for inspection: $WORK_DIR"
 fi
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 

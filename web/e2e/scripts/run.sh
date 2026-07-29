@@ -135,7 +135,8 @@ else
   assert_can_i no "$oidc_actor" get "/edgion-center-authz/api/v1/proxy/not-owned/api/v1/access"
   assert_can_i no "$oidc_actor" get "/edgion-center-authz/api/v1/center/admin/users"
   assert_can_i yes "$oidc_actor" list edgioncontrollers.center.edgion.io
-  assert_can_i yes "$oidc_actor" get "/edgion-center-authz/permissions/proxy:access"
+  assert_can_i yes "$oidc_actor" get "/edgion-center-authz/permissions/proxy:read"
+  assert_can_i yes "$oidc_actor" get "/edgion-center-authz/permissions/proxy:write"
   assert_can_i no "$oidc_actor" get "/edgion-center-authz/permissions/users:manage"
   assert_can_i no "$oidc_actor" get "/edgion-center-authz/permissions/roles:manage"
   assert_can_i no "$oidc_actor" get "/edgion-center-authz/permissions/audit:read"

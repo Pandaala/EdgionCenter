@@ -49,6 +49,17 @@ if [[ "${EDGION_SKIP_WEB:-0}" != "1" ]]; then
   npm --prefix web run lint
   npm --prefix web test
   npm --prefix web run build
+  npm --prefix web run e2e:inventory
+  npm --prefix web run e2e:typecheck
+fi
+
+# Two-controller federation e2e. Needs the sibling Edgion repo for the
+# Controller binary (override the location with EDGION_DIR), so it is an
+# explicit opt-in like the other non-hermetic stages.
+if [[ "${EDGION_FEDERATION_E2E:-0}" == "1" ]]; then
+  examples/test/scripts/integration/run_center_test.sh
+else
+  echo "skipping two-controller federation e2e: EDGION_FEDERATION_E2E=1 is not set"
 fi
 
 cicd/checks/check_english_only.sh

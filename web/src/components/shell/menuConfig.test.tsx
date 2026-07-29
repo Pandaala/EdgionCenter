@@ -144,17 +144,15 @@ describe('Center navigation structure', () => {
     ])
   })
 
-  it('keeps only Region and Service under RegionRoute', () => {
-    const regionRoutes = findBranch(
-      findCenterSection('center.nav.section.traffic').children,
-      'center-region-routes',
-    )
-    const leaves = flattenLeaves(regionRoutes.children)
-    expect(leaves.map((item) => item.path)).toEqual([
-      '/region-routes/region',
-      '/region-routes/service',
-    ])
-    expect(leaves.every((item) => item.requiredPermission === 'region-routes:read')).toBe(true)
+  // RegionRoute has exactly one override dimension, so it is a single leaf
+  // rather than a group. The removed Service dimension had no backing type in
+  // Edgion; per-service failover is expressed by pointing one EdgionPlugins
+  // entry's `overrideRef` at its own RegionRouteOverride.
+  it('exposes RegionRoute as a single leaf under Traffic', () => {
+    const leaves = flattenLeaves(findCenterSection('center.nav.section.traffic').children)
+    const regionRoutes = leaves.filter((item) => item.path?.startsWith('/region-routes'))
+    expect(regionRoutes.map((item) => item.path)).toEqual(['/region-routes/region'])
+    expect(regionRoutes.every((item) => item.requiredPermission === 'region-routes:read')).toBe(true)
   })
 
   it('defines the GlobalResources inventory menu behind both gates', () => {

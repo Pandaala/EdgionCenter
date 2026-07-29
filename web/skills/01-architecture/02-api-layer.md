@@ -58,7 +58,7 @@ Defined in `src/api/types.ts`. When adding a new resource, add the new kind valu
 export type ResourceKind =
   | 'httproute' | 'grpcroute' | 'tcproute' | 'udproute' | 'tlsroute'
   | 'service' | 'endpointslice'
-  | 'edgiontls' | 'edgionplugins' | 'pluginmetadata' | 'linksys'
+  | 'edgiontls' | 'edgionplugins' | 'edgionconfigdata' | 'linksys'
   | 'secret' | 'gatewayclass' | 'edgiongatewayconfig' | 'gateway'
 ```
 

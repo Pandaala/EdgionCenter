@@ -16,13 +16,11 @@ import { useT } from '@/i18n'
 
 const { Text } = Typography
 
-export type RegionRouteOverrideScope = 'region' | 'service'
-
 /**
  * Summarize every region's current `failoverTo` from a write outcome's
- * `observed` document (the full RegionRouteOverride/ServiceRegionRouteOverride
- * resource as last seen in the local watch cache). Used to satisfy the
- * `superseded` outcome's requirement to show what is actually in effect now.
+ * `observed` document (the full RegionRouteOverride resource as last seen in
+ * the local watch cache). Used to satisfy the `superseded` outcome's
+ * requirement to show what is actually in effect now.
  */
 export function describeObservedRegions(observed: unknown): string {
   const regions = (observed as { spec?: { data?: { config?: { regions?: unknown } } } } | undefined)
@@ -113,12 +111,10 @@ function FailoverStatus({ resource }: { resource: RegionRouteOverrideResource })
 }
 
 function FailoverEditor({
-  scope,
   row,
   resource,
   onDone,
 }: {
-  scope: RegionRouteOverrideScope
   row: CenterRegionRouteOverride
   resource: RegionRouteOverrideResource
   onDone?: () => void
@@ -139,7 +135,6 @@ function FailoverEditor({
       const results: { region: string; summary: WriteOutcomeSummary }[] = []
       for (const region of changed) {
         const summary = await regionRouteApi.overrideFailover(
-          scope,
           row.namespace,
           row.name,
           region.name,
@@ -147,7 +142,7 @@ function FailoverEditor({
         )
         results.push({ region: region.name, summary })
       }
-      await queryClient.refetchQueries({ queryKey: ['region-route-overrides', scope] })
+      await queryClient.refetchQueries({ queryKey: ['region-route-overrides'] })
       return results
     },
     onSuccess: (results) => {
@@ -220,12 +215,10 @@ function FailoverEditor({
 }
 
 function FailoverAction({
-  scope,
   row,
   resource,
   disabled,
 }: {
-  scope: RegionRouteOverrideScope
   row: CenterRegionRouteOverride
   resource: RegionRouteOverrideResource
   disabled: boolean
@@ -259,7 +252,6 @@ function FailoverAction({
         <div style={{ minWidth: 360 }}>
           <FailoverEditor
             key={normalizedConfig(resource)}
-            scope={scope}
             row={row}
             resource={resource}
             onDone={() => setOpen(false)}
@@ -273,11 +265,9 @@ function FailoverAction({
 }
 
 function SyncOverrideButton({
-  scope,
   row,
   onlineControllerIds,
 }: {
-  scope: RegionRouteOverrideScope
   row: CenterRegionRouteOverride
   onlineControllerIds: string[]
 }) {
@@ -290,7 +280,6 @@ function SyncOverrideButton({
   const [outcomeItems, setOutcomeItems] = useState<WriteOutcomeItem[]>([])
   const mutation = useMutation({
     mutationFn: () => regionRouteApi.syncOverride(
-      scope,
       row.namespace,
       row.name,
       source,
@@ -321,7 +310,7 @@ function SyncOverrideButton({
         }))
       }
       await queryClient.refetchQueries({
-        queryKey: ['region-route-overrides', scope],
+        queryKey: ['region-route-overrides'],
       })
     },
     onError: (error: Error) => message.error(error.message),
@@ -353,17 +342,13 @@ function SyncOverrideButton({
   )
 }
 
-export default function RegionRouteOverridePage({
-  scope,
-}: {
-  scope: RegionRouteOverrideScope
-}) {
+export default function RegionRouteOverridePage() {
   const canWrite = useCan('region-routes:write')
   const [namespaceFilter, setNamespaceFilter] = useState('')
   const [nameFilter, setNameFilter] = useState('')
   const query = useQuery({
-    queryKey: ['region-route-overrides', scope],
-    queryFn: () => regionRouteApi.listOverrides(scope),
+    queryKey: ['region-route-overrides'],
+    queryFn: () => regionRouteApi.listOverrides(),
     staleTime: 30_000,
   })
   const rows = useMemo(() => query.data?.data ?? [], [query.data])
@@ -387,12 +372,8 @@ export default function RegionRouteOverridePage({
       .map((value) => ({ value })),
     [namespaceFilter, rows],
   )
-  const title = scope === 'region'
-    ? 'RegionRoute Region Management'
-    : 'RegionRoute Service Management'
-  const subtitle = scope === 'region'
-    ? 'Region-level failover overrides watched from every Controller'
-    : 'Service-level failover overrides watched from every Controller'
+  const title = 'RegionRoute Override Management'
+  const subtitle = 'RegionRoute failover overrides watched from every Controller'
 
   return (
     <div>
@@ -433,7 +414,7 @@ export default function RegionRouteOverridePage({
         />
       </Space>
       {query.isLoading ? <Spin size="large" /> : visible.length === 0 ? (
-        <Empty description={`No ${scope} overrides`} />
+        <Empty description="No overrides" />
       ) : (
         <Table
           rowKey={(row) => `${row.namespace}/${row.name}`}
@@ -499,7 +480,6 @@ export default function RegionRouteOverridePage({
                     </Tooltip>
                     {canWrite && (
                       <SyncOverrideButton
-                        scope={scope}
                         row={row}
                         onlineControllerIds={online}
                       />
@@ -522,7 +502,6 @@ export default function RegionRouteOverridePage({
                 if (!resource) return '—'
                 return canWrite ? (
                   <FailoverAction
-                    scope={scope}
                     row={row}
                     resource={resource}
                     disabled={!overrideConsistent(row, online)}

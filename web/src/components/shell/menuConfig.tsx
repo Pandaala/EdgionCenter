@@ -145,15 +145,7 @@ export const centerMenu: MenuSection[] = [
     kind: 'section',
     labelKey: 'center.nav.section.traffic',
     children: [
-      {
-        kind: 'group',
-        key: 'center-region-routes',
-        labelKey: 'center.nav.regionRoutes',
-        children: [
-          { kind: 'item', key: 'center-rr-region', labelKey: 'center.nav.regionDimension', path: '/region-routes/region', icon: <ShareAltOutlined />, requiredPermission: 'region-routes:read' },
-          { kind: 'item', key: 'center-rr-service', labelKey: 'center.nav.serviceDimension', path: '/region-routes/service', icon: <DatabaseOutlined />, requiredPermission: 'region-routes:read' },
-        ],
-      },
+      { kind: 'item', key: 'center-region-routes', labelKey: 'center.nav.regionRoutes', path: '/region-routes/region', icon: <ShareAltOutlined />, requiredPermission: 'region-routes:read' },
       {
         kind: 'group',
         key: 'center-global-resources',

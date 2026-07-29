@@ -19,7 +19,7 @@ Read the corresponding backend Schema file before development to understand the 
 | [01-routes.md](01-routes.md) | HTTPRoute ✅, GRPCRoute, TCPRoute, UDPRoute, TLSRoute | `edgion/skills/02-features/03-resources/01-routes/` |
 | [02-infrastructure.md](02-infrastructure.md) | Gateway, GatewayClass, Service, EndpointSlice | `edgion/skills/02-features/03-resources/02-infrastructure/` |
 | [03-security.md](03-security.md) | EdgionTls, Secret, BackendTLSPolicy | `edgion/skills/02-features/03-resources/03-tls/` |
-| [04-plugins.md](04-plugins.md) | EdgionPlugins ✅, EdgionStreamPlugins, PluginMetaData | `edgion/skills/02-features/03-resources/04-plugins/` |
+| [04-plugins.md](04-plugins.md) | EdgionPlugins ✅, EdgionStreamPlugins, EdgionConfigData | `edgion/skills/02-features/03-resources/04-plugins/` |
 | [05-system.md](05-system.md) | EdgionGatewayConfig, LinkSys, EdgionAcme | `edgion/skills/02-features/03-resources/05-system/` |
 
 ## Common Fields
@@ -42,7 +42,7 @@ status: {}                        # read-only, managed by backend
 
 | Level | Resource | Description |
 |------|------|------|
-| Simple (YAML-only) | Service, EndpointSlice, GatewayClass, PluginMetaData, BackendTLSPolicy | Read-only display + YAML editor; no complex form needed |
+| Simple (YAML-only) | Service, EndpointSlice, GatewayClass, EdgionConfigData, BackendTLSPolicy | Read-only display + YAML editor; no complex form needed |
 | Medium (basic form) | TCPRoute, UDPRoute, TLSRoute, Gateway, EdgionTls, Secret, LinkSys | Form with Metadata + a few spec fields |
 | Complex (full form) | HTTPRoute ✅, GRPCRoute, EdgionPlugins ✅, EdgionGatewayConfig, EdgionAcme | Nested form + multiple sections + conditional rendering |
 

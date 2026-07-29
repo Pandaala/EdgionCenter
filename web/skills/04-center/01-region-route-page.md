@@ -1,45 +1,57 @@
 ---
 name: center-region-route-page
-description: Center RegionRoute Region and Service override management views.
+description: Center RegionRoute override management view.
 ---
 
-# Center RegionRoute Pages
+# Center RegionRoute Page
 
-The operator defines routing logic and the safe Region topology in the
-`RegionRoute` entry of `EdgionPlugins`. Runtime failover state is separate:
+The operator defines routing logic and the safe region topology in the
+`RegionRoute` entry of `EdgionPlugins`. Runtime failover state is separate: the
+entry's `overrideRef` points to a `RegionRouteOverride` `EdgionConfigData`, and
+Center manages those override documents. The page never edits or synchronizes
+`EdgionPlugins`.
 
-- `overrideRef` points to a Region-level `RegionRouteOverride`.
-- `serviceOverrideRef` points to a service-specific
-  `ServiceRegionRouteOverride`.
+## There is exactly one override dimension
 
-The Gateway applies the Region override first and the Service override second.
-Neither Center page edits or synchronizes `EdgionPlugins`.
+An earlier design also had a Service dimension (`serviceOverrideRef` ->
+`ServiceRegionRouteOverride`, with its own page, endpoints, and read-model map).
+Edgion never had that type, so the Service surface was permanently empty and has
+been removed.
+
+It is not a missing feature. A `RegionRoute` config lives in an `EdgionPlugins`
+object that is attached per HTTPRoute/GRPCRoute rule through an `ExtensionRef`
+filter, and each object carries its own `overrideRef`. Per-service failover is
+therefore already expressible with `RegionRouteOverride` alone: give a service
+its own `EdgionPlugins` object pointing at its own override document. Scope is a
+property of which object references a document, not of the document's own type.
+Do not reintroduce a second dimension.
 
 ## Navigation
 
 ```text
-RegionRoute
-├── Region   → /region-routes/region
-└── Service  → /region-routes/service
+RegionRoute → /region-routes/region
 ```
 
-The Region and Service pages directly display their corresponding
-`EdgionConfigData` resources. They are not projections of effective plugins,
-HTTPRoutes, GRPCRoutes, or backend Service usage.
+`/region-routes/service` and `/region-routes/services` redirect here.
+
+The page directly displays `RegionRouteOverride` `EdgionConfigData` resources.
+It is not a projection of effective plugins, HTTPRoutes, GRPCRoutes, or backend
+Service usage.
 
 ## Federation read model
 
 Controllers already list/watch `EdgionConfigData` over federation. Center
-classifies each watched resource using `spec.data.type` and maintains two maps:
+classifies each watched resource by `spec.data.type` and keeps one map:
 
 ```text
 (namespace, name) -> controllerId -> raw EdgionConfigData
 ```
 
-The Region map accepts only `RegionRouteOverride`; the Service map accepts only
-`ServiceRegionRouteOverride`. Full list responses replace one Controller's
-entries, incremental watch events update or delete one key, and offline
-Controllers retain their last observation until eviction.
+The map accepts only `RegionRouteOverride` — the classification is a type
+allowlist of one, so any other `EdgionConfigData` type is dropped rather than
+projected. Full list responses replace one Controller's entries, incremental
+watch events update or delete one key, and offline Controllers retain their last
+observation until eviction.
 
 Center must not poll `/api/v1/region-routes/effective` for these pages and must
 not aggregate pluginName, alias, entryIndex, routing rules, or service usage.
@@ -75,10 +87,10 @@ never copied. Controller federation RBAC remains the final authority.
 
 ## Validation
 
-- Shared-schema tests cover both override variants and Service-over-Region
-  precedence.
-- Center runtime tests cover list/watch classification and aggregation.
-- Center API tests cover all-success, partial-failure, and source-to-target sync.
+- Center runtime tests cover list/watch classification (including that a
+  non-`RegionRouteOverride` type is not projected) and aggregation.
+- Center API tests cover all-success, partial-failure, source-to-target sync, and
+  that failover refuses a document of another `EdgionConfigData` type.
 - Frontend tests cover missing-controller and metadata-insensitive consistency.
-- Two-Controller integration verifies both menus update from watch without the
+- Two-Controller integration verifies the menu updates from watch without the
   retired effective RegionRoute poll.

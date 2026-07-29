@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { Modal } from 'antd'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ControllersPage from './ControllersPage'
 
 const mocks = vi.hoisted(() => ({
@@ -37,8 +38,14 @@ describe('ControllersPage', () => {
     mocks.useCan.mockImplementation(
       (permission: string) => permission === 'controllers:read'
         || permission === 'controllers:write'
-        || permission === 'proxy:access',
+        || permission === 'proxy:read',
     )
+  })
+
+  // Imperative antd modals render outside the RTL container, so its automatic
+  // cleanup does not remove them and they would leak into the next test.
+  afterEach(() => {
+    Modal.destroyAll()
   })
 
   it('does not request standalone history or expose mutations when unavailable', async () => {
@@ -91,5 +98,57 @@ describe('ControllersPage', () => {
     expect(within(freshRow).getByText('12')).toBeInTheDocument()
     expect(within(staleRow).getByText('7')).toBeInTheDocument()
     expect(within(staleRow).getByText('globalResources.syncState.stale')).toBeInTheDocument()
+  })
+
+  /// Confirms a reload and returns once the mutation has been dispatched with
+  /// the expected controller id. React Query v5 hands `mutationFn` a second
+  /// (context) argument, so the first argument is asserted rather than the
+  /// whole call signature.
+  async function confirmReload(controllerId: string) {
+    fireEvent.click(screen.getAllByTestId('controller-reload')[0])
+    fireEvent.click(await screen.findByTestId('controller-reload-confirm'))
+    await waitFor(() => expect(mocks.reloadController).toHaveBeenCalled())
+    expect(mocks.reloadController.mock.calls[0][0]).toBe(controllerId)
+  }
+
+  /// The regression this page had: a reload that was only dispatched rendered
+  /// as an unqualified green toast. Any state other than `converged` must now
+  /// raise a modal the operator has to dismiss.
+  it('raises a modal for a reload that was dispatched but not confirmed', async () => {
+    mocks.useServerInfo.mockReturnValue({ data: { data: { capabilities: { controllerHistory: false } } } })
+    mocks.reloadController.mockResolvedValue({
+      controllerId: 'east/controller-a',
+      state: 'unknown',
+      reason: 'reload was dispatched, but no new server_id was observed within 20s',
+    })
+    renderPage()
+
+    expect(await screen.findByText('east/controller-a')).toBeInTheDocument()
+    await confirmReload('east/controller-a')
+
+    expect(await screen.findByTestId('controller-reload-outcome-ok')).toBeInTheDocument()
+    // antd renders a confirm title in two nodes, so match all of them.
+    expect((await screen.findAllByText('center.reloadOutcome.title')).length).toBeGreaterThan(0)
+  })
+
+  it('does not raise a modal when the reload actually completed', async () => {
+    mocks.useServerInfo.mockReturnValue({ data: { data: { capabilities: { controllerHistory: false } } } })
+    mocks.reloadController.mockResolvedValue({
+      controllerId: 'east/controller-a',
+      state: 'converged',
+      serverId: 'server-2',
+      convergenceMs: 4200,
+    })
+    renderPage()
+
+    expect(await screen.findByText('east/controller-a')).toBeInTheDocument()
+    await confirmReload('east/controller-a')
+
+    // The confirm dialog closes on its own; nothing else may appear. Waiting
+    // for its OK button to go away is what makes this assertion meaningful
+    // rather than merely early.
+    await waitFor(() => expect(screen.queryByTestId('controller-reload-confirm')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('controller-reload-outcome-ok')).not.toBeInTheDocument()
+    expect(screen.queryAllByText('center.reloadOutcome.title')).toHaveLength(0)
   })
 })

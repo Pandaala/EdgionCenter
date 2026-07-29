@@ -1,0 +1,16 @@
+# IpList EdgionConfigData with the SAME name as edge-apps/app-iplist but in the
+# default namespace — controller 1 only. The multi-namespace identity test
+# asserts both rows appear distinctly in the global resources list.
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: app-iplist
+  namespace: default
+  resourceVersion: "1"
+spec:
+  data:
+    type: IpList
+    config:
+      items:
+        - name: private-nets
+          cidrs: ["10.0.0.0/8", "192.168.0.0/16"]

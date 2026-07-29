@@ -154,8 +154,8 @@ rules:
   - {apiGroups: [center.edgion.io], resources: [edgioncontrollers], verbs: [list]}
   - {nonResourceURLs: ["/edgion-center-authz/api/v1/server-info"], verbs: [get]}
   - {nonResourceURLs: ["/edgion-center-authz/api/v1/proxy/__E2E_CONTROLLER_PATH_A__/*", "/edgion-center-authz/api/v1/proxy/__E2E_CONTROLLER_PATH_B__/*"], verbs: [get, post, put, patch, delete]}
-  - {nonResourceURLs: ["/edgion-center-authz/api/v1/center/region-route-overrides", "/edgion-center-authz/api/v1/center/region-route-overrides/*", "/edgion-center-authz/api/v1/center/service-region-route-overrides", "/edgion-center-authz/api/v1/center/service-region-route-overrides/*"], verbs: [get, post, put, patch, delete]}
-  - {nonResourceURLs: ["/edgion-center-authz/permissions/controllers:read", "/edgion-center-authz/permissions/controllers:write", "/edgion-center-authz/permissions/region-routes:read", "/edgion-center-authz/permissions/region-routes:write", "/edgion-center-authz/permissions/server:read", "/edgion-center-authz/permissions/proxy:access"], verbs: [get]}
+  - {nonResourceURLs: ["/edgion-center-authz/api/v1/center/region-route-overrides", "/edgion-center-authz/api/v1/center/region-route-overrides/*"], verbs: [get, post, put, patch, delete]}
+  - {nonResourceURLs: ["/edgion-center-authz/permissions/controllers:read", "/edgion-center-authz/permissions/controllers:write", "/edgion-center-authz/permissions/region-routes:read", "/edgion-center-authz/permissions/region-routes:write", "/edgion-center-authz/permissions/server:read", "/edgion-center-authz/permissions/proxy:read", "/edgion-center-authz/permissions/proxy:write"], verbs: [get]}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

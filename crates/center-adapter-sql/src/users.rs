@@ -727,6 +727,55 @@ impl Store {
 mod tests {
     use super::*;
 
+    /// The 0010 migration rewrites a stored `proxy:access` grant into both
+    /// halves of the split, so an upgraded role keeps exactly the access it had
+    /// and is never left holding a key the catalog no longer knows (which the
+    /// roles API would then reject with 400 on the role's next save).
+    ///
+    /// `open_in_memory` has already run every migration, so the test seeds the
+    /// legacy key afterwards and re-executes the shipped SQL text — the same
+    /// statements sqlx applies during a real upgrade.
+    #[tokio::test]
+    async fn proxy_permission_split_migration_rewrites_legacy_grant() {
+        let db = Store::open_in_memory().await.unwrap();
+        let ops = db.create_role("ops", "Fleet operators").await.unwrap();
+        let untouched = db.create_role("audit", "Auditors").await.unwrap();
+        db.set_role_permissions(ops, &["audit:read".into(), "proxy:access".into()])
+            .await
+            .unwrap();
+        db.set_role_permissions(untouched, &["audit:read".into()])
+            .await
+            .unwrap();
+
+        let Pool::Sqlite(pool) = &db.pool else {
+            unreachable!()
+        };
+        for statement in include_str!("migrations/sqlite/0010_proxy_permission_split.sql")
+            .split(';')
+            .map(str::trim)
+            .filter(|statement| !statement.is_empty())
+        {
+            sqlx::query(statement).execute(pool).await.unwrap();
+        }
+
+        let mut keys = db.role_permissions(ops).await.unwrap();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "audit:read".to_string(),
+                "proxy:read".to_string(),
+                "proxy:write".to_string()
+            ],
+            "a proxy:access holder must keep both halves of the split"
+        );
+        assert_eq!(
+            db.role_permissions(untouched).await.unwrap(),
+            vec!["audit:read".to_string()],
+            "roles without the legacy key must be untouched"
+        );
+    }
+
     #[tokio::test]
     async fn user_role_permission_join() {
         let db = Store::open_in_memory().await.unwrap();

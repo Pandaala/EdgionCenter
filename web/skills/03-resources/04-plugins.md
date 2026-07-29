@@ -1,6 +1,6 @@
 ---
 name: plugin-resources
-description: Plugin resource development guide — EdgionPlugins/EdgionStreamPlugins/PluginMetaData (based on feature-04-06 user documentation)
+description: Plugin resource development guide — EdgionPlugins/EdgionStreamPlugins/EdgionConfigData (based on feature-04-06 user documentation)
 ---
 
 # Plugin Resources
@@ -66,31 +66,30 @@ annotations:
 - IP check runs at connection establishment time, with minimal performance impact
 - Plugin configuration supports hot reload
 
-## PluginMetaData (Pending Development)
+## EdgionConfigData ✅ Completed
 
 ```yaml
 apiVersion: edgion.io/v1
-kind: PluginMetaData
+kind: EdgionConfigData
 metadata:
-  name: rate-limit
+  name: region-route-override
+  namespace: default
 spec:
-  description: "Rate limiting plugin"
-  schema:
-    type: object
-    properties:
-      count:
-        type: integer
-      time_window:
-        type: integer
-      key_type:
-        type: string
-        enum: ["var", "var_combination"]
-  defaultConfig: {}
+  data:
+    type: RegionRouteOverride
+    config:
+      regions:
+        - name: east
+          hashRange: [0, 499]
+          backendEndpoint: "127.0.0.1:30001"
+          tls: false
 ```
 
 **Development Notes**:
-- **Cluster-scoped resource**, uses `clusterResourceApi`, kind: `pluginmetadata`
-- Plugin metadata and JSON Schema definition
-- Primarily YAML editing
-- List page displays: name, description
+- **Namespaced resource**, uses `resourceApi`, kind: `edgionconfigdata`
+- The hot-swappable data overlay (`spec.data` is a tagged enum: `KeyList`,
+  `IpList`, `Selector`, `RegionRouteOverride`, `Misc`); base config stays in
+  `EdgionPlugins`, only data lives here
+- Page: `src/pages/Plugins/EdgionConfigDataList.tsx`, route `plugins/metadata`
+- The one kind the Center default policy lets a federated Center write remotely
 - List page does not need a namespace column

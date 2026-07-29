@@ -27,7 +27,7 @@ describe('regionRouteApi.overrideFailover — RegionRoute failover (region_name 
       },
     } as never)
 
-    const result = await regionRouteApi.overrideFailover('region', 'ns', 'name', 'east', 'west')
+    const result = await regionRouteApi.overrideFailover('ns', 'name', 'east', 'west')
     expect(result.modified).toBe(1)
     expect(result.failed).toBe(1)
     expect(result.outcomes).toHaveLength(2)
@@ -48,7 +48,7 @@ describe('regionRouteApi.overrideFailover — RegionRoute failover (region_name 
       },
     })
 
-    const result = await regionRouteApi.overrideFailover('region', 'ns', 'name', 'east', 'west')
+    const result = await regionRouteApi.overrideFailover('ns', 'name', 'east', 'west')
     expect(result.failed).toBe(1)
     expect(result.outcomes[0].state).toBe('conflict')
   })
@@ -59,7 +59,7 @@ describe('regionRouteApi.overrideFailover — RegionRoute failover (region_name 
     })
 
     await expect(
-      regionRouteApi.overrideFailover('region', 'ns', 'name', 'east', 'west'),
+      regionRouteApi.overrideFailover('ns', 'name', 'east', 'west'),
     ).rejects.toBeTruthy()
   })
 })
@@ -83,7 +83,7 @@ describe('regionRouteApi.syncOverride — row-level override sync', () => {
       },
     } as never)
 
-    const result = await regionRouteApi.syncOverride('region', 'ns', 'name', 'ctrl-src', ['ctrl-a', 'ctrl-b'])
+    const result = await regionRouteApi.syncOverride('ns', 'name', 'ctrl-src', ['ctrl-a', 'ctrl-b'])
     expect(result.outcomes.map((o) => o.controllerId)).toEqual(['ctrl-a', 'ctrl-b'])
     const failedOutcome = result.outcomes.find((o) => o.controllerId === 'ctrl-b')
     expect(failedOutcome?.reason).toBe('not in the local watch cache')
@@ -102,7 +102,7 @@ describe('regionRouteApi.syncOverride — row-level override sync', () => {
       },
     } as never)
 
-    const result = await regionRouteApi.syncOverride('region', 'ns', 'name', 'ctrl-src', ['ctrl-b'])
+    const result = await regionRouteApi.syncOverride('ns', 'name', 'ctrl-src', ['ctrl-b'])
     expect(result.outcomes).toEqual([])
     expect(result.failed).toBe(1)
   })

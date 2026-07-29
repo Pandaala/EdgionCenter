@@ -1,0 +1,15 @@
+# IpList EdgionConfigData in a second namespace (edge-apps) — controller 2.
+# Mirrors controller 1 so both clusters expose the same (namespace, name).
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: app-iplist
+  namespace: edge-apps
+  resourceVersion: "1"
+spec:
+  data:
+    type: IpList
+    config:
+      items:
+        - name: loopback
+          cidrs: ["127.0.0.0/8"]

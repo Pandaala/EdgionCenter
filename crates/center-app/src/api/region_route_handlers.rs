@@ -7,16 +7,31 @@
 //! `EdgionPlugins` and is owned by the business teams, so Center never
 //! aggregates it.
 //!
-//! | Method | Path                                                    | Description                                                     |
-//! |--------|---------------------------------------------------------|-----------------------------------------------------------------|
-//! | GET    | `/api/v1/center/region-route-overrides`                 | Watch-fed RegionRouteOverride rows across controllers            |
-//! | GET    | `/api/v1/center/service-region-route-overrides`         | Watch-fed ServiceRegionRouteOverride rows across controllers     |
-//! | POST   | `/api/v1/center/region-route-overrides/failover`        | Set `failoverTo` on one region, on every online controller       |
-//! | POST   | `/api/v1/center/service-region-route-overrides/failover`| Same, for the service dimension                                  |
-//! | POST   | `/api/v1/center/region-route-overrides/sync`            | Copy one controller's override document to selected targets      |
-//! | POST   | `/api/v1/center/service-region-route-overrides/sync`    | Same, for the service dimension                                  |
+//! | Method | Path                                             | Description                                                 |
+//! |--------|--------------------------------------------------|-------------------------------------------------------------|
+//! | GET    | `/api/v1/center/region-route-overrides`          | Watch-fed RegionRouteOverride rows across controllers        |
+//! | POST   | `/api/v1/center/region-route-overrides/failover` | Set `failoverTo` on one region, on every online controller   |
+//! | POST   | `/api/v1/center/region-route-overrides/sync`     | Copy one controller's override document to selected targets  |
 //!
 //! All writes go through the shared `config_data_ops::write_config_data` core.
+//!
+//! # There is exactly one override dimension
+//!
+//! An earlier model also carried a Service dimension
+//! (`ServiceRegionRouteOverride`, with its own list/failover/sync endpoints and
+//! its own dashboard tab). Edgion never had that type: RegionRoute config is
+//! attached per HTTPRoute/GRPCRoute rule through an `EdgionPlugins`
+//! ExtensionRef filter, and each `EdgionPlugins` object carries its own
+//! `overrideRef`. Per-service failover is therefore already expressible with
+//! `RegionRouteOverride` alone: scope is a property of which object references
+//! a document, not of the document's own type. The Service surface was removed
+//! rather than left permanently empty. Do not reintroduce it.
+//!
+//! `failover` pins the `/spec/data/type` its target must carry, so it can only
+//! ever rewrite a `RegionRouteOverride`. `sync` has no equivalent guard — it
+//! validates the source row (which comes from the type-classified metadata
+//! store) but replaces each target's whole `/spec/data` without checking what
+//! that target currently is.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -29,7 +44,7 @@ use super::ApiState;
 
 // ============= Failover Request Type =============
 
-/// Strongly-typed body for `/api/v1/center/{region,service-region}-route-overrides/failover`.
+/// Strongly-typed body for `/api/v1/center/region-route-overrides/failover`.
 ///
 /// The failover endpoint can only change the targeted region's `failoverTo` field.
 /// Any extra field (e.g. `myRegion`, `spec`, full PM YAML) is rejected at the
@@ -74,40 +89,16 @@ pub async fn list_region_route_overrides(
     })))
 }
 
-pub async fn list_service_region_route_overrides(
-    State(state): State<ApiState>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let online_controller_ids = state.online_controller_ids().await.map_err(|error| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "success": false, "message": error.to_string() })),
-        )
-    })?;
-    Ok(Json(serde_json::json!({
-        "success": true,
-        "data": state.metadata_store.list_service_region_route_overrides(),
-        "onlineControllerIds": online_controller_ids,
-    })))
-}
-
 pub async fn region_route_override_sync(
     State(state): State<ApiState>,
     Json(req): Json<OverrideSyncRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    sync_watched_override(&state, req, false).await
-}
-
-pub async fn service_region_route_override_sync(
-    State(state): State<ApiState>,
-    Json(req): Json<OverrideSyncRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    sync_watched_override(&state, req, true).await
+    sync_watched_override(&state, req).await
 }
 
 async fn sync_watched_override(
     state: &ApiState,
     req: OverrideSyncRequest,
-    service: bool,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let online = match state.online_controller_ids().await {
         Ok(online) if !online.is_empty() => online,
@@ -125,19 +116,11 @@ async fn sync_watched_override(
         }
     };
     let online_set: HashSet<_> = online.iter().cloned().collect();
-    let row = if service {
-        state
-            .metadata_store
-            .list_service_region_route_overrides()
-            .into_iter()
-            .find(|row| row.namespace == req.namespace && row.name == req.name)
-    } else {
-        state
-            .metadata_store
-            .list_region_route_overrides()
-            .into_iter()
-            .find(|row| row.namespace == req.namespace && row.name == req.name)
-    };
+    let row = state
+        .metadata_store
+        .list_region_route_overrides()
+        .into_iter()
+        .find(|row| row.namespace == req.namespace && row.name == req.name);
     let Some(row) = row else {
         return (
             StatusCode::NOT_FOUND,
@@ -252,25 +235,38 @@ pub async fn region_route_failover(
     State(state): State<ApiState>,
     Json(req): Json<FailoverRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    direct_override_failover(&state, req).await
+    direct_override_failover(&state, req, REGION_OVERRIDE_TYPE).await
 }
 
-pub async fn service_region_route_failover(
-    State(state): State<ApiState>,
-    Json(req): Json<FailoverRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    direct_override_failover(&state, req).await
+/// The only `/spec/data/type` this endpoint may write.
+const REGION_OVERRIDE_TYPE: &str = "RegionRouteOverride";
+
+/// Report whether the document's `/spec/data/type` is exactly `expected`.
+/// Exact and case-sensitive, matching how the watch read model classifies a
+/// document — a case variant or typo is a different type, not a near miss.
+fn config_data_type_is(document: &serde_json::Value, expected: &str) -> bool {
+    document
+        .pointer("/spec/data/type")
+        .and_then(serde_json::Value::as_str)
+        == Some(expected)
 }
 
 /// Writes the requested `failoverTo` to every online controller through the
 /// shared [`write_config_data`] core: for each controller, locate `region_name`
 /// under `/spec/data/config/regions` in the cached `EdgionConfigData` document
-/// and set its `failoverTo`, then observe convergence locally. Region and
-/// service overrides are the same resource kind (`edgionconfigdata`) from the
-/// write core's point of view, so both callers share this path.
+/// and set its `failoverTo`, then observe convergence locally.
+///
+/// `expected_type` keeps the write inside its own resource type: a request
+/// identifies its target by `namespace`/`name` alone, and the watch cache holds
+/// every `EdgionConfigData` type, so without the check a failover could rewrite
+/// an unrelated document that merely shares the name. The check runs in BOTH
+/// closures deliberately — the write core evaluates `predicate` first as an
+/// idempotent skip, so a `mutate`-only check would be bypassed whenever the
+/// wrong-type document already happened to carry the requested `failoverTo`.
 async fn direct_override_failover(
     state: &ApiState,
     req: FailoverRequest,
+    expected_type: &str,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let online = match state.online_controller_ids().await {
         Ok(online) if !online.is_empty() => online,
@@ -289,10 +285,20 @@ async fn direct_override_failover(
     };
 
     let mutate = |document: &mut serde_json::Value| -> Result<(), String> {
+        if !config_data_type_is(document, expected_type) {
+            return Err(format!(
+                "document is not a {expected_type}: spec.data.type is {}",
+                document
+                    .pointer("/spec/data/type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("absent")
+            ));
+        }
         set_region_failover_to(document, &req.region_name, &req.failover_to)
     };
     let predicate = |document: &serde_json::Value| -> bool {
-        region_failover_matches(document, &req.region_name, &req.failover_to)
+        config_data_type_is(document, expected_type)
+            && region_failover_matches(document, &req.region_name, &req.failover_to)
     };
 
     let outcomes: Vec<WriteOutcome> =
@@ -528,35 +534,46 @@ mod tests {
         }
     }
 
+    /// The federation watch feeds every `EdgionConfigData` type into the store,
+    /// but this list surface projects exactly one. A document of another type
+    /// must not appear in it.
     #[tokio::test]
-    async fn override_lists_are_fed_by_watched_resource_type() {
+    async fn override_list_is_fed_only_by_the_watched_resource_type() {
         use crate::watch_cache::CenterConfHandler;
         let state = test_api_state();
         state.metadata_store.full_set(
             "ctrl-a",
-            &HashMap::from([(
-                "shop/checkout".to_string(),
-                Arc::new(serde_json::json!({
-                    "metadata": {"namespace": "shop", "name": "checkout"},
-                    "spec": {
-                        "data": {
-                            "type": "ServiceRegionRouteOverride",
-                            "config": {"regions": [{"name": "east"}]}
+            &HashMap::from([
+                (
+                    "shop/shared".to_string(),
+                    Arc::new(serde_json::json!({
+                        "metadata": {"namespace": "shop", "name": "shared"},
+                        "spec": {
+                            "data": {
+                                "type": "RegionRouteOverride",
+                                "config": {"regions": [{"name": "east"}]}
+                            }
                         }
-                    }
-                })),
-            )]),
+                    })),
+                ),
+                (
+                    "shop/checkout".to_string(),
+                    Arc::new(serde_json::json!({
+                        "metadata": {"namespace": "shop", "name": "checkout"},
+                        "spec": {
+                            "data": {
+                                "type": "KeyList",
+                                "config": {"keys": ["tenant-a"]}
+                            }
+                        }
+                    })),
+                ),
+            ]),
         );
-        let Json(region) = list_region_route_overrides(State(state.clone()))
-            .await
-            .unwrap();
-        let Json(service) = list_service_region_route_overrides(State(state))
-            .await
-            .unwrap();
-        assert_eq!(region["data"].as_array().unwrap().len(), 0);
-        assert_eq!(service["data"].as_array().unwrap().len(), 1);
-        assert_eq!(service["data"][0]["namespace"], "shop");
-        assert_eq!(service["data"][0]["name"], "checkout");
+        let Json(region) = list_region_route_overrides(State(state)).await.unwrap();
+        assert_eq!(region["data"].as_array().unwrap().len(), 1);
+        assert_eq!(region["data"][0]["namespace"], "shop");
+        assert_eq!(region["data"][0]["name"], "shared");
     }
 
     #[test]
@@ -650,6 +667,7 @@ mod tests {
                         },
                         "spec": {
                             "data": {
+                                "type": "RegionRouteOverride",
                                 "config": {
                                     "regions": [{"name": "east", "failoverTo": "west"}]
                                 }
@@ -683,6 +701,94 @@ mod tests {
         };
         assert_eq!(outcome_for("ctrl-a")["state"], "converged");
         assert_eq!(outcome_for("ctrl-b")["state"], "failed");
+    }
+
+    /// A failover request identifies its target by `namespace`/`name` alone,
+    /// and the watch cache holds every `EdgionConfigData` type — so only the
+    /// `/spec/data/type` check keeps the write inside `RegionRouteOverride`.
+    ///
+    /// The fixture is deliberately adversarial: a `Misc` document whose config
+    /// is region-table-shaped AND already carries the requested `failoverTo`.
+    /// Without the guard the write core's idempotent skip would evaluate the
+    /// predicate to true and report `converged` before `mutate` ever runs, so
+    /// a `mutate`-only check would not catch this.
+    #[tokio::test]
+    async fn failover_refuses_a_document_of_another_config_data_type() {
+        use crate::aggregator::ControllerInfo;
+
+        let state = test_api_state();
+        state.aggregator.set_controller_info(
+            "ctrl-a",
+            ControllerInfo {
+                controller_id: "ctrl-a".into(),
+                cluster: "cluster-a".into(),
+                environments: Vec::new(),
+                tags: Vec::new(),
+            },
+        );
+        state
+            .sync_client
+            .plugin_metadata
+            .get_or_create("ctrl-a")
+            .replace_all(
+                vec![(
+                    "default/rr-override".to_string(),
+                    serde_json::json!({
+                        "metadata": {
+                            "namespace": "default",
+                            "name": "rr-override",
+                            "resourceVersion": "1"
+                        },
+                        "spec": {
+                            "data": {
+                                "type": "Misc",
+                                "config": {
+                                    "regions": [{"name": "east", "failoverTo": "west"}]
+                                }
+                            }
+                        }
+                    }),
+                )],
+                1,
+                "server-1".to_string(),
+            );
+
+        let req = FailoverRequest {
+            namespace: "default".into(),
+            name: "rr-override".into(),
+            region_name: "east".into(),
+            failover_to: "west".into(),
+        };
+        let (status, Json(v)) = region_route_failover(State(state), Json(req)).await;
+
+        // Nothing landed anywhere, and not because of a CAS conflict -> 502.
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(v["data"]["modified"], 0);
+        assert_eq!(v["data"]["failed"], 1);
+        let outcome = &v["data"]["outcomes"][0];
+        assert_eq!(outcome["state"], "failed");
+        assert_eq!(
+            outcome["reason"],
+            "document is not a RegionRouteOverride: spec.data.type is Misc"
+        );
+    }
+
+    #[test]
+    fn config_data_type_is_matches_exactly() {
+        let document = serde_json::json!({
+            "spec": {"data": {"type": "RegionRouteOverride"}}
+        });
+        assert!(config_data_type_is(&document, REGION_OVERRIDE_TYPE));
+        assert!(!config_data_type_is(&document, "Misc"));
+        // Case variants and a missing type are different types, not near misses.
+        assert!(!config_data_type_is(
+            &serde_json::json!({"spec": {"data": {"type": "regionrouteoverride"}}}),
+            REGION_OVERRIDE_TYPE
+        ));
+        assert!(!config_data_type_is(
+            &serde_json::json!({"spec": {"data": {}}}),
+            REGION_OVERRIDE_TYPE
+        ));
     }
 
     /// A `Conflict` (409: the CAS precondition was rejected outright) must be

@@ -3,9 +3,13 @@
 # Center Federation mTLS + SPIFFE Peer-Identity Integration Test
 #
 # Tests three scenarios:
-#   1. mtls_happy_path       — center (mTLS) + ctrl-east + ctrl-west both sync
-#   2. wrong_san_rejected    — bad-cert controller (SPIFFE mismatch) is rejected
-#   3. plaintext_fail_close  — center with no TLS and no allow_plaintext exits non-zero
+#   1. mtls_happy_path       — center (mTLS) + ctrl-east + ctrl-west both register
+#                              and come online (watch-cache sync itself is covered
+#                              by run_center_test.sh)
+#   2. wrong_san_rejected    — bad-cert controller (SPIFFE mismatch) is rejected;
+#                              online count stays at 2
+#   3. plaintext_fail_close  — center with no TLS and no allow_plaintext exits
+#                              non-zero for the federation mTLS requirement
 #
 # Port allocation (different from run_center_test.sh to avoid collisions):
 #   center:         gRPC 50962, HTTP 5920, probe 5929, metrics 5928
@@ -127,7 +131,14 @@ do_login() {
   resp=$(curl -sf --max-time 10 -H "Content-Type: application/json" \
     -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" \
     "${url}/api/v1/auth/login" 2>/dev/null || true)
-  echo "$resp" | grep -o '"token":"[^"]*"' | head -1 | sed 's/"token":"//;s/"//'
+  # Never fail under pipefail: an empty/HTML response yields an empty token.
+  python3 -c "
+import sys, json
+try:
+    print(json.loads(sys.argv[1])['data']['token'])
+except Exception:
+    pass
+" "$resp"
 }
 
 # ── Parse args ────────────────────────────────────────────────────────────────
@@ -346,12 +357,17 @@ conf_center:
 conf_sync:
   no_sync_kinds: ["ReferenceGrant", "Secret"]
 
+# The conf_sync (Controller->Gateway) channel refuses to start without an
+# explicit transport choice; no gateway connects in this harness.
+conf_sync_security:
+  tls:
+    skip_tls: true
+
 center:
   address: "https://127.0.0.1:${CENTER_GRPC_PORT}"
   name: "${ctrl_name}"
   cluster: "${cluster}"
   env: ["testing"]
-  ping_interval_secs: 5
   security:
     active: fed
     certs:
@@ -392,12 +408,15 @@ conf_center:
 conf_sync:
   no_sync_kinds: ["ReferenceGrant", "Secret"]
 
+conf_sync_security:
+  tls:
+    skip_tls: true
+
 center:
   address: "https://127.0.0.1:${CENTER_GRPC_PORT}"
   name: "ctrl-bad"
   cluster: "east-cluster"
   env: ["testing"]
-  ping_interval_secs: 5
   security:
     active: fed
     certs:
@@ -414,10 +433,10 @@ for idx in 1 2 _bad; do
   cp -r "$EDGION_DIR/config/crd" "${local_dir}/config/"
 done
 
-# Copy test PluginMetaData resources for ctrl1 and ctrl2 (for watch-sync)
+# Copy test EdgionConfigData resources for ctrl1 and ctrl2 (for watch-sync)
 cp "$CONF_SRC/ctrl1/"*.yaml "$WORK_DIR/ctrl1/conf/"
 cp "$CONF_SRC/ctrl2/"*.yaml "$WORK_DIR/ctrl2/conf/"
-log "Copied CRD schemas and PluginMetaData resources"
+log "Copied CRD schemas and EdgionConfigData resources"
 
 # =============================================================================
 # TEST CASE 1: mtls_happy_path
@@ -453,14 +472,21 @@ else
   pass "mtls_happy_path/no_plaintext_warning"
 fi
 
-# Login to center
+# Login to center. The probe listener comes up before the admin HTTP
+# composition; retry until the login route is mounted.
 log "Logging in to center..."
-TOKEN=$(do_login "$CENTER_HTTP" "$AUTH_USER" "$AUTH_PASS")
-if [[ -z "$TOKEN" ]]; then
-  echo -e "${RED}ERROR${NC}: Failed to login to center" >&2
-  tail -20 "$WORK_DIR/logs/center.log" >&2
-  exit 1
-fi
+login_elapsed=0
+while true; do
+  TOKEN=$(do_login "$CENTER_HTTP" "$AUTH_USER" "$AUTH_PASS")
+  [[ -n "$TOKEN" ]] && break
+  if [[ $login_elapsed -ge 15 ]]; then
+    echo -e "${RED}ERROR${NC}: Failed to login to center" >&2
+    tail -20 "$WORK_DIR/logs/center.log" >&2
+    exit 1
+  fi
+  sleep 1
+  ((login_elapsed++)) || true
+done
 log "Login successful"
 
 # Start controller 1 (east-cluster/ctrl-east — valid cert)
@@ -489,13 +515,13 @@ done
 log "Waiting for watch sync to complete (timeout 45s)..."
 elapsed=0
 while true; do
-  out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/admin/watch-status" 2>/dev/null || echo "")
+  out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/controllers" 2>/dev/null || echo "")
   synced=$(echo "$out" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
     items = d.get('data', [])
-    print(sum(1 for i in items if i.get('syncVersion', 0) > 0))
+    print(sum(1 for i in items if i.get('online')))
 except:
     print(0)
 " 2>/dev/null || echo "0")
@@ -505,7 +531,7 @@ except:
   fi
   if [[ $elapsed -ge 45 ]]; then
     echo -e "${RED}ERROR${NC}: Timed out waiting for mTLS watch sync" >&2
-    log "Last watch-status response: $out"
+    log "Last controllers response: $out"
     log "Center log tail:"
     tail -20 "$WORK_DIR/logs/center.log"
     log "Ctrl1 log tail:"
@@ -518,18 +544,18 @@ except:
   ((elapsed++)) || true
 done
 
-# Assert both controllers appear with syncVersion > 0
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/admin/watch-status")
+# Assert both controllers appear online
+out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/controllers")
 count=$(echo "$out" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 items = d.get('data', [])
-print(sum(1 for i in items if i.get('syncVersion', 0) > 0))
+print(sum(1 for i in items if i.get('online')))
 " 2>/dev/null || echo "0")
 if [[ "$count" -ge 2 ]]; then
-  pass "mtls_happy_path/watch_sync"
+  pass "mtls_happy_path/controllers_online"
 else
-  fail "mtls_happy_path/watch_sync" "expected >= 2 controllers with syncVersion > 0, got $count. Response: $out"
+  fail "mtls_happy_path/controllers_online" "expected >= 2 controllers with syncVersion > 0, got $count. Response: $out"
 fi
 
 # Assert center metrics show peer identity check ok
@@ -567,25 +593,27 @@ log "Bad controller PID: $CTRL_BAD_PID"
 log "Waiting 35s for bad controller connection attempts (startup ~15-20s + retry window)..."
 sleep 35
 
-# Sub-assert A: bad controller must NOT appear in watch-status with syncVersion > 0
-out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/center/admin/watch-status")
+# Sub-assert A: the bad controller must NOT appear as an online controller
+out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/controllers")
 bad_synced=$(echo "$out" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
     items = d.get('data', [])
-    # Check if any controller with east-cluster/ctrl-east has syncVersion > 0
-    # but we started ctrl1 (east-cluster/ctrl-east) with a valid cert too,
-    # so we check total count is still 2 (not 3) with syncVersion > 0.
-    synced = [i for i in items if i.get('syncVersion', 0) > 0]
-    # The bad controller uses same controller_id as ctrl1 (east-cluster/ctrl-east).
-    # Under mTLS with rejection, it never gets registered. If it did sneak in,
-    # it might displace ctrl1. So we check that exactly 2 controllers are online
-    # and that the center log shows the rejection.
-    print(len(synced))
+    # ctrl1 shares the cluster with the attacker identity; the attacker must
+    # never register, so the online count stays 2 and the rejection shows up
+    # in the center log (asserted below).
+    print(sum(1 for i in items if i.get('online')))
 except:
     print(0)
 " 2>/dev/null || echo "0")
+
+if [[ "$bad_synced" == "2" ]]; then
+  pass "wrong_san_rejected/online_count_unchanged"
+else
+  fail "wrong_san_rejected/online_count_unchanged" \
+    "expected exactly 2 online controllers after the bad-cert attempt, got $bad_synced"
+fi
 
 # Sub-assert B: center log must show peer identity check failed
 # grep returns exit 1 when no match — use || true to prevent set -e from firing
@@ -606,10 +634,9 @@ else
 fi
 
 # The bad controller may have displaced ctrl1 in the registry (same controller_id).
-# The important assertion is that it did NOT successfully sync (ctrl1 may still be in
-# watch-status because its session was replaced, but we verify the rejection occurred).
-# Also verify the bad controller never produced syncVersion > 0 for attacker identity.
-log "watch-status after bad controller attempt: $out"
+# The important assertion is that it never registered successfully (ctrl1 may still
+# be listed because its session was replaced, but we verify the rejection occurred).
+log "controllers list after bad controller attempt: $out"
 
 # Sub-assert C: metrics show mismatch counter > 0
 metrics_out=$(curl -sf --max-time 10 "http://127.0.0.1:${CENTER_METRICS_PORT}/metrics" 2>/dev/null || echo "")
@@ -642,7 +669,8 @@ log "TEST CASE 3: plaintext_fail_close"
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Write a center config with NO grpc_security and NO allow_plaintext.
-# This must cause the center to exit non-zero.
+# Everything else must be valid (standalone refuses database.enabled=false
+# even earlier), so the exit we assert on is the federation mTLS fail-close.
 mkdir -p "$WORK_DIR/failclose"
 cat > "$WORK_DIR/failclose/center.yaml" <<EOF
 server:
@@ -654,7 +682,9 @@ sync:
   ping_interval_secs: 5
 
 database:
-  enabled: false
+  enabled: true
+  backend: sqlite
+  sqlite_path: "${WORK_DIR}/failclose/center.db"
 
 local_auth:
   enabled: true
@@ -700,7 +730,7 @@ fi
 
 # Also assert the log contains the fail-close message
 fc_log=$(cat "$WORK_DIR/logs/center_failclose.log" 2>/dev/null || echo "")
-if echo "$fc_log" | grep -qE "allow_plaintext|no TLS|fail-close|refuses to start"; then
+if echo "$fc_log" | grep -qE "requires mTLS|refuses to start"; then
   pass "plaintext_fail_close/log_shows_reason"
 else
   fail "plaintext_fail_close/log_shows_reason" "Log does not contain expected fail-close reason. Log: $fc_log"

@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { reloadOutcomeFromError, type ReloadOutcome } from './reloadOutcome'
 
 function safeId(id: string): string {
   return id.replace(/\//g, '~')
@@ -59,9 +60,33 @@ export const centerApi = {
     const { data } = await apiClient.get('clusters')
     return data
   },
-  reloadController: async (id: string): Promise<{ success: boolean }> => {
-    const { data } = await apiClient.post(`controllers/${safeId(id)}/reload`)
-    return data
+  /**
+   * Reload one Controller and resolve with its terminal outcome.
+   *
+   * `_silent` is required: the shared response interceptor pops its own
+   * hard-coded error toast for 409/503, which would bury the reload-specific
+   * wording (the leader address, the retry hint) under a generic message —
+   * the very flattening this outcome exists to undo.
+   *
+   * A `conflict`/`failed` outcome arrives on a non-2xx status so scripts see
+   * an honest failure, so it is lifted out of the rejection and resolved like
+   * any other state. Only a genuine transport/auth failure (404 unknown
+   * controller, 401, network error) still rejects.
+   */
+  reloadController: async (id: string): Promise<ReloadOutcome> => {
+    try {
+      const { data } = await apiClient.post<{ success: boolean; data?: ReloadOutcome }>(
+        `controllers/${safeId(id)}/reload`,
+        undefined,
+        { _silent: true } as never,
+      )
+      if (!data?.data) throw new Error('reload response carried no outcome')
+      return data.data
+    } catch (error) {
+      const outcome = reloadOutcomeFromError(error)
+      if (outcome) return outcome
+      throw error
+    }
   },
   // ── Admin ──────────────────────────────────────────────────────────────
   listAdminControllers: async (): Promise<{ success: boolean; data?: AdminControllerDto[]; count: number }> => {

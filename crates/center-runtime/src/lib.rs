@@ -12,6 +12,5 @@ pub mod global_resources;
 pub mod internal_forwarding;
 pub mod metadata_store;
 pub mod observe;
-pub mod poll;
 pub mod proxy;
 pub mod watch_cache;

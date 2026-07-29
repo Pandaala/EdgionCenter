@@ -84,43 +84,56 @@ test.describe('Center and shell actions', () => {
     ])
   })
 
-  test('Center dashboard refreshes, filters, reloads, and enters a controller', async ({ page }) => {
-    await page.goto('/')
-    await expect(page.getByTestId('controller-card-enter').first()).toBeVisible()
+  test('Controllers page refreshes, filters, reloads, and enters a controller', async ({ page }) => {
+    // The reload response is terminal: Center waits up to 20 s for the new
+    // server_id before answering, so give the whole flow room to breathe.
+    test.setTimeout(90_000)
+    await page.goto('/controllers')
+    await expect(page.getByTestId('controller-enter').first()).toBeVisible()
 
     await clickAndWaitForGet(page, 'controllers-refresh', '/api/v1/controllers')
 
-    const cards = page.getByTestId('controller-card-enter')
-    const cardCount = await cards.count()
+    const rows = page.getByTestId('controller-enter')
+    const rowCount = await rows.count()
     const search = page.getByTestId('controller-search')
     await search.fill('__no_controller_matches__')
     await search.press('Enter')
-    await expect(page.getByTestId('controller-card-enter')).toHaveCount(0)
+    await expect(page.getByTestId('controller-enter')).toHaveCount(0)
     await search.fill(controllerId('A'))
     await search.press('Enter')
-    await expect(page.getByTestId('controller-card-enter').first()).toBeVisible()
+    await expect(page.getByTestId('controller-enter').first()).toBeVisible()
     await search.fill('')
-    await expect(page.getByTestId('controller-card-enter')).toHaveCount(cardCount)
+    await expect(page.getByTestId('controller-enter')).toHaveCount(rowCount)
 
     const clusterFilter = page.getByTestId('controller-cluster-filter')
     await clusterFilter.click()
     const clusterOption = page.locator('.ant-select-dropdown:visible .ant-select-item-option').nth(1)
     if (await clusterOption.count()) {
       await clusterOption.click()
-      await expect(page.getByTestId('controller-card-enter').first()).toBeVisible()
+      await expect(page.getByTestId('controller-enter').first()).toBeVisible()
     } else {
       await page.keyboard.press('Escape')
     }
 
-    await page.getByTestId('controller-card-reload').first().click()
-    await cancelModal(page, 'controller-card-reload-cancel')
-    await page.getByTestId('controller-card-reload').first().click()
-    await Promise.all([
-      page.waitForResponse((response) => response.request().method() === 'POST' && /\/controllers\/[^/]+\/reload$/.test(response.url())),
-      page.getByTestId('controller-card-reload-confirm').click(),
+    await page.getByTestId('controller-reload').first().click()
+    await cancelModal(page, 'controller-reload-cancel')
+    await page.getByTestId('controller-reload').first().click()
+    const [reloadResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) => response.request().method() === 'POST' && /\/controllers\/[^/]+\/reload$/.test(response.url()),
+        { timeout: 30_000 },
+      ),
+      page.getByTestId('controller-reload-confirm').click(),
     ])
+    // 200 converged surfaces as a toast; every other terminal state opens a
+    // modal the operator must acknowledge — dismiss it so the page is usable.
+    expect([200, 202, 409, 502, 503]).toContain(reloadResponse.status())
+    const outcomeOk = page.getByTestId('controller-reload-outcome-ok')
+    if (await outcomeOk.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true, () => false)) {
+      await outcomeOk.click()
+    }
 
-    await page.getByTestId('controller-card-enter').first().click()
+    await page.getByTestId('controller-enter').first().click()
     await expect(page).toHaveURL(/\/controller\//)
   })
 
@@ -217,10 +230,10 @@ test.describe('Center and shell actions', () => {
 
   test('admin controller deletion opens and cancels without touching the two-controller runtime', async ({ page, request }) => {
     test.skip(!(await hasCapability(request, 'controllerHistory')), `${process.env.E2E_MODE} runtime has no controller history capability`)
-    await page.goto('/admin')
-    await clickAndWaitForGet(page, 'admin-refresh', '/center/admin/controllers')
-    if (await openFirstAvailable(page.getByTestId('admin-controller-delete'))) {
-      await cancelModal(page, 'admin-delete-cancel')
+    await page.goto('/controllers')
+    await clickAndWaitForGet(page, 'controllers-refresh', '/center/admin/controllers')
+    if (await openFirstAvailable(page.getByTestId('controller-delete'))) {
+      await cancelModal(page, 'controller-delete-cancel')
     }
   })
 

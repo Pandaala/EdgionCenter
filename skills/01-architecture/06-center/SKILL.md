@@ -7,7 +7,7 @@ description: Federation, ownership, aggregation, and persistence architecture fo
 
 Controllers establish bidirectional, mTLS-authenticated streams on `:12251`. Center
 validates registration, maintains live sessions, aggregates metadata, initiates reverse
-watches, and routes commands or HTTP proxy calls back through the owning stream.
+watches, and routes HTTP proxy calls back through the owning stream.
 
 Standalone uses one process plus SQLite/MySQL. Kubernetes mode is active-active: Controller
 CRDs are the durable directory, a Lease per Controller elects and fences the replica that

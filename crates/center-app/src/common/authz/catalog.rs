@@ -25,8 +25,11 @@ pub const GLOBAL_RESOURCES_READ: &str = "global-resources:read";
 pub const AUDIT_READ: &str = "audit:read";
 // Server reads (server-info).
 pub const SERVER_READ: &str = "server:read";
-// HTTP proxy to controllers (any method).
-pub const PROXY_ACCESS: &str = "proxy:access";
+// HTTP proxy to controllers, split by method so a grant can be read-only.
+// The Controller still applies its own `center.rbac` policy to every forwarded
+// request; these keys decide only what Center distributes to its own users.
+pub const PROXY_READ: &str = "proxy:read";
+pub const PROXY_WRITE: &str = "proxy:write";
 // User / role administration (db_auth; gates the /admin/users & /admin/roles endpoints).
 pub const USERS_MANAGE: &str = "users:manage";
 pub const ROLES_MANAGE: &str = "roles:manage";
@@ -94,7 +97,8 @@ pub fn all_keys() -> &'static [&'static str] {
         GLOBAL_RESOURCES_READ,
         AUDIT_READ,
         SERVER_READ,
-        PROXY_ACCESS,
+        PROXY_READ,
+        PROXY_WRITE,
         USERS_MANAGE,
         ROLES_MANAGE,
         CLOUDFLARE_DNS_READ,
@@ -169,7 +173,7 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
         },
         PermissionGroup {
             group: "Proxy",
-            keys: vec![PROXY_ACCESS],
+            keys: vec![PROXY_READ, PROXY_WRITE],
         },
         PermissionGroup {
             group: "Access Control",
@@ -272,9 +276,13 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         return is_read.then_some(GLOBAL_RESOURCES_READ);
     }
 
-    // HTTP proxy — any method forwards to a controller.
+    // HTTP proxy — every method forwards to a controller, but read and write
+    // are distinct grants. The standalone authorizer matches the permission key
+    // alone and cannot see the method, so splitting here is what lets a database
+    // role express a read-only proxy grant (Kubernetes mode expresses the same
+    // thing through the concrete path and verb in its SubjectAccessReview).
     if path.starts_with("/api/v1/proxy/") {
-        return Some(PROXY_ACCESS);
+        return Some(if is_read { PROXY_READ } else { PROXY_WRITE });
     }
 
     if is_cloudflare_remote_control_path(path) {
@@ -423,9 +431,7 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     }
 
     // RegionRoute overrides: list is a GET read, failover/sync are writes.
-    if under_segment(path, "/api/v1/center/region-route-overrides")
-        || under_segment(path, "/api/v1/center/service-region-route-overrides")
-    {
+    if under_segment(path, "/api/v1/center/region-route-overrides") {
         return Some(if is_read {
             REGION_ROUTES_READ
         } else {
@@ -615,22 +621,10 @@ mod tests {
             (Method::POST, "/api/v1/controllers/c1/reload"),
             (Method::GET, "/api/v1/center/region-route-overrides"),
             (
-                Method::GET,
-                "/api/v1/center/service-region-route-overrides",
-            ),
-            (
                 Method::POST,
                 "/api/v1/center/region-route-overrides/failover",
             ),
-            (
-                Method::POST,
-                "/api/v1/center/service-region-route-overrides/failover",
-            ),
             (Method::POST, "/api/v1/center/region-route-overrides/sync"),
-            (
-                Method::POST,
-                "/api/v1/center/service-region-route-overrides/sync",
-            ),
             (Method::GET, "/api/v1/center/admin/controllers"),
             (Method::DELETE, "/api/v1/center/admin/controllers/c1"),
             (Method::GET, "/api/v1/center/admin/users"),
@@ -1261,24 +1255,44 @@ mod tests {
             route_permission(&Method::POST, "/api/v1/center/region-route-overrides/sync"),
             Some(REGION_ROUTES_WRITE)
         );
+        // The Service dimension was removed; its former paths are no longer
+        // classified and therefore default-deny.
         assert_eq!(
             route_permission(
                 &Method::GET,
                 "/api/v1/center/service-region-route-overrides"
             ),
-            Some(REGION_ROUTES_READ)
+            None
         );
         assert_eq!(
             route_permission(
                 &Method::POST,
                 "/api/v1/center/service-region-route-overrides/failover"
             ),
-            Some(REGION_ROUTES_WRITE)
+            None
         );
         assert_eq!(
             route_permission(&Method::DELETE, "/api/v1/center/admin/controllers/c1"),
             Some(CONTROLLERS_WRITE)
         );
+        // The proxy tunnel splits by method so a standalone role can be granted
+        // reads without writes; every controller and kind stays in scope for
+        // whichever half is granted.
+        let proxy_path = "/api/v1/proxy/east~c1/api/v1/namespaced/httproute/ns/name";
+        for method in [Method::GET, Method::HEAD] {
+            assert_eq!(
+                route_permission(&method, proxy_path),
+                Some(PROXY_READ),
+                "{method} {proxy_path}"
+            );
+        }
+        for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+            assert_eq!(
+                route_permission(&method, proxy_path),
+                Some(PROXY_WRITE),
+                "{method} {proxy_path}"
+            );
+        }
         assert_eq!(
             route_permission(&Method::GET, "/api/v1/center/admin/audit-logs"),
             Some(AUDIT_READ)
@@ -1479,13 +1493,6 @@ mod tests {
         // Sibling paths sharing a textual prefix must NOT resolve to the base key.
         assert_eq!(
             route_permission(&Method::GET, "/api/v1/center/region-route-overrides-v2"),
-            None
-        );
-        assert_eq!(
-            route_permission(
-                &Method::GET,
-                "/api/v1/center/service-region-route-overrides-v2"
-            ),
             None
         );
         assert_eq!(

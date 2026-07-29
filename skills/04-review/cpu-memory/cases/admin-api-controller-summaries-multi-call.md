@@ -14,7 +14,7 @@ description: Use when reviewing findings that flag controller_summaries() being 
 | `api/mod.rs:178` `list_controllers` | All 5 fields | None |
 | `api/mod.rs:183` `list_clusters` | Only `.cluster` | controller_id / env / tag / online |
 | `global_connection_ip_restriction_handlers.rs:53,161` `online_controllers` | filter `.online` + take `.controller_id` | cluster / env / tag |
-| `region_route_handlers.rs:150,250,312` | Partial by controller_id / online | Same as above |
+| `region_route_handlers.rs:79,103,271` `online_controller_ids` | Partial by controller_id / online | Same as above |
 
 **Reality**:
 

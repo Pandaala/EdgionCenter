@@ -550,7 +550,18 @@ const zh = {
   'center.enter': '进入',
   'center.reload': '重载',
   'center.reloadConfirm': '确定重载 Controller {name}？',
-  'center.reloadOk': '重载指令已发送',
+  'center.reloadPending': '正在重载 {name}，等待其恢复…',
+  // A reload is reported as a terminal state, never as bare dispatch success:
+  // the Controller's own 200 only means "queued", so `converged` is the only
+  // wording allowed to claim the reload finished.
+  'center.reloadOutcome.title': '重载结果',
+  'center.reloadOutcome.converged': '重载完成。{name} 已带着新的 server_id（{serverId}）恢复，耗时 {seconds} 秒。',
+  'center.reloadOutcome.accepted': '重载指令已下发给 {name}，但当前 Center 副本不持有它的联邦会话，因此无法在此确认是否完成。请直接检查该 Controller。',
+  'center.reloadOutcome.unknown': '重载指令已下发给 {name}，但在 {seconds} 秒内未观测到它恢复。它可能仍在重启中 —— 这不是已确认的成功。重试前请先复查。',
+  'center.reloadOutcome.conflict': '{name} 是 follower 副本，已拒绝本次重载。在此重试无效 —— 请发往 leader：{leader}',
+  'center.reloadOutcome.conflictNoLeader': '{name} 是 follower 副本，已拒绝本次重载。在此重试无效，且它尚不知道哪个副本是 leader（可能正在选举中）。',
+  'center.reloadOutcome.retry': '{name} 暂时拒绝了本次重载，未启动。请在 {seconds} 秒后重试。Controller 报告：{reason}',
+  'center.reloadOutcome.failed': '{name} 的重载被拒绝：{reason}',
   'center.backToCenter': '返回中心',
   'center.filterCluster': '按集群筛选',
   'center.allClusters': '全部集群',
@@ -575,8 +586,6 @@ const zh = {
   'center.nav.regionRoutes': 'RegionRoute',
   'center.nav.regionTopology': '拓扑',
   'center.nav.regionServiceUsage': '服务使用关系',
-  'center.nav.regionDimension': 'Region',
-  'center.nav.serviceDimension': 'Service',
   'center.nav.globalRules': 'GlobalRules',
   'center.nav.globalResources': '全局资源',
   'center.nav.edgionConfigData': 'EdgionConfigData',

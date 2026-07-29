@@ -1,8 +1,8 @@
 //! CenterMetaDataStore — aggregates EdgionConfigData overrides across all controllers.
 //!
 //! Implements [`CenterConfHandler<WatchedConfigData>`] for the federation
-//! EdgionConfigData list/watch cache. RegionRouteOverride and
-//! ServiceRegionRouteOverride are classified directly into namespace/name maps.
+//! EdgionConfigData list/watch cache. `RegionRouteOverride` documents are
+//! classified directly into a namespace/name map.
 //!
 //! The store holds nothing else: it is populated exclusively by the federation
 //! list/watch stream, and every row is keyed by "namespace/name" with one entry
@@ -27,30 +27,31 @@ pub struct CenterRegionRouteOverrideView {
 
 /// Aggregates the EdgionConfigData override read model across all controllers.
 ///
-/// Internal structure — both maps are "namespace/name" → { controller_id → resource }:
-/// - `region_route_overrides`: EdgionConfigData of type `RegionRouteOverride`
-/// - `service_region_route_overrides`: EdgionConfigData of type `ServiceRegionRouteOverride`
+/// Internal structure — `region_route_overrides` is "namespace/name" →
+/// { controller_id → resource }, holding EdgionConfigData of type
+/// `RegionRouteOverride`, populated only by the federation EdgionConfigData
+/// list/watch.
 ///
-/// Both maps are populated only by the federation EdgionConfigData list/watch.
+/// There is exactly ONE override dimension. RegionRoute config is attached
+/// per HTTPRoute/GRPCRoute rule through an `EdgionPlugins` ExtensionRef
+/// filter, and each `EdgionPlugins` object carries its own `overrideRef`.
+/// "Which layer an override belongs to" is therefore a property of which
+/// object references it, not of the document's own type — one referrer makes
+/// it service-scoped, many make it fleet-wide. Do not reintroduce a second
+/// type-keyed map for a "service dimension".
 pub struct CenterMetaDataStore {
     region_route_overrides: RwLock<HashMap<String, HashMap<String, serde_json::Value>>>,
-    service_region_route_overrides: RwLock<HashMap<String, HashMap<String, serde_json::Value>>>,
 }
 
 impl CenterMetaDataStore {
     pub fn new() -> Self {
         Self {
             region_route_overrides: RwLock::new(HashMap::new()),
-            service_region_route_overrides: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn list_region_route_overrides(&self) -> Vec<CenterRegionRouteOverrideView> {
         list_override_map(&self.region_route_overrides)
-    }
-
-    pub fn list_service_region_route_overrides(&self) -> Vec<CenterRegionRouteOverrideView> {
-        list_override_map(&self.service_region_route_overrides)
     }
 
     /// Retain rows only for Controllers still present in the durable directory,
@@ -66,10 +67,6 @@ impl CenterMetaDataStore {
     /// queryable and `controller_removed` has no production trigger.
     pub fn retain_controllers(&self, controller_ids: &HashSet<String>) {
         retain_override_controllers(&mut self.region_route_overrides.write(), controller_ids);
-        retain_override_controllers(
-            &mut self.service_region_route_overrides.write(),
-            controller_ids,
-        );
     }
 
     /// Remove all entries for a given controller from all maps.
@@ -77,10 +74,6 @@ impl CenterMetaDataStore {
     fn remove_all_for_controller(&self, controller_id: &str) {
         remove_controller_from_override_map(
             &mut self.region_route_overrides.write(),
-            controller_id,
-        );
-        remove_controller_from_override_map(
-            &mut self.service_region_route_overrides.write(),
             controller_id,
         );
     }
@@ -98,10 +91,6 @@ impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
             &mut self.region_route_overrides.write(),
             controller_id,
         );
-        remove_controller_from_override_map(
-            &mut self.service_region_route_overrides.write(),
-            controller_id,
-        );
         for resource in data.values() {
             self.upsert_watched_override(controller_id, resource.as_ref().clone());
         }
@@ -117,11 +106,6 @@ impl CenterConfHandler<WatchedConfigData> for CenterMetaDataStore {
         for key in remove.keys() {
             remove_override_key_for_controller(
                 &mut self.region_route_overrides.write(),
-                key,
-                controller_id,
-            );
-            remove_override_key_for_controller(
-                &mut self.service_region_route_overrides.write(),
                 key,
                 controller_id,
             );
@@ -164,17 +148,10 @@ impl CenterMetaDataStore {
             &key,
             controller_id,
         );
-        remove_override_key_for_controller(
-            &mut self.service_region_route_overrides.write(),
-            &key,
-            controller_id,
-        );
-        let target = match data_type {
-            Some("RegionRouteOverride") => &self.region_route_overrides,
-            Some("ServiceRegionRouteOverride") => &self.service_region_route_overrides,
-            _ => return,
-        };
-        target
+        if data_type != Some("RegionRouteOverride") {
+            return;
+        }
+        self.region_route_overrides
             .write()
             .entry(key)
             .or_default()
@@ -272,8 +249,12 @@ mod tests {
         );
     }
 
+    /// The watch carries every `EdgionConfigData` type, but this store projects
+    /// exactly one of them. A document of any other type must be dropped rather
+    /// than land in the single map — the classification is a type allowlist of
+    /// one, not a "not obviously something else" filter.
     #[test]
-    fn watched_overrides_are_split_and_aggregated_by_namespace_name() {
+    fn only_region_route_overrides_are_projected_and_aggregated_by_namespace_name() {
         let store = CenterMetaDataStore::new();
         let region = serde_json::json!({
             "metadata": { "namespace": "shop", "name": "shared" },
@@ -284,20 +265,25 @@ mod tests {
                 }
             }
         });
-        let service = serde_json::json!({
+        let other_type = serde_json::json!({
             "metadata": { "namespace": "shop", "name": "checkout" },
             "spec": {
                 "data": {
-                    "type": "ServiceRegionRouteOverride",
-                    "config": { "regions": [{ "name": "east", "failoverTo": "west" }] }
+                    "type": "KeyList",
+                    "config": { "keys": ["tenant-a"] }
                 }
             }
+        });
+        let untyped = serde_json::json!({
+            "metadata": { "namespace": "shop", "name": "untyped" },
+            "spec": { "data": { "config": { "regions": [{ "name": "east" }] } } }
         });
         store.full_set(
             "ctrl-a",
             &HashMap::from([
                 ("shop/shared".to_string(), Arc::new(region.clone())),
-                ("shop/checkout".to_string(), Arc::new(service.clone())),
+                ("shop/checkout".to_string(), Arc::new(other_type)),
+                ("shop/untyped".to_string(), Arc::new(untyped)),
             ]),
         );
         store.full_set(
@@ -306,14 +292,13 @@ mod tests {
         );
 
         let region_rows = store.list_region_route_overrides();
-        assert_eq!(region_rows.len(), 1);
+        assert_eq!(
+            region_rows.len(),
+            1,
+            "only the RegionRouteOverride document may be projected"
+        );
         assert_eq!(region_rows[0].namespace, "shop");
         assert_eq!(region_rows[0].name, "shared");
         assert_eq!(region_rows[0].controllers.len(), 2);
-
-        let service_rows = store.list_service_region_route_overrides();
-        assert_eq!(service_rows.len(), 1);
-        assert_eq!(service_rows[0].name, "checkout");
-        assert_eq!(service_rows[0].controllers.len(), 1);
     }
 }

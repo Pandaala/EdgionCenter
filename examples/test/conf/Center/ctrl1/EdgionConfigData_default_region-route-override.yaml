@@ -1,0 +1,31 @@
+# RegionRouteOverride EdgionConfigData for the two-controller federation e2e —
+# controller 1 (east-cluster/ctrl-east).
+#
+# Differs from controller 2 on purpose: the west region's backendEndpoint is
+# 30002 here and 30003 there. The source->target sync test replaces ctrl-west's
+# whole spec.data with this document and asserts the difference disappears.
+#
+# metadata.resourceVersion is required: the FileSystem backend serves the raw
+# file on GET, and the Center write path takes its CAS precondition from the
+# watch cache — a version-less document would make Center refuse every write.
+# The controller raises its version counter above any persisted value at init,
+# so "1" can never collide with a freshly stamped version.
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: region-route-override
+  namespace: default
+  resourceVersion: "1"
+spec:
+  data:
+    type: RegionRouteOverride
+    config:
+      regions:
+        - name: east
+          hashRange: [0, 499]
+          backendEndpoint: "127.0.0.1:30001"
+          tls: false
+        - name: west
+          hashRange: [500, 999]
+          backendEndpoint: "127.0.0.1:30002"
+          tls: false

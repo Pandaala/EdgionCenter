@@ -18,7 +18,7 @@ function resource(failoverTo?: string): RegionRouteOverrideResource {
     metadata: { namespace: 'shop', name: 'checkout' },
     spec: {
       data: {
-        type: 'ServiceRegionRouteOverride',
+        type: 'RegionRouteOverride',
         config: {
           regions: [{ name: 'east', failoverTo }],
         },

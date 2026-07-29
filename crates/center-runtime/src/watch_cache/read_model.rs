@@ -26,13 +26,7 @@ use super::{ConfigTyped, WatchedConfigData};
 /// `"Misc"`, case variants, typos, and missing/unknown types — is redacted
 /// by default (see module docs: fail-closed allowlist, not a `Misc`-only
 /// denylist).
-const CONFIG_PASSTHROUGH_TYPES: &[&str] = &[
-    "IpList",
-    "KeyList",
-    "Selector",
-    "RegionRouteOverride",
-    "ServiceRegionRouteOverride",
-];
+const CONFIG_PASSTHROUGH_TYPES: &[&str] = &["IpList", "KeyList", "Selector", "RegionRouteOverride"];
 
 /// One ConfigData row in the global read model. `doc` is the stored document
 /// with `/spec/data/config` removed unless `config_type` is in
@@ -45,10 +39,10 @@ pub struct ConfigDataEntry {
     pub namespace: String,
     pub name: String,
     /// The raw `/spec/data/type` wire string, verbatim — NOT validated
-    /// against the six known ConfigData type strings — or "Unknown" when
+    /// against the five known ConfigData type strings — or "Unknown" when
     /// absent/not a string. Whether `doc` is redacted is governed solely by
     /// `CONFIG_PASSTHROUGH_TYPES`, not by any assumption that this field
-    /// holds one of the six canonical values.
+    /// holds one of the five canonical values.
     pub config_type: String,
     pub doc: serde_json::Value,
 }
@@ -160,6 +154,28 @@ impl CenterWatchCacheRegistry<WatchedConfigData> {
     pub fn raw_document(&self, controller_id: &str, key: &str) -> Option<Arc<WatchedConfigData>> {
         self.get_if_present(controller_id)
             .and_then(|cache| cache.raw_entry(key))
+    }
+
+    /// The `server_id` this process last observed on `controller_id`'s watch
+    /// stream, without creating a cache for an unknown controller.
+    ///
+    /// This is the completion signal for a Center-initiated reload. A
+    /// Controller mints a fresh `server_id` every time it rebuilds its
+    /// ConfigSyncServer, and the value stored here only ever advances through
+    /// a successfully applied list/event batch — so observing a *change*
+    /// means the Controller really did restart and Center re-listed against
+    /// the new instance. A reload that was dispatched but wedged leaves this
+    /// value untouched, which is exactly what lets the reload path report
+    /// "not observed" instead of a bare success (see
+    /// `center-app::api::reload_ops`).
+    ///
+    /// Returns `None` — never `Some("")` — for a controller this process has
+    /// no cache for, or whose cache has not applied a batch yet, so a caller
+    /// cannot mistake "no baseline to compare against" for an observed id.
+    pub fn cached_server_id(&self, controller_id: &str) -> Option<String> {
+        self.get_if_present(controller_id)
+            .map(|cache| cache.get_server_id())
+            .filter(|server_id| !server_id.is_empty())
     }
 }
 
@@ -445,6 +461,48 @@ mod tests {
         assert!(
             serialized.contains(SECRET),
             "raw_document must expose the unredacted document"
+        );
+    }
+
+    /// Both guarantees `cached_server_id`'s doc comment makes, because a caller
+    /// uses it as a reload-completion baseline: an unknown controller must not
+    /// gain a cache from being asked about, and "no batch applied yet" must be
+    /// `None` rather than `Some("")` — a caller that mistook the empty string
+    /// for an observed id would read the first real id as convergence.
+    #[test]
+    fn cached_server_id_reports_absence_without_creating_a_cache() {
+        let handler = Arc::new(NoopHandler);
+        let registry = CenterWatchCacheRegistry::<serde_json::Value>::new(handler);
+
+        // A cache that exists but has never applied a batch: present, but with
+        // no server_id to compare against.
+        let cache = registry.get_or_create("ctrl-1");
+        assert_eq!(
+            registry.cached_server_id("ctrl-1"),
+            None,
+            "a cache with no applied batch has no baseline, and must not report an empty one"
+        );
+
+        assert_eq!(registry.cached_server_id("unknown-controller"), None);
+        assert_eq!(
+            registry.statuses().len(),
+            1,
+            "cached_server_id must not create a cache for an unknown controller"
+        );
+
+        cache.replace_all(Vec::new(), 1, "server-1".to_string());
+        assert_eq!(
+            registry.cached_server_id("ctrl-1").as_deref(),
+            Some("server-1"),
+            "an applied batch stamps the id even when it carries no entries"
+        );
+
+        // A reload mints a new id; the accessor must surface the change, which
+        // is the whole signal the reload path waits on.
+        cache.replace_all(Vec::new(), 2, "server-2".to_string());
+        assert_eq!(
+            registry.cached_server_id("ctrl-1").as_deref(),
+            Some("server-2")
         );
     }
 

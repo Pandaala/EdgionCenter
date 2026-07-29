@@ -27,7 +27,7 @@ const access: ControllerAccessDocument = {
 
 const base = {
   centerLoading: false,
-  centerPermissions: ['proxy:access'],
+  centerPermissions: ['proxy:read', 'proxy:write'],
   isControllerProxy: true,
 }
 
@@ -44,14 +44,43 @@ describe('resolveActionAvailability', () => {
     })
   })
 
-  it('requires proxy:access for selected-Controller actions', () => {
+  it('requires a proxy permission for selected-Controller actions', () => {
     expect(resolveActionAvailability({
       ...base,
       centerPermissions: ['controllers:read'],
       controllerAccess: access,
       resourceKind: 'httproute',
       resourceVerb: 'update',
-    })).toEqual({ disabled: true, reason: 'Missing permission: proxy:access' })
+    })).toEqual({ disabled: true, reason: 'Missing permission: proxy:write' })
+  })
+
+  it('lets a read-only proxy grant view but not mutate', () => {
+    const readOnly = { ...base, centerPermissions: ['proxy:read'], controllerAccess: access }
+    expect(resolveActionAvailability({
+      ...readOnly,
+      resourceKind: 'httproute',
+      resourceVerb: 'list',
+    })).toEqual({ disabled: false })
+    expect(resolveActionAvailability({
+      ...readOnly,
+      resourceKind: 'httproute',
+      resourceVerb: 'update',
+    })).toEqual({ disabled: true, reason: 'Missing permission: proxy:write' })
+    // An operation carries no verb, so it needs the write half.
+    expect(resolveActionAvailability({
+      ...readOnly,
+      operation: 'regionRoute.list',
+    })).toEqual({ disabled: true, reason: 'Missing permission: proxy:write' })
+  })
+
+  it('denies reads to a write-only proxy grant', () => {
+    expect(resolveActionAvailability({
+      ...base,
+      centerPermissions: ['proxy:write'],
+      controllerAccess: access,
+      resourceKind: 'httproute',
+      resourceVerb: 'get',
+    })).toEqual({ disabled: true, reason: 'Missing permission: proxy:read' })
   })
 
   it('does not require a Center proxy permission in direct mode', () => {

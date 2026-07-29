@@ -550,7 +550,18 @@ const en = {
   'center.enter': 'Enter',
   'center.reload': 'Reload',
   'center.reloadConfirm': 'Reload controller {name}?',
-  'center.reloadOk': 'Reload command sent',
+  'center.reloadPending': 'Reloading {name} — waiting for it to come back…',
+  // A reload is reported as a terminal state, never as bare dispatch success:
+  // the Controller's own 200 only means "queued", so `converged` is the only
+  // wording allowed to claim the reload finished.
+  'center.reloadOutcome.title': 'Reload result',
+  'center.reloadOutcome.converged': 'Reload finished. {name} came back with a new server_id ({serverId}) after {seconds}s.',
+  'center.reloadOutcome.accepted': 'Reload was dispatched to {name}, but this Center replica does not hold its federation session, so completion cannot be confirmed here. Check the Controller directly.',
+  'center.reloadOutcome.unknown': 'Reload was dispatched to {name}, but it had not come back within {seconds}s. It may still be restarting — this is not a confirmed success. Re-check before retrying.',
+  'center.reloadOutcome.conflict': '{name} is a follower replica and refused the reload. Retrying here will not help — send it to the leader: {leader}',
+  'center.reloadOutcome.conflictNoLeader': '{name} is a follower replica and refused the reload. Retrying here will not help, and it does not yet know which replica is the leader (an election may be in progress).',
+  'center.reloadOutcome.retry': '{name} temporarily refused the reload; nothing was started. Retry in {seconds}s. The Controller reported: {reason}',
+  'center.reloadOutcome.failed': 'Reload of {name} was rejected: {reason}',
   'center.backToCenter': 'Back to Center',
   'center.filterCluster': 'Filter by Cluster',
   'center.allClusters': 'All Clusters',
@@ -575,8 +586,6 @@ const en = {
   'center.nav.regionRoutes': 'RegionRoute',
   'center.nav.regionTopology': 'Topology',
   'center.nav.regionServiceUsage': 'Service Usage',
-  'center.nav.regionDimension': 'Region',
-  'center.nav.serviceDimension': 'Service',
   'center.nav.globalRules': 'GlobalRules',
   'center.nav.globalResources': 'GlobalResources',
   'center.nav.edgionConfigData': 'EdgionConfigData',

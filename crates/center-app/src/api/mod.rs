@@ -9,16 +9,13 @@
 //!   GET  /api/v1/server-info                              → public platform and capability discovery
 //!   GET  /api/v1/controllers                              → list all controller summaries
 //!   GET  /api/v1/clusters                                 → list distinct cluster names
-//!   POST /api/v1/controllers/{id}/reload                  → reload via the proxy tunnel
+//!   POST /api/v1/controllers/{id}/reload                  → reload via the proxy tunnel, reported as a terminal outcome
 //!   GET  /api/v1/center/global-resources/catalog          → supported kinds, namespaces, and clusters
 //!   GET  /api/v1/center/global-resources/resources/{kind} → grouped cross-cluster inventory
 //!   GET  /api/v1/center/global-resources/resources/{kind}/{namespace}/{name} → exact fenced cluster detail
 //!   GET  /api/v1/center/region-route-overrides                     → watch-fed RegionRouteOverride rows across controllers
-//!   GET  /api/v1/center/service-region-route-overrides             → watch-fed ServiceRegionRouteOverride rows across controllers
 //!   POST /api/v1/center/region-route-overrides/failover            → set failoverTo on a RegionRouteOverride on every online controller
-//!   POST /api/v1/center/service-region-route-overrides/failover    → set failoverTo on a ServiceRegionRouteOverride on every online controller
 //!   POST /api/v1/center/region-route-overrides/sync                → copy one controller's RegionRouteOverride to selected targets
-//!   POST /api/v1/center/service-region-route-overrides/sync        → copy one controller's ServiceRegionRouteOverride to selected targets
 //!   GET    /api/v1/center/admin/users                              → list users (with role ids + names; no password_hash)
 //!   POST   /api/v1/center/admin/users                              → create user (bcrypt password; optional role bindings)
 //!   PATCH  /api/v1/center/admin/users/{id}                         → partial update (status / password reset / role rebind)
@@ -92,6 +89,7 @@ pub mod provider_accounts;
 pub mod provider_capabilities;
 pub mod provider_credential_inspections;
 mod region_route_handlers;
+pub mod reload_ops;
 mod roles;
 pub mod route53_dns;
 #[cfg(feature = "password-auth")]
@@ -274,24 +272,12 @@ pub fn router(mut state: ApiState) -> Router {
             get(region_route_handlers::list_region_route_overrides),
         )
         .route(
-            "/api/v1/center/service-region-route-overrides",
-            get(region_route_handlers::list_service_region_route_overrides),
-        )
-        .route(
             "/api/v1/center/region-route-overrides/failover",
             post(region_route_handlers::region_route_failover),
         )
         .route(
-            "/api/v1/center/service-region-route-overrides/failover",
-            post(region_route_handlers::service_region_route_failover),
-        )
-        .route(
             "/api/v1/center/region-route-overrides/sync",
             post(region_route_handlers::region_route_override_sync),
-        )
-        .route(
-            "/api/v1/center/service-region-route-overrides/sync",
-            post(region_route_handlers::service_region_route_override_sync),
         )
         // HTTP proxy to controllers. Body cap mirrors the Controller-side
         // 1 MiB federation proxy limit so oversized writes fail locally.
@@ -831,37 +817,83 @@ async fn list_clusters(State(state): State<ApiState>) -> impl IntoResponse {
     }
 }
 
+/// `POST /api/v1/controllers/{id}/reload` — dispatch a reload over the
+/// federation tunnel and report whether it actually completed.
+///
+/// The Controller's own `200` only ever means "queued" (`request_reload()` is
+/// fire-and-forget), so reporting it as success made a wedged reload
+/// indistinguishable from a finished one. The terminal state is determined by
+/// [`reload_ops`] instead; see its module docs.
 async fn reload_controller(
     State(state): State<ApiState>,
     Path(id_raw): Path<String>,
 ) -> impl IntoResponse {
     let id = id_raw.replace('~', "/");
-    match state
-        .proxy
-        .forward(
-            &id,
-            "POST".to_string(),
-            "/api/v1/reload".to_string(),
-            std::collections::HashMap::new(),
-            Vec::new(),
-        )
-        .await
-    {
-        Ok(resp) if (200..300).contains(&resp.status_code) => {
-            (StatusCode::OK, Json(ApiResponse::ok_body("ok".to_string())))
+    match reload_ops::reload_controller(&state, &id).await {
+        Ok(outcome) => reload_outcome_response(outcome),
+        // Never reached the Controller (unknown/offline controller, stale
+        // ownership, tunnel timeout). Passed through with the proxy's own
+        // status rather than flattened into a reload outcome.
+        Err((status, message)) => {
+            (status, Json(ApiResponse::<String>::err_body(message))).into_response()
         }
-        Ok(resp) => {
-            let status = StatusCode::from_u16(resp.status_code as u16)
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            (
-                status,
-                Json(ApiResponse::<String>::err_body(
-                    String::from_utf8_lossy(&resp.body).into_owned(),
-                )),
-            )
-        }
-        Err((status, message)) => (status, Json(ApiResponse::<String>::err_body(message))),
     }
+}
+
+/// HTTP status for one [`reload_ops::ReloadOutcome`].
+///
+/// Exhaustive on purpose, in the same spirit as
+/// `region_route_handlers::OutcomeClass`: a seventh `OutcomeState` must be a
+/// compile error here rather than silently defaulting into a success or a
+/// failure bucket.
+fn reload_outcome_status(outcome: &reload_ops::ReloadOutcome) -> StatusCode {
+    use config_data_ops::OutcomeState;
+    match outcome.state {
+        OutcomeState::Converged => StatusCode::OK,
+        // The reload was accepted by the Controller but is not confirmed
+        // complete — 202 keeps it out of the client's error path so the
+        // dashboard can render the distinction instead of an error toast.
+        // `Superseded` is unreachable on this path (a reload overwrites no
+        // document) and is grouped here only to keep the match exhaustive.
+        OutcomeState::Accepted | OutcomeState::Unknown | OutcomeState::Superseded => {
+            StatusCode::ACCEPTED
+        }
+        // A follower Controller refused it: retrying this address is
+        // pointless, and the body carries the leader's.
+        OutcomeState::Conflict => StatusCode::CONFLICT,
+        OutcomeState::Failed => match outcome.retry_after_secs {
+            // A transient refusal (already queued, or the config center not
+            // ready) must keep its 503 all the way to the client instead of
+            // collapsing into 502 — retrying is the action either way.
+            Some(_) => StatusCode::SERVICE_UNAVAILABLE,
+            None => StatusCode::BAD_GATEWAY,
+        },
+    }
+}
+
+fn reload_outcome_response(outcome: reload_ops::ReloadOutcome) -> axum::response::Response {
+    let status = reload_outcome_status(&outcome);
+    let retry_after = outcome.retry_after_secs;
+    let body = ApiResponse {
+        success: status.is_success(),
+        error: if status.is_success() {
+            None
+        } else {
+            outcome.reason.clone()
+        },
+        data: Some(outcome),
+    };
+    let mut response = (status, Json(body)).into_response();
+    // Echo the transient hint so a non-browser client sees the same retry
+    // semantics the Controller expressed.
+    if let Some(seconds) = retry_after {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&seconds.to_string()) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+    }
+    response
 }
 
 #[derive(Serialize)]
@@ -1825,6 +1857,144 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Every reload outcome must map to a status the client can act on, and
+    /// the mapping must not collapse states that call for different operator
+    /// actions: `converged` is the only 200, "landed but unconfirmed" stays in
+    /// the success family as 202 so the dashboard renders the distinction
+    /// instead of an error toast, a follower's refusal keeps its 409, and a
+    /// transient refusal keeps its 503 with the retry hint.
+    #[test]
+    fn reload_outcome_status_separates_every_operator_action() {
+        use config_data_ops::OutcomeState;
+        use reload_ops::ReloadOutcome;
+
+        fn outcome(state: OutcomeState) -> ReloadOutcome {
+            ReloadOutcome {
+                controller_id: "cluster/c0".to_string(),
+                state,
+                reason: None,
+                server_id: None,
+                convergence_ms: None,
+                retry_after_secs: None,
+                leader: None,
+            }
+        }
+
+        assert_eq!(
+            reload_outcome_status(&outcome(OutcomeState::Converged)),
+            StatusCode::OK
+        );
+        for state in [OutcomeState::Accepted, OutcomeState::Unknown] {
+            assert_eq!(
+                reload_outcome_status(&outcome(state)),
+                StatusCode::ACCEPTED,
+                "{state:?} landed and must not read as an error"
+            );
+        }
+        assert_eq!(
+            reload_outcome_status(&outcome(OutcomeState::Conflict)),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            reload_outcome_status(&outcome(OutcomeState::Failed)),
+            StatusCode::BAD_GATEWAY
+        );
+        let transient = ReloadOutcome {
+            retry_after_secs: Some(5),
+            ..outcome(OutcomeState::Failed)
+        };
+        assert_eq!(
+            reload_outcome_status(&transient),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a transient refusal is not a bad gateway"
+        );
+    }
+
+    /// Deliberate contract change, recorded so it is not mistaken for a bug:
+    /// the old handler echoed the Controller's status for *any* non-2xx
+    /// (`StatusCode::from_u16(resp.status_code)`). Now only 409 and 503 keep
+    /// their own status — every other upstream rejection is reported as 502
+    /// with the upstream status and body preserved in `reason`. A Controller
+    /// status is a statement about the Controller's own request, not about
+    /// Center's, and echoing e.g. a 403 made a Center-side authorization
+    /// failure indistinguishable from a Controller-side one.
+    #[tokio::test]
+    async fn other_upstream_rejections_collapse_to_502_with_the_detail_in_reason() {
+        use config_data_ops::OutcomeState;
+        use reload_ops::ReloadOutcome;
+
+        let outcome = ReloadOutcome {
+            controller_id: "cluster/c0".to_string(),
+            state: OutcomeState::Failed,
+            reason: Some("reload returned status 403: verb reload not granted".to_string()),
+            server_id: None,
+            convergence_ms: None,
+            retry_after_secs: None,
+            leader: None,
+        };
+
+        let response = reload_outcome_response(outcome);
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_GATEWAY,
+            "an upstream 403 must not be echoed as Center's own 403"
+        );
+        assert!(
+            response
+                .headers()
+                .get(axum::http::header::RETRY_AFTER)
+                .is_none(),
+            "only a transient refusal may carry a retry hint"
+        );
+
+        // Collapsing the status is only defensible because the upstream detail
+        // survives in the body — otherwise a 403 would become an unattributable
+        // 502. Assert it reaches the wire, not merely the struct.
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("outcome body is small and fully buffered");
+        let body: serde_json::Value = serde_json::from_slice(&body).expect("outcome body is JSON");
+        assert_eq!(body["success"], serde_json::json!(false));
+        let reason = body["data"]["reason"]
+            .as_str()
+            .expect("failed carries a reason");
+        assert!(reason.contains("403"), "got {reason}");
+        assert!(reason.contains("verb reload not granted"), "got {reason}");
+        assert_eq!(
+            body["error"],
+            serde_json::json!(reason),
+            "the reason must also surface on the generic `error` field clients read"
+        );
+    }
+
+    /// A transient refusal must carry `Retry-After` on the Center response
+    /// too, so a non-browser client sees the same retry semantics the
+    /// Controller expressed rather than a bare 503.
+    #[test]
+    fn transient_reload_failure_echoes_retry_after() {
+        use config_data_ops::OutcomeState;
+        use reload_ops::ReloadOutcome;
+
+        let response = reload_outcome_response(ReloadOutcome {
+            controller_id: "cluster/c0".to_string(),
+            state: OutcomeState::Failed,
+            reason: Some("already in progress".to_string()),
+            server_id: None,
+            convergence_ms: None,
+            retry_after_secs: Some(5),
+            leader: None,
+        });
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("5")
+        );
     }
 
     /// GlobalResources is served entirely from the federation watch read

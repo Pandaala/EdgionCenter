@@ -65,7 +65,7 @@ export interface RegionRouteOverrideResource {
   spec: {
     enable?: boolean
     data: {
-      type: 'RegionRouteOverride' | 'ServiceRegionRouteOverride'
+      type: 'RegionRouteOverride'
       config: {
         regions?: Array<{
           name: string
@@ -132,13 +132,8 @@ async function postForOutcomes(url: string, body: unknown): Promise<WriteOutcome
 // ---------------------------------------------------------------------------
 
 export const regionRouteApi = {
-  listOverrides: async (
-    scope: 'region' | 'service',
-  ): Promise<RegionRouteOverrideListResult> => {
-    const url = scope === 'region'
-      ? 'center/region-route-overrides'
-      : 'center/service-region-route-overrides'
-    const { data } = await apiClient.get(url)
+  listOverrides: async (): Promise<RegionRouteOverrideListResult> => {
+    const { data } = await apiClient.get('center/region-route-overrides')
     return data
   },
 
@@ -150,17 +145,17 @@ export const regionRouteApi = {
    * pre-flight error (no `outcomes` to recover) still rejects.
    */
   overrideFailover: async (
-    scope: 'region' | 'service',
     namespace: string,
     name: string,
     regionName: string,
     failoverTo: string,
-  ): Promise<WriteOutcomeSummary> => {
-    const url = scope === 'region'
-      ? 'center/region-route-overrides/failover'
-      : 'center/service-region-route-overrides/failover'
-    return postForOutcomes(url, { namespace, name, regionName, failoverTo })
-  },
+  ): Promise<WriteOutcomeSummary> =>
+    postForOutcomes('center/region-route-overrides/failover', {
+      namespace,
+      name,
+      regionName,
+      failoverTo,
+    }),
 
   /**
    * Row-level override sync — copies the source Controller's `spec.data`
@@ -170,17 +165,17 @@ export const regionRouteApi = {
    * name) instead of throwing on partial or total failure.
    */
   syncOverride: async (
-    scope: 'region' | 'service',
     namespace: string,
     name: string,
     sourceControllerId: string,
     targetControllerIds: string[],
-  ): Promise<WriteOutcomeSummary> => {
-    const url = scope === 'region'
-      ? 'center/region-route-overrides/sync'
-      : 'center/service-region-route-overrides/sync'
-    return postForOutcomes(url, { namespace, name, sourceControllerId, targetControllerIds })
-  },
+  ): Promise<WriteOutcomeSummary> =>
+    postForOutcomes('center/region-route-overrides/sync', {
+      namespace,
+      name,
+      sourceControllerId,
+      targetControllerIds,
+    }),
 
   /**
    * One Controller's own effective RegionRoute view, derived by that Controller

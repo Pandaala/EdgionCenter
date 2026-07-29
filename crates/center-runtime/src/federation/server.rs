@@ -37,11 +37,13 @@ use edgion_center_core::{
     OwnershipFence, RenewalOutcome, SessionId,
 };
 
-/// Label value used on fed-sync metrics whose `kind` dimension is
-/// currently hardcoded. The federation server only streams EdgionConfigData
-/// today; when new kinds are added, each call site should pass its own
-/// kind instead of this constant.
-const PLUGIN_METADATA_KIND: &str = "EdgionConfigData";
+/// The single resource kind Center subscribes to over the reverse watch.
+///
+/// This names the *subscription*, not a metric label. Metric emit sites read
+/// their `kind` from the `FedWatchState` that produced the response, so adding
+/// a second watched kind attributes its events to itself rather than silently
+/// folding them into this one.
+const EDGION_CONFIG_DATA: &str = "EdgionConfigData";
 const RUNTIME_PROJECTION_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Upper bound for decoding one `ControllerMessage` from the federation
@@ -699,6 +701,12 @@ struct WatchEventRaw<'a> {
 /// require a `HashMap<kind, FedWatchState>` plus a per-kind match in the loop —
 /// not yet implemented.
 struct FedWatchState {
+    /// The kind this state watches. Doubles as the `kind` metric label for
+    /// every response it handles, so each state is attributed to its own kind
+    /// once more than one is watched. `&'static str` keeps the label inside the
+    /// bounded vocabulary `fed_metrics` requires — never a value echoed back
+    /// from a `FedWatchRequest`.
+    kind: &'static str,
     /// Current request_id for correlation (stale responses are skipped).
     request_id: String,
     /// Controller's ConfigSyncServer instance ID (detects restarts).
@@ -711,8 +719,9 @@ struct FedWatchState {
 }
 
 impl FedWatchState {
-    fn new(request_id: String, server_id: Option<String>) -> Self {
+    fn new(kind: &'static str, request_id: String, server_id: Option<String>) -> Self {
         Self {
+            kind,
             request_id,
             server_id,
             consecutive_errors: 0,
@@ -724,7 +733,7 @@ impl FedWatchState {
     ///
     /// Calling this on a terminated state is a programming error: once the
     /// watch is terminated, nothing should attempt to re-watch it.
-    fn re_watch(&mut self, kind: &str) -> CenterMessage {
+    fn re_watch(&mut self) -> CenterMessage {
         debug_assert!(!self.terminated);
         let new_id = Uuid::new_v4().to_string();
         self.request_id = new_id.clone();
@@ -732,7 +741,7 @@ impl FedWatchState {
         CenterMessage {
             payload: Some(CenterPayload::WatchRequest(FedWatchRequest {
                 request_id: new_id,
-                kind: kind.to_string(),
+                kind: self.kind.to_string(),
                 from_version: 0,
             })),
         }
@@ -757,7 +766,7 @@ fn initial_watch_request(request_id: &str, from_version: u64) -> CenterMessage {
     CenterMessage {
         payload: Some(CenterPayload::WatchRequest(FedWatchRequest {
             request_id: request_id.to_string(),
-            kind: PLUGIN_METADATA_KIND.to_string(),
+            kind: EDGION_CONFIG_DATA.to_string(),
             from_version,
         })),
     }
@@ -842,7 +851,7 @@ fn apply_watch_list(
             }
             if keyless_count > 0 || duplicate_count > 0 {
                 fed_metrics::record_watch_list(
-                    PLUGIN_METADATA_KIND,
+                    pm_watch.kind,
                     fed_metrics::labels::watch_list_result::PARSE_ERROR,
                 );
                 tracing::warn!(
@@ -858,7 +867,7 @@ fn apply_watch_list(
             match pm_cache.replace_all(keyed, resp.sync_version, resp.server_id.clone()) {
                 ApplyResult::Overflow => {
                     fed_metrics::record_watch_error(
-                        PLUGIN_METADATA_KIND,
+                        pm_watch.kind,
                         fed_metrics::labels::watch_error_reason::OVERFLOW,
                     );
                     pm_watch.terminate();
@@ -875,7 +884,7 @@ fn apply_watch_list(
             pm_watch.server_id = Some(resp.server_id);
             pm_watch.consecutive_errors = 0;
             fed_metrics::record_watch_list(
-                PLUGIN_METADATA_KIND,
+                pm_watch.kind,
                 fed_metrics::labels::watch_list_result::OK,
             );
             tracing::debug!(
@@ -888,7 +897,7 @@ fn apply_watch_list(
         }
         Err(e) => {
             fed_metrics::record_watch_list(
-                PLUGIN_METADATA_KIND,
+                pm_watch.kind,
                 fed_metrics::labels::watch_list_result::PARSE_ERROR,
             );
             tracing::warn!(
@@ -933,14 +942,14 @@ fn apply_watch_event(
     }
 
     // (2) Record delivery metric (direction = recv from Center's perspective).
-    fed_metrics::record_watch_event(PLUGIN_METADATA_KIND, fed_metrics::labels::direction::RECV);
+    fed_metrics::record_watch_event(pm_watch.kind, fed_metrics::labels::direction::RECV);
 
     // (3) Error set — terminal errors stop the watch; everything else backs
     // off then re-watches.
     if !resp.error.is_empty() {
         if resp.error == "Forbidden" {
             fed_metrics::record_watch_error(
-                PLUGIN_METADATA_KIND,
+                pm_watch.kind,
                 fed_metrics::labels::watch_error_reason::TERMINAL,
             );
             pm_watch.terminate();
@@ -953,7 +962,7 @@ fn apply_watch_event(
             return WatchOutcome::Terminal;
         }
         fed_metrics::record_watch_error(
-            PLUGIN_METADATA_KIND,
+            pm_watch.kind,
             fed_metrics::labels::watch_error_reason::RECV_ERROR,
         );
         pm_watch.consecutive_errors += 1;
@@ -981,7 +990,7 @@ fn apply_watch_event(
     if let Some(ref expected_sid) = pm_watch.server_id {
         if *expected_sid != resp.server_id {
             fed_metrics::record_watch_list(
-                PLUGIN_METADATA_KIND,
+                pm_watch.kind,
                 fed_metrics::labels::watch_list_result::VERSION_TOO_OLD,
             );
             tracing::warn!(
@@ -1003,7 +1012,7 @@ fn apply_watch_event(
         Ok(raw_events) => raw_events,
         Err(e) => {
             fed_metrics::record_watch_error(
-                PLUGIN_METADATA_KIND,
+                pm_watch.kind,
                 fed_metrics::labels::watch_error_reason::PARSE_ERROR,
             );
             tracing::warn!(
@@ -1045,7 +1054,7 @@ fn apply_watch_event(
     }
     if unknown_type_count > 0 || keyless_count > 0 || body_parse_error_count > 0 {
         fed_metrics::record_watch_error(
-            PLUGIN_METADATA_KIND,
+            pm_watch.kind,
             fed_metrics::labels::watch_error_reason::PARSE_ERROR,
         );
         tracing::warn!(
@@ -1067,7 +1076,7 @@ fn apply_watch_event(
     let cache_version = pm_cache.get_sync_version();
     if cache_version > 0 && resp.sync_version <= cache_version {
         fed_metrics::record_watch_error(
-            PLUGIN_METADATA_KIND,
+            pm_watch.kind,
             fed_metrics::labels::watch_error_reason::VERSION_GAP,
         );
         tracing::warn!(
@@ -1084,7 +1093,7 @@ fn apply_watch_event(
         match pm_cache.apply_events(events, resp.sync_version, resp.server_id.clone()) {
             ApplyResult::Overflow => {
                 fed_metrics::record_watch_error(
-                    PLUGIN_METADATA_KIND,
+                    pm_watch.kind,
                     fed_metrics::labels::watch_error_reason::OVERFLOW,
                 );
                 pm_watch.terminate();
@@ -1139,7 +1148,7 @@ async fn backoff_then_rewatch(
             return true;
         }
     }
-    let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
+    let re_watch_msg = pm_watch.re_watch();
     let _ = inner_tx.send(re_watch_msg).await;
     false
 }
@@ -1689,7 +1698,7 @@ impl FederationSync for FederationGrpcServer {
                 };
 
                 // Watch state tracking (local to this session)
-                let mut pm_watch = FedWatchState::new(watch_request_id, {
+                let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, watch_request_id, {
                     let sid = pm_cache.get_server_id();
                     if sid.is_empty() {
                         None
@@ -1829,7 +1838,7 @@ impl FederationSync for FederationGrpcServer {
                                             }
                                         }
                                         WatchOutcome::ReWatch => {
-                                            let re_watch_msg = pm_watch.re_watch(PLUGIN_METADATA_KIND);
+                                            let re_watch_msg = pm_watch.re_watch();
                                             let _ = inner_tx.send(re_watch_msg).await;
                                         }
                                         WatchOutcome::Applied => {
@@ -2622,7 +2631,7 @@ mod tests {
     #[test]
     fn apply_watch_list_happy_path() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let resp = FedWatchListResponse {
             request_id: "req-1".to_string(),
@@ -2643,7 +2652,7 @@ mod tests {
     #[test]
     fn apply_watch_list_skips_stale_request_id() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-current".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-current".to_string(), None);
 
         let resp = FedWatchListResponse {
             request_id: "req-stale".to_string(),
@@ -2665,7 +2674,7 @@ mod tests {
     #[test]
     fn apply_watch_list_skips_on_terminated_state() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
         pm_watch.terminate();
 
         // A valid, matching-request_id list frame arrives after termination.
@@ -2689,7 +2698,7 @@ mod tests {
     #[test]
     fn apply_watch_list_parse_error() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let resp = FedWatchListResponse {
             request_id: "req-1".to_string(),
@@ -2711,7 +2720,7 @@ mod tests {
     #[test]
     fn apply_watch_list_invalid_utf8_is_parse_error() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let resp = FedWatchListResponse {
             request_id: "req-1".to_string(),
@@ -2733,7 +2742,7 @@ mod tests {
     #[test]
     fn apply_watch_list_rejects_batch_with_keyless_object() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let valid: serde_json::Value = serde_json::from_str(&pm_json("default", "pm-a")).unwrap();
         let keyless = serde_json::json!({
@@ -2774,7 +2783,7 @@ mod tests {
     #[test]
     fn apply_watch_list_rejects_duplicate_keys() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         // Two docs that resolve to the same resource_key ("default/pm-a").
         let data = list_json(&[("default", "pm-a"), ("default", "pm-a")]);
@@ -2840,7 +2849,11 @@ mod tests {
         ];
         pm_cache.replace_all(keyed, 1, "srv-1".to_string());
 
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), Some("srv-1".to_string()));
+        let mut pm_watch = FedWatchState::new(
+            EDGION_CONFIG_DATA,
+            "req-1".to_string(),
+            Some("srv-1".to_string()),
+        );
 
         let resp = FedWatchEventResponse {
             request_id: "req-1".to_string(),
@@ -2901,7 +2914,7 @@ mod tests {
     #[test]
     fn apply_watch_event_skips_stale() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-current".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-current".to_string(), None);
 
         let resp = FedWatchEventResponse {
             request_id: "req-stale".to_string(),
@@ -2924,7 +2937,11 @@ mod tests {
     #[test]
     fn apply_watch_event_server_id_change_rewatches() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), Some("srv-old".to_string()));
+        let mut pm_watch = FedWatchState::new(
+            EDGION_CONFIG_DATA,
+            "req-1".to_string(),
+            Some("srv-old".to_string()),
+        );
 
         let resp = FedWatchEventResponse {
             request_id: "req-1".to_string(),
@@ -2947,7 +2964,7 @@ mod tests {
     #[test]
     fn apply_watch_event_error_backoff_rewatch() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let make_err_resp = || FedWatchEventResponse {
             request_id: "req-1".to_string(),
@@ -2971,7 +2988,7 @@ mod tests {
     #[test]
     fn apply_watch_event_forbidden_is_terminal() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let make_forbidden_resp = || FedWatchEventResponse {
             request_id: "req-1".to_string(),
@@ -2996,7 +3013,7 @@ mod tests {
     #[test]
     fn forbidden_terminal_marks_cache_stale() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let forbidden_resp = FedWatchEventResponse {
             request_id: "req-1".to_string(),
@@ -3021,9 +3038,35 @@ mod tests {
     fn terminal_watch_state_never_rewatches() {
         // After FedWatchState::terminate(), is_terminated() is true and the
         // stream loop contract is: no re_watch message is minted.
-        let mut state = FedWatchState::new("r1".to_string(), None);
+        let mut state = FedWatchState::new(EDGION_CONFIG_DATA, "r1".to_string(), None);
         state.terminate();
         assert!(state.is_terminated());
+    }
+
+    #[test]
+    fn re_watch_carries_the_kind_the_state_was_built_with() {
+        // Deliberately built with a kind that is NOT the module constant: a
+        // state built with EDGION_CONFIG_DATA cannot distinguish "re_watch
+        // reads self.kind" from "re_watch reads the constant", because the
+        // two have the same value. A hypothetical second watched kind must
+        // re-subscribe to itself, not to EdgionConfigData.
+        let mut state = FedWatchState::new("EdgionPlugins", "r1".to_string(), None);
+        let Some(CenterPayload::WatchRequest(req)) = state.re_watch().payload else {
+            panic!("expected WatchRequest");
+        };
+        assert_eq!(req.kind, "EdgionPlugins");
+        assert_eq!(req.from_version, 0);
+        assert_ne!(
+            req.request_id, "r1",
+            "re_watch must mint a fresh request_id"
+        );
+
+        // The kind actually watched today still re-subscribes to itself.
+        let mut live = FedWatchState::new(EDGION_CONFIG_DATA, "r2".to_string(), None);
+        let Some(CenterPayload::WatchRequest(live_req)) = live.re_watch().payload else {
+            panic!("expected WatchRequest");
+        };
+        assert_eq!(live_req.kind, "EdgionConfigData");
     }
 
     #[test]
@@ -3033,14 +3076,14 @@ mod tests {
             panic!("expected WatchRequest");
         };
         assert_eq!(req.request_id, "req-1");
-        assert_eq!(req.kind, PLUGIN_METADATA_KIND);
+        assert_eq!(req.kind, EDGION_CONFIG_DATA);
         assert_eq!(req.from_version, 42);
     }
 
     #[test]
     fn apply_watch_event_parse_error() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         let resp = FedWatchEventResponse {
             request_id: "req-1".to_string(),
@@ -3058,7 +3101,7 @@ mod tests {
     #[test]
     fn apply_watch_event_unknown_type_rejects_batch() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         // One unknown event type plus one otherwise-valid sibling add event.
         let resp = FedWatchEventResponse {
@@ -3098,7 +3141,7 @@ mod tests {
     #[test]
     fn apply_watch_event_rejects_partial_batch() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         // Seed the cache via a valid list at version 10.
         let seed_resp = FedWatchListResponse {
@@ -3161,7 +3204,7 @@ mod tests {
     #[test]
     fn apply_watch_event_version_gap_rewatches() {
         let pm_cache = make_pm_cache();
-        let mut pm_watch = FedWatchState::new("req-1".to_string(), None);
+        let mut pm_watch = FedWatchState::new(EDGION_CONFIG_DATA, "req-1".to_string(), None);
 
         // Seed the cache via a valid list at version 20.
         let seed_resp = FedWatchListResponse {

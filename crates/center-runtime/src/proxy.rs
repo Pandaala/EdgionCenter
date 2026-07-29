@@ -74,12 +74,12 @@ impl ProxyForwarder {
         let routed_body = body.clone();
         tokio::time::timeout(self.timeout, async {
             if self.local_session_is_dispatchable(controller_id) {
-                let result = self.forward_local(controller_id, method, path, headers, body, None).await;
+                let result = self.forward_local(controller_id, method, path, headers, body).await;
                 record_forward("proxy", "local", if result.is_ok() { "success" } else { "error" });
                 return result;
             }
             let Some(forwarding) = &self.forwarding else {
-                return self.forward_local(controller_id, routed_method, routed_path, routed_headers, routed_body, None).await;
+                return self.forward_local(controller_id, routed_method, routed_path, routed_headers, routed_body).await;
             };
             let id = edgion_center_core::ControllerId::new(controller_id.to_string())
                 .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
@@ -124,78 +124,6 @@ impl ProxyForwarder {
         ))?
     }
 
-    /// Forward to exactly the owner route observed by the caller. This path
-    /// deliberately performs no owner re-resolution or stale-owner replay so
-    /// the response can be attributed to the caller's CRD revision.
-    pub async fn forward_expected_route(
-        &self,
-        route: &edgion_center_core::ControllerOwnerRoute,
-        controller_id: &str,
-        method: String,
-        path: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
-    ) -> Result<HttpProxyResponse, (StatusCode, String)> {
-        let headers = sanitize_headers(headers);
-        tokio::time::timeout(self.timeout, async {
-            let forwarding = self.forwarding.as_ref().ok_or_else(|| {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "owner-fenced forwarding is not configured".to_string(),
-                )
-            })?;
-            if route.holder == forwarding.local_holder {
-                let result = self
-                    .forward_local(
-                        controller_id,
-                        method,
-                        path,
-                        headers,
-                        body,
-                        Some((&route.holder, &route.ownership_fence)),
-                    )
-                    .await;
-                record_forward(
-                    "proxy_fenced",
-                    "local",
-                    if result.is_ok() { "success" } else { "error" },
-                );
-                return result;
-            }
-
-            let result = forwarding
-                .transport
-                .forward_http(
-                    route,
-                    controller_id,
-                    ForwardHttpOperation {
-                        method,
-                        path,
-                        headers,
-                        body,
-                    },
-                    self.timeout,
-                )
-                .await;
-            record_forward(
-                "proxy_fenced",
-                "remote",
-                if result.is_ok() { "success" } else { "error" },
-            );
-            result.map_err(proxy_error)
-        })
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::GATEWAY_TIMEOUT,
-                format!(
-                    "Fenced proxy request timed out after {}s",
-                    self.timeout.as_secs()
-                ),
-            )
-        })?
-    }
-
     /// Whether this replica holds a dispatchable local session for the
     /// Controller. It answers two questions at once: writes reach it without
     /// a replica hop, AND this process's watch cache is the one fed by that
@@ -220,7 +148,6 @@ impl ProxyForwarder {
         path: String,
         headers: HashMap<String, String>,
         body: Vec<u8>,
-        expected: Option<(&str, &edgion_center_core::OwnershipFence)>,
     ) -> Result<HttpProxyResponse, (StatusCode, String)> {
         let session = self.registry.get_session(controller_id).ok_or_else(|| {
             (
@@ -229,40 +156,6 @@ impl ProxyForwarder {
             )
         })?;
 
-        if expected.is_some_and(|(holder, fence)| !session.matches_ownership(holder, fence)) {
-            return Err((
-                StatusCode::PRECONDITION_FAILED,
-                "stale controller ownership".to_string(),
-            ));
-        }
-
-        self.dispatch_to_session(controller_id, method, path, headers, body, session)
-            .await
-    }
-
-    /// Dispatch only while the exact standalone Controller session remains
-    /// current. This prevents continuation tokens from crossing reconnects.
-    pub async fn forward_expected_session(
-        &self,
-        controller_id: &str,
-        expected_session_id: &str,
-        method: String,
-        path: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
-    ) -> Result<HttpProxyResponse, (StatusCode, String)> {
-        let session = self.registry.get_session(controller_id).ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Controller {controller_id} not found or offline"),
-            )
-        })?;
-        if session.session_id != expected_session_id || session.stream_tx.is_none() {
-            return Err((
-                StatusCode::PRECONDITION_FAILED,
-                "Controller session changed".to_string(),
-            ));
-        }
         self.dispatch_to_session(controller_id, method, path, headers, body, session)
             .await
     }
@@ -370,69 +263,6 @@ impl ProxyForwarder {
     }
 }
 
-#[async_trait::async_trait]
-impl crate::poll::ControllerHttpClient for ProxyForwarder {
-    async fn request(
-        &self,
-        controller_id: &str,
-        method: String,
-        path: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
-    ) -> Result<crate::poll::ControllerHttpResponse, String> {
-        self.forward(controller_id, method, path, headers, body)
-            .await
-            .map(|response| crate::poll::ControllerHttpResponse {
-                status_code: response.status_code,
-                body: response.body,
-            })
-            .map_err(|(_, message)| message)
-    }
-
-    async fn request_fenced(
-        &self,
-        controller_id: &str,
-        method: String,
-        path: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
-        expected_owner: &edgion_center_core::ControllerOwnerRoute,
-    ) -> Result<crate::poll::ControllerHttpResponse, String> {
-        self.forward_expected_route(expected_owner, controller_id, method, path, headers, body)
-            .await
-            .map(|response| crate::poll::ControllerHttpResponse {
-                status_code: response.status_code,
-                body: response.body,
-            })
-            .map_err(|(_, message)| message)
-    }
-
-    async fn request_session_fenced(
-        &self,
-        controller_id: &str,
-        method: String,
-        path: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
-        expected_session_id: &str,
-    ) -> Result<crate::poll::ControllerHttpResponse, String> {
-        self.forward_expected_session(
-            controller_id,
-            expected_session_id,
-            method,
-            path,
-            headers,
-            body,
-        )
-        .await
-        .map(|response| crate::poll::ControllerHttpResponse {
-            status_code: response.status_code,
-            body: response.body,
-        })
-        .map_err(|(_, message)| message)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,32 +271,48 @@ mod tests {
         ControllerId, ControllerOwnerLocator, ControllerOwnerRoute, CoreResult, OwnershipFence,
     };
 
-    struct NeverLocate;
-
-    #[async_trait::async_trait]
-    impl ControllerOwnerLocator for NeverLocate {
-        async fn locate(&self, _: &ControllerId) -> CoreResult<Option<ControllerOwnerRoute>> {
-            panic!("fenced forwarding must not re-resolve ownership")
+    fn owner_route(epoch: u64) -> ControllerOwnerRoute {
+        ControllerOwnerRoute {
+            holder: format!("center-{epoch}/uid-{epoch}"),
+            endpoint: format!("https://10.0.0.{epoch}:12252"),
+            ownership_fence: OwnershipFence {
+                token: format!("token-{epoch}"),
+                epoch,
+            },
         }
     }
 
-    struct RecordingTransport(Mutex<Vec<ControllerOwnerRoute>>);
+    /// Hands out a strictly newer owner on every call, so a retry always has
+    /// somewhere new to go and cannot be stopped by the no-advance guard.
+    struct AdvancingOwner(Mutex<u64>);
 
     #[async_trait::async_trait]
-    impl InternalForwardTransport for RecordingTransport {
+    impl ControllerOwnerLocator for AdvancingOwner {
+        async fn locate(&self, _: &ControllerId) -> CoreResult<Option<ControllerOwnerRoute>> {
+            let mut epoch = self.0.lock();
+            *epoch += 1;
+            Ok(Some(owner_route(*epoch)))
+        }
+    }
+
+    struct FailingTransport {
+        attempts: Mutex<u32>,
+        kind: ForwardErrorKind,
+    }
+
+    #[async_trait::async_trait]
+    impl InternalForwardTransport for FailingTransport {
         async fn forward_http(
             &self,
-            route: &ControllerOwnerRoute,
+            _: &ControllerOwnerRoute,
             _: &str,
             _: ForwardHttpOperation,
             _: Duration,
         ) -> Result<HttpProxyResponse, ForwardError> {
-            self.0.lock().push(route.clone());
-            Ok(HttpProxyResponse {
-                request_id: "poll".to_string(),
-                status_code: 200,
-                headers: HashMap::new(),
-                body: br#"{"data":[]}"#.to_vec(),
+            *self.attempts.lock() += 1;
+            Err(ForwardError {
+                kind: self.kind,
+                message: "forward failed".to_string(),
             })
         }
 
@@ -479,40 +325,66 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn fenced_poll_dispatches_exact_route_without_reresolution() {
-        let expected = ControllerOwnerRoute {
-            holder: "center-a/uid-a".to_string(),
-            endpoint: "https://10.0.0.1:12252".to_string(),
-            ownership_fence: OwnershipFence {
-                token: "token-a".to_string(),
-                epoch: 1,
-            },
-        };
-        let transport = Arc::new(RecordingTransport(Mutex::new(Vec::new())));
-        let proxy = ProxyForwarder::new(
+    fn forwarder_over(transport: Arc<FailingTransport>) -> ProxyForwarder {
+        ProxyForwarder::new(
             ControllerRegistry::new(),
             Arc::new(Mutex::new(HashMap::new())),
             1,
         )
         .with_owner_forwarding(OwnerForwarding {
-            locator: Arc::new(NeverLocate),
-            transport: transport.clone(),
-            local_holder: "center-request/uid".to_string(),
-        });
+            locator: Arc::new(AdvancingOwner(Mutex::new(0))),
+            transport,
+            local_holder: "center-local/uid".to_string(),
+        })
+    }
 
-        proxy
-            .forward_expected_route(
-                &expected,
+    /// Returns how many times the request actually reached the transport. The
+    /// error message is asserted here because `Deadline` maps to the same 504
+    /// the outer request budget produces — only the message distinguishes a
+    /// transport failure from an expired budget.
+    async fn forward_and_count(kind: ForwardErrorKind) -> u32 {
+        let transport = Arc::new(FailingTransport {
+            attempts: Mutex::new(0),
+            kind,
+        });
+        let error = forwarder_over(transport.clone())
+            .forward(
                 "c1",
-                "GET".to_string(),
-                "/api/v1/region-routes/effective".to_string(),
+                "PUT".to_string(),
+                "/api/v1/namespaced/edgionconfigdata/ns/name".to_string(),
                 HashMap::new(),
                 Vec::new(),
             )
             .await
-            .unwrap();
-        assert_eq!(transport.0.lock().as_slice(), &[expected]);
+            .unwrap_err();
+        assert_eq!(
+            error.1, "forward failed",
+            "{kind:?} ended on the wrong error"
+        );
+        let attempts = *transport.attempts.lock();
+        attempts
+    }
+
+    /// A failure that may have already reached the Controller must never be
+    /// replayed: the mutation could have executed. Only `StaleOwnership`, which
+    /// the owning replica raises strictly before dispatch, is retryable.
+    #[tokio::test]
+    async fn uncertain_dispatch_failures_are_never_replayed() {
+        for kind in [
+            ForwardErrorKind::Unavailable,
+            ForwardErrorKind::Deadline,
+            ForwardErrorKind::Rejected,
+        ] {
+            assert_eq!(forward_and_count(kind).await, 1, "{kind:?} must not retry");
+        }
+    }
+
+    /// `AdvancingOwner` hands out a strictly newer owner each call, so this
+    /// stops at two because the retry budget is one — not because the
+    /// no-advance guard fired.
+    #[tokio::test]
+    async fn stale_ownership_is_retried_exactly_once_against_a_newer_owner() {
+        assert_eq!(forward_and_count(ForwardErrorKind::StaleOwnership).await, 2);
     }
 
     #[tokio::test]

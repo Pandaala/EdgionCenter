@@ -9,6 +9,8 @@ import { invalidateControllerAccess } from '@/hooks/useControllerAccess'
 import { useCan } from '@/utils/permissions'
 import { useT } from '@/i18n'
 import PageHeader from '@/components/PageHeader'
+import { reloadOutcomeMessage } from '@/components/WriteOutcome/reloadOutcomeText'
+import { reloadErrorMessage } from '@/api/reloadOutcome'
 
 type ControllerRow = ControllerSummary & { lastSeenAt?: number }
 
@@ -27,7 +29,9 @@ export default function ControllersPage() {
   const queryClient = useQueryClient()
   const canRead = useCan('controllers:read')
   const canWrite = useCan('controllers:write')
-  const canProxy = useCan('proxy:access')
+  // Entering a Controller only reads through the proxy; writes are gated per
+  // action by PermissionAwareButton on the drill-in pages.
+  const canProxy = useCan('proxy:read')
   const { data: serverInfo } = useServerInfo()
   const hasHistory = serverInfo?.data?.capabilities?.controllerHistory === true
   const [search, setSearch] = useState('')
@@ -67,12 +71,31 @@ export default function ControllersPage() {
       && (!cluster || row.cluster === cluster)
   })
 
+  // A reload is reported as a terminal state, never as bare dispatch success.
+  // `converged` is a toast; every other state is a modal, because each of them
+  // carries something the operator must read (a leader address, a retry delay,
+  // or "this may not have finished") that a 3 s toast would lose.
   const reload = useMutation({
     mutationFn: centerApi.reloadController,
-    onSuccess: async (_data, id) => {
+    onSuccess: async (outcome, id) => {
       await invalidateControllerAccess(queryClient, id)
-      message.success(t('center.reloadOk'))
+      refresh()
+      const { level, text } = reloadOutcomeMessage(t, outcome)
+      if (level === 'success') {
+        message.success(text)
+        return
+      }
+      const show = level === 'error' ? Modal.error : Modal.warning
+      show({
+        title: t('center.reloadOutcome.title'),
+        content: text,
+        okButtonProps: { 'data-testid': 'controller-reload-outcome-ok' },
+      })
     },
+    // The reload request is `_silent`, so the shared interceptor's per-status
+    // message never fires — word the transport failure here instead of letting
+    // axios's "Request failed with status code 404" reach the operator.
+    onError: (error: unknown) => message.error(reloadErrorMessage(error)),
   })
   const remove = useMutation({
     mutationFn: centerApi.deleteAdminController,
@@ -87,7 +110,14 @@ export default function ControllersPage() {
     content: t('center.reloadConfirm', { name: id }),
     okButtonProps: { 'data-testid': 'controller-reload-confirm' },
     cancelButtonProps: { 'data-testid': 'controller-reload-cancel' },
-    onOk: () => reload.mutateAsync(id),
+    // Fire and let the confirm modal close: Center now waits up to 20 s for
+    // the Controller to come back, and holding the dialog open for that long
+    // would read as a hung dialog. The row's own button keeps spinning until
+    // the outcome arrives.
+    onOk: () => {
+      message.info(t('center.reloadPending', { name: id }))
+      reload.mutate(id)
+    },
   })
   const confirmDelete = (id: string) => Modal.confirm({
     title: t('confirm.deleteTitle'),

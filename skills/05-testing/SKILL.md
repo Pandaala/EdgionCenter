@@ -20,6 +20,16 @@ External fixtures are opt-in:
 - `EDGION_TEST_MYSQL_URL=...` enables SQL-adapter MySQL tests.
 - `EDGION_TEST_KUBERNETES=1` plus a disposable
   `EDGION_TEST_KUBERNETES_NAMESPACE` enables real API-server CRD/Lease tests.
+- `EDGION_FEDERATION_E2E=1` runs the two-controller federation e2e
+  (`examples/test/scripts/integration/run_center_test.sh`): real Center +
+  Controller binaries over mTLS, covering registration/StatsReport counts,
+  watch-cache reads, proxied CRUD with CAS, the default-RBAC surface, failover
+  fan-out and row sync, terminal reload outcomes, disconnect/reconnect/eviction,
+  a >4 MiB proxied list, and the terminal watch denial. It needs the sibling
+  Edgion repo (override the path with `EDGION_DIR`). The companion
+  `run_center_mtls_test.sh` covers SPIFFE identity rejection and the plaintext
+  fail-close; both scripts document, in their headers, which scenarios are
+  deliberately left to unit tests and why.
 
 Never point the Kubernetes matrix at a shared or production namespace. See
 `cicd/integration/README.md` for setup, assertions, and cleanup guarantees.

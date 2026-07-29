@@ -37,6 +37,21 @@ export function resolveControllerAccessId(routeControllerId: string | undefined,
   return routeControllerId?.replace(/~/g, '/') ?? activeControllerId
 }
 
+const PROXY_READ_VERBS: readonly ControllerAccessResourceVerb[] = ['get', 'list', 'list-keys', 'watch']
+
+/**
+ * Center splits its proxy grant by HTTP method so a role can drill into a
+ * Controller read-only. An `operation` carries no verb of its own, so it
+ * conservatively requires the write half.
+ */
+function requiredProxyPermission(
+  resourceVerb: ControllerAccessResourceVerb | undefined,
+  operation: ControllerAccessOperation | undefined,
+): string {
+  if (operation) return 'proxy:write'
+  return resourceVerb && PROXY_READ_VERBS.includes(resourceVerb) ? 'proxy:read' : 'proxy:write'
+}
+
 export function resolveActionAvailability(input: ActionAvailabilityInput): {
   disabled: boolean
   reason?: string
@@ -53,8 +68,11 @@ export function resolveActionAvailability(input: ActionAvailabilityInput): {
   const needsControllerAccess = Boolean(input.operation || (input.resourceKind && input.resourceVerb))
   if (!needsControllerAccess) return { disabled: false }
 
-  if (input.isControllerProxy && !input.centerPermissions.includes('proxy:access')) {
-    return { disabled: true, reason: 'Missing permission: proxy:access' }
+  if (input.isControllerProxy) {
+    const proxyPermission = requiredProxyPermission(input.resourceVerb, input.operation)
+    if (!input.centerPermissions.includes(proxyPermission)) {
+      return { disabled: true, reason: `Missing permission: ${proxyPermission}` }
+    }
   }
   if (input.controllerAccessLoading) {
     return { disabled: true, reason: 'Controller authorization is loading' }

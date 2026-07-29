@@ -167,14 +167,13 @@ const expectedUserNonResourceUrls = new Set([
   '/edgion-center-authz/api/v1/proxy/__E2E_CONTROLLER_PATH_B__/*',
   '/edgion-center-authz/api/v1/center/region-route-overrides',
   '/edgion-center-authz/api/v1/center/region-route-overrides/*',
-  '/edgion-center-authz/api/v1/center/service-region-route-overrides',
-  '/edgion-center-authz/api/v1/center/service-region-route-overrides/*',
   '/edgion-center-authz/permissions/controllers:read',
   '/edgion-center-authz/permissions/controllers:write',
   '/edgion-center-authz/permissions/region-routes:read',
   '/edgion-center-authz/permissions/region-routes:write',
   '/edgion-center-authz/permissions/server:read',
-  '/edgion-center-authz/permissions/proxy:access',
+  '/edgion-center-authz/permissions/proxy:read',
+  '/edgion-center-authz/permissions/proxy:write',
 ])
 if (userNonResourceUrls.length !== expectedUserNonResourceUrls.size || userNonResourceUrls.some((url) => !expectedUserNonResourceUrls.has(url))) throw new Error('OIDC non-resource RBAC must equal the reviewed least-privilege URL set')
 const dynamicSecrets = ['center-federation-tls', 'center-internal-tls', 'controller-a-federation-tls', 'controller-b-federation-tls', 'dex-tls', 'center-oidc-ca', 'oauth-oidc-ca']

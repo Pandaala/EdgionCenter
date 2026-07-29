@@ -79,10 +79,6 @@ pub struct OwnerForwarding {
     pub local_holder: String,
 }
 
-pub fn expected_fence(route: &ControllerOwnerRoute) -> (&str, &OwnershipFence) {
-    (&route.holder, &route.ownership_fence)
-}
-
 pub fn proxy_error(error: ForwardError) -> (StatusCode, String) {
     let status = match error.kind {
         ForwardErrorKind::Deadline => StatusCode::GATEWAY_TIMEOUT,

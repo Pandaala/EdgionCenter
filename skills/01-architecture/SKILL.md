@@ -8,7 +8,7 @@ description: Crate and binary map for EdgionCenter internals.
 | Path | Responsibility |
 |---|---|
 | `crates/center-core/` | Platform-neutral ports, models, capabilities, audit, authz, coordination |
-| `crates/center-runtime/` | Federation service, registry, aggregation, watches, command/proxy dispatch, internal forwarding |
+| `crates/center-runtime/` | Federation service, registry, aggregation, watches, proxy dispatch, internal forwarding |
 | `crates/center-app/` | Shared Admin API, authentication, web assets, runtime re-exports |
 | `crates/center-adapter-sql/` | SQLite/MySQL controller, user/RBAC, and audit persistence |
 | `crates/center-adapter-kubernetes/` | Controller CRD projection, Lease fencing, owner lookup, SAR, stdout audit |
@@ -26,4 +26,4 @@ explicitly requires Controller participation.
 
 Fleet-wide management of Edgion resources in platform namespaces is a separate Controller-backed
 capability. Read [06-center/04-global-resource-management.md](06-center/04-global-resource-management.md)
-before changing its inventory, persistence, synchronization, or dashboard contracts.
+before changing its inventory or dashboard contracts.

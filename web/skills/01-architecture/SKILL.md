@@ -90,7 +90,7 @@ Auth note: all business routes are wrapped by the `RequireAuth` component — un
 ├── /plugins
 │   ├── /                          → EdgionPluginsList
 │   ├── /stream                    → EdgionStreamPluginsList
-│   └── /metadata                  → PluginMetaDataList
+│   └── /metadata                  → EdgionConfigDataList
 └── /system
     ├── /config                    → EdgionGatewayConfigPage
     ├── /linksys                   → LinkSysList
@@ -127,7 +127,7 @@ src/
 │   │   ├── hooks/              # useTopologyData (data fetching + graph construction)
 │   │   └── components/         # Canvas, Legend, Drawer, nodes/ (6 node types), layout/
 │   ├── Routes/                 # HTTPRoute/GRPCRoute/TCPRoute/UDPRoute/TLSRoute
-│   ├── Plugins/                # EdgionPlugins/StreamPlugins/PluginMetaData
+│   ├── Plugins/                # EdgionPlugins/StreamPlugins/EdgionConfigData
 │   └── ...                     # Infrastructure, Security, System, Login
 │
 ├── schemas/                    # Zod validation schemas

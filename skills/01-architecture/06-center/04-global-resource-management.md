@@ -80,6 +80,43 @@ resource-specific Controller endpoint, ResourceKind, or federation protobuf mess
 federation Command channel (apply/delete/reload) has been removed entirely, so this proxy is
 the only path.
 
+## EdgionConfigData ownership — there is none to negotiate
+
+Mirrored from Edgion, which is canonical:
+`../Edgion/skills/01-architecture/05-resources/15-edgion-config-data.md` (Ownership) and
+`../Edgion/skills/04-review/architecture/edgion-config-data-managed-by-is-inert.md`.
+
+`EdgionConfigData` is the **Center-controlled data overlay** and is deliberately not an ops-repo
+artifact. The git-owned half of Edgion's model is the base config (`EdgionPlugins` and friends),
+which carries the logic; the overlay carries only data and exists to be pushed and hot-swapped by
+Center. The kind therefore has a **single intended writer**, which is why no ownership arbitration
+exists on either side of the federation boundary.
+
+Two consequences bind Center work:
+
+- **Do not rely on, read, or stamp `edgion.io/managed-by`.** The label is inert in Edgion: no
+  handler consults it, and the `managed_by` constants in
+  `../Edgion/edgion-resources/src/constants/labels.rs` have no callers at all. Its only live use is
+  provenance on `Secret` and the ACME-generated `EdgionTls`, written by ACME (`acme`) and the
+  conf-sync CA (`conf-sync-ca`) via their own local literals. Putting it on an `EdgionConfigData`
+  changes no behavior and misrepresents a guarantee that does not exist.
+- **Do not reintroduce label-based ownership.** Center stamping `managed-by: center`, refusing to
+  take over an unowned object, and surfacing an `unowned-conflict` drift state was the
+  `tasks/pending/global-resource-management/` design, **superseded and rejected on 2026-07-26** by
+  `tasks/pending/center-controller-interaction-convergence/`. Write safety is a CAS property
+  instead — `If-Match` on `metadata.resourceVersion` with explicit `converged` / `superseded` /
+  `conflict` outcomes — and an ownership epoch beside it would be a second, coarser concurrency
+  model with nothing to protect.
+
+`superseded` is consequently an expected outcome, not an anomaly: it means the write landed and
+something later replaced it. It does not imply a competing authority that Center should have
+out-ranked.
+
+Note that the Controller's CAS precondition is opt-in for *other* Admin API callers, so a caller
+sending neither `If-Match` nor a body `resourceVersion` still performs an unconditional replace.
+That is a Controller-side Admin API contract question, tracked separately in Edgion; it is not an
+ownership question and needs no Center-side mechanism.
+
 ## Watch constraints
 
 `FedWatchRequest` carries a single `kind` and a `from_version`; `from_version = 0` means

@@ -138,11 +138,11 @@ function App() {
           <Route index element={<CenterDashboard />} />
           <Route path="controllers" element={<RequirePermission permission="controllers:read"><ControllersPage /></RequirePermission>} />
           <Route path="region-routes" element={<Navigate to="/region-routes/region" replace />} />
-          <Route path="region-routes/region" element={<RequirePermission permission="region-routes:read"><RegionRouteOverridePage scope="region" /></RequirePermission>} />
-          <Route path="region-routes/service" element={<RequirePermission permission="region-routes:read"><RegionRouteOverridePage scope="service" /></RequirePermission>} />
+          <Route path="region-routes/region" element={<RequirePermission permission="region-routes:read"><RegionRouteOverridePage /></RequirePermission>} />
           <Route path="region-routes/topology" element={<Navigate to="/region-routes/region" replace />} />
           <Route path="region-routes/cluster" element={<Navigate to="/region-routes/region" replace />} />
-          <Route path="region-routes/services" element={<Navigate to="/region-routes/service" replace />} />
+          <Route path="region-routes/service" element={<Navigate to="/region-routes/region" replace />} />
+          <Route path="region-routes/services" element={<Navigate to="/region-routes/region" replace />} />
           {capabilities?.providerAccountAdmin && <Route path="cloud/provider-accounts" element={<RequirePermission permission="provider-accounts:read"><ProviderAccountsPage /></RequirePermission>} />}
           {capabilities?.cloudflareDnsRead && <Route path="cloud/cloudflare/dns" element={<RequirePermissions permissions={['cloudflare-dns:read', 'provider-accounts:read']}><CloudflareDnsPage /></RequirePermissions>} />}
           {capabilities?.cloudflareWafRead && <Route path="cloud/cloudflare/waf" element={<RequirePermissions permissions={['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read']}><CloudflareWafPage /></RequirePermissions>} />}

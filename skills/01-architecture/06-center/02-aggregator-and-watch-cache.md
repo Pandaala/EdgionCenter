@@ -5,9 +5,9 @@ The shared in-memory read path is implemented in `crates/center-runtime/src/`:
 - `aggregator.rs` tracks per-cluster Controller summaries and online state.
 - `watch_cache/` manages per-Controller typed reverse-watch caches.
 - `metadata_store.rs` builds the global view used by Admin API handlers.
-- `poll.rs` declares the `ControllerHttpClient` contract implemented by `proxy.rs`. It schedules
-  nothing: the effective-state poller that once lived here was deleted when the read model moved
-  entirely onto the federation watch stream.
+- Nothing polls a Controller. The effective-state poller and the `ControllerHttpClient`
+  contract it dispatched through are both gone; the read model rides the federation watch
+  stream entirely, and `proxy.rs` serves only on-demand admin requests.
 
 Center sends watch/list requests over each Controller's existing federation stream; the
 Controller remains the data source. Responses are associated with the live session and

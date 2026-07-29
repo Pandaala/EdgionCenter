@@ -1,0 +1,17 @@
+# IpList EdgionConfigData in a second namespace (edge-apps) — controller 1.
+# Together with the same-named document in the default namespace it proves the
+# global read model keys documents by (cluster, namespace, name), not by name.
+# It is also the wrong-type target for the failover type-pinning test.
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: app-iplist
+  namespace: edge-apps
+  resourceVersion: "1"
+spec:
+  data:
+    type: IpList
+    config:
+      items:
+        - name: loopback
+          cidrs: ["127.0.0.0/8"]

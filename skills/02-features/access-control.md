@@ -126,7 +126,7 @@ bundle keys; users get roles.
 | Global Resources | `global-resources:read` |
 | Audit | `audit:read` |
 | Server | `server:read` |
-| Proxy | `proxy:access` |
+| Proxy | `proxy:read`, `proxy:write` |
 | Access Control | `users:manage`, `roles:manage` |
 
 GET endpoints map to a `:read` key, mutating endpoints to a `:write` key.
@@ -136,6 +136,14 @@ GET endpoints map to a `:read` key, mutating endpoints to a `:write` key.
 three GlobalResources routes. There is no separate preflight route or `diagnose`
 permission; both were removed when GlobalResources moved to being served entirely from
 the in-memory federation watch read model, with zero Controller HTTP on the read path.
+
+The proxy tunnel (`/api/v1/proxy/{controller_id}/{*rest}`) follows the same rule:
+`GET`/`HEAD` require `proxy:read`, every other method requires `proxy:write`. Neither key
+is scoped to a Controller or a resource kind — that narrowing is the Controller's job,
+applied to the forwarded request through its own `center.rbac` policy. The split exists so
+a standalone (database RBAC) role can be granted read-only fleet access; in Kubernetes mode
+the SubjectAccessReview already carries the concrete path and HTTP verb, so native RBAC can
+express the same grant (and finer ones) directly on `nonResourceURLs`.
 
 ## How RBAC enforcement works (`authz.mode: rbac`)
 
