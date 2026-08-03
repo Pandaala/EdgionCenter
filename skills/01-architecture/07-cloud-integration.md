@@ -2,11 +2,9 @@
 
 ## Product boundary
 
-Cloud integration is an independent EdgionCenter capability for provider accounts, provider DNS,
-bounded WAF administration, and a minimal CloudFront distribution lifecycle. Provider surfaces
-remain provider-specific: Route 53 is DNS, Cloudflare supplies its own DNS/WAF semantics, AWS WAF
-is separate from CloudFront, and CloudFront remains deliberately limited to distribution/origin
-and Web ACL attachment operations. Center does not provide a unified exposure, edge, origin pool,
+Cloud integration is an independent EdgionCenter capability for provider accounts and
+provider-specific DNS. Route 53 and Cloudflare retain their own DNS semantics and Admin surfaces.
+Center does not provide WAF, CDN, unified exposure, edge, origin pool,
 certificate, health-check, cache, or failover control plane. It does not depend on Edgion
 Controllers, Gateway API resources, RegionRoute, or the federation wire contract.
 
@@ -77,7 +75,7 @@ an external object. Each mutation API must establish its own exact authority and
 ## Status contract
 
 Observed status uses generation-aware Conditions. Retained services can publish
-`Accepted`, `CredentialsValid`, `DNSReady`, `WafReady`, `Programmed`, and `DriftDetected`.
+`Accepted`, `CredentialsValid`, `DNSReady`, `Programmed`, and `DriftDetected`.
 Unknown and stale observations must not be interpreted as
 success. Provider errors are summarized into stable reason codes; raw payloads and secrets
 must not be stored in status.
@@ -226,10 +224,8 @@ pages rather than a snapshot token, so continuation still performs a bounded res
 persistence remains deferred until measured scale or quota evidence justifies separate SQL and
 Kubernetes implementations.
 
-Cloudflare API Tokens are preferred to legacy global API keys. AWS integrations use the ambient
-SDK credential chain and verify the effective AWS account with STS before provider calls. Route
-53, CloudFront, and AWS WAF are independently composed: enabling one neither enables nor
-authorizes another.
+Cloudflare API Tokens are preferred to legacy global API keys. Route 53 uses the AWS ambient SDK
+credential chain and verifies the effective AWS account with STS before provider calls.
 
 Credential inspection orchestration lives in the provider-neutral runtime. It loads the current
 ProviderAccount, resolves an inspector against that exact account authority, coalesces concurrent
@@ -249,9 +245,8 @@ adds no Kubernetes Secret permission.
 ## Provider capability contract
 
 Provider capabilities are independent snapshots, not booleans embedded in `ProviderAccount`
-status. A closed `ProviderCapability` family identifies portable DNS and WAF behavior. WAF
-capabilities cover only managed rules, custom rules, and rate limiting; provider expressions and
-protected-target references stay provider-specific. Each `CapabilityRequirement` also names an action
+status. The closed `ProviderCapability` family identifies portable DNS behavior. Each
+`CapabilityRequirement` also names an action
 (`Observe`, `Create`, `Update`, `Delete`, or `Execute`) so a read-only credential is not mistaken
 for write access and delete is not unnecessarily blocked by create quota.
 
@@ -386,8 +381,7 @@ cross-page consistent snapshot. The shared adapter conformance kit verifies acco
 scope, deterministic token replay, complete traversal, exact-revision CRUD, guard negotiation,
 receipt isolation, and all-or-nothing preflight. The single-receipt port rejects per-change partial
 success until an outcome-per-change type exists. Concrete provider adapters must run this suite;
-canonical fingerprinting remains follow-up work. CLD-14 adds an independent DNS verifier; it is
-not composed into a provider adapter or product binary.
+canonical fingerprinting remains follow-up work.
 
 The Cloudflare adapter is a separate account-bound crate. `ProviderAccountSpec` carries a typed
 provider-native account scope, so a Center resource ID is never sent as a Cloudflare account ID.
@@ -536,46 +530,18 @@ Zone lifecycle is a separate port from RRset mutation. `ManagedZone` records whe
 zone was imported or Center-created and defaults to imported, observe-only, and retain. Cloudflare,
 and Route 53 lifecycle adapters expose provider-assigned nameservers, DNSSEC state, DS
 handoff, create/delete receipts, and full provider-state revisions. Provider completion never sets
-DNS readiness. An independent authority-verifier port supplies zone- and revision-bound parent NS
-and authoritative-resolution evidence; public readiness additionally requires an exact delegated
-NS set. Registrar and parent-zone changes are external actions, not implicit side effects.
+DNS readiness, and the current product does not compose an authoritative DNS verifier.
+`ZoneAuthorityEvidence` remains a lifecycle projection, while current provider observations leave
+authoritative verification as `NotChecked`. Registrar and parent-zone changes are external
+actions, not implicit side effects.
 
 Zone deletion uses a fail-closed plan. Imported, observe-only, retained, non-empty,
 delegated/unverified, or DNSSEC-enabled zones are blockers that acknowledgement cannot override.
 Only a fresh safe plan plus a zone- and revision-bound approval can mint the sealed, non-wire
 deletion capability accepted by provider adapters, which re-observe provider state before delete.
-DNSSEC disable is likewise blocked until an independent parent check proves DS removal and the
-required cache hold; adapters never turn signing off first.
-
-The CLD-14 verifier is a separate adapter with no provider SDK, persistence, Admin API, dashboard,
-federation, or Edgion dependency. Requests bind the provider account, zone, zone and record
-revisions, expected RRset, exact nameserver set, resolver profile ID and revision, retry/query
-budget, and evidence freshness window. Provider completion cannot construct DNS readiness. Public
-readiness requires every provider-observed authoritative server to publish the exact A, AAAA,
-CNAME, or TXT RRset, every configured recursive view to observe it, and a direct parent-authority
-delegation check to return the exact NS set. Parent discovery may use the bound authority resolver,
-but delegation evidence is accepted only after the target server proves authority for the parent
-with an authoritative SOA response. Delegated-child verification binds a separate child apex and
-child nameserver set and cannot update its parent zone's lifecycle readiness. Private and
-split-horizon checks use only their explicitly bound resolver profile and never fall back to
-ambient system DNS.
-
-Network access is bounded and fail closed. Public authoritative targets are provider- or
-delegation-derived nameserver addresses, pinned before connect, restricted to public unicast port
-53, and rechecked before UDP and TCP exchanges. Private targets require an explicit CIDR and port
-allowlist. Responses must match source endpoint, transaction ID, opcode, question, type, and class;
-truncated UDP retries only the same endpoint over bounded TCP. CNAME verification compares the
-direct RRset and never follows the target. Query attempts, backoff, per-query time, total time, and
-evidence age are bounded. Timeout and budget exhaustion remain per-nameserver evidence rather than
-an unscoped network error, and metrics expose only low-cardinality result classes.
-
-DNSSEC validation uses explicit resolver endpoints with system configuration, search domains, and
-hosts-file fallback disabled. Hickory validates locally from root trust anchors; a raw AD bit is
-never promoted to local-chain evidence. Signed readiness requires the expected RRset and parent DS
-set plus a secure local chain. Authenticated DS absence is kept distinct from an empty or failed
-answer. DNSSEC validation reserves bounded logical operations and is also constrained by the
-resolver's single attempt, per-lookup timeout, and the verifier's total deadline; Hickory's internal
-DNSKEY/DS exchanges are not individually exported as propagation-query metrics.
+DNSSEC disable remains blocked unless lifecycle evidence proves parent DS removal and the required
+cache hold. No current composition produces that evidence, and adapters never turn signing off
+first.
 
 ## Historical origin and general-edge design (retired)
 
@@ -640,173 +606,10 @@ response. Provider write ambiguity is `UnknownOutcome`, never an automatic retry
 quota, region, and steering limitations are capability evidence; an unknown create quota cannot be
 treated as spare capacity.
 
-## Historical general CloudFront design (retired)
-
-The detailed material below records the removed broad CloudFront planner. The retained adapter is
-read-only Distribution inventory plus a private raw-wire round-trip seam. CLD-28F will separately
-add a fixed one-origin API Distribution lifecycle, and CLD-29A will add an exact `WebACLId`
-association write set. Ordered behaviors, origin groups, failover, ACM/domain orchestration,
-invalidations, and general CDN management are not current contracts.
-
-CloudFront is modeled as a distribution rather than a DNS zone. Route 53 owns hosted zones and
-alias RRsets; a distribution owns its provider domain, origins, origin groups, ordered cache
-behaviors, alternate domain names, deployment state, and invalidations. The first delivery slice
-supports public custom HTTP(S) origins. A syntactically valid DNS hostname or an ambient resolver
-answer is not proof of that boundary: a plan requires fresh, scope-bound public-origin approval for
-the exact provider account, distribution observation, hostname, and protocol intent. Ordinary
-public origins and trusted-classified public AWS custom endpoints are allowed; S3/OAC, private and
-VPC origins, functions, WAF, continuous deployment, and policy authoring remain outside the
-contract and cannot be silently represented as public custom origins. The first slice supports
-only `http-only` and `https-only`; `match-viewer` remains unsupported.
-
-Persistent inventory retains a sanitized typed projection, opaque ETag, account/partition and
-credential authority, observation freshness, mutation eligibility, and a keyed MAC of the opaque
-ETag revision. The MAC is a scope-binding token, not a configuration content hash. Inventory never
-persists raw XML, a complete SDK configuration, or Origin Custom Header names or values; only a
-redacted count crosses the adapter seam. When a custom
-header is an origin access credential, its name and value form one composition-resolved secret;
-neither field may enter desired state, status, plans, events, logs, debug output, provider errors,
-or API projections. Validation identifies only the secret reference or collection position.
-CloudFront updates replace a full configuration, so CLD-28B emits only observation-bound origin and
-origin-group fragments with no dispatch authority. CLD-28F re-reads the complete config and ETag
-into one bounded in-memory mutation window, overlays an authorized fragment, preserves unsupported
-and unowned fields, submits once, and discards the sensitive object.
-If unknown fields cannot be detected or safely preserved, the resource is mutation-ineligible.
-CLD-28F now performs a private live re-read and an `Enabled`-only overlay preview. The same bounded
-GET operation captures its raw response after deserialization. A serializer probe captures the
-current and desired SDK request bodies and raises a typed interceptor abort before identity,
-signing, or transmit. Strict ordered, namespace-aware comparison rejects any raw/SDK mismatch and
-proves that the desired wire changes only the root `Enabled` scalar. A successful proof removes
-only that plan's wire-schema and full-config-revision blockers; ownership, approval, reliability,
-secret-memory zeroization, and executor blockers remain, and no dispatch method is exposed.
-The secret-bearing SDK configuration is consumed and dropped within the planner rather than
-returned to its caller. Preview fields are private, and its intent MAC binds the logical provider
-account, generation, credential revision, AWS account and partition, distribution, ETag, and
-desired enablement state; the MAC is still not mutation authority.
-A persistable ownership claim and approval record now bind that composite plan revision to the
-exact Center resource, ownership revision, action, risk, AWS scope, and freshness window. A joint
-verifier must validate both records from one authoritative snapshot or transaction. The resulting
-sealed preauthorization also binds the fresh inventory observation token and earliest evidence
-deadline, but remains deliberately non-serializable and non-dispatchable. It removes no planner
-blocker; durable storage, one-time approval consumption, and an operation-fence check immediately
-before provider dispatch are still required.
-A `cfg(test)`-only `UpdateDistribution` protocol harness specifies a separate one-attempt SDK
-client and its error contract. Explicit ETag rejection requires a replan; deterministic `4xx`
-responses are terminal or explicitly throttled; ambiguous transport failures, `408`, `5xx`,
-malformed success, or response identity/config drift are `UnknownOutcome`. A valid response proves
-only provider acceptance, never deployment. Production builds contain no CloudFront mutation
-client because the SDK request body can contain credential-bearing custom headers and must not be
-sent until a secret-safe logging boundary and sealed authority exist. The SDK version is exactly
-pinned for reproducibility, but this does not replace runtime full-wire preservation proof and
-cannot by itself remove preview blockers; only the live raw-versus-serialized admission can remove
-the two wire-related blockers for that exact ETag.
-Creation is composed only after a validated origin and default cache behavior exist. Update,
-enable, disable, and delete use the latest observed ETag and remain pending until a fresh
-observation reports the expected configuration as deployed. Ambiguous writes become
-`UnknownOutcome` and are resolved by observation rather than blind replay.
-
-CLD-28B planning consumes a non-deserializable live-inventory handle, not a persisted inventory
-DTO. Public-origin resolver/classifier inputs and their approval minter remain sealed inside the
-adapter until a trusted composition resolver is wired. CLD-23 contributes only a conservative
-endpoint shape: weight one, priority zero, active state, verified TLS, no portable health check,
-minimum healthy one, and priority-tier mode. No CLD-23 load-balancing or health semantics are
-silently translated to CloudFront.
-
-An origin group has exactly one primary and one secondary origin plus bounded failover status
-codes. It is not a weighted load balancer. CloudFront failover applies only to viewer `GET`, `HEAD`,
-and cacheable `OPTIONS` requests. AWS may route a mutating request to the primary member without
-failing it over, but Center deliberately rejects a behavior that combines an origin group with
-`POST`, `PUT`, `PATCH`, or `DELETE`. Plans, APIs, and UI must describe this as a stricter Center
-safety policy, not as an AWS API restriction, and must never claim failover for mutating methods.
-
-Reverse-reference inspection for an origin or origin group is impact diagnosis only. Even a fresh
-empty result does not prove provider ownership, override `DeletionPolicy::Retain`, authorize the
-caller, acknowledge traffic impact, or construct deletion authority. CLD-28F must independently
-require all ownership, policy, authorization, freshness, and approval fences before removal.
-
-Cache behaviors retain CloudFront first-match ordering and reference observed AWS-managed or
-pre-existing cache, origin-request, and response-header policies. Center does not author those
-policies in the first slice. Policy planning authority comes only from a live, scope-filtered List
-followed by an exact Get for every referenced policy; the sealed observation binds policy kind,
-managed/custom scope, ID, ETag, modification time, AWS account and partition, credential revision,
-and freshness. A sanitized policy DTO or persisted inventory cannot authorize a plan.
-
-The initial behavior planner is append-only: it preserves every observed ordered behavior and
-places new behavior fragments after them. It exposes no default replacement, existing behavior
-replacement/deletion, or reorder operation until CLD-05 ownership/adoption authority exists. An
-append can still divert requests that previously reached the default behavior, so this impact is
-explicit in the plan and is not mutation approval. Managed path patterns use a conservative exact
-or single trailing-wildcard subset. Local preview uses first-match order after RFC 3986 dot-segment
-normalization, preserves repeated slashes, is restricted to the observed provider hostname or an
-alias, and is always labeled as a local projection. An origin group preview reports its primary
-and conditional secondary plus eligible failover codes; it never claims that the secondary was
-actually selected. The fragment and plan carry no dispatch authority, and the
-`wire_schema_not_lossless` guard remains a mutation blocker until CLD-28F.
-
-Alternate domains consume an externally managed ACM ARN plus fresh, sealed account,
-commercial-partition, `us-east-1`, certificate-status/type/key, validity, SAN coverage, exact
-effective-hostname-set, and distribution-revision evidence. Center uses ACM
-`DescribeCertificate` only and never retrieves certificate material or owns request, import,
-renewal, export, rotation, or deletion. The conservative first subset accepts only
-`AMAZON_ISSUED` certificates that are not ACM-managed for CloudFront and additive exact-hostname
-distribution aliases; wildcard SANs may cover exact hostnames, but wildcard distribution aliases
-remain unsupported until inventory can represent them safely. A certificate already used by a
-different distribution is rejected until fresh evidence can prove compatible supported HTTP
-versions across all consumers. Exact aliases must enter the adapter in lowercase ASCII/A-label
-form; implicit Unicode-to-Punycode conversion is not part of the initial contract.
-
-Route 53 aliases use the freshly observed distribution domain and sealed, short-lived evidence
-from a composition-owned, versioned AWS endpoint catalog for the CloudFront alias hosted-zone ID.
-The initial production source is a strictly parsed, checked-in catalog artifact with a fixed source
-identity and an exact-byte SHA-256 revision; ordinary configuration, environment, or Admin input
-cannot replace its values. Observation time, rather than the static artifact, mints the five-minute
-evidence window.
-There is no hard-coded, request-supplied, or distribution-derived fallback. The initial subset is
-commercial AWS only and emits simple public alias desired state: A always, AAAA only when the
-distribution's observed IPv6 setting is enabled, inherited TTL, empty ordinary values, and
-`EvaluateTargetHealth=false`. The Route 53 zone may be in another AWS account, but every requested
-alias must have exactly one zone binding. Planning stages distribution attachment, deployed-state
-observation, Route 53 submission, `INSYNC` observation, and CLD-14 authoritative/recursive
-verification separately. AWS domain-conflict lookup requires the validation Distribution to
-already have a certificate covering the queried hostname, so the safe sequence is certificate-only
-attachment, deployed-state observation, complete bounded `ListDomainConflicts` scans for every new
-exact alias, Alias attachment, and a second deployed-state observation. Any returned item—including
-wildcard overlap, Distribution Tenant, or a partially masked cross-account identity—blocks the
-plan; this slice never migrates or takes over an Alias. Empty-scan evidence binds the Distribution
-ETag and credential authority, certificate ARN, exact new-hostname set, and a five-minute window,
-and contains no foreign identifiers. Until ownership/adoption, exact DNS revision, approval, and
-both mutation executors are composed, this plan has no dispatch authority. Serialized plans
-retain the Route 53 provider-account and hosted-zone scope for every alias group so later ownership
-and exact-revision evidence cannot be rebound to another zone.
-
-Invalidations are durable operations with stable CallerReference identities. Accepted and
-in-progress states are not completion. Paths, wildcard suffixes, quotas, costs, and broad-impact
-approval are validated before submission; ambiguous dispatch is observed by CallerReference or
-provider invalidation identity before any replay.
-
-The first invalidation slice is read/plan/reconciliation only. It exposes bounded GET-only List
-and Get transport and performs an exact Get for every list summary before sealing a complete
-distribution-scoped inventory. Provider-form paths are kept case- and byte-sensitive: Center does
-not percent-decode, remove dot segments, collapse slashes, or otherwise rewrite cache identity.
-Provider reads preserve bounded external query-string, tag, duplicate, and literal-mid-wildcard
-items as opaque observations; desired-state validation is intentionally separate. The conservative
-initial desired subset rejects query strings, raw non-ASCII, tilde, unnecessary percent encoding,
-and non-suffix wildcards. Targeted paths retain an explicit query-variant coverage blocker until
-cache-policy evidence proves completeness; a suffix wildcard is the conservative way to cover
-query variants. `/*` is available only through an explicit all-path intent. Canonical sorting and
-deduplication happen before the request digest; CallerReference binds distribution, operation
-identity, and that digest. Reconciliation accepts a provider invalidation only when both
-CallerReference and the complete canonical path vector match. Reconciliation uses the current
-fresh account/distribution scope rather than requiring the old plan ETag to remain fresh. A
-complete non-snapshot scan that finds no match is still indeterminate under concurrent creation or
-provider visibility delay and never authorizes a new CallerReference. Plans always report possible billing and missing ownership, approval,
-quota, operation-binding, and executor authority; no CreateInvalidation transport exists in this
-slice.
-
 ## Historical lifecycle examples (retired)
 
 The examples below describe the removed unified exposure model and are non-normative. Current DNS
-and future WAF workflows use their provider-specific APIs and menus directly.
+use provider-specific DNS APIs and menus directly.
 
 ### Import and observe a DNS zone
 

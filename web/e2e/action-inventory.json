@@ -158,26 +158,10 @@
       "cloudflare-record-create",
       "cloudflare-record-load-more"
     ],
-    "/cloud/cloudflare/waf": [
-      "cloudflare-waf-account",
-      "cloudflare-waf-zone-open",
-      "cloudflare-waf-order",
-      "cloudflare-waf-exception"
-    ],
     "/cloud/aws/route53": [
       "route53-account",
       "route53-zone-create",
       "route53-record-create"
-    ],
-    "/cloud/aws/cloudfront": [
-      "cloudfront-account",
-      "cloudfront-create"
-    ],
-    "/cloud/aws/waf": [
-      "aws-waf-account",
-      "aws-waf-scope",
-      "aws-waf-region",
-      "aws-waf-acls"
     ]
   },
   "resourceActionTemplates": [

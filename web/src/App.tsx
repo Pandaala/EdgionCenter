@@ -49,10 +49,7 @@ import GlobalResourceInventoryPage from './pages/GlobalResources/GlobalResourceI
 import { GLOBAL_RESOURCE_DESCRIPTORS } from './pages/GlobalResources/globalResourceDescriptors'
 import ProviderAccountsPage from './pages/Cloud/ProviderAccountsPage'
 import CloudflareDnsPage from './pages/Cloud/CloudflareDnsPage'
-import CloudflareWafPage from './pages/Cloud/CloudflareWafPage'
 import Route53DnsPage from './pages/Cloud/Route53DnsPage'
-import CloudFrontPage from './pages/Cloud/CloudFrontPage'
-import AwsWafPage from './pages/Cloud/AwsWafPage'
 import './App.css'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -145,10 +142,7 @@ function App() {
           <Route path="region-routes/services" element={<Navigate to="/region-routes/region" replace />} />
           {capabilities?.providerAccountAdmin && <Route path="cloud/provider-accounts" element={<RequirePermission permission="provider-accounts:read"><ProviderAccountsPage /></RequirePermission>} />}
           {capabilities?.cloudflareDnsRead && <Route path="cloud/cloudflare/dns" element={<RequirePermissions permissions={['cloudflare-dns:read', 'provider-accounts:read']}><CloudflareDnsPage /></RequirePermissions>} />}
-          {capabilities?.cloudflareWafRead && <Route path="cloud/cloudflare/waf" element={<RequirePermissions permissions={['cloudflare-waf:read', 'cloudflare-dns:read', 'provider-accounts:read']}><CloudflareWafPage /></RequirePermissions>} />}
           {capabilities?.route53DnsRead && <Route path="cloud/aws/route53" element={<RequirePermissions permissions={['route53-dns:read', 'provider-accounts:read']}><Route53DnsPage dnsWriteAvailable={capabilities.route53DnsWrite === true} zoneLifecycleAvailable={capabilities.route53ZoneLifecycle === true} /></RequirePermissions>} />}
-          {capabilities?.cloudfrontRead && <Route path="cloud/aws/cloudfront" element={<RequirePermissions permissions={['cloudfront:read', 'provider-accounts:read']}><CloudFrontPage writeAvailable={capabilities.cloudfrontWrite === true} /></RequirePermissions>} />}
-          {capabilities?.awsWafRead && <Route path="cloud/aws/waf" element={<RequirePermissions permissions={['aws-waf:read', 'provider-accounts:read']}><AwsWafPage writeAvailable={capabilities.awsWafWrite === true} attachAvailable={capabilities.awsWafAttach === true} detachAvailable={capabilities.awsWafDetach === true} securityWeakenAvailable={capabilities.awsWafSecurityWeaken === true} cloudfrontWriteAvailable={capabilities.cloudfrontWrite === true} /></RequirePermissions>} />}
           {capabilities?.globalResourcesInventory && (
             <>
               <Route

@@ -105,21 +105,10 @@ pub enum DnsCapability {
     AtomicChanges,
 }
 
-/// Provider-neutral WAF capabilities. Provider-specific rule expressions and
-/// protected-target identifiers remain outside the core contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WafCapability {
-    ManagedRules,
-    CustomRules,
-    RateLimiting,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "family", content = "name", rename_all = "snake_case")]
 pub enum ProviderCapability {
     Dns(DnsCapability),
-    Waf(WafCapability),
 }
 
 /// Identifies persisted snapshots that advertise retired capability families.
@@ -137,7 +126,7 @@ fn contains_retired_capability_family(value: &serde_json::Value) -> bool {
         serde_json::Value::Object(values) => {
             matches!(
                 values.get("family").and_then(serde_json::Value::as_str),
-                Some("certificate" | "edge" | "health_check" | "cache")
+                Some("certificate" | "edge" | "health_check" | "cache" | "waf")
             ) || values.values().any(contains_retired_capability_family)
         }
         serde_json::Value::Array(values) => values.iter().any(contains_retired_capability_family),
@@ -1552,9 +1541,6 @@ mod tests {
             ProviderCapability::Dns(DnsCapability::GeolocationRouting),
             ProviderCapability::Dns(DnsCapability::FailoverRouting),
             ProviderCapability::Dns(DnsCapability::AtomicChanges),
-            ProviderCapability::Waf(WafCapability::ManagedRules),
-            ProviderCapability::Waf(WafCapability::CustomRules),
-            ProviderCapability::Waf(WafCapability::RateLimiting),
         ];
         let message = SanitizedCapabilityMessage::new("x".repeat(MAX_DIAGNOSTIC_MESSAGE_LEN))
             .expect("maximum diagnostic message");
@@ -1615,7 +1601,7 @@ mod tests {
         assert!(is_retired_capability_snapshot_json(
             r#"{"capability":{"family":"certificate","name":"managed"}}"#
         ));
-        assert!(!is_retired_capability_snapshot_json(
+        assert!(is_retired_capability_snapshot_json(
             r#"{"observations":[{"capability":{"family":"dns","name":"record_sets"}},{"capability":{"family":"waf","name":"managed_rules"}}]}"#
         ));
         assert!(!is_retired_capability_snapshot_json("not-json"));

@@ -76,95 +76,10 @@ fn parse_target_controller(path: &str) -> Option<String> {
     Some(decoded.replace('~', "/"))
 }
 
-/// Return a stable, body-independent action summary for Cloudflare WAF writes.
-///
-/// Keeping this path-derived is deliberate: WAF request bodies can contain
-/// security expressions and must never be copied into the audit stream.
-fn cloudflare_waf_action(method: &Method, path: &str) -> Option<String> {
-    const PREFIX: &str = "/api/v1/center/cloudflare/waf/";
-    if !path.starts_with(PREFIX) {
-        return None;
-    }
-
-    let resource = if path.ends_with("/security-weaken") {
-        "security_weaken"
-    } else if path.ends_with("/order") {
-        "order"
-    } else if path.ends_with("/exceptions") {
-        "managed_exception"
-    } else if path.contains("/managed-rules") {
-        "managed_rule"
-    } else if path.contains("/custom-rules") {
-        "custom_rule"
-    } else if path.contains("/rate-limits") {
-        "rate_limit"
-    } else {
-        "ruleset"
-    };
-
-    let operation = match *method {
-        Method::POST => "create",
-        Method::PUT | Method::PATCH => "update",
-        Method::DELETE => "delete",
-        _ => return None,
-    };
-    Some(format!("cloudflare_waf_{resource}_{operation}"))
-}
-
-/// Return stable, body-independent AWS WAF mutation summaries. Paths may
-/// contain provider ARNs or opaque identifiers, so only route shape and method
-/// contribute to audit detail.
-fn aws_waf_action(method: &Method, path: &str) -> Option<String> {
-    const PREFIX: &str = "/api/v1/center/aws/waf/accounts/";
-    if !path.starts_with(PREFIX) {
-        return None;
-    }
-    let resource = if path.ends_with("/security-weaken") && path.contains("/ip-sets/") {
-        "ip_set_security_weaken"
-    } else if path.ends_with("/security-weaken") && path.contains("/rules/") {
-        "rule_security_weaken"
-    } else if path.ends_with("/security-weaken") {
-        "web_acl_security_weaken"
-    } else if path.ends_with("/exceptions") {
-        "managed_exception"
-    } else if path.ends_with("/associations") {
-        "association"
-    } else if path.ends_with("/capacity") {
-        "capacity"
-    } else if path.contains("/ip-sets") {
-        "ip_set"
-    } else if path.contains("/rules") {
-        "rule"
-    } else {
-        "web_acl"
-    };
-    let operation = match *method {
-        Method::POST => "create",
-        Method::PUT | Method::PATCH => "update",
-        Method::DELETE => "delete",
-        _ => return None,
-    };
-    Some(format!("aws_waf_{resource}_{operation}"))
-}
-
 /// Return body-independent lifecycle actions for provider operations that may carry opaque
 /// concurrency tokens, association identifiers, or signed confirmations in their request body.
 fn cloud_lifecycle_action(method: &Method, path: &str) -> Option<String> {
-    const CLOUDFRONT: &str = "/api/v1/center/aws/cloudfront/accounts/";
     const ROUTE53: &str = "/api/v1/center/aws/route53/accounts/";
-    if path.starts_with(CLOUDFRONT) {
-        let action = match *method {
-            Method::POST if path.ends_with("/distributions") => "distribution_create",
-            Method::PUT if path.ends_with("/origin") => "origin_update",
-            Method::POST if path.ends_with("/enable") => "distribution_enable",
-            Method::POST if path.ends_with("/disable") => "distribution_disable",
-            Method::PUT if path.ends_with("/web-acl") => "web_acl_attach_or_replace",
-            Method::DELETE if path.ends_with("/web-acl") => "web_acl_detach",
-            Method::DELETE => "distribution_delete",
-            _ => return None,
-        };
-        return Some(format!("cloudfront_{action}"));
-    }
     if path.starts_with(ROUTE53) {
         let action = match *method {
             Method::POST if path.ends_with("/hosted-zones") => "zone_create",
@@ -196,17 +111,6 @@ fn cloud_audit_target(path: &str) -> Option<&'static str> {
             "cloudflare_dns_zone"
         });
     }
-    if path.starts_with("/api/v1/center/cloudflare/waf/") {
-        return Some(if path.contains("/managed-rules") {
-            "cloudflare_waf_managed_rule"
-        } else if path.contains("/custom-rules") {
-            "cloudflare_waf_custom_rule"
-        } else if path.contains("/rate-limits") {
-            "cloudflare_waf_rate_limit"
-        } else {
-            "cloudflare_waf_ruleset"
-        });
-    }
     if path.starts_with("/api/v1/center/aws/route53/") {
         return Some(
             if path.contains("/record-sets") || path.contains("/change-batches") {
@@ -217,28 +121,6 @@ fn cloud_audit_target(path: &str) -> Option<&'static str> {
                 "route53_hosted_zone"
             },
         );
-    }
-    if path.starts_with("/api/v1/center/aws/cloudfront/") {
-        return Some(if path.ends_with("/origin") {
-            "cloudfront_origin"
-        } else if path.ends_with("/web-acl") {
-            "cloudfront_web_acl_association"
-        } else {
-            "cloudfront_distribution"
-        });
-    }
-    if path.starts_with("/api/v1/center/aws/waf/") {
-        return Some(if path.contains("/ip-sets") {
-            "aws_waf_ip_set"
-        } else if path.contains("/rules/") || path.ends_with("/rules") {
-            "aws_waf_rule"
-        } else if path.contains("/associations") {
-            "aws_waf_association"
-        } else if path.ends_with("/capacity") {
-            "aws_waf_capacity_check"
-        } else {
-            "aws_waf_web_acl"
-        });
     }
     None
 }
@@ -319,9 +201,7 @@ pub async fn audit_middleware(
         .map(|s| s.to_string());
     let (actor, provider) = actor_and_provider(&req);
     let target_controller = parse_target_controller(&original_path);
-    let action = cloudflare_waf_action(&method, &original_path)
-        .or_else(|| aws_waf_action(&method, &original_path))
-        .or_else(|| cloud_lifecycle_action(&method, &original_path));
+    let action = cloud_lifecycle_action(&method, &original_path);
     let (path, detail) = sanitized_cloud_audit(&method, &original_path, action)
         .map(|(path, detail)| (path, Some(detail)))
         .unwrap_or((original_path, None));
@@ -350,7 +230,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request as HttpRequest, StatusCode};
-    use axum::routing::{get, post, put};
+    use axum::routing::{get, post};
     use axum::Router;
     use tokio::sync::mpsc;
     use tower::ServiceExt;
@@ -376,83 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn waf_action_is_stable_and_contains_no_request_data() {
-        assert_eq!(
-            cloudflare_waf_action(
-                &Method::PUT,
-                "/api/v1/center/cloudflare/waf/accounts/account-1/zones/zone-1/custom-rules/rule-1/order",
-            ),
-            Some("cloudflare_waf_order_update".to_string())
-        );
-        assert_eq!(
-            cloudflare_waf_action(
-                &Method::DELETE,
-                "/api/v1/center/cloudflare/waf/accounts/account-1/zones/zone-1/rate-limits/rule-1/security-weaken",
-            ),
-            Some("cloudflare_waf_security_weaken_delete".to_string())
-        );
-        assert_eq!(
-            cloudflare_waf_action(&Method::POST, "/api/v1/center/admin/controllers"),
-            None
-        );
-    }
-
-    #[test]
-    fn aws_waf_actions_are_path_only_and_cover_mutation_families() {
-        let root = "/api/v1/center/aws/waf/accounts/aws-main/scopes/regional";
-        assert_eq!(
-            aws_waf_action(&Method::POST, &format!("{root}/web-acls")),
-            Some("aws_waf_web_acl_create".to_string())
-        );
-        assert_eq!(
-            aws_waf_action(
-                &Method::PUT,
-                &format!("{root}/web-acls/acl/rules/ref/security-weaken")
-            ),
-            Some("aws_waf_rule_security_weaken_update".to_string())
-        );
-        assert_eq!(
-            aws_waf_action(
-                &Method::PUT,
-                &format!("{root}/web-acls/acl/rules/ref/exceptions")
-            ),
-            Some("aws_waf_managed_exception_update".to_string())
-        );
-        assert_eq!(
-            aws_waf_action(
-                &Method::PUT,
-                &format!("{root}/web-acls/acl/security-weaken")
-            ),
-            Some("aws_waf_web_acl_security_weaken_update".to_string())
-        );
-        assert_eq!(
-            aws_waf_action(
-                &Method::DELETE,
-                &format!("{root}/ip-sets/id/security-weaken")
-            ),
-            Some("aws_waf_ip_set_security_weaken_delete".to_string())
-        );
-        assert_eq!(
-            aws_waf_action(&Method::POST, &format!("{root}/web-acls/acl/associations")),
-            Some("aws_waf_association_create".to_string())
-        );
-        assert_eq!(
-            aws_waf_action(&Method::POST, &format!("{root}/capacity")),
-            Some("aws_waf_capacity_create".to_string())
-        );
-    }
-
-    #[test]
     fn cloud_lifecycle_actions_are_path_only_and_stable() {
-        let cloudfront = "/api/v1/center/aws/cloudfront/accounts/aws-main/distributions/E123";
-        assert_eq!(
-            cloud_lifecycle_action(&Method::PUT, &format!("{cloudfront}/web-acl")),
-            Some("cloudfront_web_acl_attach_or_replace".to_string())
-        );
-        assert_eq!(
-            cloud_lifecycle_action(&Method::DELETE, &format!("{cloudfront}/web-acl")),
-            Some("cloudfront_web_acl_detach".to_string())
-        );
         assert_eq!(
             cloud_lifecycle_action(
                 &Method::DELETE,
@@ -471,27 +275,6 @@ mod tests {
     }
 
     #[test]
-    fn cloud_audit_discards_raw_identifiers_and_links_permission_to_target() {
-        let raw_path = "/api/v1/center/aws/waf/accounts/123456789012/scopes/regional/web-acls/arn%3Aaws%3Awafv2%3Aus-east-1%3A123456789012%3Aregional%2Fwebacl%2Fsecret/rules/private-rule/security-weaken";
-        let action = aws_waf_action(&Method::PUT, raw_path);
-        let (path, detail) =
-            sanitized_cloud_audit(&Method::PUT, raw_path, action).expect("cloud route");
-
-        assert_eq!(path, "/api/v1/center/cloud-audit/aws_waf_rule");
-        assert!(!path.contains("123456789012"));
-        assert!(!detail.contains("123456789012"));
-        assert!(!detail.contains("private-rule"));
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&detail).unwrap(),
-            serde_json::json!({
-                "permission": catalog::AWS_WAF_SECURITY_WEAKEN,
-                "target": "aws_waf_rule",
-                "action": "aws_waf_rule_security_weaken_update",
-            })
-        );
-    }
-
-    #[test]
     fn cloud_audit_covers_every_retained_provider_family() {
         let cases = [
             (
@@ -502,21 +285,9 @@ mod tests {
             ),
             (
                 Method::POST,
-                "/api/v1/center/cloudflare/waf/accounts/cf/zones/z/custom-rules",
-                "cloudflare_waf_custom_rule",
-                catalog::CLOUDFLARE_WAF_WRITE,
-            ),
-            (
-                Method::POST,
                 "/api/v1/center/aws/route53/accounts/aws/hosted-zones",
                 "route53_hosted_zone",
                 catalog::ROUTE53_ZONES_WRITE,
-            ),
-            (
-                Method::PUT,
-                "/api/v1/center/aws/cloudfront/accounts/aws/distributions/d/origin",
-                "cloudfront_origin",
-                catalog::CLOUDFRONT_WRITE,
             ),
             (
                 Method::POST,
@@ -558,10 +329,6 @@ mod tests {
             .route(
                 "/api/v1/proxy/{controller_id}/{*rest}",
                 post(|| async { "ok" }),
-            )
-            .route(
-                "/api/v1/center/aws/cloudfront/accounts/{account_id}/distributions/{distribution_id}/origin",
-                put(|| async { "ok" }),
             )
             // Audit layer (inner)...
             .layer(axum::middleware::from_fn_with_state(
@@ -666,38 +433,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let rec = rx.try_recv().expect("proxy mutation must be recorded");
         assert_eq!(rec.target_controller.as_deref(), Some("cluster-a/ctrl-1"));
-    }
-
-    #[tokio::test]
-    async fn middleware_links_cloud_actor_permission_target_and_request_id() {
-        let (app, mut rx) = app_with_claims(false);
-        let raw_path =
-            "/api/v1/center/aws/cloudfront/accounts/123456789012/distributions/SECRET/origin";
-        let resp = app
-            .oneshot(
-                HttpRequest::builder()
-                    .method(Method::PUT)
-                    .uri(raw_path)
-                    .header("x-request-id", "req-cloud-1")
-                    .body(Body::from(r#"{"origin":"sensitive.example"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let rec = rx.try_recv().expect("cloud mutation must be recorded");
-        assert_eq!(rec.actor, "alice");
-        assert_eq!(rec.request_id.as_deref(), Some("req-cloud-1"));
-        assert_eq!(rec.path, "/api/v1/center/cloud-audit/cloudfront_origin");
-        let detail: serde_json::Value =
-            serde_json::from_str(rec.detail.as_deref().expect("cloud detail")).unwrap();
-        assert_eq!(detail["permission"], catalog::CLOUDFRONT_WRITE);
-        assert_eq!(detail["target"], "cloudfront_origin");
-        let serialized = serde_json::to_string(&rec).unwrap();
-        assert!(!serialized.contains("123456789012"));
-        assert!(!serialized.contains("SECRET"));
-        assert!(!serialized.contains("sensitive.example"));
     }
 
     #[test]

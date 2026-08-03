@@ -37,10 +37,8 @@ must not contact the internet. Provider coverage is split deliberately:
 
 | Boundary | Hermetic coverage |
 |---|---|
-| Cloudflare DNS and WAF HTTP | Wiremock status/body/header fixtures, bounded response streaming, throttling metadata, one-shot mutation dispatch, and lost-response ambiguity |
+| Cloudflare DNS HTTP | Wiremock status/body/header fixtures, bounded response streaming, throttling metadata, one-shot mutation dispatch, and lost-response ambiguity |
 | Route 53 DNS and hosted-zone lifecycle | Deterministic SDK HTTP fixtures, revision and authority fencing, throttling, partial observations, mutation receipts, deletion guards, and post-dispatch failure injection |
-| CloudFront Distribution and WAF association | Fixed wire-shape capture, serialized request bounds, SDK error normalization, ETag guards, and pre/post-dispatch deadline classification |
-| AWS WAF | Deterministic adapter fakes, bounded rule/IP-set models, ownership and lock-token guards, single-attempt SDK configuration, throttling normalization, and lost-response classification |
 | Admin API | Capability-gated route mounting, exact permission inventory, request body limits, sanitized errors, and provider-independent dashboard contracts |
 
 Real-account tests remain optional verification only. They must use disposable resources and

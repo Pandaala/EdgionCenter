@@ -189,7 +189,6 @@ describe('Center navigation structure', () => {
   it('removes temporary Global rule entries and keeps legacy IP Lists outside GlobalResources', () => {
     const leaves = centerMenu.flatMap((section) => flattenLeaves(section.children))
     expect(leaves.map((item) => item.key)).not.toContain('center-global-shared-plugins')
-    expect(leaves.map((item) => item.key)).not.toContain('center-global-waf-control')
     expect(leaves.map((item) => item.key)).not.toContain('center-global-ip-lists')
     expect(leaves.map((item) => item.path)).not.toContain('/global-rules/ip-lists')
   })

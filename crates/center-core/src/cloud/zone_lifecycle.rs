@@ -234,11 +234,10 @@ pub struct ZoneLifecycleObservation {
     pub non_default_record_count: u64,
 }
 
-/// Evidence produced independently from provider control-plane status.
+/// Evidence projected independently from provider control-plane status.
 ///
-/// This is a lifecycle projection only. It must be produced and applied by the
-/// validated DNS propagation contract; there is intentionally no legacy
-/// verifier/apply port that can turn an unbound timestamp into readiness.
+/// The current product does not compose a verifier or apply port. This
+/// lifecycle type alone must not be treated as proof of DNS readiness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ZoneAuthorityEvidence {

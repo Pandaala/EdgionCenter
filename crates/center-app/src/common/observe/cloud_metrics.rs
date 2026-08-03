@@ -15,14 +15,8 @@ pub const CLOUD_PROVIDER_THROTTLED_TOTAL: &str = "edgion_center_cloud_provider_t
 fn route_labels(path: &str) -> Option<(&'static str, &'static str)> {
     if path.starts_with("/api/v1/center/cloudflare/dns/") {
         Some(("cloudflare", "dns"))
-    } else if path.starts_with("/api/v1/center/cloudflare/waf/") {
-        Some(("cloudflare", "waf"))
     } else if path.starts_with("/api/v1/center/aws/route53/") {
         Some(("aws", "dns"))
-    } else if path.starts_with("/api/v1/center/aws/cloudfront/") {
-        Some(("aws", "cloudfront"))
-    } else if path.starts_with("/api/v1/center/aws/waf/") {
-        Some(("aws", "waf"))
     } else if path.starts_with("/api/v1/center/cloud/provider-") {
         Some(("center", "provider_account"))
     } else {
@@ -107,12 +101,8 @@ mod tests {
     #[test]
     fn route_labels_are_bounded_and_never_include_resource_ids() {
         assert_eq!(
-            route_labels("/api/v1/center/aws/cloudfront/accounts/123/distributions/secret/origin"),
-            Some(("aws", "cloudfront"))
-        );
-        assert_eq!(
-            route_labels("/api/v1/center/cloudflare/waf/accounts/a/zones/z/rulesets"),
-            Some(("cloudflare", "waf"))
+            route_labels("/api/v1/center/aws/route53/accounts/123/hosted-zones/secret"),
+            Some(("aws", "dns"))
         );
         assert_eq!(route_labels("/api/v1/controllers"), None);
     }

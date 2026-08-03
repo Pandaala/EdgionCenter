@@ -67,7 +67,7 @@ export interface ProviderCapabilitySnapshot {
   state: 'complete' | 'partial' | 'failed'
   discoveredAtUnixMs: number
   observations: Array<{
-    capability: { family: 'dns' | 'waf'; name: string }
+    capability: { family: 'dns'; name: string }
     dimensions: CapabilityDimensionObservation[]
   }>
   issues: Array<{ severity: 'warning' | 'blocking'; scope: unknown; reason: string }>

@@ -1239,7 +1239,8 @@ impl<T> DnsPage<T> {
 }
 
 /// Poll-based provider port. A provider-reported applied change is not proof
-/// of authoritative DNS readiness; CLD-14 performs that verification.
+/// of authoritative DNS readiness; no current product component performs that
+/// verification.
 ///
 /// Implementations validate every input. Page tokens are opaque cursors bound
 /// to the exact account/zone and list method that issued them; cross-scope

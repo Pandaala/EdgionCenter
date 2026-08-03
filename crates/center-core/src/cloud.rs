@@ -18,7 +18,6 @@ mod direct_call;
 mod dns;
 #[cfg(feature = "test-support")]
 mod dns_provider_conformance;
-mod dns_verification;
 #[cfg(feature = "test-support")]
 mod provider_account_store_conformance;
 mod provider_accounts;
@@ -36,7 +35,7 @@ pub use capabilities::{
     CapabilityScope, CapabilitySnapshotKey, CapabilitySnapshotStore, CapabilityStoreWrite,
     DiscoveryToken, DnsCapability, ProviderCapability, ProviderCapabilityDiscoverer,
     ProviderCapabilitySnapshot, ProviderRegion, SanitizedCapabilityCode,
-    SanitizedCapabilityMessage, TriState, WafCapability,
+    SanitizedCapabilityMessage, TriState,
 };
 pub use credentials::{
     CredentialInspection, CredentialInspector, CredentialIssue, CredentialIssueKind,
@@ -52,15 +51,6 @@ pub use dns::{
     DnsRoutingIdentity, DnsTtl, DnsTxtValue, DnsZoneId, DnsZoneRef, ObservedDnsRecordSet,
     ObservedDnsZone, ProviderDnsRecordSet, ProviderDnsRecordType, Route53AliasTarget,
     Route53FailoverRole, Route53GeoLocation, Route53HealthCheckId, Route53RoutingPolicy,
-};
-pub use dns_verification::{
-    apply_dns_verification_evidence, DnsPropagationVerifier, DnsQueryOutcome, DnsRrsetExpectation,
-    DnsVerificationBinding, DnsVerificationBudgetUse, DnsVerificationError,
-    DnsVerificationErrorKind, DnsVerificationEvidence, DnsVerificationPolicy,
-    DnsVerificationRequest, DnsVerificationRequestId, DnsVerificationResult, DnsVerificationScope,
-    DnssecEvidenceSource, DnssecValidationState, DnssecVerificationEvidence,
-    DnssecVerificationExpectation, NameserverCheck, RecursiveResolverCheck, ResolverProfileId,
-    ResolverProfileRef, ResolverProfileRevision, SanitizedDnsFailureCode,
 };
 pub use provider_accounts::{
     provider_account_from_desired, validate_stored_provider_account, ProviderAccountCreateResult,
@@ -281,7 +271,6 @@ pub enum CloudConditionType {
     Accepted,
     CredentialsValid,
     DnsReady,
-    WafReady,
     Programmed,
     DriftDetected,
 }

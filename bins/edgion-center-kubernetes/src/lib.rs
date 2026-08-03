@@ -177,12 +177,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         mounted_credential_resolver.clone(),
     )
     .map_err(|error| anyhow::anyhow!("Invalid Cloudflare DNS write config: {error}"))?;
-    let cloudflare_waf_admin = edgion_center_integration_cloudflare::compose_waf_admin(
-        &config.cloudflare_waf,
-        Some(provider_account_store.clone()),
-        mounted_credential_resolver.clone(),
-    )
-    .map_err(|error| anyhow::anyhow!("Invalid Cloudflare WAF config: {error}"))?;
     let route53_dns_admin = edgion_center_integration_route53::compose_dns_admin(
         &config.route53_dns_read,
         Some(provider_account_store.clone()),
@@ -202,18 +196,6 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
             mounted_credential_resolver.clone(),
         )
         .map_err(|error| anyhow::anyhow!("Invalid Route 53 zone lifecycle config: {error}"))?;
-    let cloudfront_admin = edgion_center_integration_cloudfront::compose_cloudfront_admin(
-        &config.cloudfront,
-        Some(provider_account_store.clone()),
-        mounted_credential_resolver.clone(),
-    )
-    .map_err(|error| anyhow::anyhow!("Invalid CloudFront config: {error}"))?;
-    let aws_waf_admin = edgion_center_integration_aws_waf::compose_aws_waf_admin(
-        &config.aws_waf,
-        Some(provider_account_store.clone()),
-        mounted_credential_resolver.clone(),
-    )
-    .map_err(|error| anyhow::anyhow!("Invalid AWS WAF config: {error}"))?;
     platform_health_check(
         directory.as_ref(),
         coordinator.as_ref(),
@@ -310,12 +292,9 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
         audit_reader: None,
         cloudflare_dns_admin: cloudflare_dns_admin.clone(),
         cloudflare_dns_write_admin: cloudflare_dns_write_admin.clone(),
-        cloudflare_waf_admin: cloudflare_waf_admin.clone(),
-        aws_waf_admin: aws_waf_admin.clone(),
         route53_dns_admin: route53_dns_admin.clone(),
         route53_dns_write_admin: route53_dns_write_admin.clone(),
         route53_zone_lifecycle_admin: route53_zone_lifecycle_admin.clone(),
-        cloudfront_admin: cloudfront_admin.clone(),
         provider_account_store: Some(provider_account_store),
         capability_snapshot_store: Some(capability_snapshot_store),
         credential_inspection_service: credential_inspection_service.clone(),
@@ -333,23 +312,9 @@ async fn run(config: KubernetesCenterConfig) -> anyhow::Result<()> {
             capabilities.provider_credential_inspection = credential_inspection_service.is_some();
             capabilities.cloudflare_dns_read = cloudflare_dns_admin.is_some();
             capabilities.cloudflare_dns_write = cloudflare_dns_write_admin.is_some();
-            capabilities.cloudflare_waf_read =
-                config.cloudflare_waf.read_enabled && cloudflare_waf_admin.is_some();
-            capabilities.cloudflare_waf_write =
-                config.cloudflare_waf.write_enabled && cloudflare_waf_admin.is_some();
             capabilities.route53_dns_read = route53_dns_admin.is_some();
             capabilities.route53_dns_write = route53_dns_write_admin.is_some();
             capabilities.route53_zone_lifecycle = route53_zone_lifecycle_admin.is_some();
-            capabilities.cloudfront_read =
-                config.cloudfront.read_enabled && cloudfront_admin.is_some();
-            capabilities.cloudfront_write =
-                config.cloudfront.write_enabled && cloudfront_admin.is_some();
-            capabilities.aws_waf_read = config.aws_waf.read_enabled && aws_waf_admin.is_some();
-            capabilities.aws_waf_write = config.aws_waf.write_enabled && aws_waf_admin.is_some();
-            capabilities.aws_waf_attach = config.aws_waf.attach_enabled && aws_waf_admin.is_some();
-            capabilities.aws_waf_detach = config.aws_waf.detach_enabled && aws_waf_admin.is_some();
-            capabilities.aws_waf_security_weaken =
-                config.aws_waf.security_weaken_enabled && aws_waf_admin.is_some();
             capabilities
         },
     };

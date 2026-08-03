@@ -3,12 +3,9 @@ use edgion_center_app::common::{
     auth::AdminAuthConfig,
     config::{ConfSyncSecurityConfig, ConfSyncTlsConfig},
 };
-use edgion_center_integration_aws_waf::AwsWafConfig;
 use edgion_center_integration_cloudflare::{
     CloudflareCredentialInspectionConfig, CloudflareDnsReadConfig, CloudflareDnsWriteConfig,
-    CloudflareWafConfig,
 };
-use edgion_center_integration_cloudfront::CloudFrontAdminConfig;
 use edgion_center_integration_route53::{
     Route53DnsReadConfig, Route53DnsWriteConfig, Route53ZoneLifecycleConfig,
 };
@@ -118,18 +115,12 @@ pub struct KubernetesCenterConfig {
     pub cloudflare_dns_read: CloudflareDnsReadConfig,
     /// Account-bound synchronous Cloudflare DNS writes. Disabled by default.
     pub cloudflare_dns_write: CloudflareDnsWriteConfig,
-    /// Account-bound Cloudflare Zone WAF reads and writes. Both routes are disabled by default.
-    pub cloudflare_waf: CloudflareWafConfig,
     /// Account-bound, read-only Route 53 DNS inventory. Disabled by default.
     pub route53_dns_read: Route53DnsReadConfig,
     /// Account-bound synchronous Route 53 RRset writes. Disabled by default.
     pub route53_dns_write: Route53DnsWriteConfig,
     /// Account-bound synchronous Route 53 public hosted-zone lifecycle. Disabled by default.
     pub route53_zone_lifecycle: Route53ZoneLifecycleConfig,
-    /// Account-bound CloudFront Distribution inventory and fixed lifecycle. Disabled by default.
-    pub cloudfront: CloudFrontAdminConfig,
-    /// Account-bound AWS WAFv2 inventory and mutation boundary. Disabled by default.
-    pub aws_waf: AwsWafConfig,
 }
 
 impl Default for KubernetesCenterConfig {
@@ -148,12 +139,9 @@ impl Default for KubernetesCenterConfig {
             cloudflare_credential_inspection: CloudflareCredentialInspectionConfig::default(),
             cloudflare_dns_read: CloudflareDnsReadConfig::default(),
             cloudflare_dns_write: CloudflareDnsWriteConfig::default(),
-            cloudflare_waf: CloudflareWafConfig::default(),
             route53_dns_read: Route53DnsReadConfig::default(),
             route53_dns_write: Route53DnsWriteConfig::default(),
             route53_zone_lifecycle: Route53ZoneLifecycleConfig::default(),
-            cloudfront: CloudFrontAdminConfig::default(),
-            aws_waf: AwsWafConfig::default(),
         }
     }
 }
@@ -279,15 +267,12 @@ mod tests {
         assert!(aws.route53_dns_read.enabled);
         assert!(aws.route53_dns_write.enabled);
         assert!(aws.route53_zone_lifecycle.enabled);
-        assert!(aws.cloudfront.read_enabled && aws.cloudfront.write_enabled);
-        assert!(aws.aws_waf.read_enabled && aws.aws_waf.write_enabled);
 
         let cloudflare = example_config(include_str!(
             "../../../cicd/deploy/examples/cloudflare-mounted-credentials/config.yaml"
         ));
         assert!(cloudflare.cloudflare_dns_read.enabled);
         assert!(cloudflare.cloudflare_dns_write.enabled);
-        assert!(cloudflare.cloudflare_waf.read_enabled);
     }
 
     #[test]
@@ -303,14 +288,6 @@ mod tests {
         .is_err());
         assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
             "cloudflare_dns_read:\n  enabledd: true\n"
-        )
-        .is_err());
-        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
-            "cloudflare_waf:\n  read_enabledd: true\n"
-        )
-        .is_err());
-        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
-            "aws_waf:\n  security_weaken_enabledd: true\n"
         )
         .is_err());
     }
@@ -383,19 +360,6 @@ mod tests {
     }
 
     #[test]
-    fn cloudflare_waf_routes_are_independently_default_off_and_strict() {
-        let default = KubernetesCenterConfig::default();
-        assert!(!default.cloudflare_waf.read_enabled);
-        assert!(!default.cloudflare_waf.write_enabled);
-        let config: KubernetesCenterConfig = serde_yaml::from_str(
-            "cloudflare_waf:\n  read_enabled: true\n  write_enabled: false\n  operation_timeout_secs: 30\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
-        )
-        .unwrap();
-        assert!(config.cloudflare_waf.read_enabled);
-        assert!(!config.cloudflare_waf.write_enabled);
-    }
-
-    #[test]
     fn route53_dns_read_is_default_off_and_strict() {
         assert!(!KubernetesCenterConfig::default().route53_dns_read.enabled);
         let config: KubernetesCenterConfig = serde_yaml::from_str(
@@ -452,51 +416,6 @@ mod tests {
         );
         assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
             "route53_zone_lifecycle:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn cloudfront_is_default_off_and_strict() {
-        assert!(!KubernetesCenterConfig::default().cloudfront.read_enabled);
-        assert!(!KubernetesCenterConfig::default().cloudfront.write_enabled);
-        let config: KubernetesCenterConfig = serde_yaml::from_str(
-            "cloudfront:\n  read_enabled: true\n  write_enabled: true\n  fingerprint_key_ref: aws/cloudfront-fingerprint\n  operation_timeout_secs: 60\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
-        )
-        .unwrap();
-        assert!(config.cloudfront.read_enabled);
-        assert!(config.cloudfront.write_enabled);
-        assert_eq!(
-            config.cloudfront.fingerprint_key_ref.as_deref(),
-            Some("aws/cloudfront-fingerprint")
-        );
-        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
-            "cloudfront:\n  read_enabled: true\n  endpoint_url: https://example.invalid\n"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn aws_waf_capabilities_are_independently_default_off_and_strict() {
-        let default = KubernetesCenterConfig::default();
-        assert!(!default.aws_waf.read_enabled);
-        assert!(!default.aws_waf.write_enabled);
-        assert!(!default.aws_waf.attach_enabled);
-        assert!(!default.aws_waf.detach_enabled);
-        assert!(!default.aws_waf.security_weaken_enabled);
-
-        let config: KubernetesCenterConfig = serde_yaml::from_str(
-            "aws_waf:\n  detach_enabled: true\n  ownership_hmac_key_ref: aws/waf-owner\n  operation_timeout_secs: 60\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
-        )
-        .unwrap();
-        assert!(config.aws_waf.detach_enabled);
-        assert!(!config.aws_waf.write_enabled);
-        assert_eq!(
-            config.aws_waf.ownership_hmac_key_ref.as_deref(),
-            Some("aws/waf-owner")
-        );
-        assert!(serde_yaml::from_str::<KubernetesCenterConfig>(
-            "aws_waf:\n  detach_enabled: true\n  ownership_hmac_key_reff: aws/waf-owner\n"
         )
         .is_err());
     }

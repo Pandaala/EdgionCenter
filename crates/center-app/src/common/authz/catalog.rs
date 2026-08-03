@@ -43,16 +43,6 @@ pub const CLOUDFLARE_DNS_WRITE: &str = "cloudflare-dns:write";
 /// Dedicated authority for writing an authenticated caller marker with an RRset mutation.
 /// It does not imply ordinary Cloudflare DNS mutation access.
 pub const CLOUDFLARE_DNS_REMOTE_WRITE: &str = "cloudflare-dns:remote-write";
-/// Read Cloudflare Zone WAF rulesets across configured ProviderAccounts.
-pub const CLOUDFLARE_WAF_READ: &str = "cloudflare-waf:read";
-/// Create, update, enable, disable, or delete Center-owned Cloudflare WAF rules.
-pub const CLOUDFLARE_WAF_WRITE: &str = "cloudflare-waf:write";
-/// Reorder Center-owned Cloudflare WAF rules without granting other mutations.
-pub const CLOUDFLARE_WAF_ORDER: &str = "cloudflare-waf:order";
-/// Configure bounded managed-rule skips and exceptions.
-pub const CLOUDFLARE_WAF_EXCEPTION: &str = "cloudflare-waf:exception";
-/// Confirm an operation that weakens effective Cloudflare WAF protection.
-pub const CLOUDFLARE_WAF_SECURITY_WEAKEN: &str = "cloudflare-waf:security-weaken";
 /// High-trust Route 53 inventory access across every configured AWS ProviderAccount.
 /// Kubernetes authorization may additionally narrow this to exact non-resource paths.
 pub const ROUTE53_DNS_READ: &str = "route53-dns:read";
@@ -61,26 +51,6 @@ pub const ROUTE53_DNS_READ: &str = "route53-dns:read";
 pub const ROUTE53_DNS_WRITE: &str = "route53-dns:write";
 /// Create and guarded-delete public Route 53 hosted zones. This does not imply RRset mutation.
 pub const ROUTE53_ZONES_WRITE: &str = "route53-zones:write";
-/// Read CloudFront Distribution inventory across configured AWS ProviderAccounts.
-pub const CLOUDFRONT_READ: &str = "cloudfront:read";
-/// Create fixed-shape distributions and update their supported origin endpoints.
-pub const CLOUDFRONT_WRITE: &str = "cloudfront:write";
-/// Disable a CloudFront Distribution without granting delete authority.
-pub const CLOUDFRONT_DISABLE: &str = "cloudfront:disable";
-/// Delete a separately disabled CloudFront Distribution with an exact confirmation.
-pub const CLOUDFRONT_DELETE: &str = "cloudfront:delete";
-/// Explicitly weaken CloudFront protection by detaching its current AWS WAF Web ACL.
-pub const AWS_WAF_DETACH: &str = "aws-waf:detach";
-/// Read AWS WAF Web ACL, rule, IP set, capacity, and association inventory.
-pub const AWS_WAF_READ: &str = "aws-waf:read";
-/// Create or update bounded AWS WAF Web ACL, rule, and IP set resources.
-pub const AWS_WAF_WRITE: &str = "aws-waf:write";
-/// Attach an AWS WAF Web ACL to a supported target resource.
-pub const AWS_WAF_ATTACH: &str = "aws-waf:attach";
-/// Configure bounded managed-rule exclusions and overrides.
-pub const AWS_WAF_EXCEPTION: &str = "aws-waf:exception";
-/// Confirm an operation that weakens effective AWS WAF protection.
-pub const AWS_WAF_SECURITY_WEAKEN: &str = "aws-waf:security-weaken";
 pub const PROVIDER_ACCOUNTS_READ: &str = "provider-accounts:read";
 pub const PROVIDER_ACCOUNTS_WRITE: &str = "provider-accounts:write";
 pub const PROVIDER_CREDENTIALS_USE: &str = "provider-credentials:use";
@@ -104,24 +74,9 @@ pub fn all_keys() -> &'static [&'static str] {
         CLOUDFLARE_DNS_READ,
         CLOUDFLARE_DNS_WRITE,
         CLOUDFLARE_DNS_REMOTE_WRITE,
-        CLOUDFLARE_WAF_READ,
-        CLOUDFLARE_WAF_WRITE,
-        CLOUDFLARE_WAF_ORDER,
-        CLOUDFLARE_WAF_EXCEPTION,
-        CLOUDFLARE_WAF_SECURITY_WEAKEN,
         ROUTE53_DNS_READ,
         ROUTE53_DNS_WRITE,
         ROUTE53_ZONES_WRITE,
-        CLOUDFRONT_READ,
-        CLOUDFRONT_WRITE,
-        CLOUDFRONT_DISABLE,
-        CLOUDFRONT_DELETE,
-        AWS_WAF_READ,
-        AWS_WAF_WRITE,
-        AWS_WAF_ATTACH,
-        AWS_WAF_DETACH,
-        AWS_WAF_EXCEPTION,
-        AWS_WAF_SECURITY_WEAKEN,
         PROVIDER_ACCOUNTS_READ,
         PROVIDER_ACCOUNTS_WRITE,
         PROVIDER_CREDENTIALS_USE,
@@ -188,38 +143,8 @@ pub fn catalog_groups() -> Vec<PermissionGroup> {
             ],
         },
         PermissionGroup {
-            group: "Cloudflare WAF",
-            keys: vec![
-                CLOUDFLARE_WAF_READ,
-                CLOUDFLARE_WAF_WRITE,
-                CLOUDFLARE_WAF_ORDER,
-                CLOUDFLARE_WAF_EXCEPTION,
-                CLOUDFLARE_WAF_SECURITY_WEAKEN,
-            ],
-        },
-        PermissionGroup {
             group: "Route 53 DNS",
             keys: vec![ROUTE53_DNS_READ, ROUTE53_DNS_WRITE, ROUTE53_ZONES_WRITE],
-        },
-        PermissionGroup {
-            group: "CloudFront",
-            keys: vec![
-                CLOUDFRONT_READ,
-                CLOUDFRONT_WRITE,
-                CLOUDFRONT_DISABLE,
-                CLOUDFRONT_DELETE,
-            ],
-        },
-        PermissionGroup {
-            group: "AWS WAF",
-            keys: vec![
-                AWS_WAF_READ,
-                AWS_WAF_WRITE,
-                AWS_WAF_ATTACH,
-                AWS_WAF_DETACH,
-                AWS_WAF_EXCEPTION,
-                AWS_WAF_SECURITY_WEAKEN,
-            ],
         },
         PermissionGroup {
             group: "Provider Accounts",
@@ -299,10 +224,6 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
         };
     }
 
-    if under_segment(path, "/api/v1/center/cloudflare/waf") {
-        return cloudflare_waf_route_permission(method, path);
-    }
-
     if let Some(route) = route53_dns_route(path) {
         return match (route, method) {
             (Route53DnsRoute::ZoneCollection, &Method::GET) => Some(ROUTE53_DNS_READ),
@@ -315,56 +236,6 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
             (Route53DnsRoute::ChangeBatch, &Method::POST) => Some(ROUTE53_DNS_WRITE),
             (Route53DnsRoute::ZoneLifecycle, &Method::GET | &Method::POST | &Method::DELETE) => {
                 Some(ROUTE53_ZONES_WRITE)
-            }
-            _ => None,
-        };
-    }
-
-    if let Some(route) = cloudfront_route(path) {
-        return match (route, method) {
-            (CloudFrontRoute::Collection, &Method::GET)
-            | (CloudFrontRoute::Detail | CloudFrontRoute::Observation, &Method::GET) => {
-                Some(CLOUDFRONT_READ)
-            }
-            (
-                CloudFrontRoute::Collection | CloudFrontRoute::Origin | CloudFrontRoute::Enable,
-                &Method::POST,
-            )
-            | (CloudFrontRoute::Origin, &Method::PUT) => Some(CLOUDFRONT_WRITE),
-            (CloudFrontRoute::Disable, &Method::POST) => Some(CLOUDFRONT_DISABLE),
-            (CloudFrontRoute::Detail, &Method::DELETE) => Some(CLOUDFRONT_DELETE),
-            (CloudFrontRoute::WebAcl, &Method::PUT) => Some(AWS_WAF_ATTACH),
-            (CloudFrontRoute::WebAcl, &Method::DELETE) => Some(AWS_WAF_DETACH),
-            _ => None,
-        };
-    }
-
-    if let Some(route) = aws_waf_route(path) {
-        return match (route, method) {
-            (
-                AwsWafRoute::WebAclCollection
-                | AwsWafRoute::WebAclDetail
-                | AwsWafRoute::RuleCollection
-                | AwsWafRoute::IpSetCollection
-                | AwsWafRoute::ManagedCatalog
-                | AwsWafRoute::AssociationCollection,
-                &Method::GET | &Method::HEAD,
-            ) => Some(AWS_WAF_READ),
-            (AwsWafRoute::Capacity, &Method::POST) => Some(AWS_WAF_READ),
-            (
-                AwsWafRoute::WebAclCollection
-                | AwsWafRoute::RuleCollection
-                | AwsWafRoute::IpSetCollection,
-                &Method::POST,
-            )
-            | (AwsWafRoute::WebAclDetail | AwsWafRoute::Rule | AwsWafRoute::IpSet, &Method::PUT) => {
-                Some(AWS_WAF_WRITE)
-            }
-            (AwsWafRoute::AssociationCollection, &Method::POST) => Some(AWS_WAF_ATTACH),
-            (AwsWafRoute::AssociationRoot, &Method::DELETE) => Some(AWS_WAF_DETACH),
-            (AwsWafRoute::Exception, &Method::PUT) => Some(AWS_WAF_EXCEPTION),
-            (AwsWafRoute::SecurityWeaken, &Method::PUT | &Method::DELETE) => {
-                Some(AWS_WAF_SECURITY_WEAKEN)
             }
             _ => None,
         };
@@ -456,47 +327,6 @@ pub fn route_permission(method: &Method, path: &str) -> Option<&'static str> {
     None
 }
 
-fn cloudflare_waf_route_permission(method: &Method, path: &str) -> Option<&'static str> {
-    let suffix = path.strip_prefix("/api/v1/center/cloudflare/waf/accounts/")?;
-    let segments = suffix.split('/').collect::<Vec<_>>();
-    if segments.iter().any(|segment| segment.is_empty()) || segments.get(1) != Some(&"zones") {
-        return None;
-    }
-    let is_read = method == Method::GET || method == Method::HEAD;
-    match segments.as_slice() {
-        [_, "zones", _, "rulesets"] => is_read.then_some(CLOUDFLARE_WAF_READ),
-        [_, "zones", _, "managed-rules"]
-        | [_, "zones", _, "custom-rules"]
-        | [_, "zones", _, "rate-limits"] => {
-            if is_read {
-                Some(CLOUDFLARE_WAF_READ)
-            } else {
-                (method == Method::POST).then_some(CLOUDFLARE_WAF_WRITE)
-            }
-        }
-        [_, "zones", _, "managed-rules", "exceptions"] => {
-            (method == Method::PUT).then_some(CLOUDFLARE_WAF_EXCEPTION)
-        }
-        [_, "zones", _, "managed-rules", _, "order"]
-        | [_, "zones", _, "custom-rules", _, "order"]
-        | [_, "zones", _, "rate-limits", _, "order"] => {
-            (method == Method::PUT).then_some(CLOUDFLARE_WAF_ORDER)
-        }
-        [_, "zones", _, "managed-rules", _, "security-weaken"]
-        | [_, "zones", _, "custom-rules", _, "security-weaken"]
-        | [_, "zones", _, "rate-limits", _, "security-weaken"] => {
-            matches!(*method, Method::PUT | Method::DELETE)
-                .then_some(CLOUDFLARE_WAF_SECURITY_WEAKEN)
-        }
-        [_, "zones", _, "managed-rules", _]
-        | [_, "zones", _, "custom-rules", _]
-        | [_, "zones", _, "rate-limits", _] => {
-            (method == Method::PUT).then_some(CLOUDFLARE_WAF_WRITE)
-        }
-        _ => None,
-    }
-}
-
 fn is_cloudflare_remote_control_path(path: &str) -> bool {
     let Some(suffix) = path.strip_prefix("/api/v1/center/cloudflare/dns/accounts/") else {
         return false;
@@ -532,75 +362,6 @@ fn route53_dns_route(path: &str) -> Option<Route53DnsRoute> {
         [_, "hosted-zones", _, "record-sets", _] => Some(Route53DnsRoute::RecordDetail),
         [_, "hosted-zones", _, "change-batches"] => Some(Route53DnsRoute::ChangeBatch),
         [_, "hosted-zones", _, "lifecycle"] => Some(Route53DnsRoute::ZoneLifecycle),
-        _ => None,
-    }
-}
-
-#[derive(Clone, Copy)]
-enum CloudFrontRoute {
-    Collection,
-    Detail,
-    Observation,
-    Origin,
-    Enable,
-    Disable,
-    WebAcl,
-}
-fn cloudfront_route(path: &str) -> Option<CloudFrontRoute> {
-    let suffix = path.strip_prefix("/api/v1/center/aws/cloudfront/accounts/")?;
-    let segments = suffix.split('/').collect::<Vec<_>>();
-    if segments.iter().any(|segment| segment.is_empty()) {
-        return None;
-    }
-    match segments.as_slice() {
-        [_, "distributions"] => Some(CloudFrontRoute::Collection),
-        [_, "distributions", _] => Some(CloudFrontRoute::Detail),
-        [_, "distributions", _, "observation"] => Some(CloudFrontRoute::Observation),
-        [_, "distributions", _, "origin"] => Some(CloudFrontRoute::Origin),
-        [_, "distributions", _, "enable"] => Some(CloudFrontRoute::Enable),
-        [_, "distributions", _, "disable"] => Some(CloudFrontRoute::Disable),
-        [_, "distributions", _, "web-acl"] => Some(CloudFrontRoute::WebAcl),
-        _ => None,
-    }
-}
-
-#[derive(Clone, Copy)]
-enum AwsWafRoute {
-    WebAclCollection,
-    WebAclDetail,
-    RuleCollection,
-    Rule,
-    IpSetCollection,
-    IpSet,
-    ManagedCatalog,
-    Capacity,
-    AssociationCollection,
-    AssociationRoot,
-    Exception,
-    SecurityWeaken,
-}
-
-fn aws_waf_route(path: &str) -> Option<AwsWafRoute> {
-    let suffix = path.strip_prefix("/api/v1/center/aws/waf/accounts/")?;
-    let segments = suffix.split('/').collect::<Vec<_>>();
-    if segments.iter().any(|segment| segment.is_empty()) {
-        return None;
-    }
-    match segments.as_slice() {
-        [_, "scopes", _, "web-acls", _, "rules", _, "security-weaken"]
-        | [_, "scopes", _, "web-acls", _, "security-weaken"]
-        | [_, "scopes", _, "ip-sets", _, "security-weaken"] => Some(AwsWafRoute::SecurityWeaken),
-        [_, "scopes", _, "web-acls", _, "rules", _, "exceptions"] => Some(AwsWafRoute::Exception),
-        [_, "scopes", _, "web-acls", _, "rules", _] => Some(AwsWafRoute::Rule),
-        [_, "scopes", _, "web-acls", _, "rules"] => Some(AwsWafRoute::RuleCollection),
-        [_, "scopes", _, "web-acls", _, "associations"] => Some(AwsWafRoute::AssociationCollection),
-        [_, "scopes", _, "web-acls", _] => Some(AwsWafRoute::WebAclDetail),
-        [_, "scopes", _, "web-acls"] => Some(AwsWafRoute::WebAclCollection),
-        [_, "scopes", _, "ip-sets"] => Some(AwsWafRoute::IpSetCollection),
-        [_, "scopes", _, "ip-sets", _] => Some(AwsWafRoute::IpSet),
-        [_, "scopes", _, "managed-rule-groups"] => Some(AwsWafRoute::ManagedCatalog),
-        [_, "scopes", _, "capacity"] => Some(AwsWafRoute::Capacity),
-        [_, "scopes", _, "associations"] => Some(AwsWafRoute::AssociationRoot),
         _ => None,
     }
 }
@@ -675,34 +436,6 @@ mod tests {
             ),
             (
                 Method::GET,
-                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/rulesets",
-            ),
-            (
-                Method::PUT,
-                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/managed-rules/rule-1",
-            ),
-            (
-                Method::PUT,
-                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/managed-rules/exceptions",
-            ),
-            (
-                Method::POST,
-                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/custom-rules",
-            ),
-            (
-                Method::PUT,
-                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/custom-rules/rule-1/order",
-            ),
-            (
-                Method::DELETE,
-                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/custom-rules/rule-1/security-weaken",
-            ),
-            (
-                Method::POST,
-                "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/0123456789abcdef0123456789abcdef/rate-limits",
-            ),
-            (
-                Method::GET,
                 "/api/v1/center/aws/route53/accounts/aws-main/hosted-zones",
             ),
             (
@@ -770,11 +503,8 @@ mod tests {
     #[test]
     fn every_cloud_admin_route_has_the_exact_permission() {
         let cf_dns = "/api/v1/center/cloudflare/dns/accounts/a/zones/z";
-        let cf_waf = "/api/v1/center/cloudflare/waf/accounts/a/zones/z";
         let route53 = "/api/v1/center/aws/route53/accounts/a/hosted-zones/z";
-        let cloudfront = "/api/v1/center/aws/cloudfront/accounts/a/distributions/d";
-        let aws_waf = "/api/v1/center/aws/waf/accounts/a/scopes/regional";
-        let mut routes: Vec<(Method, String, &'static str)> = vec![
+        let routes: Vec<(Method, String, &'static str)> = vec![
             (
                 Method::GET,
                 "/api/v1/center/cloud/provider-accounts".into(),
@@ -843,31 +573,6 @@ mod tests {
                 CLOUDFLARE_DNS_REMOTE_WRITE,
             ),
             (
-                Method::GET,
-                format!("{cf_waf}/rulesets"),
-                CLOUDFLARE_WAF_READ,
-            ),
-            (
-                Method::GET,
-                format!("{cf_waf}/managed-rules"),
-                CLOUDFLARE_WAF_READ,
-            ),
-            (
-                Method::GET,
-                format!("{cf_waf}/custom-rules"),
-                CLOUDFLARE_WAF_READ,
-            ),
-            (
-                Method::GET,
-                format!("{cf_waf}/rate-limits"),
-                CLOUDFLARE_WAF_READ,
-            ),
-            (
-                Method::PUT,
-                format!("{cf_waf}/managed-rules/exceptions"),
-                CLOUDFLARE_WAF_EXCEPTION,
-            ),
-            (
                 Method::POST,
                 "/api/v1/center/aws/route53/accounts/a/hosted-zones".into(),
                 ROUTE53_ZONES_WRITE,
@@ -918,148 +623,7 @@ mod tests {
                 format!("{route53}/lifecycle"),
                 ROUTE53_ZONES_WRITE,
             ),
-            (
-                Method::GET,
-                "/api/v1/center/aws/cloudfront/accounts/a/distributions".into(),
-                CLOUDFRONT_READ,
-            ),
-            (Method::GET, cloudfront.into(), CLOUDFRONT_READ),
-            (
-                Method::GET,
-                format!("{cloudfront}/observation"),
-                CLOUDFRONT_READ,
-            ),
-            (
-                Method::POST,
-                "/api/v1/center/aws/cloudfront/accounts/a/distributions".into(),
-                CLOUDFRONT_WRITE,
-            ),
-            (
-                Method::PUT,
-                format!("{cloudfront}/origin"),
-                CLOUDFRONT_WRITE,
-            ),
-            (
-                Method::POST,
-                format!("{cloudfront}/enable"),
-                CLOUDFRONT_WRITE,
-            ),
-            (
-                Method::POST,
-                format!("{cloudfront}/disable"),
-                CLOUDFRONT_DISABLE,
-            ),
-            (Method::DELETE, cloudfront.into(), CLOUDFRONT_DELETE),
-            (Method::PUT, format!("{cloudfront}/web-acl"), AWS_WAF_ATTACH),
-            (
-                Method::DELETE,
-                format!("{cloudfront}/web-acl"),
-                AWS_WAF_DETACH,
-            ),
         ];
-
-        for suffix in ["managed-rules", "custom-rules", "rate-limits"] {
-            routes.extend([
-                (
-                    Method::POST,
-                    format!("{cf_waf}/{suffix}"),
-                    CLOUDFLARE_WAF_WRITE,
-                ),
-                (
-                    Method::PUT,
-                    format!("{cf_waf}/{suffix}/r"),
-                    CLOUDFLARE_WAF_WRITE,
-                ),
-                (
-                    Method::PUT,
-                    format!("{cf_waf}/{suffix}/r/order"),
-                    CLOUDFLARE_WAF_ORDER,
-                ),
-                (
-                    Method::PUT,
-                    format!("{cf_waf}/{suffix}/r/security-weaken"),
-                    CLOUDFLARE_WAF_SECURITY_WEAKEN,
-                ),
-                (
-                    Method::DELETE,
-                    format!("{cf_waf}/{suffix}/r/security-weaken"),
-                    CLOUDFLARE_WAF_SECURITY_WEAKEN,
-                ),
-            ]);
-        }
-
-        routes.extend([
-            (Method::GET, format!("{aws_waf}/web-acls"), AWS_WAF_READ),
-            (Method::GET, format!("{aws_waf}/web-acls/acl"), AWS_WAF_READ),
-            (
-                Method::GET,
-                format!("{aws_waf}/web-acls/acl/rules"),
-                AWS_WAF_READ,
-            ),
-            (Method::GET, format!("{aws_waf}/ip-sets"), AWS_WAF_READ),
-            (
-                Method::GET,
-                format!("{aws_waf}/managed-rule-groups"),
-                AWS_WAF_READ,
-            ),
-            (
-                Method::GET,
-                format!("{aws_waf}/web-acls/acl/associations"),
-                AWS_WAF_READ,
-            ),
-            (Method::POST, format!("{aws_waf}/capacity"), AWS_WAF_READ),
-            (Method::POST, format!("{aws_waf}/web-acls"), AWS_WAF_WRITE),
-            (
-                Method::PUT,
-                format!("{aws_waf}/web-acls/acl"),
-                AWS_WAF_WRITE,
-            ),
-            (
-                Method::POST,
-                format!("{aws_waf}/web-acls/acl/rules"),
-                AWS_WAF_WRITE,
-            ),
-            (
-                Method::PUT,
-                format!("{aws_waf}/web-acls/acl/rules/r"),
-                AWS_WAF_WRITE,
-            ),
-            (Method::POST, format!("{aws_waf}/ip-sets"), AWS_WAF_WRITE),
-            (Method::PUT, format!("{aws_waf}/ip-sets/ip"), AWS_WAF_WRITE),
-            (
-                Method::PUT,
-                format!("{aws_waf}/web-acls/acl/rules/r/exceptions"),
-                AWS_WAF_EXCEPTION,
-            ),
-            (
-                Method::POST,
-                format!("{aws_waf}/web-acls/acl/associations"),
-                AWS_WAF_ATTACH,
-            ),
-            (
-                Method::DELETE,
-                format!("{aws_waf}/associations"),
-                AWS_WAF_DETACH,
-            ),
-        ]);
-        for suffix in [
-            "web-acls/acl/rules/r/security-weaken",
-            "web-acls/acl/security-weaken",
-            "ip-sets/ip/security-weaken",
-        ] {
-            for method in [Method::PUT, Method::DELETE] {
-                // The IP-set route mounts DELETE only; asserting PUT here is a
-                // parser guard for the shared elevated route family.
-                if suffix.starts_with("ip-sets/") && method == Method::PUT {
-                    continue;
-                }
-                routes.push((
-                    method,
-                    format!("{aws_waf}/{suffix}"),
-                    AWS_WAF_SECURITY_WEAKEN,
-                ));
-            }
-        }
 
         for (method, path, expected) in routes {
             assert_eq!(
@@ -1436,43 +1000,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cloudflare_waf_routes_use_the_narrow_permission_suffixes() {
-        let base = "/api/v1/center/cloudflare/waf/accounts/cf-main/zones/zone-1";
-        assert_eq!(
-            route_permission(&Method::GET, &format!("{base}/rulesets")),
-            Some(CLOUDFLARE_WAF_READ)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, &format!("{base}/custom-rules")),
-            Some(CLOUDFLARE_WAF_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::PUT, &format!("{base}/custom-rules/rule-1/order")),
-            Some(CLOUDFLARE_WAF_ORDER)
-        );
-        assert_eq!(
-            route_permission(&Method::PUT, &format!("{base}/managed-rules/rule-1/order")),
-            Some(CLOUDFLARE_WAF_ORDER)
-        );
-        assert_eq!(
-            route_permission(&Method::PUT, &format!("{base}/managed-rules/exceptions")),
-            Some(CLOUDFLARE_WAF_EXCEPTION)
-        );
-        assert_eq!(
-            route_permission(
-                &Method::DELETE,
-                &format!("{base}/rate-limits/rule-1/security-weaken")
-            ),
-            Some(CLOUDFLARE_WAF_SECURITY_WEAKEN)
-        );
-        assert_eq!(
-            route_permission(&Method::DELETE, &format!("{base}/rate-limits/rule-1")),
-            None,
-            "destructive WAF changes require the dedicated security-weaken route"
-        );
-    }
-
     /// `is_business_path` covers /api/v1/ except the public auth routes.
     #[test]
     fn business_path_classification() {
@@ -1510,103 +1037,6 @@ mod tests {
                 "/api/v1/center/region-route-overrides/some-row"
             ),
             Some(REGION_ROUTES_READ)
-        );
-    }
-
-    #[test]
-    fn cloudfront_lifecycle_routes_use_separate_destructive_keys() {
-        let base = "/api/v1/center/aws/cloudfront/accounts/aws-main/distributions/DIST123";
-        assert_eq!(
-            route_permission(&Method::GET, &format!("{base}/observation")),
-            Some(CLOUDFRONT_READ)
-        );
-        assert_eq!(
-            route_permission(&Method::PUT, &format!("{base}/origin")),
-            Some(CLOUDFRONT_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, &format!("{base}/enable")),
-            Some(CLOUDFRONT_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, &format!("{base}/disable")),
-            Some(CLOUDFRONT_DISABLE)
-        );
-        assert_eq!(
-            route_permission(&Method::DELETE, base),
-            Some(CLOUDFRONT_DELETE)
-        );
-        assert_eq!(
-            route_permission(&Method::DELETE, &format!("{base}/web-acl")),
-            Some(AWS_WAF_DETACH)
-        );
-        assert_eq!(
-            route_permission(&Method::PUT, &format!("{base}/web-acl")),
-            Some(AWS_WAF_ATTACH)
-        );
-    }
-
-    #[test]
-    fn aws_waf_routes_use_scope_specific_narrow_permissions() {
-        let base = "/api/v1/center/aws/waf/accounts/aws-main/scopes/regional";
-        assert_eq!(
-            route_permission(&Method::GET, &format!("{base}/web-acls")),
-            Some(AWS_WAF_READ)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, &format!("{base}/web-acls")),
-            Some(AWS_WAF_WRITE)
-        );
-        assert_eq!(
-            route_permission(&Method::POST, &format!("{base}/capacity")),
-            Some(AWS_WAF_READ)
-        );
-        assert_eq!(
-            route_permission(
-                &Method::POST,
-                &format!("{base}/web-acls/acl-1/associations")
-            ),
-            Some(AWS_WAF_ATTACH)
-        );
-        assert_eq!(
-            route_permission(&Method::DELETE, &format!("{base}/associations")),
-            Some(AWS_WAF_DETACH)
-        );
-        assert_eq!(
-            route_permission(
-                &Method::PUT,
-                &format!("{base}/web-acls/acl-1/rules/managed/exceptions")
-            ),
-            Some(AWS_WAF_EXCEPTION)
-        );
-        assert_eq!(
-            route_permission(
-                &Method::DELETE,
-                &format!("{base}/web-acls/acl-1/rules/rule-1")
-            ),
-            None,
-            "a weakening delete is reachable only through the dedicated security-weaken path"
-        );
-        assert_eq!(
-            route_permission(
-                &Method::PUT,
-                &format!("{base}/web-acls/acl-1/rules/rule-1/security-weaken")
-            ),
-            Some(AWS_WAF_SECURITY_WEAKEN)
-        );
-        assert_eq!(
-            route_permission(
-                &Method::DELETE,
-                &format!("{base}/web-acls/acl-1/security-weaken")
-            ),
-            Some(AWS_WAF_SECURITY_WEAKEN)
-        );
-        assert_eq!(
-            route_permission(
-                &Method::DELETE,
-                &format!("{base}/ip-sets/ip-set-1/security-weaken")
-            ),
-            Some(AWS_WAF_SECURITY_WEAKEN)
         );
     }
 

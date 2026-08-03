@@ -4,22 +4,10 @@
 //! Edgion resources. Composition roots inject a credential-owning API client.
 
 mod http;
-mod waf;
 
 pub use http::{
     CloudflareApiToken, CloudflareCredentialProbe, CloudflareHttpApi, CloudflareTokenStatus,
     CloudflareTokenVerification,
-};
-pub use waf::{
-    CloudflareWafAction, CloudflareWafApi, CloudflareWafCustomRuleSpec, CloudflareWafExpression,
-    CloudflareWafManagedExceptionSpec, CloudflareWafManagedRuleOverride,
-    CloudflareWafManagedRuleSpec, CloudflareWafMutationReceipt, CloudflareWafOwnedRuleDefinition,
-    CloudflareWafOwnershipKeyRing, CloudflareWafPhase, CloudflareWafPhaseAvailability,
-    CloudflareWafPhaseInventory, CloudflareWafProviderRule, CloudflareWafRateLimitCharacteristic,
-    CloudflareWafRateLimitRuleSpec, CloudflareWafRuleInventoryItem, CloudflareWafRulePayload,
-    CloudflareWafRulePosition, CloudflareWafRuleRef, CloudflareWafRuleSpec, CloudflareWafRuleset,
-    CloudflareWafRulesetRevision, CloudflareWafSecurityWeakeningIntent, CloudflareZoneWafAdapter,
-    CloudflareZoneWafApi, CloudflareZoneWafInventory,
 };
 
 use std::{
