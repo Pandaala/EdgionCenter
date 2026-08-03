@@ -1,7 +1,7 @@
 import * as yaml from 'js-yaml'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { renderWithQueryClient } from '@/test/render'
 import EdgionBackendTrafficPolicyEditor from './EdgionBackendTrafficPolicyEditor'
 
 const create = vi.fn()
@@ -54,12 +54,7 @@ vi.mock('@/components/YamlEditor', () => ({
 }))
 
 function renderEditor(props: React.ComponentProps<typeof EdgionBackendTrafficPolicyEditor>) {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <EdgionBackendTrafficPolicyEditor {...props} />
-    </QueryClientProvider>,
-  )
+  return renderWithQueryClient(<EdgionBackendTrafficPolicyEditor {...props} />)
 }
 
 describe('EdgionBackendTrafficPolicyEditor mutation paths', () => {

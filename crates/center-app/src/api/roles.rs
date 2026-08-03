@@ -228,50 +228,13 @@ mod tests {
     use std::sync::Arc;
 
     fn state_with_db(db: Option<Arc<Store>>) -> ApiState {
-        use crate::aggregator::ResourceAggregator;
-        use crate::fed_sync::registry::ControllerRegistry;
-        use crate::metadata_store::CenterMetaDataStore;
-        use crate::proxy::ProxyForwarder;
-        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
-        use parking_lot::Mutex;
-        use std::collections::HashMap;
-
-        let registry = ControllerRegistry::new();
-        let metadata_store = Arc::new(CenterMetaDataStore::new());
-        let sync_client = Arc::new(CenterSyncClient {
-            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
-        });
-        let proxy = Arc::new(ProxyForwarder::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
         let role_admin = db.map(|store| {
             Arc::new(edgion_center_adapter_sql::SqlAdmin::new(store))
                 as Arc<dyn edgion_center_core::RoleAdmin>
         });
         ApiState {
-            aggregator: Arc::new(ResourceAggregator::new()),
-            proxy,
-            controller_directory: None,
-            controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
-            user_admin: None,
             role_admin: role_admin.clone(),
-            audit_reader: None,
-            cloudflare_dns_admin: None,
-            cloudflare_dns_write_admin: None,
-            route53_dns_admin: None,
-            route53_dns_write_admin: None,
-            route53_zone_lifecycle_admin: None,
-            provider_account_store: None,
-            capability_snapshot_store: None,
-            credential_inspection_service: None,
-            metadata_store,
-            sync_client,
-            registry,
-            platform_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             authz_mode: edgion_center_core::AuthzMode::Rbac,
-            platform_mode: edgion_center_core::CenterMode::Standalone,
             capabilities: edgion_center_core::CenterCapabilities::resolved(
                 false,
                 role_admin.is_some(),
@@ -285,6 +248,7 @@ mod tests {
                 false,
                 false,
             ),
+            ..ApiState::default()
         }
     }
 

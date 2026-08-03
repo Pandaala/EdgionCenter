@@ -292,103 +292,79 @@ mod tests {
     }
 
     #[test]
-    fn cloudflare_credential_inspection_is_default_off_and_strict() {
-        assert!(
-            !CenterConfig::default()
-                .cloudflare_credential_inspection
-                .enabled
-        );
-        let config = parse_via_production("cloudflare_credential_inspection:\n  enabled: true\n");
-        assert!(config.cloudflare_credential_inspection.enabled);
-        assert!(serde_yaml::from_str::<CenterConfig>(
-            "cloudflare_credential_inspection:\n  base_url: https://example.invalid\n"
-        )
-        .is_err());
-    }
+    fn dns_integrations_are_default_off_and_parse_strictly() {
+        let defaults = CenterConfig::default();
+        assert!(!defaults.cloudflare_credential_inspection.enabled);
+        assert!(!defaults.cloudflare_dns_read.enabled);
+        assert!(!defaults.cloudflare_dns_write.enabled);
+        assert!(!defaults.route53_dns_read.enabled);
+        assert!(!defaults.route53_dns_write.enabled);
+        assert!(!defaults.route53_zone_lifecycle.enabled);
 
-    #[test]
-    fn cloudflare_dns_read_is_default_off_and_strict() {
-        assert!(!CenterConfig::default().cloudflare_dns_read.enabled);
-        let config = parse_via_production(
+        let inspection =
+            parse_via_production("cloudflare_credential_inspection:\n  enabled: true\n");
+        assert!(inspection.cloudflare_credential_inspection.enabled);
+
+        let cloudflare_read = parse_via_production(
             "cloudflare_dns_read:\n  enabled: true\n  cursor_key_ref: cloudflare/dns-cursor-a\n  cursor_fallback_key_ref: cloudflare/dns-cursor-b\n  cursor_max_lifetime_secs: 900\n  cursor_clock_skew_secs: 30\n  operation_timeout_secs: 30\n  global_concurrency: 16\n  per_account_concurrency: 2\n",
         );
-        assert!(config.cloudflare_dns_read.enabled);
+        assert!(cloudflare_read.cloudflare_dns_read.enabled);
         assert_eq!(
-            config
+            cloudflare_read
                 .cloudflare_dns_read
                 .cursor_fallback_key_ref
                 .as_deref(),
             Some("cloudflare/dns-cursor-b")
         );
-        assert_eq!(config.cloudflare_dns_read.cursor_max_lifetime_secs, 900);
-        assert_eq!(config.cloudflare_dns_read.cursor_clock_skew_secs, 30);
-        assert_eq!(config.cloudflare_dns_read.operation_timeout_secs, 30);
-    }
+        assert_eq!(
+            cloudflare_read.cloudflare_dns_read.cursor_max_lifetime_secs,
+            900
+        );
 
-    #[test]
-    fn cloudflare_dns_write_is_default_off_and_strict() {
-        assert!(!CenterConfig::default().cloudflare_dns_write.enabled);
-        let config = parse_via_production(
+        let cloudflare_write = parse_via_production(
             "cloudflare_dns_write:\n  enabled: true\n  operation_timeout_secs: 30\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
         );
-        assert!(config.cloudflare_dns_write.enabled);
-        assert_eq!(config.cloudflare_dns_write.operation_timeout_secs, 30);
-        assert_eq!(config.cloudflare_dns_write.global_concurrency, 4);
-        assert_eq!(config.cloudflare_dns_write.per_account_concurrency, 1);
-    }
+        assert!(cloudflare_write.cloudflare_dns_write.enabled);
+        assert_eq!(cloudflare_write.cloudflare_dns_write.global_concurrency, 4);
 
-    #[test]
-    fn route53_dns_read_is_default_off_and_strict() {
-        assert!(!CenterConfig::default().route53_dns_read.enabled);
-        let config = parse_via_production(
+        let route53_read = parse_via_production(
             "route53_dns_read:\n  enabled: true\n  cursor_key_ref: aws/route53-dns-cursor\n  operation_timeout_secs: 60\n  global_concurrency: 8\n  per_account_concurrency: 2\n",
         );
-        assert!(config.route53_dns_read.enabled);
         assert_eq!(
-            config.route53_dns_read.cursor_key_ref.as_deref(),
+            route53_read.route53_dns_read.cursor_key_ref.as_deref(),
             Some("aws/route53-dns-cursor")
         );
-        assert!(serde_yaml::from_str::<CenterConfig>(
-            "route53_dns_read:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
-        )
-        .is_err());
-    }
 
-    #[test]
-    fn route53_dns_write_is_default_off_and_strict() {
-        assert!(!CenterConfig::default().route53_dns_write.enabled);
-        let config = parse_via_production(
+        let route53_write = parse_via_production(
             "route53_dns_write:\n  enabled: true\n  cursor_key_ref: aws/route53-dns-cursor\n  mutation_receipt_key_ref: aws/route53-dns-mutation\n  operation_timeout_secs: 60\n  global_concurrency: 4\n  per_account_concurrency: 1\n",
         );
-        assert!(config.route53_dns_write.enabled);
         assert_eq!(
-            config.route53_dns_write.mutation_receipt_key_ref.as_deref(),
+            route53_write
+                .route53_dns_write
+                .mutation_receipt_key_ref
+                .as_deref(),
             Some("aws/route53-dns-mutation")
         );
-        assert!(serde_yaml::from_str::<CenterConfig>(
-            "route53_dns_write:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
-        )
-        .is_err());
-    }
 
-    #[test]
-    fn route53_zone_lifecycle_is_default_off_and_strict() {
-        assert!(!CenterConfig::default().route53_zone_lifecycle.enabled);
-        let config = parse_via_production(
+        let route53_lifecycle = parse_via_production(
             "route53_zone_lifecycle:\n  enabled: true\n  cursor_key_ref: aws/route53-dns-cursor\n  lifecycle_token_key_ref: aws/route53-zone-lifecycle\n  operation_timeout_secs: 60\n  global_concurrency: 2\n  per_account_concurrency: 1\n",
         );
-        assert!(config.route53_zone_lifecycle.enabled);
         assert_eq!(
-            config
+            route53_lifecycle
                 .route53_zone_lifecycle
                 .lifecycle_token_key_ref
                 .as_deref(),
             Some("aws/route53-zone-lifecycle")
         );
-        assert!(serde_yaml::from_str::<CenterConfig>(
-            "route53_zone_lifecycle:\n  enabled: true\n  endpoint_url: https://example.invalid\n"
-        )
-        .is_err());
+
+        for invalid in [
+            "cloudflare_credential_inspection:\n  base_url: https://example.invalid\n",
+            "route53_dns_read:\n  enabled: true\n  endpoint_url: https://example.invalid\n",
+            "route53_dns_write:\n  enabled: true\n  endpoint_url: https://example.invalid\n",
+            "route53_zone_lifecycle:\n  enabled: true\n  endpoint_url: https://example.invalid\n",
+        ] {
+            assert!(serde_yaml::from_str::<CenterConfig>(invalid).is_err());
+        }
     }
 
     #[test]

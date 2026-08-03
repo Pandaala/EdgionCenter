@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { I18nProvider } from '@/i18n'
+import { renderWithQueryClient } from '@/test/render'
 import Route53DnsPage, { recordDesiredFromForm } from './Route53DnsPage'
 import { route53MutationResult } from '@/api/route53Dns'
 
@@ -24,7 +24,7 @@ const record = { providerAccountId: 'aws-main', zoneId: zone.zoneId, zoneApex: z
 const txtRecord = { providerAccountId: 'aws-main', zoneId: zone.zoneId, zoneApex: zone.apex, zoneVisibility: 'public', recordSet: { key: { owner: '_check.example.com.', recordType: 'TXT', routing: { type: 'simple' } }, ttl: { type: 'seconds', seconds: 60 }, values: [{ type: 'TXT', value: [[104, 105]] }] }, control: 'external_or_manual', revision: 'r2' } as const
 
 function renderPage() {
-  return render(<I18nProvider><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Route53DnsPage dnsWriteAvailable zoneLifecycleAvailable /></QueryClientProvider></I18nProvider>)
+  return renderWithQueryClient(<I18nProvider><Route53DnsPage dnsWriteAvailable zoneLifecycleAvailable /></I18nProvider>)
 }
 
 beforeEach(() => {

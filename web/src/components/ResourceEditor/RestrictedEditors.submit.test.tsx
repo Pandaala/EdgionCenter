@@ -1,13 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SecretEditor from './Secret/SecretEditor'
 import ConfigMapEditor from './ConfigMap/ConfigMapEditor'
+import { renderWithQueryClient } from '@/test/render'
 
 const api=vi.hoisted(()=>({create:vi.fn(),update:vi.fn()}))
 vi.mock('@/api/resources',()=>({resourceApi:{create:(...args:unknown[])=>api.create(...args),update:(...args:unknown[])=>api.update(...args)}}))
 vi.mock('@/components/YamlEditor',()=>({default:({value,onChange}:any)=><textarea aria-label="yaml-source" value={value} onChange={(e)=>onChange(e.target.value)}/> }))
-function wrapper(node:React.ReactNode){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{mutations:{retry:false}}})}>{node}</QueryClientProvider>)}
+function wrapper(node:React.ReactElement){return renderWithQueryClient(node)}
 
 describe('restricted dependency request payloads',()=>{
   beforeEach(()=>{api.create.mockReset().mockResolvedValue({success:true});api.update.mockReset().mockResolvedValue({success:true})})

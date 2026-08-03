@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import type { RoleDto, PermissionGroup } from '@/api/roles'
+import { renderWithQueryClient } from '@/test/render'
 import RoleManagementPage from './RoleManagementPage'
 
 const rolesList = vi.fn()
@@ -27,12 +27,7 @@ const CATALOG: PermissionGroup[] = [
 ]
 
 function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <RoleManagementPage />
-    </QueryClientProvider>,
-  )
+  return renderWithQueryClient(<RoleManagementPage />)
 }
 
 describe('RoleManagementPage', () => {

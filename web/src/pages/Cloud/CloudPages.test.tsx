@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { I18nProvider } from '@/i18n'
 import type { ProviderAccount } from '@/api/cloud'
+import { renderWithQueryClient } from '@/test/render'
 import ProviderAccountsPage from './ProviderAccountsPage'
 import CloudflareDnsPage from './CloudflareDnsPage'
 
@@ -53,8 +53,7 @@ const ACCOUNT: ProviderAccount = {
 }
 
 function renderPage(page: ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<I18nProvider><QueryClientProvider client={client}>{page}</QueryClientProvider></I18nProvider>)
+  return renderWithQueryClient(<I18nProvider>{page}</I18nProvider>)
 }
 
 beforeEach(() => {

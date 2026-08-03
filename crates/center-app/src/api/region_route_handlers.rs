@@ -484,51 +484,7 @@ mod tests {
 
     /// Minimal `ApiState` for handler tests; mirrors the builder in `src/api/mod.rs`.
     fn test_api_state() -> ApiState {
-        use crate::aggregator::ResourceAggregator;
-        use crate::fed_sync::registry::ControllerRegistry;
-        use crate::metadata_store::CenterMetaDataStore;
-        use crate::proxy::ProxyForwarder;
-        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
-        use edgion_center_core::AuthzMode;
-        use parking_lot::Mutex;
-        use std::collections::HashMap;
-
-        let registry = ControllerRegistry::new();
-        let metadata_store = Arc::new(CenterMetaDataStore::new());
-        let sync_client = Arc::new(CenterSyncClient {
-            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
-        });
-        let proxy = Arc::new(ProxyForwarder::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
-        ApiState {
-            aggregator: Arc::new(ResourceAggregator::new()),
-            proxy,
-            controller_directory: None,
-            controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
-            user_admin: None,
-            role_admin: None,
-            audit_reader: None,
-            cloudflare_dns_admin: None,
-            cloudflare_dns_write_admin: None,
-            route53_dns_admin: None,
-            route53_dns_write_admin: None,
-            route53_zone_lifecycle_admin: None,
-            provider_account_store: None,
-            capability_snapshot_store: None,
-            credential_inspection_service: None,
-            metadata_store,
-            sync_client,
-            registry,
-            platform_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            authz_mode: AuthzMode::AllowAll,
-            platform_mode: edgion_center_core::CenterMode::Standalone,
-            capabilities: edgion_center_core::CenterCapabilities::for_mode(
-                edgion_center_core::CenterMode::Standalone,
-            ),
-        }
+        ApiState::default()
     }
 
     /// The federation watch feeds every `EdgionConfigData` type into the store,

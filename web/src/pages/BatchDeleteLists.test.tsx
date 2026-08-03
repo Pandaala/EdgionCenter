@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { Modal } from 'antd'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderWithQueryClient } from '@/test/render'
 import ServiceList from './Infrastructure/ServiceList'
 import EndpointSliceList from './Infrastructure/EndpointSliceList'
 import BackendTLSPolicyList from './Security/BackendTLSPolicyList'
@@ -21,7 +21,7 @@ const cases=[['service',ServiceList],['endpointslice',EndpointSliceList],['backe
 describe('permission-aware selected-set batch deletion',()=>{
   beforeEach(()=>{batchDelete.mockReset().mockResolvedValue(undefined);vi.spyOn(Modal,'confirm').mockImplementation((config)=>{void config.onOk?.();return {destroy:vi.fn(),update:vi.fn()}})})
   it.each(cases)('%s deletes the complete selected set',(kind,Component)=>{
-    render(<QueryClientProvider client={new QueryClient()}><Component/></QueryClientProvider>)
+    renderWithQueryClient(<Component />)
     const boxes=screen.getAllByRole('checkbox');fireEvent.click(boxes[1]);fireEvent.click(boxes[2])
     fireEvent.click(screen.getByRole('button',{name:'Batch Delete'}))
     return waitFor(()=>expect(batchDelete).toHaveBeenCalledWith(
@@ -35,7 +35,7 @@ describe('permission-aware selected-set batch deletion',()=>{
     batchDelete.mockRejectedValueOnce(Object.assign(new Error('one delete failed'), {
       failedKeys: ['prod/service-b'],
     }))
-    render(<QueryClientProvider client={new QueryClient()}><ServiceList/></QueryClientProvider>)
+    renderWithQueryClient(<ServiceList />)
     const boxes = screen.getAllByRole('checkbox')
     fireEvent.click(boxes[1])
     fireEvent.click(boxes[2])

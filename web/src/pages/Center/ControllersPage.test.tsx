@@ -1,8 +1,8 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { Modal } from 'antd'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderWithQueryClient } from '@/test/render'
 import ControllersPage from './ControllersPage'
 
 const mocks = vi.hoisted(() => ({
@@ -26,8 +26,7 @@ const controllers = [
 ]
 
 function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<MemoryRouter><QueryClientProvider client={queryClient}><ControllersPage /></QueryClientProvider></MemoryRouter>)
+  return renderWithQueryClient(<MemoryRouter><ControllersPage /></MemoryRouter>)
 }
 
 describe('ControllersPage', () => {

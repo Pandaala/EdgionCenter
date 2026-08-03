@@ -1,7 +1,7 @@
 import * as yaml from 'js-yaml'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { renderWithQueryClient } from '@/test/render'
 import HTTPRouteEditor from './HTTPRoute/HTTPRouteEditor'
 import GRPCRouteEditor from './GRPCRoute/GRPCRouteEditor'
 import StreamRouteEditor from './StreamRoute/StreamRouteEditor'
@@ -25,7 +25,7 @@ vi.mock('@/components/ResourceEditor/GRPCRoute/GRPCRouteForm', () => ({ default:
 vi.mock('@/components/ResourceEditor/StreamRoute/StreamRouteForm', () => ({ default: ({ data, onChange }: any) =>
   <button onClick={() => onChange({ ...data, metadata: { name: 'stream', namespace: 'edge', uid: 'server' }, spec: { ...data.spec, parentRefs: [{ name: 'gw' }], futureSpec: true }, status: { runtime: true } })}>Fill Stream</button> }))
 
-const mount = (node: React.ReactNode) => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>{node}</QueryClientProvider>)
+const mount = (node: React.ReactElement) => renderWithQueryClient(node)
 const mutationPayload = () => yaml.load((create.mock.calls[0]?.[3] || update.mock.calls[0]?.[4]) as string) as any
 
 describe('route Editor mutation paths', () => {

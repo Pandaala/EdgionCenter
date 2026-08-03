@@ -41,11 +41,13 @@
 //!   GET  /api/v1/center/cloud/provider-capabilities/accounts/{account_id} → sanitized capability snapshot
 //!   ANY  /api/v1/proxy/{controller_id}/*rest                       → proxy HTTP request to controller
 
+#[cfg(feature = "password-auth")]
+use axum::routing::patch;
 use axum::{
     extract::{OriginalUri, Path, State},
     http::{HeaderMap, HeaderName, StatusCode, Uri},
     response::IntoResponse,
-    routing::{any, delete, get, patch, post},
+    routing::{any, delete, get, post},
     Json, Router,
 };
 use serde::Serialize;
@@ -218,6 +220,52 @@ impl ApiState {
             .filter(|summary| summary.online)
             .map(|summary| summary.controller_id)
             .collect())
+    }
+}
+
+#[cfg(test)]
+impl Default for ApiState {
+    fn default() -> Self {
+        use crate::watch_cache::CenterWatchCacheRegistry;
+        use parking_lot::Mutex;
+
+        let registry = ControllerRegistry::new();
+        let metadata_store = Arc::new(CenterMetaDataStore::new());
+        let sync_client = Arc::new(CenterSyncClient {
+            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
+        });
+        let proxy = Arc::new(ProxyForwarder::new(
+            registry.clone(),
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            5,
+        ));
+
+        Self {
+            aggregator: Arc::new(ResourceAggregator::new()),
+            proxy,
+            controller_directory: None,
+            controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
+            user_admin: None,
+            role_admin: None,
+            audit_reader: None,
+            cloudflare_dns_admin: None,
+            cloudflare_dns_write_admin: None,
+            route53_dns_admin: None,
+            route53_dns_write_admin: None,
+            route53_zone_lifecycle_admin: None,
+            provider_account_store: None,
+            capability_snapshot_store: None,
+            credential_inspection_service: None,
+            metadata_store,
+            sync_client,
+            registry,
+            platform_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            authz_mode: edgion_center_core::AuthzMode::AllowAll,
+            platform_mode: edgion_center_core::CenterMode::Standalone,
+            capabilities: edgion_center_core::CenterCapabilities::for_mode(
+                edgion_center_core::CenterMode::Standalone,
+            ),
+        }
     }
 }
 
@@ -1089,42 +1137,8 @@ mod tests {
     /// field is a minimal default sufficient for the stateless `server_info`
     /// handler.
     fn state_with_authz_mode(authz_mode: AuthzMode, db_auth_enabled: bool) -> ApiState {
-        use crate::watch_cache::{CenterSyncClient, CenterWatchCacheRegistry};
-        use parking_lot::Mutex;
-        use std::collections::HashMap;
-
-        let registry = ControllerRegistry::new();
-        let metadata_store = Arc::new(CenterMetaDataStore::new());
-        let sync_client = Arc::new(CenterSyncClient {
-            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
-        });
-        let proxy = Arc::new(ProxyForwarder::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
         ApiState {
-            aggregator: Arc::new(ResourceAggregator::new()),
-            proxy,
-            controller_directory: None,
-            controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
-            user_admin: None,
-            role_admin: None,
-            audit_reader: None,
-            cloudflare_dns_admin: None,
-            cloudflare_dns_write_admin: None,
-            route53_dns_admin: None,
-            route53_dns_write_admin: None,
-            route53_zone_lifecycle_admin: None,
-            provider_account_store: None,
-            capability_snapshot_store: None,
-            credential_inspection_service: None,
-            metadata_store,
-            sync_client,
-            registry,
-            platform_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             authz_mode,
-            platform_mode: edgion_center_core::CenterMode::Standalone,
             capabilities: edgion_center_core::CenterCapabilities::resolved(
                 false,
                 false,
@@ -1138,6 +1152,7 @@ mod tests {
                 false,
                 false,
             ),
+            ..ApiState::default()
         }
     }
 

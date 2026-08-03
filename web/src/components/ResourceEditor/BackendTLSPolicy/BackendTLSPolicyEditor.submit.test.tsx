@@ -1,11 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import BackendTLSPolicyEditor from './BackendTLSPolicyEditor'
+import { renderWithQueryClient } from '@/test/render'
 const api=vi.hoisted(()=>({create:vi.fn()}))
 vi.mock('@/api/resources',()=>({resourceApi:{create:(...args:unknown[])=>api.create(...args),update:vi.fn()}}))
 vi.mock('@/components/YamlEditor',()=>({default:({value,onChange}:any)=><textarea aria-label="yaml-source" value={value} onChange={(e)=>onChange(e.target.value)}/> }))
-const renderEditor=()=>render(<QueryClientProvider client={new QueryClient()}><BackendTLSPolicyEditor visible mode="create" onClose={vi.fn()}/></QueryClientProvider>)
+const renderEditor=()=>renderWithQueryClient(<BackendTLSPolicyEditor visible mode="create" onClose={vi.fn()}/>)
 describe('BackendTLSPolicy request payloads',()=>{
   beforeEach(()=>api.create.mockReset().mockResolvedValue({success:true}))
   it('submits the real Form path with same-namespace CA and bare client cert',async()=>{

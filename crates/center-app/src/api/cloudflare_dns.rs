@@ -1487,27 +1487,16 @@ pub async fn get_record_set(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Mutex,
-        },
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
     };
 
     use axum::{body::Body, http::Request};
-    use edgion_center_core::{AuthzMode, CenterCapabilities, CenterMode};
+    use edgion_center_core::{CenterCapabilities, CenterMode};
     use tower::ServiceExt;
 
     use super::*;
-    use crate::{
-        aggregator::ResourceAggregator,
-        fed_sync::registry::ControllerRegistry,
-        metadata_store::CenterMetaDataStore,
-        proxy::ProxyForwarder,
-        watch_cache::{CenterSyncClient, CenterWatchCacheRegistry},
-    };
-
     const ZONE_ID: &str = "0123456789abcdef0123456789abcdef";
 
     struct FakeService {
@@ -1823,42 +1812,14 @@ mod tests {
         write_service: Option<SharedCloudflareDnsWriteAdminService>,
         write_capability: bool,
     ) -> ApiState {
-        let registry = ControllerRegistry::new();
-        let metadata_store = Arc::new(CenterMetaDataStore::new());
-        let sync_client = Arc::new(CenterSyncClient {
-            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
-        });
-        let proxy = Arc::new(ProxyForwarder::new(
-            registry.clone(),
-            Arc::new(parking_lot::Mutex::new(HashMap::new())),
-            5,
-        ));
         let mut capabilities = CenterCapabilities::for_mode(CenterMode::Standalone);
         capabilities.cloudflare_dns_read = capability;
         capabilities.cloudflare_dns_write = write_capability;
         ApiState {
-            aggregator: Arc::new(ResourceAggregator::new()),
-            proxy,
-            controller_directory: None,
-            controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
-            user_admin: None,
-            role_admin: None,
-            audit_reader: None,
             cloudflare_dns_admin: service,
             cloudflare_dns_write_admin: write_service,
-            route53_dns_admin: None,
-            route53_dns_write_admin: None,
-            route53_zone_lifecycle_admin: None,
-            provider_account_store: None,
-            capability_snapshot_store: None,
-            credential_inspection_service: None,
-            metadata_store,
-            sync_client,
-            registry,
-            platform_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            authz_mode: AuthzMode::AllowAll,
-            platform_mode: CenterMode::Standalone,
             capabilities,
+            ..ApiState::default()
         }
     }
 

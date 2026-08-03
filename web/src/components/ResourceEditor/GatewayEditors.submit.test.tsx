@@ -1,7 +1,7 @@
 import * as yaml from 'js-yaml'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { renderWithQueryClient } from '@/test/render'
 import GatewayEditor from './Gateway/GatewayEditor'
 import GatewayClassEditor from './GatewayClass/GatewayClassEditor'
 import EdgionGatewayConfigEditor from './EdgionGatewayConfig/EdgionGatewayConfigEditor'
@@ -64,8 +64,7 @@ vi.mock('@/components/YamlEditor', () => ({
 }))
 
 function renderEditor(element: React.ReactElement) {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-  return render(<QueryClientProvider client={client}>{element}</QueryClientProvider>)
+  return renderWithQueryClient(element)
 }
 
 describe('Gateway family editor submit boundaries', () => {

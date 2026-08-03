@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { Modal } from 'antd'
 import type { ComponentProps } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { controllerMenu, type MenuNode } from '@/components/shell/menuConfig'
+import { renderWithQueryClient } from '@/test/render'
 import EdgionBackendTrafficPolicyList from './EdgionBackendTrafficPolicyList'
 
 vi.mock('@/hooks/useControllerMutationTarget', () => ({ useControllerMutationTarget: () => ({ controllerId: 'cluster/controller' }) }))
@@ -46,11 +46,7 @@ describe('EdgionBackendTrafficPolicy navigation', () => {
 
   it('keeps batch confirmation semantics when only one resource is selected', async () => {
     const confirm = vi.spyOn(Modal, 'confirm').mockReturnValue({ destroy: vi.fn(), update: vi.fn() })
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <EdgionBackendTrafficPolicyList />
-      </QueryClientProvider>,
-    )
+    renderWithQueryClient(<EdgionBackendTrafficPolicyList />)
 
     fireEvent.click(screen.getAllByRole('checkbox').at(-1)!)
     const batchDelete = await screen.findByTestId('edgionbackendtrafficpolicy-batch-delete')

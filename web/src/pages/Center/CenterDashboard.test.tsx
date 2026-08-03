@@ -1,6 +1,6 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderWithQueryClient } from '@/test/render'
 import CenterDashboard from './CenterDashboard'
 
 const mocks = vi.hoisted(() => ({
@@ -16,14 +16,7 @@ vi.mock('./ResourceOverviewPanel', () => ({
 }))
 
 function renderPage() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <CenterDashboard />
-    </QueryClientProvider>,
-  )
+  return renderWithQueryClient(<CenterDashboard />)
 }
 
 describe('CenterDashboard', () => {

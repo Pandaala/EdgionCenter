@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderWithQueryClient } from '@/test/render'
 import RestrictedDependenciesPage from './RestrictedDependenciesPage'
 
 const mocks = vi.hoisted(() => ({ allowed: false, listKeys: vi.fn() }))
@@ -12,8 +12,7 @@ vi.mock('@/components/ResourceEditor/Secret/SecretEditor', () => ({ default: () 
 vi.mock('@/components/ResourceEditor/ConfigMap/ConfigMapEditor', () => ({ default: () => null }))
 
 function renderPage() {
-  const client = new QueryClient({ defaultOptions:{queries:{retry:false}} })
-  return render(<MemoryRouter><QueryClientProvider client={client}><RestrictedDependenciesPage /></QueryClientProvider></MemoryRouter>)
+  return renderWithQueryClient(<MemoryRouter><RestrictedDependenciesPage /></MemoryRouter>)
 }
 
 describe('RestrictedDependenciesPage', () => {

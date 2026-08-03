@@ -1,7 +1,7 @@
 import * as yaml from 'js-yaml'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { renderWithQueryClient } from '@/test/render'
 import EdgionPluginsEditor from './EdgionPluginsEditor'
 import EdgionStreamPluginsEditor from '../EdgionStreamPlugins/EdgionStreamPluginsEditor'
 import EdgionConfigDataEditor from '../EdgionConfigData/EdgionConfigDataEditor'
@@ -49,7 +49,7 @@ vi.mock('../EdgionConfigData/EdgionConfigDataForm', () => ({ default: ({ data, o
 ) }))
 
 function renderWithQuery(element: React.ReactElement) {
-  return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>{element}</QueryClientProvider>)
+  return renderWithQueryClient(element)
 }
 
 async function assertMutation(fn: ReturnType<typeof vi.fn>, kind: string, expectedSpec: (spec: any) => void) {

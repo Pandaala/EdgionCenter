@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
 import type { AuditListParams, AuditRecordDto } from '@/api/audit'
+import { renderWithQueryClient } from '@/test/render'
 import AuditLogPage from './AuditLogPage'
 
 // Mock the audit API module so the page renders against canned data.
@@ -40,12 +40,7 @@ const ROWS: AuditRecordDto[] = [
 ]
 
 function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <AuditLogPage />
-    </QueryClientProvider>,
-  )
+  return renderWithQueryClient(<AuditLogPage />)
 }
 
 describe('AuditLogPage', () => {

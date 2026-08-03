@@ -2448,27 +2448,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_empty_controller_id() {
-        let mut r = ok_req();
-        r.controller_id = String::new();
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_overlong_controller_id() {
-        let mut r = ok_req();
-        r.controller_id = "x".repeat(MAX_CONTROLLER_ID_LEN + 1);
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_controller_id_with_control_char() {
-        let mut r = ok_req();
-        r.controller_id = "ctrl\n01".to_string();
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
     fn validate_allows_empty_cluster() {
         // Aggregator already normalises empty cluster to "unknown"; do not
         // tighten this without auditing aggregator gauge semantics.
@@ -2478,45 +2457,63 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_overlong_cluster() {
-        let mut r = ok_req();
-        r.cluster = "y".repeat(MAX_CLUSTER_LEN + 1);
-        assert!(validate_register_req(&r).is_err());
-    }
+    fn validate_rejects_invalid_fields() {
+        let cases = [
+            ("empty controller ID", {
+                let mut request = ok_req();
+                request.controller_id.clear();
+                request
+            }),
+            ("overlong controller ID", {
+                let mut request = ok_req();
+                request.controller_id = "x".repeat(MAX_CONTROLLER_ID_LEN + 1);
+                request
+            }),
+            ("controller ID control character", {
+                let mut request = ok_req();
+                request.controller_id = "ctrl\n01".to_string();
+                request
+            }),
+            ("overlong cluster", {
+                let mut request = ok_req();
+                request.cluster = "y".repeat(MAX_CLUSTER_LEN + 1);
+                request
+            }),
+            ("cluster control character", {
+                let mut request = ok_req();
+                request.cluster = "cluster\u{0}a".to_string();
+                request
+            }),
+            ("too many environment items", {
+                let mut request = ok_req();
+                request.env = (0..(MAX_LIST_ITEMS + 1))
+                    .map(|index| format!("e{index}"))
+                    .collect();
+                request
+            }),
+            ("overlong environment item", {
+                let mut request = ok_req();
+                request.env = vec!["z".repeat(MAX_TAG_LEN + 1)];
+                request
+            }),
+            ("environment control character", {
+                let mut request = ok_req();
+                request.env = vec!["prod\tprime".to_string()];
+                request
+            }),
+            ("overlong tag item", {
+                let mut request = ok_req();
+                request.tag = vec!["t".repeat(MAX_TAG_LEN + 1)];
+                request
+            }),
+        ];
 
-    #[test]
-    fn validate_rejects_cluster_with_control_char() {
-        let mut r = ok_req();
-        r.cluster = "cluster\u{0}a".to_string();
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_too_many_env_items() {
-        let mut r = ok_req();
-        r.env = (0..(MAX_LIST_ITEMS + 1)).map(|i| format!("e{i}")).collect();
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_overlong_env_item() {
-        let mut r = ok_req();
-        r.env = vec!["z".repeat(MAX_TAG_LEN + 1)];
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_env_item_with_control_char() {
-        let mut r = ok_req();
-        r.env = vec!["prod\tprime".to_string()];
-        assert!(validate_register_req(&r).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_overlong_tag_item() {
-        let mut r = ok_req();
-        r.tag = vec!["t".repeat(MAX_TAG_LEN + 1)];
-        assert!(validate_register_req(&r).is_err());
+        for (case, request) in cases {
+            assert!(
+                validate_register_req(&request).is_err(),
+                "{case} must fail closed"
+            );
+        }
     }
 
     #[test]

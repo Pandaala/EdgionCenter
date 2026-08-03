@@ -340,18 +340,10 @@ fn response_detail(body: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use crate::{
-        aggregator::ResourceAggregator,
-        fed_sync::registry::ControllerRegistry,
-        metadata_store::CenterMetaDataStore,
-        proxy::ProxyForwarder,
-        watch_cache::{CenterSyncClient, CenterWatchCacheRegistry},
-    };
     use edgion_center_runtime::federation::proto::{CenterMessage, RegisterRequest};
 
     /// Minimal `ApiState` with a real watch-cache registry and controller
@@ -359,42 +351,7 @@ mod tests {
     /// core is exercised against `state.sync_client.plugin_metadata` and
     /// `state.registry`, never through a live gRPC session.
     fn test_state() -> ApiState {
-        let registry = ControllerRegistry::new();
-        let metadata_store = Arc::new(CenterMetaDataStore::new());
-        let sync_client = Arc::new(CenterSyncClient {
-            plugin_metadata: CenterWatchCacheRegistry::new(metadata_store.clone()),
-        });
-        let proxy = Arc::new(ProxyForwarder::new(
-            registry.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            5,
-        ));
-        ApiState {
-            aggregator: Arc::new(ResourceAggregator::new()),
-            proxy,
-            controller_directory: None,
-            controller_evictor: Arc::new(edgion_center_runtime::eviction::NoopControllerEvictor),
-            user_admin: None,
-            role_admin: None,
-            audit_reader: None,
-            cloudflare_dns_admin: None,
-            cloudflare_dns_write_admin: None,
-            route53_dns_admin: None,
-            route53_dns_write_admin: None,
-            route53_zone_lifecycle_admin: None,
-            provider_account_store: None,
-            capability_snapshot_store: None,
-            credential_inspection_service: None,
-            metadata_store,
-            sync_client,
-            registry,
-            platform_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            authz_mode: edgion_center_core::AuthzMode::AllowAll,
-            platform_mode: edgion_center_core::CenterMode::Standalone,
-            capabilities: edgion_center_core::CenterCapabilities::for_mode(
-                edgion_center_core::CenterMode::Standalone,
-            ),
-        }
+        ApiState::default()
     }
 
     /// Registers a live, dispatchable session so

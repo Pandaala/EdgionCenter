@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { UserDto } from '@/api/users'
+import { renderWithQueryClient } from '@/test/render'
 import UserManagementPage from './UserManagementPage'
 
 const usersList = vi.fn()
@@ -44,12 +44,7 @@ const USERS: UserDto[] = [
 ]
 
 function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <UserManagementPage />
-    </QueryClientProvider>,
-  )
+  return renderWithQueryClient(<UserManagementPage />)
 }
 
 describe('UserManagementPage', () => {

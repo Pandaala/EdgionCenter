@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { createTestQueryClient, renderWithQueryClient } from '@/test/render'
 import LinkSysEditor from './LinkSysEditor'
 
 const create = vi.fn()
@@ -23,14 +23,10 @@ describe('LinkSysEditor', () => {
   })
 
   it('creates the current wire shape and invalidates the resource list', async () => {
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const client = createTestQueryClient()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
 
-    render(
-      <QueryClientProvider client={client}>
-        <LinkSysEditor visible mode="create" onClose={vi.fn()} />
-      </QueryClientProvider>,
-    )
+    renderWithQueryClient(<LinkSysEditor visible mode="create" onClose={vi.fn()} />, client)
 
     fireEvent.change(screen.getByPlaceholderText('example-route'), { target: { value: 'redis-test' } })
     const typeInput = screen.getAllByRole('combobox')[0]
@@ -53,8 +49,7 @@ describe('LinkSysEditor', () => {
   })
 
   it('creates a YAML LinkSys through the same validated request boundary', async () => {
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-    render(<QueryClientProvider client={client}><LinkSysEditor visible mode="create" onClose={vi.fn()} /></QueryClientProvider>)
+    renderWithQueryClient(<LinkSysEditor visible mode="create" onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
     fireEvent.change(screen.getByLabelText('yaml-source'), { target: { value: 'apiVersion: edgion.io/v1\nkind: LinkSys\nmetadata: {name: kafka-test, namespace: prod}\nspec: {type: kafka, config: {brokers: [kafka:9092], channelSize: 100}}\n' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))

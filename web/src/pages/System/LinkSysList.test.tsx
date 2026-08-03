@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { Modal } from 'antd'
+import { renderWithQueryClient } from '@/test/render'
 import LinkSysList from './LinkSysList'
 
 const batchDelete = vi.fn()
@@ -40,12 +40,7 @@ vi.mock('react-router-dom', async () => {
 })
 
 function renderPage() {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <LinkSysList />
-    </QueryClientProvider>,
-  )
+  return renderWithQueryClient(<LinkSysList />)
 }
 
 describe('LinkSysList', () => {
