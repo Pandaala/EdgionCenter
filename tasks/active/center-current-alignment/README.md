@@ -2035,3 +2035,26 @@ before acting on CCI execution files or proposing replacements.
 - No Edgion source changed. No new native AI/delegation traffic test is claimed.
   Recorded the next discovered condition-runtime omission in CURRENT-COVERAGE.md;
   the resource/menu audit remains active.
+
+
+### Shared plugin condition resolution boundary (2026-09-28)
+
+- Checked current SecretMatchCondition and IpAccessMatch in Edgion conditions.rs,
+  their entry/body/dye owners, RequestRestriction and RequestAccessPolicy nested
+  condition owners. resolvedValues is redacted Secret-derived state; resolvedIps
+  is the expanded inline/reference union. Both must stay out of operator writes.
+- Added both terminals to the existing stage-scoped recursive runtime exclusions,
+  covering all four plugin stage trees and flattened RequestAccessPolicy IP rules.
+  The separate RequestAccessUrlAllowList ConfigData adapter already strips these
+  condition fields; no change was needed there.
+- Create/update regression cases exercise allOf, anyOf and grouped allOf, multiple
+  stages, entry/config/body/dye nesting, preservation of references and original
+  lists, false/empty values, unknown content outside stage trees, and input
+  immutability. These are structural serialization cases, not proof that every
+  plugin or condition is accepted in every runtime stage.
+- Session 41005 passed 82 tests, build and lint. Corrected test dye fixtures to
+  use current name/on/value fields; session 93778 reran all 82 tests successfully.
+  Logs: /tmp/ws5-center-plugin-resolved-tests-v2.log,
+  /tmp/ws5-center-plugin-resolved-build.log,
+  /tmp/ws5-center-plugin-resolved-lint.log.
+  No Edgion source or deployed cluster changed. Overall audit remains active.

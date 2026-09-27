@@ -369,3 +369,37 @@ it.each(['create', 'update'] as const)('strips HTTP rule admission and delegatio
   else expect(result).not.toHaveProperty('metadata.resourceVersion')
   expect(document).toEqual(before)
 })
+
+
+it.each(['create', 'update'] as const)('removes resolved plugin condition inputs on %s across stages and placements', (mode) => {
+  const secret = { type: 'secretMatch', key: { type: 'header', name: 'X-Access-Key' },
+    secretRef: { name: 'access', namespace: 'security' }, secretKey: 'token', negate: false }
+  const peer = { type: 'directPeerIpMatch', ips: ['192.0.2.0/24'], ipRefs: [{ name: 'trusted-peers' }] }
+  const remote = { type: 'remoteIpMatch', ips: [], negate: true }
+  const leaves = [secret, peer, remote]
+  const resolvedLeaves = [
+    { ...secret, resolvedValues: '[redacted]' },
+    { ...peer, resolvedIps: ['192.0.2.0/24', '198.51.100.0/24'] },
+    { ...remote, resolvedIps: [] },
+  ]
+  const entry = (conditions: unknown[]) => ({
+    type: 'RequestRestriction',
+    conditions: { run: { allOf: conditions }, skip: { anyOf: [{ allOf: conditions }] } },
+    config: { mode: 'Deny', conditions: { anyOf: conditions }, status: 403 },
+    body: { conditions: { run: { allOf: conditions } } },
+    dye: { request: [{ name: 'X-Policy', on: ['success'], value: 'checked',
+      conditions: { run: { allOf: conditions } } }] },
+  })
+  const stages = ['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins', 'upstreamResponsePlugins']
+  const operatorSpec = Object.fromEntries(stages.map((stage) => [stage, [entry(leaves)]]))
+  const document = {
+    apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins',
+    metadata: { name: 'conditions', namespace: 'edge', resourceVersion: '7' },
+    spec: { ...Object.fromEntries(stages.map((stage) => [stage, [entry(resolvedLeaves)]])),
+      futureOperator: { resolvedValues: 'keep', resolvedIps: [] } },
+  }
+  const before = structuredClone(document)
+  const result = buildMutationDocument(document, { mode, resourceKind: 'edgionplugins' })
+  expect(result.spec).toEqual({ ...operatorSpec, futureOperator: document.spec.futureOperator })
+  expect(document).toEqual(before)
+})

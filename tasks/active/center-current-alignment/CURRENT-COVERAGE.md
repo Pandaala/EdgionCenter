@@ -104,10 +104,10 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
 1. Continue the exact operator/runtime-field audit against all current resource
    structs. Catalog coverage alone is insufficient: the current pass found the
    missing ExtensionRef.resolvedNamespace, Gateway TLS resolution and HTTP rule
-   admission/provenance exclusions (now fixed). Next inspect shared plugin
-   conditions: SecretMatch.resolvedValues and IP-match resolvedIps are serialized
-   by current Edgion but absent from the mutation exclusions. Verify every owning
-   condition placement before choosing scoped filtering paths.
+   admission/provenance exclusions (now fixed). Shared plugin conditions now
+   exclude SecretMatch.resolvedValues and IP-match resolvedIps in all four
+   stage trees. Continue nested configuration and operator editor coverage;
+   serialization checks do not establish placement-specific runtime acceptance.
 2. Finish capability/permission and asynchronous state transitions in Center
    menus, including OIDC and owner forwarding evidence. Keep native, component,
    hermetic transport and unavailable environment evidence distinct.
