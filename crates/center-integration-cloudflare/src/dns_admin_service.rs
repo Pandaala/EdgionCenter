@@ -1209,11 +1209,11 @@ mod tests {
                 calls: calls.clone(),
                 rotate_store: None,
                 rotate_cursor_file: None,
-                delay: Duration::from_millis(50),
+                delay: Duration::from_secs(120),
             }),
         );
-        service.timeout = Duration::from_millis(10);
-        assert_eq!(
+        service.timeout = Duration::from_secs(60);
+        let operation = tokio::spawn(async move {
             service
                 .list_zones(
                     &CloudResourceId::new(CENTER_ACCOUNT).unwrap(),
@@ -1222,7 +1222,21 @@ mod tests {
                         cursor: None,
                     },
                 )
-                .await,
+                .await
+        });
+        // Let real credential file IO finish before pausing time. Starting with
+        // a paused clock can expire the deadline while blocking IO is pending.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while calls.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("provider work must start before advancing its deadline");
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(60)).await;
+        assert_eq!(
+            operation.await.unwrap(),
             Err(CloudflareDnsAdminError::Unavailable)
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);

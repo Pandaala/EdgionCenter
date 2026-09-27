@@ -2118,3 +2118,31 @@ before acting on CCI execution files or proposing replacements.
   is not a healthy Kubernetes runtime. No restart or user-cluster mutation.
 - Current UI suite success does not close the native regression, backend gates,
   OIDC/ownership/forwarding or remaining nested-field evidence. Goal stays active.
+
+
+### Backend matrix and deterministic provider deadline regression (2026-09-28)
+
+- Current native builds completed: Center session 2501 exited zero; Controller
+  session 71323 exited zero after 8m04s. Logs:
+  /tmp/ws5-center-current-native-build.log and
+  /tmp/ws5-controller-current-native-build.log. Edgion's concurrent changes were
+  preserved. Federation protobuf definitions match except comments/spacing.
+- Initial backend matrix session 56252 failed one Cloudflare deadline test:
+  the operation correctly returned Unavailable, but a 10ms real deadline expired
+  during credential file IO before FakeApi dispatch (calls=0, expected=1).
+  The regression now waits for provider dispatch before pausing Tokio time and
+  advancing the operation deadline. It still requires exactly one provider call
+  and an Unavailable result. Only test code and a Tokio dev feature changed.
+- Focused session 21273 passed. Matrix rerun 5121 passed fmt, clippy, workspace
+  tests, app no-default-feature tests (242), dependency purity and kustomize.
+  Its 19 successful test-result groups report 1112 passes in total (includes
+  repeated feature-mode coverage, not a unique test count) and 3 ignored tests;
+  external Kubernetes/MySQL and federation stages were not opted in. Web was
+  explicitly skipped because the fresh 622-test frontend run is recorded above.
+- Matrix v2 exited 1 at the pre-existing English-only guard on the tracked root
+  fix-issue-workflow-generic.zh.md. Preserved that unrelated file. Ran the
+  subsequent no-legacy guard separately: passed. Diff check passed.
+  Logs: /tmp/ws5-center-current-backend-matrix-v2.log,
+  /tmp/ws5-center-current-legacy-guard.log, /tmp/ws5-center-deadline-test.log.
+- Full current-native browser run alignment-full-current-20260928-v3 is separate;
+  this checkpoint does not claim its completion. Overall audit remains active.
