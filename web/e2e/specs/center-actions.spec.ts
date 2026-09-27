@@ -560,4 +560,60 @@ test.describe('Center and shell actions', () => {
     }
   })
 
+  test('region route sync reports a missing target and recovers after explicit creation', async ({ page, request }) => {
+    test.skip(process.env.E2E_MODE !== 'standalone', 'Requires local Controller watch convergence')
+    test.setTimeout(90_000)
+    const name = `${prefix}-region-route-override`
+    const collection = `/api/v1/proxy/${controllerPathId('B')}/api/v1/namespaced/edgionconfigdata/${namespace}`
+    const path = `${collection}/${name}`
+    const original = await configData(request, 'B', name)
+    const source = await configData(request, 'A', name)
+    expect(original.metadata?.labels?.['edgion.io/e2e-run']).toBe(runId)
+    expect(original.metadata?.resourceVersion).toBeTruthy()
+    let deleted = false
+    try {
+      const removed = await request.delete(path, {
+        headers: { 'If-Match': `"${original.metadata!.resourceVersion}"` },
+      })
+      expect(removed.ok()).toBeTruthy()
+      deleted = true
+      await expect.poll(async () => (await request.get(path)).status()).toBe(404)
+      await page.goto('/region-routes/region')
+      await expect.poll(async () => {
+        await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
+        return page.getByText(`Missing on ${controllerId('B')}.`, { exact: false }).count()
+      }).toBe(1)
+      await expect(page.getByTestId('region-failover')).toBeDisabled()
+      const [response] = await Promise.all([
+        page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-route-overrides/sync')),
+        page.getByTestId('region-sync-apply').click(),
+      ])
+      expect(response.status()).toBe(502)
+      expect(await response.json()).toMatchObject({
+        success: false,
+        data: { modified: 0, failed: 1, outcomes: [{ controllerId: controllerId('B'), state: 'failed' }] },
+      })
+      await expect(page.getByTestId('write-outcome-failed')).toBeVisible()
+      expect((await request.get(path)).status()).toBe(404)
+      expect((await configData(request, 'A', name)).metadata?.resourceVersion).toBe(source.metadata?.resourceVersion)
+    } finally {
+      if (deleted) {
+        const restored = await request.post(collection, {
+          headers: { 'Content-Type': 'application/yaml' },
+          data: JSON.stringify({
+            apiVersion: 'edgion.io/v1', kind: 'EdgionConfigData',
+            metadata: { namespace, name, labels: original.metadata?.labels },
+            spec: original.spec,
+          }),
+        })
+        expect(restored.ok()).toBeTruthy()
+      }
+    }
+    await expectGlobalFailover(request, '')
+    await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
+    await expect(page.getByText(/Missing on/)).toHaveCount(0)
+    await expect(page.getByTestId('region-failover')).toBeEnabled()
+    expect((await configData(request, 'B', name)).metadata?.labels?.['edgion.io/e2e-run']).toBe(runId)
+  })
+
 })

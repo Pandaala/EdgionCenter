@@ -1191,3 +1191,23 @@ before acting on CCI execution files or proposing replacements.
 - Missing-resource behavior currently has source/component evidence; native
   missing-target failure/recovery and Gateway traffic remain unverified. Other
   resource/menu rows remain open.
+
+### RegionRoute missing-target native recovery
+
+- Added a native case that verifies the exact run label and CAS token before
+  deleting only B's run-owned override. The browser waits for the missing-target
+  warning, checks disabled failover, submits data sync, and requires HTTP 502
+  with exactly one failed outcome for B and no modified targets.
+- Verified the failure remains visible, B is still 404 (no implicit creation),
+  and A's resourceVersion is unchanged. Explicitly recreate B in finally using
+  the saved operator spec/labels and no generated metadata; then require both
+  watch documents, disappearance of the missing warning, enabled failover and
+  preserved run label.
+- Native alignment-region-missing-20260928-v1 passed all 6 cases, including the
+  prior failover/restore, source sync, enable-preservation and discoverability
+  checks. Session 30504 exited zero; 70 exact files retained. E2E typecheck 82723
+  and lint 67758 passed. Logs /tmp/ws5-center-region-missing-{native,types,lint}.log.
+  All sessions terminal. No production code changed in this batch.
+- This closes the previously missing native failure/recovery evidence. Gateway
+  traffic and Kubernetes ownership remain distinct unverified paths; the full
+  Center type/menu alignment goal remains active.
