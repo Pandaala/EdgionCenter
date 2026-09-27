@@ -32,7 +32,7 @@ All rows remain open unless explicitly marked complete.
 | Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification and native RegionRoute failover/restore/source sync/enable preservation/missing-target recovery passed; mixed outcome retention covered by component tests; actual traffic remains open |
 | Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Native local account create/edit/CAS conflict/label preservation passed; provider DNS adapters and external workflows still pending |
 | Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Native standalone auth/logout, audit filters/pagination, user/role mutations and restricted-role denial passed; OIDC and Kubernetes capability workflows pending |
-| Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Focused native browser runs and frontend checks passed; combined RBAC run exposed five failures, all passed focused rerun after fixes; clean full rerun and Kubernetes/MySQL/live traffic remain open |
+| Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Focused native browser runs and frontend checks passed; Full native standalone RBAC rerun passed 147 tests (one Kubernetes-only skip), with all 112 generated cases passed; Kubernetes/MySQL/live traffic remain open |
 
 ## Findings and work log
 
@@ -1453,3 +1453,29 @@ before acting on CCI execution files or proposing replacements.
   (55454 terminal zero), /tmp/ws5-center-full-web-final-status.log. Current
   follow-up scope adds one classifier test. Full browser rerun remains next;
   Kubernetes, external-provider and Gateway traffic proof remain outstanding.
+
+
+### Clean full standalone RBAC rerun
+
+- At product commit 6e18420, ran the unfiltered native standalone browser suite
+  with database RBAC and two current Controllers. Run:
+  alignment-full-rbac-20260928-v2; session 40915 terminal zero. No product code
+  changed during the run. Reused binaries had no newer Rust sources in the
+  Controller/resources/common or Center crates checked before execution.
+- Result: 147 passed, 1 Kubernetes-only namespace-boundary case skipped, zero
+  failures, 8.9 minutes. All five prior failures passed, including the unchanged
+  role/user cancellation and mutation flow. No timeout or assertion weakening.
+- Independently inspected case-ledger.json: 112 unique standalone generated
+  cases, all passed. The reporter checks the exact expected set. The 35 other
+  passed cases cover authentication, menus, RegionRoute, typed variants and
+  additional actions; the skipped case does not apply to standalone.
+- All 70 run-owned seed files retained and verified, two changed by RegionRoute
+  workflows with original deletion hashes preserved. Runner stopped its own
+  services. Log: /tmp/ws5-center-full-rbac-native-v2.log. Detailed evidence:
+  web/test-results/alignment-full-rbac-20260928-v2/{case-ledger.json,html/}.
+- This establishes a green integrated standalone baseline for current menus,
+  resource CRUD and exercised operations. It does not prove Kubernetes writer
+  ownership/fencing, MySQL/OIDC, provider calls, Gateway traffic, or all advanced
+  resource semantics. Keep the overall alignment goal active. Next audit should
+  address those resource/backend behavior gaps rather than repeat this unchanged
+  browser matrix without a new reason.
