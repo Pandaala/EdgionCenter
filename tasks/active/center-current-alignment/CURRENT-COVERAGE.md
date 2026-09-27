@@ -20,11 +20,16 @@ Center cloud integration is independent of Controller federation.
 - **Focused flow**: resource-specific browser or backend scenario described below.
 - **Open**: missing or narrower evidence; never count it as completion.
 
-The full standalone run `alignment-full-rbac-20260928-v2` passed 147 tests,
-with one Kubernetes-only skip, including all 22 resource CRUD cases and 112
-generated action cases. Its source predates the later fixes below; it is a
-baseline, not proof that the final current tree passed the complete browser suite.
-Log: `/tmp/ws5-center-full-rbac-native-v2.log`.
+The current full standalone run `alignment-full-current-20260928-v3` passed
+155 tests with two Kubernetes-only skips (capabilities and dependency namespace
+scope). Session 20509 exited zero; all 112 annotated ledger cases passed,
+including all 22 generic resource CRUD cases, plus the focused routes/WAF/
+ConfigData/LinkSys scenarios. Both native binaries were freshly built from
+current source; the frontend corresponds to commit 712ed0f (later commits before
+this run completed only changed backend test code and evidence documentation).
+Log: `/tmp/ws5-center-full-current-native-v3.log`.
+Artifacts: `web/test-results/alignment-full-current-20260928-v3/`.
+The older 147-test run remains historical evidence, superseded by this run.
 
 ## Controller resource menus
 
@@ -86,7 +91,7 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
 - Full frontend baseline: 590 tests in 100 files passed in
   `/tmp/ws5-center-frontend-full-current.log`, before the latest cloud fixes.
   Superseded for frontend unit/component coverage by the 622-test run below.
-  A complete current-tree native browser regression remains outstanding.
+  The complete native browser regression is recorded above (155 passed).
 - Two real Kubernetes adapter scenarios passed earlier: reconstruction/CAS and
   Lease takeover/fencing. This is not deployed OIDC, ServiceAccount RBAC or
   cross-replica forwarding proof.
@@ -98,6 +103,14 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
 - Edgion image compilation finished, but packaging failed to find its configured
   release directory. No Edgion source change or commit was made for that failure.
 - Existing OrbStack workloads and the user's other kind cluster remain untouched.
+
+The current backend matrix passed fmt, clippy, workspace tests, app tests with
+no default features (242), dependency isolation and kustomize. Its final exit was
+1 at the pre-existing English-only violation in root
+`fix-issue-workflow-generic.zh.md`; the subsequent legacy guard was run separately
+and passed. See `/tmp/ws5-center-current-backend-matrix-v2.log`. External MySQL,
+Kubernetes and federation stages were not opted into that matrix. A 10ms wall-clock
+Cloudflare test race was fixed and passed both focused and matrix runs.
 
 ## Latest complete frontend suite
 
@@ -127,9 +140,9 @@ no unrelated cluster was modified and no runtime restart was attempted.
 2. Finish capability/permission and asynchronous state transitions in Center
    menus, including OIDC and owner forwarding evidence. Keep native, component,
    hermetic transport and unavailable environment evidence distinct.
-3. Run final current-tree frontend/backend gates and the complete native browser
-   regression after the remaining fixes. Account for pre-existing repository
-   guard failures explicitly; never hide them or delete unrelated files.
+3. Current frontend/backend gates and the complete native browser regression
+   are recorded above. Rerun affected checks after further fixes; retain the
+   explicit pre-existing English-only guard limitation.
 4. Reconcile every row with the original objective before claiming completion.
    Passing editor CRUD never proves Gateway traffic, real DNS propagation or
    a Kubernetes deployment that has not run.

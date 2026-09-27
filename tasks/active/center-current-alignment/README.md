@@ -2146,3 +2146,29 @@ before acting on CCI execution files or proposing replacements.
   /tmp/ws5-center-current-legacy-guard.log, /tmp/ws5-center-deadline-test.log.
 - Full current-native browser run alignment-full-current-20260928-v3 is separate;
   this checkpoint does not claim its completion. Overall audit remains active.
+
+
+### Complete current-native browser regression (2026-09-28)
+
+- Session 20509 exited zero: 155 passed / 2 skipped in 11.2m. Run ID
+  alignment-full-current-20260928-v3; log /tmp/ws5-center-full-current-native-v3.log.
+  Both skips are Kubernetes-only: capability behavior and restricted dependency
+  namespace scope. No failed cases. The case ledger independently contains all
+  112 expected annotated cases with passed status.
+- Current native Center and Controller binaries were rebuilt before startup.
+  RBAC was enabled; the run used two private Controller configurations, generated
+  credentials, an isolated database and 70 run-owned fixture files. Coverage
+  includes all 22 generic CRUD resources, resource/menu actions, permission and
+  reload controls, RegionRoute writes/convergence, and the newer route policy,
+  stream annotation, WAF, ConfigData and eight LinkSys variant cases.
+- E2E typecheck session 57844 exited zero; log
+  /tmp/ws5-center-current-e2e-types.log. The runner's inventory gate passed.
+- Runtime trap completed; lsof confirms no listeners on this run's Center,
+  Controller Admin or Vite ports (12201/13101/13201/15173). Cleanup verification
+  retained all 70 fixture files, including two expected modified fixtures with
+  their original deletion hashes preserved. Artifacts remain under
+  web/test-results/alignment-full-current-20260928-v3/.
+- Updated CURRENT-COVERAGE.md to replace obsolete full-regression pending notes
+  with current frontend, backend and native evidence. This still does not claim
+  deployed Kubernetes, external provider mutations or exhaustive data-plane
+  conformance. Remaining audit actions stay explicit; the overall goal is active.
