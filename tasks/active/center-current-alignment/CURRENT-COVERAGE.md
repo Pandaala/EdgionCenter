@@ -61,7 +61,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | Service | services/list | Immutable-field handling, zero weights, single/batch delete workflows |
 | EndpointSlice | services/endpointslices | Native top-level addressType/endpoints/ports envelope retained |
 | EdgionBackend | services/ai-backends | New resource, provider/credential/model editor, AI route and topology references |
-| EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary; live Center form → HTTP probe → Gateway 200/503/200 transitions |
+| EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary; live Center form → HTTP/HTTPS probes → Gateway 200/503/200 transitions and HTTPS hostname failure/recovery |
 | EdgionTls | security/tls | Typed mTLS SANs and resolved-secret mutation boundary |
 | BackendTLSPolicy | security/backendtls | Current identity/target restrictions and lossless form edits |
 | Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model; read failure/recovery components and live default-policy denial; direct Kubernetes Controller namespace filtering plus the real dual-Controller Center proxy E2E |
@@ -72,10 +72,10 @@ No row implies complete nested-field coverage or data-plane conformance.
 | LinkSys | system/linksys | All eight variants have dedicated native browser CRUD |
 | EdgionAcme | system/acme | HTTP-01 scope; current renewal and notification boundaries |
 
-The active HTTP health policy now has a real Gateway traffic proof, including
+The active HTTP and HTTPS health policies now have real Gateway traffic proof, including
 Center form updates, Controller version readback and 200/503/200 recovery. See
-[HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md). Encrypted
-probes and other resilience mechanisms still need their own runtime evidence.
+[HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md). HTTPS identity mismatch and recovery passed; mTLS,
+GRPC/GRPCS and other resilience mechanisms still need their own runtime evidence.
 
 Recent native logs supplement the baseline: `/tmp/ws5-center-waf-ui-native-v1.log`,
 `/tmp/ws5-center-http-retry-native-v1.log`, `/tmp/ws5-center-grpc-match-native-v1.log`,

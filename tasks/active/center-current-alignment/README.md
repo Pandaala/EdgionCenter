@@ -2538,3 +2538,18 @@ before acting on CCI execution files or proposing replacements.
   exact topology, artifacts, failed setup probes, retained handles and limits.
   This is HTTP active-health evidence, not encrypted-probe or resilience-wide
   proof. No Edgion edits or commits; overall goal remains active, no push.
+
+
+### 2026-09-28: Center HTTPS health probe identity and recovery
+
+- The actual policy form now has live HTTPS evidence: correct hostname gives
+  200, incorrect certificate identity gives 503, and restoring it gives 200.
+  Each edit advances Controller resourceVersion. Healthy assertions require
+  multiple actual HTTPS requests before accepting the business traffic result.
+- Encrypted probes intentionally reject loopback in current source. The first
+  loopback attempt failed and is excluded; the passing fixture uses the host's
+  private interface. Business HTTP and probe HTTPS remain independent.
+- All three authorization-restoration checks passed. No production source
+  changed, no Edgion changes committed, and no push. See the HTTPS follow-up in
+  [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md).
+  mTLS and GRPC/GRPCS remain open; the overall goal remains active.

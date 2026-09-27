@@ -77,3 +77,51 @@ including failure and recovery. It does not establish HTTPS/mTLS, GRPC/GRPCS,
 outlier ejection, retry budgets, circuit-breaking or load-balancer algorithms.
 No production source change was needed for this HTTP scenario. The embedded
 Center v5 frontend was not rebuilt; the browser used current Vite source.
+
+
+## HTTPS follow-up: verified identity, failure and recovery
+
+The next run uses the same Center form, Controller and Gateway, with a separate
+CA and HTTPS health server on port 18092. The application still serves plaintext
+HTTP on 18091. Only the run-owned EndpointSlice moved from loopback to the host's
+private interface; no BackendTLSPolicy was installed. The CA reference is the
+run-owned Secret `center-health-flow/center-health-probe-ca`, seeded directly
+with the private Controller admin credential. Center never received Secret
+read access.
+
+The structured form changes the active type to `https`, sets port 18092 and
+writes the Probe TLS JSON with its CA reference and validation hostname:
+
+1. `probe.health.example.com`: actual HTTPS probe requests advance the server
+   counter and application traffic returns 200.
+2. `wrong.health.example.com`: the policy PUT succeeds, but verified probes fail
+   and Gateway traffic converges to 503.
+3. Restoring `probe.health.example.com` resumes actual HTTPS probes and traffic
+   returns 200 with `health-flow-backend`.
+
+All three edits advanced Controller resourceVersion and passed exact readback
+assertions. Healthy steps wait for more than two additional HTTPS requests
+before checking application traffic. At the final checkpoint the probe server
+recorded eight requests, `/health`, and the expected TLS host authority.
+The inspected screenshot displays the HTTPS health badge in the policy menu.
+
+The first attempt used loopback and failed recovery. Current encrypted probes
+explicitly call endpoint validation with loopback disabled, independently of
+GatewayConfig's business-upstream setting. Its initial transient 200 was stale
+health state, not proof of a successful TLS exchange; that attempt is excluded.
+The passing run uses a private interface and a stronger request-counter oracle.
+No product source change was required.
+
+Artifacts: `/tmp/ws5-center-encrypted-health-20260928/`, including
+`browser-proof.cjs`, passing `browser-result.json`, `probe-stats.json`, inspected
+`recovered.png`, and passing `restored.json`. Private keys/configuration stay
+outside Git. The retained LAN backend process is session 50259; revalidate it
+and the host address before reuse. The original loopback backend is retained.
+The active policy now uses HTTPS with the correct hostname.
+
+The exact Controller configuration was restored and reloaded; remote policy
+update permission is absent, Gateway traffic remains 200, and removal of the
+Center grant makes proxy read return 403. All three restoration checks passed.
+This extends the HTTP proof to HTTPS identity validation; mTLS, GRPC/GRPCS and
+other resilience behaviors remain open. The frontend unit/build/lint baseline
+was not rerun for this runtime-and-documentation-only follow-up.
