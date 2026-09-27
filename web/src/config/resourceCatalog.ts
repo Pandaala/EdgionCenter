@@ -39,7 +39,7 @@ const HTTP_PLUGIN_INTERNAL_TERMINALS = [
   'resolvedOidcClientSecret', 'resolvedSessionSecret', 'resolvedCaCertificates',
   'resolvedClientCertificate', 'resolvedCredential', 'resolvedKeys',
   'resolvedSecretValues', 'resolvedSecrets', 'valuesSet', 'wildcardPatterns',
-  'compiledRegex', 'compiledPatterns', 'compiledOriginsRegex', 'compiledTemplates',
+  'compiledRegex', 'compiledJsonBody', 'compiledPatterns', 'compiledOriginsRegex', 'compiledTemplates',
   'compiledTimingRegex', 'compiledTransformPatterns', 'originsCache', 'ipMatcher',
   'allowMatcher', 'denyMatcher', 'intervalDuration', 'effectiveSlots',
   'rateBytesPerSecond', 'requestTimeoutDuration',
@@ -49,23 +49,29 @@ const HTTP_PLUGIN_INTERNAL_PATHS: readonly MutationPath[] = HTTP_PLUGIN_STAGES.f
     ['spec', stage, '*', 'policyAction'],
     ['spec', stage, '*', 'config', 'allowDegradation'],
     ['spec', stage, '*', 'config', 'allowDegradationTemplate'],
+    ['spec', stage, '*', 'config', 'resolvedProfiles'],
+    ['spec', stage, '*', 'config', 'resolutionWarnings'],
+    ['spec', stage, '*', 'config', 'profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'resolvedCandidates'],
     ...HTTP_PLUGIN_INTERNAL_TERMINALS.map((terminal) => ['spec', stage, '*', '**', terminal]),
   ]
 ))
 
 const EXCLUDED_MUTATION_PATHS = {
-  gatewayclass: [],
+  gatewayclass: [['spec', 'currentStatus']],
   edgiongatewayconfig: [
+    ['spec', 'currentStatus'],
     ['spec', 'enableReferenceGrantValidation'],
     ['spec', 'outboundTls', 'resolvedCaCertificates'],
     ['spec', 'outboundTls', 'resolvedClientCertificate'],
   ],
   gateway: [
+    ['spec', 'currentStatus'],
     ['spec', 'tls', 'backend', 'resolvedClientCertificate'],
     ['spec', 'listeners', '*', 'tls', 'secrets'],
     ['spec', 'listeners', '*', 'tls', 'resolvedFrontendCaSecrets'],
   ],
   httproute: [
+    ['spec', 'currentStatus'],
     ['spec', 'resolvedHostnames'], ['spec', 'resolvedListeners'], ['spec', 'invalidRuleIndices'],
     ['spec', 'resolvedRules'], ['spec', 'delegationIssues'],
     ['spec', 'rules', '*', 'parsedTimeouts'], ['spec', 'rules', '*', 'parsedRetry'],
@@ -84,6 +90,7 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'rules', '**', 'requestMirror', 'maxConcurrent'],
   ],
   grpcroute: [
+    ['spec', 'currentStatus'],
     ['spec', 'resolvedHostnames'], ['spec', 'resolvedListeners'], ['spec', 'invalidRuleIndices'],
     ['spec', 'resolvedRules'], ['spec', 'delegationIssues'],
     ['spec', 'rules', '*', 'parsedTimeouts'], ['spec', 'rules', '*', 'parsedRetry'],
@@ -92,28 +99,35 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
   ],
   tcproute: [
+    ['spec', 'currentStatus'],
     ['spec', 'resolvedListeners'], ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
   ],
   udproute: [
+    ['spec', 'currentStatus'],
     ['spec', 'resolvedListeners'], ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
   ],
   tlsroute: [
+    ['spec', 'currentStatus'],
     ['spec', 'resolvedListeners'], ['spec', 'effectiveHostnames'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
   ],
   service: [],
   endpointslice: [],
   edgiontls: [
+    ['spec', 'currentStatus'],
     ['spec', 'clientAuth', 'caSecret'], ['spec', 'secret'], ['spec', 'resolvedListeners'],
     ['spec', 'resolvedLogLabels'],
   ],
   referencegrant: [],
   backendtlspolicy: [
+    ['spec', 'currentStatus'],
+    ['spec', 'resolvedTargetClass'],
     ['spec', 'resolvedCaCertificates'], ['spec', 'resolvedClientCertificate'],
     ['spec', 'useSystemCa'],
   ],
-  edgionplugins: HTTP_PLUGIN_INTERNAL_PATHS,
+  edgionplugins: [['spec', 'currentStatus'], ...HTTP_PLUGIN_INTERNAL_PATHS],
   edgionstreamplugins: [
+    ['spec', 'currentStatus'],
     ['spec', 'plugins', '*', 'policyAction'],
     ['spec', 'plugins', '*', 'config', '**', 'refDenied'],
     ['spec', 'plugins', '*', 'config', '**', 'ipMatcher'],
@@ -129,11 +143,13 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'intervalDuration'],
     ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'effectiveSlots'],
   ],
-  edgionconfigdata: [],
+  edgionconfigdata: [['spec', 'currentStatus']],
   edgionacme: [
+    ['spec', 'currentStatus'],
     ['spec', 'renewal', 'renewBeforeDays'],
   ],
   linksys: [
+    ['spec', 'currentStatus'],
     ['spec', 'config', 'resolvedSecrets'],
     ['spec', 'config', 'auth', 'secret'],
     ['spec', 'config', 'tls', 'resolvedCaCertificates'],
@@ -145,8 +161,14 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'config', 'allowDegradationTemplate'],
   ],
   edgionbackendtrafficpolicy: [
+    ['spec', 'currentStatus'],
+    ['spec', 'resolvedTargetClass'],
     ['spec', 'outlierDetection', 'ejectionSeconds'],
     ['spec', 'outlierDetection', 'maxEjectionSeconds'],
+  ],
+  edgionbackend: [
+    ['spec', 'currentStatus'],
+    ['spec', 'ai', 'credentialPool', 'credentials', '*', 'secret'],
   ],
   secret: [],
   configmap: [],
@@ -172,6 +194,7 @@ const baseEntries: ResourceCatalogBaseEntry[] = [
   { kind: 'edgionacme', displayName: 'EdgionAcme', apiVersion: 'edgion.io/v1', scope: 'namespaced', lifecycle: 'firstClass', area: 'system', route: 'system/acme', hasConditions: true, operatorTopLevelFields: ['spec'] },
   { kind: 'linksys', displayName: 'LinkSys', apiVersion: 'edgion.io/v1', scope: 'namespaced', lifecycle: 'firstClass', area: 'system', route: 'system/linksys', hasConditions: true, operatorTopLevelFields: ['spec'] },
   { kind: 'edgionbackendtrafficpolicy', displayName: 'EdgionBackendTrafficPolicy', apiVersion: 'edgion.io/v1', scope: 'namespaced', lifecycle: 'firstClass', area: 'services', route: 'services/backend-traffic-policies', hasConditions: true, operatorTopLevelFields: ['spec'] },
+  { kind: 'edgionbackend', displayName: 'EdgionBackend', apiVersion: 'edgion.io/v1', scope: 'namespaced', lifecycle: 'firstClass', area: 'services', route: 'services/ai-backends', hasConditions: true, operatorTopLevelFields: ['spec'] },
   { kind: 'secret', displayName: 'Secret', apiVersion: 'v1', scope: 'namespaced', lifecycle: 'restrictedDependency', area: 'security', hasConditions: false, operatorTopLevelFields: ['data', 'stringData', 'type', 'immutable'] },
   { kind: 'configmap', displayName: 'ConfigMap', apiVersion: 'v1', scope: 'namespaced', lifecycle: 'restrictedDependency', area: 'security', hasConditions: false, operatorTopLevelFields: ['data', 'binaryData', 'immutable'] },
 ]

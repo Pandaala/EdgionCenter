@@ -17,6 +17,7 @@
   "auxiliary": [
     "login-error",
     "ebtp-list",
+    "edgionbackend-list",
     "ebtp-form",
     "topology-canvas",
     "route-ref-denied",
@@ -202,7 +203,8 @@
     "edgionplugins",
     "edgionstreamplugins",
     "linksys",
-    "edgionbackendtrafficpolicy"
+    "edgionbackendtrafficpolicy",
+    "edgionbackend"
   ],
   "searchExceptions": [
     "edgiongatewayconfig"
@@ -226,6 +228,7 @@
     "grpcroute": [],
     "backendtlspolicy": [],
     "edgionbackendtrafficpolicy": [],
+    "edgionbackend": [],
     "edgionacme": [
       "acme-trigger"
     ],

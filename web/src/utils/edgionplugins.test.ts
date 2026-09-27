@@ -11,6 +11,31 @@ import {
 } from './edgionplugins'
 
 describe('EdgionPlugins lossless adapter', () => {
+  it('preserves access-policy rules and strips Controller-expanded profiles', () => {
+    const resource: any = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'access', namespace: 'edge' },
+      spec: { requestPlugins: [{ type: 'RequestAccessPolicy', config: {
+        defaultProfile: 'public', activeProfileRef: { name: 'access-selector' },
+        profiles: { public: { requiredRuleGroups: [{ name: 'url', anyOfRules: [{
+          name: 'health', type: 'url', config: {
+            hosts: ['api.example.com'], paths: [{ type: 'Exact', value: '/health' }],
+            resolvedCandidates: [{ name: 'expanded' }], futureRule: false,
+          },
+        }] }] } },
+        resolvedProfiles: { internal: {} }, resolutionWarnings: ['runtime only'], futureConfig: [],
+      } }] },
+    }
+    expect(yamlToEdgionPlugins(edgionPluginsToYAML(resource))).toEqual(resource)
+    const config = (yaml.load(edgionPluginsToMutationYAML(resource, 'create')) as any).spec.requestPlugins[0].config
+    expect(config.resolvedProfiles).toBeUndefined()
+    expect(config.resolutionWarnings).toBeUndefined()
+    expect(config.activeProfileRef).toEqual({ name: 'access-selector' })
+    expect(config.futureConfig).toEqual([])
+    expect(config.profiles.public.requiredRuleGroups[0].anyOfRules[0].config).toEqual({
+      hosts: ['api.example.com'], paths: [{ type: 'Exact', value: '/health' }], futureRule: false,
+    })
+  })
+
   it('preserves all four stages, aliases, conditions, unknown fields, and cardinality', () => {
     const resource: any = {
       apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins',
@@ -19,7 +44,7 @@ describe('EdgionPlugins lossless adapter', () => {
         requestPlugins: [{
           enable: false,
           alias: 'auth.1',
-          conditions: { run: [{ type: 'keyExist' }] },
+          conditions: { run: { allOf: [{ type: 'keyExist', key: { type: 'header', name: 'x-tenant' } }] } },
           body: { maxBodySize: '1m', onReadFailure: 'failClose', futureBody: true },
           dye: { request: [{ name: 'x-region', on: ['success'] }], futureDye: false },
           policyAction: { action: 'deny' },
@@ -113,8 +138,29 @@ describe('EdgionPlugins accessLogExtern validation', () => {
 })
 
 describe('EdgionPlugins body requirement capability', () => {
+  it('handles current buffering, transformation, forwarding and conditional consumers', () => {
+    for (const type of ['RequestBodyBuffer', 'JsonSchemaValidation', 'FormJsonTransform', 'AiGuard']) {
+      expect(pluginAcceptsBodyRequirement('requestPlugins', type, {})).toBe(true)
+      expect(pluginAcceptsBodyRequirement('upstreamResponsePlugins', type, {})).toBe(false)
+    }
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'ForwardAuth', { forwardBody: true })).toBe(true)
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'ForwardAuth', {})).toBe(false)
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'ProxyRewrite', { jsonBody: {} })).toBe(true)
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'ProxyRewrite', { jsonBody: null })).toBe(false)
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'ExtProc', { processingMode: { requestBodyMode: 'BUFFERED' } })).toBe(true)
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'ExtProc', { processingMode: { requestBodyMode: 'STREAMED' } })).toBe(false)
+    const conditions = { anyOf: [{ allOf: [{ type: 'hmacAuth', validateRequestBody: true }] }] }
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'RequestRestriction', { conditions })).toBe(true)
+    const config = { profiles: { private: { requiredRuleGroups: [{ name: 'auth', anyOfRules: [{ type: 'url', config: { conditions } }] }] } } }
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'RequestAccessPolicy', config)).toBe(true)
+    conditions.anyOf[0].allOf[0].validateRequestBody = false
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'RequestAccessPolicy', config)).toBe(false)
+  })
+
   it('mirrors current request-stage Wasm, HmacAuth, and DSL capability gates', () => {
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'Wasm', {})).toBe(true)
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'AiProxy', {})).toBe(true)
+    expect(pluginAcceptsBodyRequirement('upstreamResponseFilterPlugins', 'AiProxy', {})).toBe(false)
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'HmacAuth', { validateRequestBody: true })).toBe(true)
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'HmacAuth', { validateRequestBody: false })).toBe(false)
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'Dsl', { source: 'let body = req.body' })).toBe(true)
@@ -122,18 +168,18 @@ describe('EdgionPlugins body requirement capability', () => {
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'Dsl', { source: '// req.body' })).toBe(true)
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'Dsl', { bytecode: 'opaque' })).toBe(true)
     expect(pluginAcceptsBodyRequirement('upstreamResponsePlugins', 'ExtProc', {})).toBe(false)
-    expect(pluginAcceptsBodyRequirement('requestPlugins', 'TraceContext', {})).toBe(false)
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'RequestId', {})).toBe(false)
   })
 
   it('rejects stale body blocks on plugins that do not consume a body', () => {
     const spec: any = {
       requestPlugins: [
-        { type: 'TraceContext', config: {}, body: { maxBodySize: '1MiB' } },
+        { type: 'RequestId', config: {}, body: { maxBodySize: '1MiB' } },
         { type: 'HmacAuth', config: { validateRequestBody: true }, body: { maxBodySize: '1MiB' } },
       ],
     }
     expect(validatePluginBodyRequirements(spec)).toEqual([
-      'requestPlugins[0]: plugin TraceContext does not accept an operator body requirement',
+      'requestPlugins[0]: plugin RequestId does not accept an operator body requirement',
     ])
     spec.requestPlugins[0].enable = false
     expect(validatePluginBodyRequirements(spec)).toEqual([])
@@ -145,6 +191,6 @@ describe('EdgionPlugins body requirement capability', () => {
       metadata: { name: 'plugins', namespace: 'edge' },
       spec,
     })
-    expect(() => edgionPluginsToMutationYAML(resource, 'update')).toThrow(/TraceContext.*does not accept/)
+    expect(() => edgionPluginsToMutationYAML(resource, 'update')).toThrow(/RequestId.*does not accept/)
   })
 })

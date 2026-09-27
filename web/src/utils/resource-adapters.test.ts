@@ -194,12 +194,11 @@ describe('lossless policy and system adapters', () => {
         targetRefs: [{ group: '', kind: 'Service', name: 'api', sectionName: 'https', futureRef: true }],
         validation: {
           hostname: 'api.prod.svc',
-          caCertificateRefs: [{ group: '', kind: 'ConfigMap', name: 'ca', namespace: 'security', futureRef: true }],
+          caCertificateRefs: [{ group: '', kind: 'ConfigMap', name: 'ca', futureRef: true }],
           subjectAltNames: [
             { type: 'Hostname', hostname: 'api.prod.svc' },
             { type: 'URI', uri: 'spiffe://cluster.local/ns/prod/sa/api' },
           ],
-          wellKnownCACertificates: 'System',
           futureValidation: { strict: false },
         },
         options: { 'edgion.io/client-certificate-ref': 'client-cert', future: '' },
@@ -219,6 +218,12 @@ describe('lossless policy and system adapters', () => {
     expect(mutation.spec).not.toHaveProperty('resolvedCaCertificates')
     expect(mutation.spec).not.toHaveProperty('resolvedClientCertificate')
     expect(mutation.spec).not.toHaveProperty('useSystemCa')
+    const systemTrust = normalizeBackendTls(fixture)
+    delete systemTrust.spec.validation.caCertificateRefs
+    systemTrust.spec.validation.wellKnownCACertificates = 'System'
+    const systemMutation = parse(backendTlsToMutationYaml(systemTrust, 'update'))
+    expect(systemMutation.spec.validation).toEqual(systemTrust.spec.validation)
+    expect(systemMutation.spec).not.toHaveProperty('useSystemCa')
   })
 
   it('preserves hidden EdgionGatewayConfig modules while stripping server state', () => {

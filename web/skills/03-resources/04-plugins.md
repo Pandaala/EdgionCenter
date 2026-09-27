@@ -5,18 +5,39 @@ description: Plugin resource development guide — EdgionPlugins/EdgionStreamPlu
 
 # Plugin Resources
 
-## EdgionPlugins ✅ Completed
+## EdgionPlugins
 
 - apiVersion: `edgion.io/v1`
 - Kind: `edgionplugins`
 - Reference code: `src/pages/Plugins/EdgionPluginsList.tsx`
 
-25+ built-in HTTP plugins:
+The catalog exposes all 48 executable HTTP plugin names in the current sibling
+Edgion enum. Name and stage coverage does not establish complete nested-field or
+runtime behavior coverage; continue checking each configuration against source.
+
+Plugin families:
 - **Authentication**: Basic Auth, JWT Auth, Key Auth, HMAC Auth, LDAP Auth, Forward Auth, OpenID Connect, JWE Decrypt, Header Cert Auth
 - **Security**: CORS, CSRF, IP Restriction, Request Restriction
 - **Traffic Control**: Rate Limit, Rate Limit(Redis), Proxy Rewrite, Response Rewrite, Bandwidth Limit, Request Mirror, Direct Endpoint, Dynamic Upstream, **Region Route (new)**
-- **Observability**: Real IP, Ctx Setter, Mock, DSL, Debug Access Log
+- **Observability**: Real IP, Ctx Setter, RequestId, GeoIpLocation, Mock, DSL, Debug Access Log
+- **Body and AI processing**: RequestBodyBuffer, JsonSchemaValidation, FormJsonTransform, AiProxy, AiGuard, Guardrail
+- **Outbound credentials and variables**: CredentialInjector, WebhookKeyGet
 - **Gateway API Filters**: Request Header Modifier, Response Header Modifier, Request Redirect, URL Rewrite
+
+### AI backend routing
+
+The Services menu exposes EdgionBackend provider/credential/model resources.
+HTTPRoute backend references select `edgion.io/EdgionBackend` without a port;
+the route attaches an EdgionPlugins resource containing request-stage AiProxy
+through the ordinary ExtensionRef filter. The AiProxy catalog exposes backend
+selection, usage tracking, unknown-model policy, model routes, and token quota.
+Read the current sibling Edgion schema for nested field semantics. Credential
+values are never edited inline; EdgionBackend stores Secret references.
+
+Plugin stage eligibility is authoritative in Edgion's
+`edgion-resources/src/resources/edgion_plugins/validate.rs`. In particular, ExtProc
+response handling is configured by its request-stage entry; it is not a directly
+configurable upstreamResponsePlugins entry.
 
 ## EdgionStreamPlugins (Pending Development)
 

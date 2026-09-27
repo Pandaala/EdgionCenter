@@ -148,6 +148,22 @@ spec:
   connection: {connectTimeout: 5s}
   outlierDetection: {consecutiveErrors: 5, ejectionTime: 30s, maxEjectionTime: 5m, maxEjectionPercent: 50}
 ---
+apiVersion: edgion.io/v1
+kind: EdgionBackend
+metadata: {name: "__PREFIX__-ai-backend", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+spec:
+  ai:
+    provider: OpenAI
+    credentialPool:
+      credentials: [{name: primary, secretRef: {name: "__PREFIX__-ai-key"}}]
+    models: [{name: fixture-model, aliases: [default], public: true}]
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: "__PREFIX__-ai-key", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
+type: Opaque
+stringData: {apiKey: "fixture-only-not-a-provider-credential"}
+---
 apiVersion: v1
 kind: Secret
 metadata: {name: "__PREFIX__-secret", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}

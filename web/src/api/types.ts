@@ -63,6 +63,7 @@ export type ResourceKind =
   | 'edgionacme'
   | 'backendtlspolicy'
   | 'edgionbackendtrafficpolicy'
+  | 'edgionbackend'
   | 'configmap'
 
 export type ResourceScope = 'namespaced' | 'cluster'

@@ -78,7 +78,7 @@ describe('plugin editor Form and YAML mutation boundaries', () => {
     const resource: any = { apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'http-plugins', namespace: 'edge' }, spec: { requestPlugins: [] } }
     renderWithQuery(<EdgionPluginsEditor visible mode="edit" resource={resource} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
-    fireEvent.change(screen.getByLabelText('Resource YAML'), { target: { value: yaml.dump({ ...resource, spec: { requestPlugins: [{ type: 'TraceContext', config: { trustInbound: true } }], futureSpec: false }, status: {} }) } })
+    fireEvent.change(screen.getByLabelText('Resource YAML'), { target: { value: yaml.dump({ ...resource, spec: { requestPlugins: [{ type: 'RequestId', config: { defaultId: { forwardUpstream: true, echoResponse: true } } }], futureSpec: false }, status: {} }) } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await assertMutation(update, 'edgionplugins', (spec) => expect(spec.futureSpec).toBe(false))
   })

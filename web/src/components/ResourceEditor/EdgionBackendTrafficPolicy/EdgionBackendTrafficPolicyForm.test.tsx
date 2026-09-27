@@ -6,6 +6,21 @@ import type { EdgionBackendTrafficPolicy } from '@/types/edgion-backend-traffic-
 vi.mock('../common/MetadataSection', () => ({ default: () => null }))
 
 describe('EdgionBackendTrafficPolicyForm', () => {
+  it('keeps added AI targets homogeneous and renders omitted retry defaults without mutating them', () => {
+    const onChange = vi.fn()
+    const policy: EdgionBackendTrafficPolicy = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionBackendTrafficPolicy',
+      metadata: { name: 'ai-policy', namespace: 'prod' },
+      spec: { targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }], retryConstraint: {} },
+    }
+    render(<EdgionBackendTrafficPolicyForm data={policy} onChange={onChange} />)
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('edgionbackendtrafficpolicy-target-add'))
+    const changed = onChange.mock.calls[0][0] as EdgionBackendTrafficPolicy
+    expect(changed.spec.targetRefs[1]).toEqual({ group: 'edgion.io', kind: 'EdgionBackend', name: '' })
+    expect(changed.spec.retryConstraint).toEqual({})
+  })
+
   it('narrowly edits one target while preserving siblings and unknown fields', () => {
     const onChange = vi.fn()
     const policy: EdgionBackendTrafficPolicy = {

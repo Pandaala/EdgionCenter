@@ -130,7 +130,10 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
   if (spec.maxBodySize !== undefined && (maxBodySizeBytes === null || maxBodySizeBytes <= 0)) {
     errors.push("spec.maxBodySize is invalid (expected a positive byte size such as '32MiB')")
   }
-  if (spec.loadBalancing?.panicThreshold !== undefined && (spec.loadBalancing.panicThreshold < 0 || spec.loadBalancing.panicThreshold > 100)) errors.push('spec.loadBalancing.panicThreshold must be 0-100')
+  const degradeThreshold = spec.loadBalancing?.degradeThreshold
+  if (degradeThreshold !== undefined && (!Number.isInteger(degradeThreshold) || degradeThreshold < 0 || degradeThreshold > 100)) {
+    errors.push('spec.loadBalancing.degradeThreshold must be an integer from 0 to 100')
+  }
   const groupNames = new Set<string>()
   spec.realIp?.trustedIps?.forEach((group, index) => {
     const path = `spec.realIp.trustedIps[${index}]`

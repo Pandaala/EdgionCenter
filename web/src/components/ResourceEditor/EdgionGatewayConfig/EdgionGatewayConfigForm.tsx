@@ -306,7 +306,7 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           </Form.Item>
           <Form.Item label={t('field.tcpIdleTimeout')} style={{ marginBottom: 8, marginTop: 8 }}><Input value={tcpTimeout.idleTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { idleTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
           <Form.Item label={t('field.tcpConnectTimeout')} style={{ marginBottom: 8 }}><Input value={tcpTimeout.connectTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { connectTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
-          <Form.Item label={t('field.panicThreshold')} style={{ marginBottom: 0 }}><InputNumber value={loadBalancing.panicThreshold} min={0} max={100} onChange={(value) => updateSpecBlock('loadBalancing', { panicThreshold: value ?? undefined })} disabled={readOnly} /></Form.Item>
+          <Form.Item label={t('field.degradeThreshold')} style={{ marginBottom: 0 }}><InputNumber value={loadBalancing.degradeThreshold} min={0} max={100} onChange={(value) => updateSpecBlock('loadBalancing', { degradeThreshold: value ?? undefined })} disabled={readOnly} /></Form.Item>
           <Form.Item
             label={t('field.gatewayMaxBodySize')}
             help={t('field.gatewayMaxBodySizeHelp')}

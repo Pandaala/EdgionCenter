@@ -8,7 +8,7 @@ npm run e2e:typecheck
 E2E_MODE=mock npx playwright test e2e/specs/mock-static.spec.ts
 ```
 
-`e2e:inventory` validates the 21-kind catalog/fixture/cleanup contract, six resource states,
+`e2e:inventory` validates the 22-kind catalog/fixture/cleanup contract, six resource states,
 two modes, two Controller slots, action inventory, and case expansion. Set
 `E2E_INVENTORY_STRICT=1` once UI action test IDs have landed to fail on every missing selector.
 
@@ -17,6 +17,10 @@ environment-only credentials and Controller IDs, create a unique run artifact di
 stop only PIDs they started. Kubernetes mutations require `E2E_ALLOW_MUTATION=1`, which
 `run.sh` sets after establishing the run ID. Successful runs call the retain path: they verify
 the exact run label and UID of every ledger object and leave the environment intact.
+
+Both modes use the current sibling `Edgion/` checkout. Set `EDGION_DIR` to an absolute
+checkout path to use another Controller source. The standalone runner builds and starts
+that checkout's Controller binary and copies its current CRDs into each fixture directory.
 
 Cleanup is always explicit:
 

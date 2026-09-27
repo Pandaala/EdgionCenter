@@ -25,9 +25,11 @@ spec:
   requestPlugins:
     - type: BasicAuth
       config:
-        credentials:
-          - username: admin
-            password: secret
+        secretGroups:
+          - name: users
+            secretRefs:
+              - name: basic-auth-users
+                namespace: default
 `
 
 /**
@@ -108,14 +110,48 @@ type BodyCapableStage = keyof Pick<
  * uses a UI heuristic; opaque bytecode stays permissive because the browser
  * cannot inspect its compiled builtin table.
  */
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function conditionSetUsesRequestBody(value: unknown): boolean {
+  const set = objectValue(value)
+  const consumesBody = (leaf: unknown) => {
+    const condition = objectValue(leaf)
+    return condition.type === 'hmacAuth' && condition.validateRequestBody === true
+  }
+  if (Array.isArray(set.allOf)) return set.allOf.some(consumesBody)
+  return Array.isArray(set.anyOf) && set.anyOf.some((clause) => {
+    const group = objectValue(clause)
+    return Array.isArray(group.allOf) ? group.allOf.some(consumesBody) : consumesBody(clause)
+  })
+}
+
 export function pluginAcceptsBodyRequirement(
   stage: BodyCapableStage,
   type: string,
   config: Record<string, unknown> | undefined,
 ): boolean {
   if (stage !== 'requestPlugins') return false
-  if (type === 'Wasm') return true
+  if (['Wasm', 'AiProxy', 'AiGuard', 'RequestBodyBuffer', 'JsonSchemaValidation', 'FormJsonTransform'].includes(type)) return true
   if (type === 'HmacAuth') return config?.validateRequestBody === true
+  if (type === 'ForwardAuth') return config?.forwardBody === true
+  if (type === 'ProxyRewrite') return config?.jsonBody != null
+  if (type === 'ExtProc') return objectValue(config?.processingMode).requestBodyMode === 'BUFFERED'
+  if (type === 'RequestRestriction') return conditionSetUsesRequestBody(config?.conditions)
+  if (type === 'RequestAccessPolicy') {
+    return Object.values(objectValue(config?.resolvedProfiles ?? config?.profiles)).some((profile) => {
+      const groups = objectValue(profile).requiredRuleGroups
+      return Array.isArray(groups) && groups.some((group) => {
+        const rules = objectValue(group).anyOfRules
+        return Array.isArray(rules) && rules.some((rule) => {
+          const ruleConfig = objectValue(objectValue(rule).config)
+          return conditionSetUsesRequestBody(ruleConfig.conditions) ||
+            (Array.isArray(ruleConfig.resolvedCandidates) && ruleConfig.resolvedCandidates.some((candidate) => conditionSetUsesRequestBody(objectValue(candidate).conditions)))
+        })
+      })
+    })
+  }
   if (type === 'Dsl') {
     if (typeof config?.bytecode === 'string' && config.bytecode.trim() !== '') return true
     return typeof config?.source === 'string' && /\breq\s*\.\s*body\b/.test(config.source)

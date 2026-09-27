@@ -31,7 +31,7 @@ const fullPolicy: EdgionBackendTrafficPolicy = {
     loadBalancer: {
       type: 'ConsistentHash',
       consistentHash: { hashOn: 'queryParam', key: 'tenant', futureHash: true },
-      panicThreshold: 30,
+      degradeThreshold: 30,
       futureLoadBalancer: 'keep',
     },
     healthCheck: {
@@ -77,6 +77,43 @@ const fullPolicy: EdgionBackendTrafficPolicy = {
 }
 
 describe('EdgionBackendTrafficPolicy adapter', () => {
+  it('accepts AI targets and removes the Controller-resolved target class', () => {
+    const policy: EdgionBackendTrafficPolicy = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionBackendTrafficPolicy',
+      metadata: { name: 'ai-policy', namespace: 'prod', resourceVersion: '12' },
+      spec: {
+        targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }],
+        resolvedTargetClass: 'AiBackend',
+        retryConstraint: {},
+        circuitBreaker: { maxParallelRequests: 10 },
+      },
+    }
+    expect(validateEdgionBackendTrafficPolicy(policy)).toEqual([])
+    const payload = yaml.load(edgionBackendTrafficPolicyToMutationYaml(policy, 'update')) as EdgionBackendTrafficPolicy
+    expect(payload.spec.resolvedTargetClass).toBeUndefined()
+    expect(payload.spec.retryConstraint).toEqual({})
+    expect(payload.spec.targetRefs).toEqual(policy.spec.targetRefs)
+  })
+
+  it('rejects mixed, duplicate, excessive AI targets and AI active probes', () => {
+    const policy = structuredClone(fullPolicy)
+    const ai = { group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }
+    policy.spec.targetRefs = [ai, { group: '', kind: 'Service', name: 'service' }]
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain('targetRefs must all have the same target kind')
+    policy.spec.targetRefs = [ai, { ...ai }]
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain('EdgionBackend targetRefs must not contain duplicate targets')
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain('healthCheck is not supported for EdgionBackend targets')
+    policy.spec.targetRefs = Array.from({ length: 17 }, (_, index) => ({ ...ai, name: `provider-${index}` }))
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain('EdgionBackend targetRefs must contain at most 16 entries')
+  })
+
+  it.each([{}, { budget: {} }, { budget: { percent: 0 } }])('preserves omitted retry defaults: %j', (retryConstraint) => {
+    const policy = structuredClone(fullPolicy)
+    policy.spec.retryConstraint = retryConstraint
+    expect(validateEdgionBackendTrafficPolicy(policy)).toEqual([])
+    expect((yaml.load(edgionBackendTrafficPolicyToMutationYaml(policy, 'update')) as EdgionBackendTrafficPolicy).spec.retryConstraint).toEqual(retryConstraint)
+  })
+
   it('round-trips every current and unknown operator field without projection', () => {
     const normalized = normalizeEdgionBackendTrafficPolicy(fullPolicy)
     expect(edgionBackendTrafficPolicyFromYaml(edgionBackendTrafficPolicyToYaml(normalized))).toEqual(fullPolicy)
@@ -122,7 +159,7 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
 
   it('validates conditional sections and complete health-check/outlier bounds', () => {
     const policy = structuredClone(fullPolicy)
-    policy.spec.loadBalancer = { type: 'ConsistentHash', panicThreshold: 101 }
+    policy.spec.loadBalancer = { type: 'ConsistentHash', degradeThreshold: 101 }
     policy.spec.healthCheck!.active = {
       type: 'http', path: '', interval: '0s', timeout: 'bad', healthyThreshold: 0,
       unhealthyThreshold: 0, expectedStatuses: [99, 600], port: 65536,
@@ -147,7 +184,7 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
     }
     const errors = validateEdgionBackendTrafficPolicy(policy).join('\n')
     expect(errors).toContain('consistentHash is required')
-    expect(errors).toContain('panicThreshold must be 0-100')
+    expect(errors).toContain('degradeThreshold must be 0-100')
     expect(errors).toContain('healthyThreshold must be >= 1')
     expect(errors).toContain('expectedStatuses must contain valid HTTP status codes')
     expect(errors).toContain('consecutiveLocalOriginFailures must be >= 1')

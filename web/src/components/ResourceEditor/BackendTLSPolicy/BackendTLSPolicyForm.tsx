@@ -79,7 +79,7 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
                 ) : null
               }
             >
-              <Form.Item label={t('field.serviceName')} required style={{ marginBottom: 8 }}>
+              <Form.Item label={t('field.targetBackend')} required style={{ marginBottom: 8 }}>
                 <Input
                   value={ref.name}
                   onChange={(e) => updateTargetRef(index, { name: e.target.value })}
@@ -97,16 +97,17 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
                 />
               </Form.Item>
               <Form.Item label={t('field.kind')} style={{ marginBottom: 0 }}>
-                <Input
+                <Select
+                  aria-label="Target kind"
                   value={ref.kind}
-                  onChange={(e) => updateTargetRef(index, { kind: e.target.value })}
-                  placeholder="Service"
+                  options={[...new Set(['Service', 'EdgionBackend', ref.kind])].map((value) => ({ value }))}
+                  onChange={(kind) => updateTargetRef(index, { kind, group: kind === 'EdgionBackend' ? 'edgion.io' : '', ...(kind === 'EdgionBackend' ? { sectionName: undefined } : {}) })}
                   disabled={readOnly}
                   style={{ width: 200 }}
                 />
               </Form.Item>
               <Form.Item label="Section name" style={{ marginBottom: 0 }}>
-                <Input value={ref.sectionName} onChange={(e) => updateTargetRef(index, { sectionName: e.target.value || undefined })} disabled={readOnly} placeholder="Optional port/listener section" />
+                <Input value={ref.sectionName} onChange={(e) => updateTargetRef(index, { sectionName: e.target.value || undefined })} disabled={readOnly || ref.kind === 'EdgionBackend'} placeholder="Optional Service port section" />
               </Form.Item>
             </Card>
           ))}

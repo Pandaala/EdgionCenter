@@ -13,7 +13,7 @@ describe('structured plugin forms', () => {
     const resource: any = {
       apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'p', namespace: 'edge' },
       spec: {
-        requestPlugins: [{ alias: 'limit.one', conditions: { run: [{ type: 'keyExist' }] }, type: 'RateLimit', config: { rate: 10, interval: '1s', future: false } }],
+        requestPlugins: [{ alias: 'limit.one', conditions: { run: { allOf: [{ type: 'keyExist', key: { type: 'header', name: 'x-tenant' } }] } }, type: 'RateLimitLocal', config: { rate: 10, interval: '1s', future: false } }],
         upstreamResponsePlugins: [{ type: 'ExtProc', config: { grpcService: { target: 'proc:9000' } } }],
         futureSpec: true,
       },

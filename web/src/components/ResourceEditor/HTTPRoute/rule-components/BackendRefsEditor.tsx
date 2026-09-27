@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Form, Input, InputNumber, Button, Space, Card } from 'antd';
+import { Form, Input, InputNumber, Button, Space, Card, Select } from 'antd';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import { DEFAULT_VALUES, PORT_MIN, PORT_MAX, WEIGHT_MIN, WEIGHT_MAX } from '@/constants/gateway-api';
 import type { BackendRef } from '@/types/gateway-api';
@@ -77,7 +77,7 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
             {/* Service 名称 */}
             <Form.Item
-              label="Service 名称 / Name"
+              label={t('field.name')}
               required
               style={{ marginBottom: 0 }}
             >
@@ -116,7 +116,7 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
                 placeholder="80"
                 min={PORT_MIN}
                 max={PORT_MAX}
-                disabled={disabled}
+                disabled={disabled || backend.kind === 'EdgionBackend' || backend.kind === 'HTTPRoute' || backend.kind === 'GRPCRoute'}
                 style={{ width: '100%' }}
               />
             </Form.Item>
@@ -127,9 +127,10 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
               style={{ marginBottom: 0 }}
             >
               <InputNumber
+                aria-label="Backend weight"
                 value={backend.weight ?? DEFAULT_VALUES.backendRef.weight}
                 onChange={(weight) =>
-                  handleBackendChange(index, { ...backend, weight: weight || undefined })
+                  handleBackendChange(index, { ...backend, weight: weight ?? undefined })
                 }
                 min={WEIGHT_MIN}
                 max={WEIGHT_MAX}
@@ -173,13 +174,17 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
               label="Kind（高级，默认 Service）"
               style={{ marginBottom: 0 }}
             >
-              <Input
+              <Select
+                aria-label="Backend kind"
                 value={backend.kind || DEFAULT_VALUES.backendRef.kind}
-                onChange={(e) =>
-                  handleBackendChange(index, { ...backend, kind: e.target.value })
-                }
-                placeholder="Service"
+                options={[...new Set(['Service', ...(protocol === 'http' ? ['EdgionBackend', 'HTTPRoute'] : ['GRPCRoute']), backend.kind || 'Service'])].map((kind) => ({ value: kind, label: kind }))}
+                onChange={(kind) => {
+                  const next = { ...backend, kind, group: kind === 'Service' ? '' : kind === 'EdgionBackend' ? 'edgion.io' : 'gateway.networking.k8s.io' }
+                  if (kind !== 'Service') delete next.port
+                  handleBackendChange(index, next)
+                }}
                 disabled={disabled}
+                style={{ width: '100%' }}
               />
             </Form.Item>
           </Space>

@@ -10,11 +10,15 @@ import type { K8sObjectMeta, Condition } from '@/types/gateway-api'
  * 支持 skip（跳过条件）和 run（运行条件）
  */
 export interface PluginConditions {
-  skip?: PluginConditionItem[]
-  run?: PluginConditionItem[]
+  skip?: PluginConditionSet
+  run?: PluginConditionSet
 }
 
 export type PluginConditionItem = Record<string, unknown>
+
+export type PluginConditionSet =
+  | { allOf: PluginConditionItem[] }
+  | { anyOf: (PluginConditionItem | { name?: string; allOf: PluginConditionItem[] })[] }
 
 export type DyeOutcome = 'success' | 'fallback' | 'reject' | 'fail-open' | 'fail-close'
 
@@ -150,6 +154,15 @@ export const PLUGIN_TYPES = [
   'UrlRewrite',
   'RequestMirror',
   // Edgion 自定义插件
+  'AiProxy',
+  'AiGuard',
+  'CredentialInjector',
+  'RequestBodyBuffer',
+  'JsonSchemaValidation',
+  'FormJsonTransform',
+  'GeoIpLocation',
+  'Guardrail',
+  'WebhookKeyGet',
   'BasicAuth',
   'Cors',
   'Csrf',
@@ -166,7 +179,7 @@ export const PLUGIN_TYPES = [
   'ProxyRewrite',
   'RequestRestriction',
   'ResponseRewrite',
-  'RateLimit',
+  'RateLimitLocal',
   'RateLimitRedis',
   'CtxSet',
   'RealIp',
@@ -179,9 +192,9 @@ export const PLUGIN_TYPES = [
   'DynamicExternalUpstream',
   'Dsl',
   'RegionRoute',
-  'TraceContext',
+  'RequestId',
   'ExtProc',
-  'GlobalAccessControl',
+  'RequestAccessPolicy',
   'Canary',
   'Wasm',
 ] as const
@@ -192,13 +205,14 @@ export type PluginType = typeof PLUGIN_TYPES[number]
 export const STAGE_PLUGIN_TYPES = {
   requestPlugins: [
     'RequestHeaderModifier', 'RequestRedirect', 'UrlRewrite', 'RequestMirror',
-    'BasicAuth', 'Cors', 'Csrf', 'IpRestriction', 'JwtAuth', 'JweDecrypt',
+    'AiProxy', 'AiGuard', 'CredentialInjector', 'RequestBodyBuffer', 'JsonSchemaValidation',
+    'FormJsonTransform', 'GeoIpLocation', 'Guardrail', 'WebhookKeyGet', 'BasicAuth', 'Cors', 'Csrf', 'IpRestriction', 'JwtAuth', 'JweDecrypt',
     'HmacAuth', 'HeaderCertAuth', 'KeyAuth', 'LdapAuth', 'Mock', 'FaultInjection',
     'ProxyRewrite', 'RequestRestriction',
-    'RateLimit', 'RateLimitRedis', 'CtxSet', 'RealIp', 'ForwardAuth',
+    'RateLimitLocal', 'RateLimitRedis', 'CtxSet', 'RealIp', 'ForwardAuth',
     'OpenidConnect', 'DirectEndpoint', 'AllEndpointStatus',
     'DynamicInternalUpstream', 'DynamicExternalUpstream', 'Dsl',
-    'RegionRoute', 'TraceContext', 'ExtProc', 'GlobalAccessControl', 'Canary', 'Wasm',
+    'RegionRoute', 'RequestId', 'ExtProc', 'RequestAccessPolicy', 'Canary', 'Wasm',
   ],
   upstreamResponseFilterPlugins: [
     'ResponseHeaderModifier', 'DebugAccessLogToHeader', 'ResponseRewrite', 'Dsl', 'Wasm',
@@ -206,5 +220,5 @@ export const STAGE_PLUGIN_TYPES = {
   upstreamResponseBodyFilterPlugins: [
     'BandwidthLimit', 'Wasm',
   ],
-  upstreamResponsePlugins: ['ExtProc'],
+  upstreamResponsePlugins: [],
 } as const

@@ -3,9 +3,33 @@ import { buildMutationDocument } from '@/utils/resource-document'
 import { RESOURCE_CATALOG, getResourceCatalogEntry, listFirstClassResources } from './resourceCatalog'
 
 describe('resource catalog', () => {
-  it('accounts for all 21 Controller resource kinds', () => {
-    expect(RESOURCE_CATALOG.size).toBe(21)
-    expect(listFirstClassResources()).toHaveLength(19)
+  it.each(['create', 'update'] as const)('strips deployment runtime status in %s while retaining operator siblings', (mode) => {
+    const kinds = [
+      'gatewayclass', 'edgiongatewayconfig', 'gateway', 'httproute', 'grpcroute',
+      'tcproute', 'udproute', 'tlsroute', 'edgiontls', 'backendtlspolicy',
+      'edgionplugins', 'edgionstreamplugins', 'edgionconfigdata', 'edgionacme',
+      'linksys', 'edgionbackendtrafficpolicy',
+    ] as const
+    for (const kind of kinds) {
+      const entry = getResourceCatalogEntry(kind)
+      const source = {
+        apiVersion: entry.apiVersion, kind: entry.displayName,
+        metadata: { name: 'example', namespace: 'edge', resourceVersion: '7' },
+        status: { controllers: [{ controllerName: 'east', status: { conditions: [] } }] },
+        spec: { currentStatus: { conditions: [] }, futureField: { currentStatus: 'operator-value' } },
+      }
+      expect(buildMutationDocument(source, { resourceKind: kind, mode })).toEqual({
+        apiVersion: entry.apiVersion, kind: entry.displayName,
+        metadata: { name: 'example', namespace: 'edge', ...(mode === 'update' ? { resourceVersion: '7' } : {}) },
+        spec: { futureField: { currentStatus: 'operator-value' } },
+      })
+      expect(source.spec.currentStatus).toEqual({ conditions: [] })
+    }
+  })
+
+  it('accounts for all 22 Controller resource kinds', () => {
+    expect(RESOURCE_CATALOG.size).toBe(22)
+    expect(listFirstClassResources()).toHaveLength(20)
   })
 
   it('keeps Secret and ConfigMap as restricted dependencies', () => {

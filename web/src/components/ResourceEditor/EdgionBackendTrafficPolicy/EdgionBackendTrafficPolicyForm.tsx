@@ -86,6 +86,8 @@ const EdgionBackendTrafficPolicyForm = ({
   const [expectedStatusesTouched, setExpectedStatusesTouched] = useState(false)
   const outlier = data.spec.outlierDetection
   const retryConstraint = data.spec.retryConstraint
+  const retryBudget = { percent: 20, interval: '10s', ...retryConstraint?.budget }
+  const retryFloor = retryConstraint?.minRetryRate ?? { count: 10, interval: '1s' }
   const circuitBreaker = data.spec.circuitBreaker
   const connection = data.spec.connection
   const authority = data.spec.upstreamAuthority
@@ -153,7 +155,7 @@ const EdgionBackendTrafficPolicyForm = ({
               ) : null}
             >
               <Space wrap align="start">
-                <Form.Item label={t('field.serviceName')} required>
+                <Form.Item label={t('field.name')} required>
                   <Input value={ref.name} disabled={readOnly} onChange={(event) => patchTarget(index, { name: event.target.value })} />
                 </Form.Item>
                 <Form.Item label={t('field.group')} tooltip={t('help.ebtpTargetGroup')}>
@@ -164,8 +166,8 @@ const EdgionBackendTrafficPolicyForm = ({
                     value={ref.kind}
                     disabled={readOnly}
                     style={{ width: 150 }}
-                    options={[{ value: 'Service', label: 'Service' }]}
-                    onChange={(kind) => patchTarget(index, { kind })}
+                    options={['Service', 'EdgionBackend'].map((value) => ({ value, label: value }))}
+                    onChange={(kind) => patchTarget(index, { kind, group: kind === 'EdgionBackend' ? 'edgion.io' : '' })}
                   />
                 </Form.Item>
               </Space>
@@ -177,7 +179,7 @@ const EdgionBackendTrafficPolicyForm = ({
               type="dashed"
               block
               icon={<PlusOutlined />}
-              onClick={() => setSection('targetRefs', [...data.spec.targetRefs, { group: '', kind: 'Service', name: '' }])}
+              onClick={() => setSection('targetRefs', [...data.spec.targetRefs, { group: data.spec.targetRefs[0]?.group ?? '', kind: data.spec.targetRefs[0]?.kind ?? 'Service', name: '' }])}
             >
               {t('btn.addTargetRef')}
             </Button>
@@ -206,8 +208,8 @@ const EdgionBackendTrafficPolicyForm = ({
                     }}
                   />
                 </Form.Item>
-                <Form.Item label={t('field.panicThreshold')} tooltip={t('help.panicThreshold')}>
-                  <InputNumber min={0} max={100} value={lb.panicThreshold} disabled={readOnly} onChange={(value) => patchLoadBalancer({ panicThreshold: value ?? undefined })} />
+                <Form.Item label={t('field.degradeThreshold')} tooltip={t('help.degradeThreshold')}>
+                  <InputNumber min={0} max={100} value={lb.degradeThreshold} disabled={readOnly} onChange={(value) => patchLoadBalancer({ degradeThreshold: value ?? undefined })} />
                 </Form.Item>
               </Space>
               {lb.type === 'ConsistentHash' && lb.consistentHash && (
@@ -331,19 +333,19 @@ const EdgionBackendTrafficPolicyForm = ({
                 <InputNumber
                   min={0}
                   max={100}
-                  value={retryConstraint.budget.percent}
+                  value={retryBudget.percent}
                   disabled={readOnly}
                   onChange={(value) => patchRetryConstraint({
-                    budget: { ...retryConstraint.budget, percent: value ?? 0 },
+                    budget: { ...retryBudget, percent: value ?? 0 },
                   })}
                 />
               </Form.Item>
               <Form.Item label={t('field.retryBudgetInterval')} required>
                 <Input
-                  value={retryConstraint.budget.interval}
+                  value={retryBudget.interval}
                   disabled={readOnly}
                   onChange={(event) => patchRetryConstraint({
-                    budget: { ...retryConstraint.budget, interval: event.target.value },
+                    budget: { ...retryBudget, interval: event.target.value },
                   })}
                 />
               </Form.Item>
@@ -351,19 +353,19 @@ const EdgionBackendTrafficPolicyForm = ({
                 <InputNumber
                   min={1}
                   max={1_000_000}
-                  value={retryConstraint.minRetryRate.count}
+                  value={retryFloor.count}
                   disabled={readOnly}
                   onChange={(value) => patchRetryConstraint({
-                    minRetryRate: { ...retryConstraint.minRetryRate, count: value ?? 0 },
+                    minRetryRate: { ...retryFloor, count: value ?? 0 },
                   })}
                 />
               </Form.Item>
               <Form.Item label={t('field.minRetryRateInterval')} required>
                 <Input
-                  value={retryConstraint.minRetryRate.interval}
+                  value={retryFloor.interval}
                   disabled={readOnly}
                   onChange={(event) => patchRetryConstraint({
-                    minRetryRate: { ...retryConstraint.minRetryRate, interval: event.target.value },
+                    minRetryRate: { ...retryFloor, interval: event.target.value },
                   })}
                 />
               </Form.Item>

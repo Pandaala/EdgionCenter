@@ -3,6 +3,44 @@ import { describe, expect, it } from 'vitest'
 import ResourceConditions, { collectResourceConditions } from './ResourceConditions'
 
 describe('ResourceConditions', () => {
+  it('preserves opposing deployment observations in the Kubernetes envelope', () => {
+    const accepted = { type: 'Accepted', status: 'True', observedGeneration: 7 }
+    const rejected = { type: 'Accepted', status: 'False', reason: 'Invalid', observedGeneration: 6 }
+    const partitioned = { controllers: [
+      { controllerName: 'edgion.io/east', status: { conditions: [accepted] } },
+      { controllerName: 'edgion.io/west', status: { conditions: [rejected] } },
+    ] }
+    expect(collectResourceConditions(partitioned)).toEqual([
+      { context: 'Controller: edgion.io/east', condition: accepted },
+      { context: 'Controller: edgion.io/west', condition: rejected },
+    ])
+    render(<ResourceConditions status={partitioned} />)
+    expect(screen.getByText('Controller: edgion.io/east')).toBeInTheDocument()
+    expect(screen.getByText('Controller: edgion.io/west')).toBeInTheDocument()
+    expect(screen.getByText('Accepted=True')).toBeInTheDocument()
+    expect(screen.getByText('Accepted=False')).toBeInTheDocument()
+  })
+
+  it('ignores malformed observations without losing valid neighbors or using top-level fallback', () => {
+    const condition = { type: 'ResolvedRefs', status: 'False' }
+    expect(collectResourceConditions({
+      conditions: [{ type: 'Accepted', status: 'True' }],
+      controllers: [null, {}, { controllerName: '' }, { controllerName: 'bad', status: null },
+        { controllerName: 'valid', status: { conditions: [null, {}, condition] } }],
+    })).toEqual([{ context: 'Controller: valid', condition }])
+    expect(collectResourceConditions({ controllers: null, conditions: [condition] })).toEqual([])
+  })
+
+  it('identifies native parent and ancestor writers independently of attachment identity', () => {
+    const condition = { type: 'Accepted', status: 'True' }
+    expect(collectResourceConditions({
+      parents: [{ controllerName: 'east', parentRef: { name: 'shared' }, conditions: [condition] }],
+      ancestors: [{ controllerName: 'west', ancestorRef: { name: 'shared' }, conditions: [condition] }],
+    }).map((item) => item.context)).toEqual([
+      'Controller: east / Parent: shared', 'Controller: west / Ancestor: shared',
+    ])
+  })
+
   const status = {
     conditions: [{ type: 'Accepted', status: 'True', reason: 'Accepted' }],
     parents: [{

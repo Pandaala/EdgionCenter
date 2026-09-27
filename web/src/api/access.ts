@@ -32,6 +32,7 @@ export const CONTROLLER_KIND_BY_RESOURCE_KIND: Readonly<Record<ResourceKind, str
   edgionacme: 'EdgionAcme',
   backendtlspolicy: 'BackendTLSPolicy',
   edgionbackendtrafficpolicy: 'EdgionBackendTrafficPolicy',
+  edgionbackend: 'EdgionBackend',
   configmap: 'ConfigMap',
 }
 
@@ -56,6 +57,7 @@ const SCOPE_BY_RESOURCE_KIND: Readonly<Record<ResourceKind, ResourceScope>> = {
   edgionacme: 'namespaced',
   backendtlspolicy: 'namespaced',
   edgionbackendtrafficpolicy: 'namespaced',
+  edgionbackend: 'namespaced',
   configmap: 'namespaced',
 }
 
@@ -82,6 +84,7 @@ export const CONTROLLER_ACCESS_RESOURCE_KINDS: readonly ResourceKind[] = [
   'edgionacme',
   'configmap',
   'edgionbackendtrafficpolicy',
+  'edgionbackend',
 ]
 const VERB_INDEX = new Map(CONTROLLER_ACCESS_RESOURCE_VERBS.map((verb, index) => [verb, index]))
 

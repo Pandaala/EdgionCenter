@@ -4,7 +4,7 @@ import { Input, Modal, Space, Table, Tag, message } from 'antd'
 import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import type { EdgionBackendTrafficPolicy } from '@/types/edgion-backend-traffic-policy'
+import type { EdgionBackend } from '@/types/edgion-backend'
 import { batchDeleteFailureKeys, resourceApi } from '@/api/resources'
 import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
@@ -15,13 +15,13 @@ import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 import PageHeader from '@/components/PageHeader'
-import EdgionBackendTrafficPolicyEditor from '@/components/ResourceEditor/EdgionBackendTrafficPolicy/EdgionBackendTrafficPolicyEditor'
+import EdgionBackendEditor from '@/components/ResourceEditor/EdgionBackend/EdgionBackendEditor'
 import { useT } from '@/i18n'
 
 const { Search } = Input
-const RESOURCE_KIND = 'edgionbackendtrafficpolicy' as const
+const RESOURCE_KIND = 'edgionbackend' as const
 
-const EdgionBackendTrafficPolicyList = () => {
+const EdgionBackendList = () => {
   const t = useT()
   const mutationTarget = useControllerMutationTarget()
   const { controllerId } = useParams<{ controllerId?: string }>()
@@ -30,10 +30,10 @@ const EdgionBackendTrafficPolicyList = () => {
   const [editor, setEditor] = useState<{
     visible: boolean
     mode: 'create' | 'edit' | 'view'
-    resource?: EdgionBackendTrafficPolicy
+    resource?: EdgionBackend
   }>({ visible: false, mode: 'create' })
   const queryClient = useQueryClient()
-  const list = useResourceList<EdgionBackendTrafficPolicy>(RESOURCE_KIND, {
+  const list = useResourceList<EdgionBackend>(RESOURCE_KIND, {
     namespaced: true,
     scope: controllerId ?? null,
   })
@@ -77,49 +77,36 @@ const EdgionBackendTrafficPolicyList = () => {
     const search = searchText.toLowerCase()
     return item.metadata.name.toLowerCase().includes(search)
       || item.metadata.namespace?.toLowerCase().includes(search)
-      || item.spec.targetRefs.some((ref) => ref.name.toLowerCase().includes(search))
+      || item.spec.ai.provider.toLowerCase().includes(search)
   })
   const selected = list.items.filter((item) => selectedRowKeys.includes(`${item.metadata.namespace}/${item.metadata.name}`))
 
   const columns = [
-    ...getResourceMetaColumns<EdgionBackendTrafficPolicy>({
+    ...getResourceMetaColumns<EdgionBackend>({
       namespaced: true,
       titles: { name: t('col.name'), namespace: t('col.namespace'), age: t('col.age') },
       items: list.items,
     }),
     {
-      title: t('col.targetBackend'),
-      key: 'targets',
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => (
-        <Space wrap>{item.spec.targetRefs.map((ref, index) => <Tag color="blue" key={`${ref.name}-${index}`}>{ref.kind}/{ref.name}</Tag>)}</Space>
-      ),
+      title: t('ai.provider'), key: 'provider',
+      render: (_: unknown, item: EdgionBackend) => <Tag color="blue">{item.spec.ai.provider}</Tag>,
     },
     {
-      title: t('col.loadBalancer'),
-      key: 'loadBalancer',
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => item.spec.loadBalancer?.type ?? 'RoundRobin',
-    },
-    {
-      title: t('col.trafficPolicy'),
-      key: 'features',
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => (
-        <Space wrap>
-          {item.spec.healthCheck?.active && <Tag color="green">{t('tag.healthCheck')}</Tag>}
-          {item.spec.outlierDetection && <Tag color="orange">{t('tag.outlierDetection')}</Tag>}
-          {item.spec.upstreamAuthority && <Tag color="purple">{t('tag.upstreamAuthority')}</Tag>}
-        </Space>
+      title: t('ai.models'), key: 'models',
+      render: (_: unknown, item: EdgionBackend) => (
+        <Space wrap>{item.spec.ai.models.map((model, index) => <Tag key={index}>{model.name}</Tag>)}</Space>
       ),
     },
     {
       title: t('col.status'),
       key: 'status',
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => <ResourceConditions status={item.status} compact />,
+      render: (_: unknown, item: EdgionBackend) => <ResourceConditions status={item.status} compact />,
     },
     {
       title: t('col.actions'),
       key: 'actions',
       width: 250,
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => (
+      render: (_: unknown, item: EdgionBackend) => (
         <Space>
           <PermissionAwareButton data-testid={resourceActionTestId(RESOURCE_KIND, 'row-view')} size="small" resourceKind={RESOURCE_KIND} resourceVerb="get" icon={<EyeOutlined />} onClick={() => setEditor({ visible: true, mode: 'view', resource: item })}>{t('btn.view')}</PermissionAwareButton>
           <PermissionAwareButton data-testid={resourceActionTestId(RESOURCE_KIND, 'row-edit')} size="small" resourceKind={RESOURCE_KIND} resourceVerb="update" icon={<EditOutlined />} onClick={() => setEditor({ visible: true, mode: 'edit', resource: item })}>{t('btn.edit')}</PermissionAwareButton>
@@ -132,13 +119,13 @@ const EdgionBackendTrafficPolicyList = () => {
   if (list.error) return <ResourceListError error={list.error} onRetry={list.refetch} />
 
   return (
-    <div data-testid="ebtp-list">
+    <div data-testid="edgionbackend-list">
       <PageHeader
-        title="EdgionBackendTrafficPolicy"
-        subtitle={t('page.subtitle.backendTrafficPolicy')}
+        title="EdgionBackend"
+        subtitle={t('page.subtitle.aiBackends')}
         actions={(
           <>
-            <Search data-testid={resourceActionTestId(RESOURCE_KIND, 'search')} value={searchText} onChange={(event) => setSearchText(event.target.value)} allowClear placeholder={t('ph.searchNameNsService')} style={{ width: 260 }} />
+            <Search data-testid={resourceActionTestId(RESOURCE_KIND, 'search')} value={searchText} onChange={(event) => setSearchText(event.target.value)} allowClear placeholder={t('ph.searchNameNs')} style={{ width: 260 }} />
             <PermissionAwareButton data-testid={resourceActionTestId(RESOURCE_KIND, 'refresh')} icon={<ReloadOutlined />} resourceKind={RESOURCE_KIND} resourceVerb="list" onClick={() => list.refetch()}>{t('btn.refresh')}</PermissionAwareButton>
             <PermissionAwareButton data-testid={resourceActionTestId(RESOURCE_KIND, 'create')} type="primary" icon={<PlusOutlined />} resourceKind={RESOURCE_KIND} resourceVerb="create" onClick={() => setEditor({ visible: true, mode: 'create' })}>{t('btn.create')}</PermissionAwareButton>
           </>
@@ -167,7 +154,7 @@ const EdgionBackendTrafficPolicyList = () => {
           },
         }}
       />
-      <EdgionBackendTrafficPolicyEditor
+      <EdgionBackendEditor
         visible={editor.visible}
         mode={editor.mode}
         resource={editor.resource}
@@ -177,4 +164,4 @@ const EdgionBackendTrafficPolicyList = () => {
   )
 }
 
-export default EdgionBackendTrafficPolicyList
+export default EdgionBackendList

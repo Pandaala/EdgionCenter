@@ -95,7 +95,7 @@ describe('EdgionBackendTrafficPolicyEditor mutation paths', () => {
           metadata: { ...resource.metadata, resourceVersion: 'new', managedFields: [{ manager: 'server' }] },
           spec: {
             ...resource.spec,
-            loadBalancer: { type: 'LeastConn', panicThreshold: 0 },
+            loadBalancer: { type: 'LeastConn', degradeThreshold: 0 },
             futureSpec: { preserved: false },
           },
           status: { conditions: [{ type: 'Accepted', status: 'True' }] },
@@ -111,7 +111,7 @@ describe('EdgionBackendTrafficPolicyEditor mutation paths', () => {
     const payload = yaml.load(update.mock.calls[0][4]) as any
     expect(payload.metadata).toEqual({ name: 'payments-policy', namespace: 'prod', resourceVersion: 'new' })
     expect(payload.status).toBeUndefined()
-    expect(payload.spec.loadBalancer).toEqual({ type: 'LeastConn', panicThreshold: 0 })
+    expect(payload.spec.loadBalancer).toEqual({ type: 'LeastConn', degradeThreshold: 0 })
     expect(payload.spec.futureSpec).toEqual({ preserved: false })
   })
 })

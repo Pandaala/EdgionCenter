@@ -20,7 +20,7 @@ const fixture: any = {
     maxRetries: 0,
     maxBodySize: '32MiB',
     tcpTimeout: { idleTimeout: '1h', connectTimeout: '10s' },
-    loadBalancing: { panicThreshold: 50 },
+    loadBalancing: { degradeThreshold: 50 },
     realIp: { trustedIps: [{ name: 'private', description: '', cidrs: ['10.0.0.0/8'], futureGroup: [] }, { name: 'proxy', cidrs: ['192.0.2.1'] }], realIpHeader: 'X-Forwarded-For', recursive: false, maxTrustedHops: 3 },
     securityProtect: { xForwardedForLimit: 200, requireSniHostMatch: false, fallbackSni: '', tlsProxyLogRecord: false, allowLoopbackUpstream: true, rejectDuplicateHost: true },
     globalPluginsRef: [{ name: 'one', namespace: 'prod' }, { name: 'two' }],
@@ -61,6 +61,20 @@ describe('EdgionGatewayConfig lossless adapter', () => {
     expect(fromForm.spec.accessLogExtern).toEqual(fixture.spec.accessLogExtern)
     expect(fromForm.spec.futureSpec).toEqual({ empty: [], disabled: false })
     expect(fromForm.spec.pathNormalization).toEqual({ legacyUnknownField: false })
+  })
+
+  it('validates the current degrade threshold and preserves it in mutations', () => {
+    for (const value of [0, 50, 100]) {
+      const resource = structuredClone(fixture)
+      resource.spec.loadBalancing.degradeThreshold = value
+      expect(validateEdgionGatewayConfig(resource)).toEqual([])
+      expect((yaml.load(toMutationYaml(resource, 'update')) as any).spec.loadBalancing).toEqual({ degradeThreshold: value })
+    }
+    for (const value of [-1, 101, 0.5, '50', null]) {
+      const resource = structuredClone(fixture)
+      resource.spec.loadBalancing.degradeThreshold = value
+      expect(validateEdgionGatewayConfig(resource)).toContain('spec.loadBalancing.degradeThreshold must be an integer from 0 to 100')
+    }
   })
 
   it('validates duration, body size, CIDR, reference, and DNS resolver constraints', () => {

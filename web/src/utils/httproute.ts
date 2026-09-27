@@ -180,6 +180,9 @@ export function validateHTTPRouteForMutation(route: HTTPRoute): void {
       throw new Error(`rules[${ruleIndex}] cannot combine RequestRedirect and URLRewrite`);
     }
     for (const [backendIndex, backend] of (rule.backendRefs || []).entries()) {
+      if (backend.group === 'edgion.io' && backend.kind === 'EdgionBackend' && backend.port !== undefined) {
+        throw new Error(`rules[${ruleIndex}].backendRefs[${backendIndex}] EdgionBackend must not set port`);
+      }
       validateFilters(backend.filters || [], `rules[${ruleIndex}].backendRefs[${backendIndex}].filters`)
       const backendTypes = new Set((backend.filters || []).map((filter) => filter.type));
       if (backendTypes.has('RequestRedirect') && backendTypes.has('URLRewrite')) {

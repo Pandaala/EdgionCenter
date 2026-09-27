@@ -116,12 +116,25 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
   const errors: string[] = []
   const refs = policy.spec.targetRefs
   if (!Array.isArray(refs) || refs.length === 0) errors.push('targetRefs must not be empty')
-  refs?.forEach((ref, index) => {
+  const targetKinds = new Set<string>()
+  const targetNames = new Set<string>()
+  let hasDuplicateTarget = false
+  if (Array.isArray(refs)) refs.forEach((ref, index) => {
     if (!ref.name) errors.push(`targetRefs[${index}].name must not be empty`)
-    if (!(ref.group === undefined || ref.group === '' || ref.group === 'core') || ref.kind !== 'Service') {
-      errors.push(`targetRefs[${index}] must reference a core Service`)
-    }
+    const service = (ref.group === undefined || ref.group === '' || ref.group === 'core') && ref.kind === 'Service'
+    const ai = ref.group === 'edgion.io' && ref.kind === 'EdgionBackend'
+    if (!service && !ai) errors.push(`targetRefs[${index}] must reference a core Service or edgion.io/EdgionBackend`)
+    else targetKinds.add(ai ? 'EdgionBackend' : 'Service')
+    const identity = `${ref.kind}/${ref.name}`
+    if (targetNames.has(identity)) hasDuplicateTarget = true
+    targetNames.add(identity)
   })
+  if (targetKinds.size > 1) errors.push('targetRefs must all have the same target kind')
+  if (targetKinds.size === 1 && targetKinds.has('EdgionBackend')) {
+    if (refs.length > 16) errors.push('EdgionBackend targetRefs must contain at most 16 entries')
+    if (hasDuplicateTarget) errors.push('EdgionBackend targetRefs must not contain duplicate targets')
+    if (policy.spec.healthCheck !== undefined) errors.push('healthCheck is not supported for EdgionBackend targets')
+  }
 
   const lb = policy.spec.loadBalancer
   if (lb) {
@@ -137,8 +150,8 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
         } else if (!lb.consistentHash.key) errors.push('consistentHash.key must not be empty')
       }
     } else if (lb.consistentHash) errors.push('consistentHash is only valid for ConsistentHash')
-    if (lb.panicThreshold !== undefined && (!Number.isInteger(lb.panicThreshold) || lb.panicThreshold < 0 || lb.panicThreshold > 100)) {
-      errors.push('loadBalancer.panicThreshold must be 0-100')
+    if (lb.degradeThreshold !== undefined && (!Number.isInteger(lb.degradeThreshold) || lb.degradeThreshold < 0 || lb.degradeThreshold > 100)) {
+      errors.push('loadBalancer.degradeThreshold must be 0-100')
     }
   }
 
@@ -175,7 +188,7 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
 
   const retry = policy.spec.retryConstraint
   if (retry) {
-    const budget = retry.budget
+    const budget = retry.budget === null ? null : { percent: 20, interval: '10s', ...retry.budget }
     if (!budget || !Number.isInteger(budget.percent) || budget.percent < 0 || budget.percent > 100) {
       errors.push('retryConstraint.budget.percent must be 0-100')
     }
@@ -183,7 +196,7 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
       minimumMilliseconds: 1_000,
       maximumMilliseconds: 3_600_000,
     })) errors.push('retryConstraint.budget.interval must be in [1s, 1h]')
-    const minRetryRate = retry.minRetryRate
+    const minRetryRate = retry.minRetryRate === undefined ? { count: 10, interval: '1s' } : retry.minRetryRate
     if (!minRetryRate || !Number.isInteger(minRetryRate.count)
       || minRetryRate.count < 1 || minRetryRate.count > 1_000_000) {
       errors.push('retryConstraint.minRetryRate.count must be in 1-1000000')

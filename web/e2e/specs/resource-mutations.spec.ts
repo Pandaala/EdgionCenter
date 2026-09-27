@@ -25,7 +25,7 @@ const conditionKinds = new Set([
   'gatewayclass', 'edgiongatewayconfig', 'gateway', 'httproute', 'grpcroute',
   'tcproute', 'udproute', 'tlsroute', 'edgiontls', 'backendtlspolicy',
   'edgionplugins', 'edgionstreamplugins', 'edgionconfigdata', 'edgionacme',
-  'linksys', 'edgionbackendtrafficpolicy',
+  'linksys', 'edgionbackendtrafficpolicy', 'edgionbackend',
 ])
 
 const fixtureValues: Record<string, string> = {

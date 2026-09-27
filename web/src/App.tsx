@@ -30,6 +30,7 @@ import GatewayList from './pages/Infrastructure/GatewayList'
 import GatewayClassList from './pages/Infrastructure/GatewayClassList'
 import ServiceList from './pages/Infrastructure/ServiceList'
 import EndpointSliceList from './pages/Infrastructure/EndpointSliceList'
+import EdgionBackendList from './pages/Services/EdgionBackendList'
 import EdgionBackendTrafficPolicyList from './pages/Services/EdgionBackendTrafficPolicyList'
 import ReferenceGrantList from './pages/Infrastructure/ReferenceGrantList'
 // Security
@@ -193,6 +194,7 @@ function App() {
           <Route path="infrastructure/referencegrants" element={<ReferenceGrantList />} />
           <Route path="services/list" element={<ServiceList />} />
           <Route path="services/endpointslices" element={<EndpointSliceList />} />
+          <Route path="services/ai-backends" element={<EdgionBackendList />} />
           <Route path="services/backend-traffic-policies" element={<EdgionBackendTrafficPolicyList />} />
           <Route path="security/tls" element={<EdgionTlsList />} />
           <Route path="security/backendtls" element={<BackendTLSPolicyList />} />
@@ -226,6 +228,7 @@ function App() {
         <Route path="infrastructure/referencegrants" element={<ReferenceGrantList />} />
         <Route path="services/list" element={<ServiceList />} />
         <Route path="services/endpointslices" element={<EndpointSliceList />} />
+        <Route path="services/ai-backends" element={<EdgionBackendList />} />
         <Route path="services/backend-traffic-policies" element={<EdgionBackendTrafficPolicyList />} />
         <Route path="security/tls" element={<EdgionTlsList />} />
         <Route path="security/backendtls" element={<BackendTLSPolicyList />} />

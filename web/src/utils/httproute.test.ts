@@ -7,6 +7,24 @@ import {
 } from './httproute'
 
 describe('HTTPRoute lossless adapter', () => {
+  it('retains typed AI backend candidates and rejects an operator-supplied port', () => {
+    const route = normalizeHTTPRoute({
+      apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute',
+      metadata: { name: 'ai', namespace: 'edge' },
+      spec: { rules: [{
+        filters: [{ type: 'ExtensionRef', extensionRef: { group: 'edgion.io', kind: 'EdgionPlugins', name: 'ai-proxy' } }],
+        backendRefs: [
+          { group: 'edgion.io', kind: 'EdgionBackend', name: 'primary', weight: 3 },
+          { group: 'edgion.io', kind: 'EdgionBackend', name: 'secondary', weight: 0 },
+        ],
+      }] },
+    })
+    expect(() => validateHTTPRouteForMutation(route)).not.toThrow()
+    expect(toHTTPRouteMutationDocument(route, 'update')).toHaveProperty('spec.rules.0.backendRefs', route.spec.rules![0].backendRefs)
+    route.spec.rules![0].backendRefs![0].port = 443
+    expect(() => validateHTTPRouteForMutation(route)).toThrow('EdgionBackend must not set port')
+  })
+
   it('preserves rule extensions and backend filters while stripping runtime state', () => {
     const fixture = {
       apiVersion: 'gateway.networking.k8s.io/v1' as const,

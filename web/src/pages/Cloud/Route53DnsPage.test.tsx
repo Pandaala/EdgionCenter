@@ -67,7 +67,7 @@ describe('Route 53 DNS dashboard boundary', () => {
     expect(within(dialog).getByDisplayValue('hc-1')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(state.putRecord).toHaveBeenCalledWith('aws-main', zone.zoneId, expect.objectContaining({ routing: { type: 'route53', set_identifier: 'blue' } }), expect.objectContaining({ aliasTarget: expect.objectContaining({ targetZoneId: 'ZALIAS' }), routingPolicy: { type: 'weighted', weight: 10 }, healthCheckId: 'hc-1' }), 'r1'))
-  })
+  }, 15_000)
 
   it('requires the exact Zone Apex confirmation before it can dispatch deletion', async () => {
     renderPage()

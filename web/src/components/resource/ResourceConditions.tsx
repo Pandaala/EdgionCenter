@@ -33,8 +33,8 @@ function referenceLabel(value: unknown, fallback: string): string {
   return `${namespace}${name}${section}`
 }
 
-/** Collect the condition locations used by Edgion and Gateway API resources. */
-export function collectResourceConditions(status: unknown): ContextualCondition[] {
+/** Collect a native status payload without following nested envelopes. */
+function collectNativeConditions(status: unknown): ContextualCondition[] {
   if (typeof status !== 'object' || status === null) return []
   const source = status as Record<string, unknown>
   const result = conditionArray(source.conditions).map((condition) => ({
@@ -57,12 +57,33 @@ export function collectResourceConditions(status: unknown): ContextualCondition[
       const reference = typeof rawReference === 'string'
         ? rawReference
         : referenceLabel(rawReference, String(index + 1))
-      const context = `${group.label}: ${reference}`
+      const owner = typeof record.controllerName === 'string' ? `Controller: ${record.controllerName} / ` : ''
+      const context = `${owner}${group.label}: ${reference}`
       conditionArray(record.conditions).forEach((condition) => result.push({ context, condition }))
     })
   }
 
   return result
+}
+
+/** Preserve every deployment observation and its identity in Kubernetes status. */
+export function collectResourceConditions(status: unknown): ContextualCondition[] {
+  if (typeof status !== 'object' || status === null || Array.isArray(status)) return []
+  const source = status as Record<string, unknown>
+  if (!('controllers' in source)) return collectNativeConditions(status)
+  if (!Array.isArray(source.controllers)) return []
+
+  return source.controllers.flatMap((entry): ContextualCondition[] => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const observation = entry as Record<string, unknown>
+    if (typeof observation.controllerName !== 'string' || !observation.controllerName) return []
+    return collectNativeConditions(observation.status).map(({ context, condition }) => ({
+      context: context === 'Resource'
+        ? `Controller: ${observation.controllerName}`
+        : `Controller: ${observation.controllerName} / ${context}`,
+      condition,
+    }))
+  })
 }
 
 function conditionColor(status: string): string {
@@ -98,7 +119,7 @@ export default function ResourceConditions({
     return (
       <Space size={[4, 4]} wrap>
         {items.map(({ context, condition }, index) => (
-          <Tooltip key={`${context}-${condition.type}-${index}`} title={condition.message || condition.reason}>
+          <Tooltip key={`${context}-${condition.type}-${index}`} title={[context, condition.reason, condition.message].filter(Boolean).join(' — ')}>
             <ConditionTag condition={condition} />
           </Tooltip>
         ))}

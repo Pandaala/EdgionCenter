@@ -80,6 +80,7 @@ export const controllerMenu: MenuSection[] = [
         children: [
           { kind: 'item', key: 'svc-list',     labelKey: 'infra.service',       path: '/services/list',          icon: <DatabaseOutlined /> },
           { kind: 'item', key: 'svc-epslices', labelKey: 'infra.endpointslice', path: '/services/endpointslices',icon: <DatabaseOutlined /> },
+          { kind: 'item', key: 'svc-ai-backends', labelKey: 'services.aiBackends', path: '/services/ai-backends', icon: <DatabaseOutlined /> },
           { kind: 'item', key: 'svc-backend-traffic', labelKey: 'services.backendTrafficPolicy', path: '/services/backend-traffic-policies', icon: <DatabaseOutlined /> },
         ],
       },

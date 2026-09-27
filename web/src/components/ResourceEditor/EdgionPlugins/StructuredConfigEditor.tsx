@@ -130,7 +130,7 @@ const KnownFieldEditor = ({ field, value, onChange, readOnly }: {
   if (field.kind === 'number') return <InputNumber value={value as number | undefined} disabled={readOnly} onChange={(next) => onChange(next)} style={{ width: '100%' }} />
   if (field.kind === 'code') return <Input.TextArea value={value as string | undefined} disabled={readOnly} onChange={(event) => onChange(event.target.value)} autoSize={{ minRows: 5, maxRows: 16 }} style={{ fontFamily: 'monospace' }} />
   if (field.kind === 'string') return <Input value={value as string | undefined} disabled={readOnly} onChange={(event) => onChange(event.target.value)} />
-  return <DynamicValueEditor value={value ?? defaultForKind(field.kind)} onChange={onChange} readOnly={readOnly} />
+  return <DynamicValueEditor value={value ?? field.defaultValue ?? defaultForKind(field.kind)} onChange={onChange} readOnly={readOnly} />
 }
 
 export default function StructuredConfigEditor({ fields, value, onChange, readOnly }: {

@@ -82,12 +82,25 @@ export function toMutationYaml(policy: BackendTLSPolicy, mode: 'create' | 'updat
 
 export function validateBackendTLSPolicy(policy: BackendTLSPolicy): void {
   if (!policy.metadata.name || !policy.metadata.namespace) throw new Error('Name and namespace are required')
-  if (!policy.spec.targetRefs.length) throw new Error('At least one targetRef is required')
-  policy.spec.targetRefs.forEach((ref) => { if (!ref.name || !ref.kind) throw new Error('Every targetRef needs name and kind') })
+  if (!Array.isArray(policy.spec.targetRefs) || policy.spec.targetRefs.length !== 1) throw new Error('Exactly one targetRef is required')
+  const target = policy.spec.targetRefs[0]
+  if (!target.name) throw new Error('Target name is required')
+  const service = ['', 'core'].includes(target.group) && target.kind === 'Service'
+  const aiBackend = target.group === 'edgion.io' && target.kind === 'EdgionBackend'
+  if (!service && !aiBackend) throw new Error('Target must be a core Service or edgion.io EdgionBackend')
+  if (aiBackend && target.sectionName !== undefined) throw new Error('sectionName is not supported for EdgionBackend targets')
   if (!policy.spec.validation.hostname) throw new Error('Validation hostname is required')
   const refs = policy.spec.validation.caCertificateRefs ?? []
   if (!refs.length && policy.spec.validation.wellKnownCACertificates !== 'System') throw new Error('Choose CA references or the System CA bundle')
-  refs.forEach((ref) => { if (!ref.name || !['Secret', 'ConfigMap'].includes(ref.kind)) throw new Error('CA references must name a Secret or ConfigMap') })
+  if (refs.length && policy.spec.validation.wellKnownCACertificates !== undefined) throw new Error('CA references and the System CA bundle are mutually exclusive')
+  const seenCaRefs = new Set<string>()
+  refs.forEach((ref) => {
+    if (!ref.name || !['Secret', 'ConfigMap'].includes(ref.kind) || !['', 'core'].includes(ref.group)) throw new Error('CA references must name a core Secret or ConfigMap')
+    if (ref.namespace !== undefined) throw new Error('CA references must stay in the policy namespace; omit namespace')
+    const key = `${ref.kind}/${ref.name}`
+    if (seenCaRefs.has(key)) throw new Error('Duplicate CA references are not allowed')
+    seenCaRefs.add(key)
+  })
   const clientCert = policy.spec.options?.['edgion.io/client-certificate-ref']
   if (clientCert && (clientCert.includes('/') || !/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(clientCert))) {
     throw new Error('Client certificate reference must be a bare Secret name in the policy namespace')

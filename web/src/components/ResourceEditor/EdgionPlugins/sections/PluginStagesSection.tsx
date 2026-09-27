@@ -76,7 +76,7 @@ export default function PluginStagesSection({ value, onChange, readOnly }: {
                   </Space>
                   <Card title={t('plugins.conditions')} size="small">
                     <StructuredConfigEditor
-                      fields={[{ name: 'skip', kind: 'array', defaultValue: [] }, { name: 'run', kind: 'array', defaultValue: [] }]}
+                      fields={[{ name: 'skip', kind: 'object', defaultValue: { anyOf: [] } }, { name: 'run', kind: 'object', defaultValue: { allOf: [] } }]}
                       value={(entry.conditions ?? {}) as Record<string, unknown>}
                       readOnly={readOnly}
                       onChange={(conditions) => {

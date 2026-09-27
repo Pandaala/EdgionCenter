@@ -61,7 +61,7 @@ export interface EdgionGatewayConfigSpec {
   maxRetries?: number
   maxBodySize?: string
   tcpTimeout?: { idleTimeout?: string; connectTimeout?: string; [key: string]: unknown }
-  loadBalancing?: { panicThreshold?: number; [key: string]: unknown }
+  loadBalancing?: { degradeThreshold?: number; [key: string]: unknown }
   realIp?: {
     trustedIps?: IpGroup[]
     realIpHeader?: string

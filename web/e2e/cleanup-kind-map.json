@@ -17,6 +17,7 @@
   "EdgionConfigData": "edgionconfigdata.edgion.io",
   "EdgionAcme": "edgionacmes.edgion.io",
   "LinkSys": "linksys.edgion.io",
+  "EdgionBackend": "edgionbackends.edgion.io",
   "EdgionBackendTrafficPolicy": "edgionbackendtrafficpolicies.edgion.io",
   "Secret": "secrets",
   "ConfigMap": "configmaps"

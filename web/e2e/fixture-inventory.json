@@ -21,6 +21,7 @@
     {"kind":"EdgionAcme","apiVersion":"edgion.io/v1","scope":"Namespaced","namespace":"__NS_A__","name":"__PREFIX__-acme","file":"resources/catalog.yaml"},
     {"kind":"LinkSys","apiVersion":"edgion.io/v1","scope":"Namespaced","namespace":"__NS_A__","name":"__PREFIX__-redis","file":"resources/catalog.yaml"},
     {"kind":"EdgionBackendTrafficPolicy","apiVersion":"edgion.io/v1","scope":"Namespaced","namespace":"__NS_A__","name":"__PREFIX__-traffic","file":"resources/catalog.yaml"},
+    {"kind":"EdgionBackend","apiVersion":"edgion.io/v1","scope":"Namespaced","namespace":"__NS_A__","name":"__PREFIX__-ai-backend","file":"resources/catalog.yaml"},
     {"kind":"Secret","apiVersion":"v1","scope":"Namespaced","namespace":"__NS_A__","name":"__PREFIX__-secret","file":"resources/catalog.yaml"},
     {"kind":"ConfigMap","apiVersion":"v1","scope":"Namespaced","namespace":"__NS_A__","name":"__PREFIX__-configmap","file":"resources/catalog.yaml"}
   ],
@@ -33,6 +34,7 @@
     {"state":"conflict","kind":"EdgionBackendTrafficPolicy","namespace":"__NS_A__","name":"__PREFIX__-traffic-conflict","file":"resources/states.yaml"}
   ],
   "supportResources": [
+    {"kind":"Secret","namespace":"__NS_A__","name":"__PREFIX__-ai-key","file":"resources/catalog.yaml"},
     {"kind":"Service","namespace":"__NS_B__","name":"__PREFIX__-cross-service","file":"resources/states.yaml"},
     {"kind":"Service","namespace":"__NS_DENIED__","name":"__PREFIX__-denied-service","file":"resources/states.yaml"},
     {"kind":"Secret","namespace":"__NS_A__","name":"__PREFIX__-acme-account","file":"resources/catalog.yaml"},

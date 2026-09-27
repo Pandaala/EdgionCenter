@@ -20,7 +20,7 @@ export interface ConsistentHashConfig {
 export interface LoadBalancerConfig {
   type: LoadBalancerType
   consistentHash?: ConsistentHashConfig
-  panicThreshold?: number
+  degradeThreshold?: number
   [key: string]: unknown
 }
 
@@ -54,8 +54,8 @@ export interface OutlierDetectionConfig {
 }
 
 export interface RetryBudget {
-  percent: number
-  interval: string
+  percent?: number
+  interval?: string
   [key: string]: unknown
 }
 
@@ -66,8 +66,8 @@ export interface RetryRateThreshold {
 }
 
 export interface RetryConstraintConfig {
-  budget: RetryBudget
-  minRetryRate: RetryRateThreshold
+  budget?: RetryBudget
+  minRetryRate?: RetryRateThreshold
   [key: string]: unknown
 }
 

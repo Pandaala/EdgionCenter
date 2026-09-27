@@ -3,17 +3,40 @@ import * as yaml from 'js-yaml'
 import { normalize, toMutationYaml, validateBackendTLSPolicy } from './backendtlspolicy'
 
 describe('BackendTLSPolicy validation', () => {
+  it('supports AI targets and rejects invalid attachment and trust combinations', () => {
+    const policy = normalize({ apiVersion: 'gateway.networking.k8s.io/v1', kind: 'BackendTLSPolicy', metadata: { name: 'ai', namespace: 'prod' }, spec: { targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }], validation: { hostname: 'provider.example.com', wellKnownCACertificates: 'System' }, resolvedTargetClass: 'Ai', futureField: { enabled: false } } })
+    const mutation = yaml.load(toMutationYaml(policy, 'create')) as any
+    expect(mutation.spec.targetRefs).toEqual(policy.spec.targetRefs)
+    expect(mutation.spec.resolvedTargetClass).toBeUndefined()
+    expect(mutation.spec.futureField).toEqual({ enabled: false })
+    policy.spec.targetRefs[0].sectionName = 'https'
+    expect(() => validateBackendTLSPolicy(policy)).toThrow('sectionName')
+    delete policy.spec.targetRefs[0].sectionName
+    policy.spec.targetRefs.push({ group: '', kind: 'Service', name: 'extra' })
+    expect(() => validateBackendTLSPolicy(policy)).toThrow('Exactly one')
+    policy.spec.targetRefs.pop()
+    policy.spec.validation.caCertificateRefs = [{ group: '', kind: 'Secret', name: 'ca' }]
+    expect(() => validateBackendTLSPolicy(policy)).toThrow('mutually exclusive')
+    delete policy.spec.validation.wellKnownCACertificates
+    policy.spec.validation.caCertificateRefs.push({ group: 'core', kind: 'Secret', name: 'ca' })
+    expect(() => validateBackendTLSPolicy(policy)).toThrow('Duplicate')
+  })
+
   it('supports section refs, system CA, SANs and client certificate option', () => {
     const policy = normalize({ apiVersion:'gateway.networking.k8s.io/v1',kind:'BackendTLSPolicy',metadata:{name:'api',namespace:'prod'},spec:{targetRefs:[{group:'',kind:'Service',name:'api',sectionName:'https'}],validation:{hostname:'api.internal',wellKnownCACertificates:'System',subjectAltNames:[{type:'URI',uri:'spiffe://prod/api'}]},options:{'edgion.io/client-certificate-ref':'client-cert'}} })
     expect(() => validateBackendTLSPolicy(policy)).not.toThrow()
     expect((yaml.load(toMutationYaml(policy,'create')) as any).spec.targetRefs[0].sectionName).toBe('https')
   })
 
-  it('rejects namespace-qualified client certificates but preserves CA ref namespaces', () => {
+  it('rejects namespace-qualified client certificates and cross-namespace CA references', () => {
     const policy = normalize({apiVersion:'gateway.networking.k8s.io/v1',kind:'BackendTLSPolicy',metadata:{name:'api',namespace:'prod'},spec:{targetRefs:[{group:'',kind:'Service',name:'api'}],validation:{hostname:'api.internal',caCertificateRefs:[{group:'',kind:'Secret',name:'ca',namespace:'pki'}]},options:{'edgion.io/client-certificate-ref':'pki/client'}}})
+    delete policy.spec.validation.caCertificateRefs![0].namespace
     expect(() => validateBackendTLSPolicy(policy)).toThrow('bare Secret name')
     policy.spec.options!['edgion.io/client-certificate-ref']='client'
-    expect((yaml.load(toMutationYaml(policy,'update')) as any).spec.validation.caCertificateRefs[0].namespace).toBe('pki')
+    policy.spec.validation.caCertificateRefs![0].namespace = 'pki'
+    expect(() => toMutationYaml(policy, 'update')).toThrow('policy namespace')
+    delete policy.spec.validation.caCertificateRefs![0].namespace
+    expect(() => toMutationYaml(policy, 'update')).not.toThrow()
   })
 
   it('rejects missing trust and malformed CA reference kinds', () => {

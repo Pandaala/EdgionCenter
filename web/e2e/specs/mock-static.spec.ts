@@ -17,7 +17,7 @@ test('run IDs are unique and label-safe', () => {
 })
 test('cleanup map contains no broad resource aliases', async () => {
   const map = JSON.parse(await readFile(resolve('e2e/cleanup-kind-map.json'), 'utf8')) as Record<string, string>
-  expect(Object.keys(map)).toHaveLength(21)
+  expect(Object.keys(map)).toHaveLength(22)
   expect(Object.values(map)).not.toContain('all')
   expect(Object.values(map).every((value) => !value.includes('*'))).toBeTruthy()
 })
