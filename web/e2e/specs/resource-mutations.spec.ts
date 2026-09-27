@@ -529,6 +529,8 @@ test('single and batch delete confirmations remove only isolated Services', asyn
 const typedLinkSysCases = [
   { type: 'otlp', field: 'linksys-otlp-endpoint', config: { endpoint: 'https://collector.example.test:4317', timeoutMs: 15000, tls: { enabled: false } }, edited: { endpoint: 'https://updated.example.test:4317', timeoutMs: 15000, tls: { enabled: false } }, after: 'https://updated.example.test:4317' },
   { type: 'credentialSource', field: 'linksys-credential-endpoint', config: { provider: { type: 'oauth2ClientCredentials', tokenEndpoint: 'https://issuer.example.test/token', clientAuthentication: { activeSecretRef: { name: 'missing-bootstrap' } }, scopes: ['read'] }, publication: { persist: false, memoryMaxKeys: 100 } }, edited: { provider: { type: 'oauth2ClientCredentials', tokenEndpoint: 'https://updated.example.test/token', clientAuthentication: { activeSecretRef: { name: 'missing-bootstrap' } }, scopes: ['read'] }, publication: { persist: false, memoryMaxKeys: 100 } }, after: 'https://updated.example.test/token' },
+  { type: 'redis', field: 'Redis connect timeout', config: { endpoints: [], topology: { mode: 'sentinel', sentinel: { masterName: 'primary', sentinels: ['sentinel.example.test:26379'] } }, db: 255, timeout: { connect: '5s', command: '30s' }, pool: { size: 64 } }, edited: { endpoints: [], topology: { mode: 'sentinel', sentinel: { masterName: 'primary', sentinels: ['sentinel.example.test:26379'] } }, db: 255, timeout: { connect: '7s', command: '30s' }, pool: { size: 64 } }, after: '7s' },
+  { type: 'kafka', field: 'Kafka maxTopics', config: { brokers: ['broker.example.test:9092'], maxTopics: 64, maxPendingRecords: 1000, maxPendingBytes: 1048576, lingerMs: 0 }, edited: { brokers: ['broker.example.test:9092'], maxTopics: 32, maxPendingRecords: 1000, maxPendingBytes: 1048576, lingerMs: 0 }, after: '32' },
 ]
 
 for (const variant of typedLinkSysCases) {
@@ -544,8 +546,9 @@ for (const variant of typedLinkSysCases) {
     await createThroughYaml(page, catalog, document)
     await expectApiDocument(request, catalog, namespace, name)
     await (await resourceRow(page, catalog, name)).getByTestId('linksys-row-edit').click()
-    await expect(page.getByTestId(variant.field)).toBeVisible()
-    await page.getByTestId(variant.field).fill(variant.after)
+    const field = variant.field.startsWith('linksys-') ? page.getByTestId(variant.field) : page.getByLabel(variant.field, { exact: true })
+    await expect(field).toBeVisible()
+    await field.fill(variant.after)
     await page.getByTestId('editor-yaml-tab').click()
     expect((await yamlEditorDocument(page)).spec.config).toMatchObject(variant.edited)
     await page.getByTestId('editor-form-tab').click()

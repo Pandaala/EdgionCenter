@@ -40,3 +40,23 @@ describe('OTLP form', () => {
     expect(onChange.mock.calls.at(-1)?.[0].spec.config.auth.secretRef).toEqual({ name: 'rotated-token', namespace: 'edge', kind: 'Secret', group: 'core' })
   })
 })
+
+describe('current Redis controls', () => {
+  it('edits duration strings and removes conflicting fields when selecting Sentinel', async () => {
+    const resource = createEmpty()
+    resource.spec.config = { endpoints: ['redis://cache:6379'], db: 255, timeout: { connect: '5s', command: '30s' }, topology: { mode: 'cluster', cluster: { maxRedirects: 8 } } }
+    const onChange = vi.fn()
+    render(<LinkSysForm data={resource} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText('Redis connect timeout'), { target: { value: '7s' } })
+    expect(onChange.mock.calls.at(-1)?.[0].spec.config.timeout).toEqual({ connect: '7s', command: '30s' })
+    expect(screen.queryByText('Read from replicas')).not.toBeInTheDocument()
+    expect(screen.queryByText('Min idle')).not.toBeInTheDocument()
+    const topologyItem = screen.getByText('Topology Mode').closest('.ant-form-item')!
+    fireEvent.mouseDown(topologyItem.querySelector('input')!)
+    fireEvent.click((await screen.findAllByText('sentinel')).at(-1)!)
+    const edited = onChange.mock.calls.at(-1)?.[0].spec.config
+    expect(edited.endpoints).toEqual([])
+    expect(edited.topology).toEqual({ mode: 'sentinel', sentinel: { masterName: '', sentinels: [] }, cluster: undefined })
+    expect(edited.db).toBe(255)
+  })
+})

@@ -103,7 +103,7 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
               <Form.Item label={t('field.addresses')} required style={{ marginBottom: 8 }}>
                 <Select mode="tags" value={redis.endpoints || []}
                   onChange={(endpoints) => updateConfig({ endpoints } as Partial<RedisConfig>)}
-                  disabled={readOnly} placeholder="redis://127.0.0.1:6379" style={{ width: '100%' }} />
+                  disabled={readOnly || redis.topology?.mode === 'sentinel'} placeholder="redis://127.0.0.1:6379" style={{ width: '100%' }} />
               </Form.Item>
               <Form.Item label={t('field.secretName')} style={{ marginBottom: 8 }}>
                 {renderSecretRef(redis.auth, (auth) => updateConfig({ auth } as Partial<RedisConfig>))}
@@ -111,24 +111,17 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
               <Form.Item label={t('field.dbNumber')} style={{ marginBottom: 8 }}>
                 <InputNumber value={redis.db ?? 0}
                   onChange={(db) => updateConfig({ db: db ?? 0 } as Partial<RedisConfig>)}
-                  min={0} max={15} disabled={readOnly} style={{ width: 120 }} />
+                  min={0} max={255} precision={0} disabled={readOnly} style={{ width: 120 }} />
               </Form.Item>
               <Form.Item label="Topology Mode" style={{ marginBottom: 8 }}>
                 <Select value={redis.topology?.mode || 'standalone'}
                   onChange={(mode) => updateConfig({
-                    topology: mode === 'sentinel'
-                      ? {
-                          ...redis.topology,
-                          mode,
-                          sentinel: redis.topology?.sentinel || { masterName: '', sentinels: [] },
-                        }
-                      : mode === 'cluster'
-                        ? {
-                            ...redis.topology,
-                            mode,
-                            cluster: redis.topology?.cluster || { maxRedirects: 6 },
-                          }
-                        : { ...redis.topology, mode },
+                    endpoints: mode === 'sentinel' ? [] : redis.endpoints,
+                    topology: {
+                      ...redis.topology, mode,
+                      sentinel: mode === 'sentinel' ? (redis.topology?.sentinel ?? { masterName: '', sentinels: [] }) : undefined,
+                      cluster: mode === 'cluster' ? redis.topology?.cluster : undefined,
+                    },
                   } as Partial<RedisConfig>)}
                   disabled={readOnly}>
                   <Select.Option value="standalone">standalone</Select.Option>
@@ -154,10 +147,15 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
                   </Form.Item>
                 </>
               )}
-              {redis.topology?.mode === 'cluster' && <Space wrap><Form.Item label="Read from replicas"><Switch checked={redis.topology.cluster?.readFromReplicas} disabled={readOnly} onChange={(readFromReplicas)=>updateConfig({topology:{...redis.topology!,cluster:{...redis.topology?.cluster,readFromReplicas}}} as Partial<RedisConfig>)}/></Form.Item><Form.Item label="Max redirects"><InputNumber min={0} value={redis.topology.cluster?.maxRedirects} disabled={readOnly} onChange={(maxRedirects)=>updateConfig({topology:{...redis.topology!,cluster:{...redis.topology?.cluster,maxRedirects:maxRedirects??undefined}}} as Partial<RedisConfig>)}/></Form.Item></Space>}
-              <Card size="small" title="Timeouts and pool"><Space wrap>{(['connect','read','write'] as const).map(key=><Form.Item key={key} label={`${key} timeout`}><InputNumber min={0} value={redis.timeout?.[key]} disabled={readOnly} onChange={(value)=>updateConfig({timeout:{...redis.timeout,[key]:value??undefined}} as Partial<RedisConfig>)}/></Form.Item>)}<Form.Item label="Pool size"><InputNumber min={1} value={redis.pool?.size} disabled={readOnly} onChange={(size)=>updateConfig({pool:{...redis.pool,size:size??undefined}} as Partial<RedisConfig>)}/></Form.Item><Form.Item label="Min idle"><InputNumber min={0} value={redis.pool?.minIdle} disabled={readOnly} onChange={(minIdle)=>updateConfig({pool:{...redis.pool,minIdle:minIdle??undefined}} as Partial<RedisConfig>)}/></Form.Item><Form.Item label="Max retries"><InputNumber min={0} value={redis.retry?.maxRetries} disabled={readOnly} onChange={(maxRetries)=>updateConfig({retry:{...redis.retry,maxRetries:maxRetries??undefined}} as Partial<RedisConfig>)}/></Form.Item></Space></Card>
-              <Space wrap><Form.Item label="TLS enabled"><Switch checked={redis.tls?.enabled} disabled={readOnly} onChange={(enabled)=>updateConfig({tls:{...redis.tls,enabled}} as Partial<RedisConfig>)}/></Form.Item><Form.Item label="Verify TLS"><Switch checked={redis.tls?.verify} disabled={readOnly} onChange={(verify)=>updateConfig({tls:{...redis.tls,verify}} as Partial<RedisConfig>)}/></Form.Item><Form.Item label="Metrics"><Switch checked={redis.observability?.metrics?.enabled} disabled={readOnly} onChange={(enabled)=>updateConfig({observability:{...redis.observability,metrics:{...redis.observability?.metrics,enabled}}} as Partial<RedisConfig>)}/></Form.Item><Form.Item label="Logging"><Switch checked={redis.observability?.logging?.enabled} disabled={readOnly} onChange={(enabled)=>updateConfig({observability:{...redis.observability,logging:{...redis.observability?.logging,enabled}}} as Partial<RedisConfig>)}/></Form.Item></Space>
-              <Card size="small" title="Advanced timeout, pool, retry/backoff, TLS certificates and observability"><JsonValueField readOnly={readOnly} value={{timeout:redis.timeout||{},pool:redis.pool||{},retry:redis.retry||{},tls:redis.tls||{},observability:redis.observability||{}}} onChange={(advanced)=>updateConfig(advanced as Partial<RedisConfig>)}/></Card>
+              {redis.topology?.mode === 'cluster' && <Form.Item label="Max redirects"><InputNumber min={0} max={64} precision={0} value={redis.topology.cluster?.maxRedirects} disabled={readOnly} onChange={(maxRedirects) => updateConfig({ topology: { ...redis.topology!, cluster: { ...redis.topology?.cluster, maxRedirects: maxRedirects ?? undefined } } })} /></Form.Item>}
+              <Card size="small" title="Timeouts and pool">
+                <Space wrap>
+                  {(['connect', 'command'] as const).map((key) => <Form.Item key={key} label={`${key} timeout`}><Input aria-label={`Redis ${key} timeout`} value={redis.timeout?.[key]} placeholder="5s" disabled={readOnly} onChange={(event) => updateConfig({ timeout: { ...redis.timeout, [key]: event.target.value || undefined } })} /></Form.Item>)}
+                  <Form.Item label="Pool size"><InputNumber min={1} max={64} precision={0} value={redis.pool?.size} disabled={readOnly} onChange={(size) => updateConfig({ pool: { ...redis.pool, size: size ?? undefined } })} /></Form.Item>
+                </Space>
+              </Card>
+              <Space wrap><Form.Item label="TLS enabled"><Switch checked={redis.tls?.enabled} disabled={readOnly} onChange={(enabled) => updateConfig({ tls: { ...redis.tls, enabled } })} /></Form.Item><Form.Item label="Verify TLS"><Switch checked={redis.tls?.verify ?? true} disabled={readOnly} onChange={(verify) => updateConfig({ tls: { ...redis.tls, verify } })} /></Form.Item></Space>
+              <Card size="small" title="Advanced timeout, pool and TLS certificates"><JsonValueField readOnly={readOnly} value={{ timeout: redis.timeout ?? {}, pool: redis.pool ?? {}, tls: redis.tls ?? {} }} onChange={(advanced) => updateConfig(advanced as Partial<RedisConfig>)} /></Card>
             </Card>
           )
         })()}
@@ -262,6 +260,11 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
                   onChange={(channelSize) => updateConfig({ channelSize: channelSize ?? undefined } as Partial<KafkaConfig>)}
                   min={1} disabled={readOnly} style={{ width: 160 }} />
               </Form.Item>
+              {([
+                ['maxTopics', 'Maximum topic queues', 64],
+                ['maxPendingRecords', 'Maximum pending records', 4096],
+                ['maxPendingBytes', 'Maximum pending bytes', 16777216],
+              ] as const).map(([field, label, defaultValue]) => <Form.Item label={label} key={field}><InputNumber aria-label={`Kafka ${field}`} min={1} max={Number.MAX_SAFE_INTEGER} precision={0} value={kafka[field]} placeholder={String(defaultValue)} disabled={readOnly} onChange={(value) => updateConfig({ [field]: value ?? undefined })} /></Form.Item>)}
               <Form.Item label="Linger (ms)" style={{ marginBottom: 0 }}>
                 <InputNumber value={kafka.lingerMs}
                   onChange={(lingerMs) => updateConfig({ lingerMs: lingerMs ?? undefined } as Partial<KafkaConfig>)}

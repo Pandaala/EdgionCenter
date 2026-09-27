@@ -135,7 +135,7 @@ spec:
   it('rejects incomplete form-mode resources before calling the backend', () => {
     const empty = createEmpty()
     empty.metadata.name = 'invalid'
-    expect(() => validateLinkSys(empty)).toThrow('at least one endpoint')
+    expect(() => validateLinkSys(empty)).toThrow('exactly one endpoint')
 
     empty.spec.config = {
       endpoints: ['redis://127.0.0.1:6379'],

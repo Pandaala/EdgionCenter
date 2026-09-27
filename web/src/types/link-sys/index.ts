@@ -29,16 +29,14 @@ export interface RedisConfig {
   endpoints: string[]
   db?: number
   auth?: SecretAuth
-  timeout?: { connect?: number; read?: number; write?: number }
-  pool?: { size?: number; minIdle?: number }
-  retry?: { maxRetries?: number; backoff?: { type?: string; initialDelay?: number; maxDelay?: number; multiplier?: number } }
+  timeout?: { connect?: string; command?: string }
+  pool?: { size?: number }
   topology?: {
     mode: 'standalone' | 'sentinel' | 'cluster'
     sentinel?: { masterName: string; sentinels: string[] }
-    cluster?: { readFromReplicas?: boolean; maxRedirects?: number }
+    cluster?: { maxRedirects?: number }
   }
   tls?: LinkTlsConfig
-  observability?: LinkObservability
 }
 
 export interface ElasticsearchConfig {
@@ -100,6 +98,9 @@ export interface KafkaConfig {
   sasl?: { username?: string; password?: SecretAuth }
   tls?: LinkTlsConfig
   channelSize?: number
+  maxTopics?: number
+  maxPendingRecords?: number
+  maxPendingBytes?: number
   lingerMs?: number
 }
 

@@ -13,19 +13,20 @@ import type {
   WebhookConfig,
 } from '@/types/link-sys'
 import { isValidDNS1123Label, isValidDNS1123Subdomain } from './validation'
+import { validateRedis } from './linksys-redis'
 import { validateCredentialSource } from './linksys-credential-source'
 import { dumpYaml } from './yaml-utils'
 import { mutationDocumentToYaml } from './resource-document'
 
 /** Operator fields derived from the Rust LinkSys structs; used as a drift/test matrix. */
 export const LINKSYS_RUST_FIELD_MATRIX = {
-  redis: ['endpoints','auth','db','timeout','pool','retry','topology','tls','observability'],
+  redis: ['endpoints','auth','db','timeout','pool','topology','tls'],
   elasticsearch: ['endpoints','auth','tls','timeout','pool','bulk','index'],
   etcd: ['endpoints','auth','tls','timeout','keepAlive','namespace','autoSyncInterval','maxCallSendSize','maxCallRecvSize','userAgent','rejectOldCluster','observability'],
   webhook: ['target','tls','timeoutMs','timeoutMsTemplate','retry','rateLimit','healthCheck','maxResponseBytes','success','statusOnError','request'],
   credentialSource: ['provider','rotation','egress','publication'],
   otlp: ['endpoint','timeoutMs','auth','tls'],
-  kafka: ['brokers','sasl','tls','channelSize','lingerMs'],
+  kafka: ['brokers','sasl','tls','channelSize','maxTopics','maxPendingRecords','maxPendingBytes','lingerMs'],
   httpdns: ['preset','urlTemplate','response','fallback','connection'],
 } as const
 
@@ -158,16 +159,9 @@ export function validateLinkSys(resource: LinkSys): void {
   const config = resource.spec.config
 
   switch (resource.spec.type) {
-    case 'redis': {
-      const redis = config as RedisConfig
-      if (!redis.endpoints?.length) fail('Redis requires at least one endpoint')
-      if (redis.auth && !redis.auth.secretRef?.name) fail('Redis auth requires a Secret name')
-      if (redis.topology?.mode === 'sentinel' && (
-        !redis.topology.sentinel?.masterName || !redis.topology.sentinel.sentinels?.length
-      )) fail('Sentinel mode requires a master name and at least one endpoint')
-      if (redis.topology?.mode === 'cluster' && !redis.topology.cluster) fail('Cluster mode requires cluster settings')
+    case 'redis':
+      validateRedis(config as RedisConfig)
       break
-    }
     case 'elasticsearch': {
       const elasticsearch = config as ElasticsearchConfig
       if (!elasticsearch.endpoints?.length) fail('Elasticsearch requires at least one endpoint')
@@ -237,9 +231,15 @@ export function validateLinkSys(resource: LinkSys): void {
       }
       break
     }
-    case 'kafka':
-      if (!(config as KafkaConfig).brokers?.length) fail('Kafka requires at least one broker')
+    case 'kafka': {
+      const kafka = config as KafkaConfig
+      if (!kafka.brokers?.length) fail('Kafka requires at least one broker')
+      for (const field of ['channelSize', 'maxTopics', 'maxPendingRecords', 'maxPendingBytes', 'lingerMs'] as const) {
+        const value = kafka[field]
+        if (value != null && (!Number.isSafeInteger(value) || value < (field === 'lingerMs' ? 0 : 1))) fail(`Kafka ${field} must be ${field === 'lingerMs' ? 'a nonnegative' : 'a positive'} safe integer`)
+      }
       break
+    }
     case 'httpdns': {
       const httpDns = config as HttpDnsConfig
       if (!httpDns.preset && !httpDns.urlTemplate) fail('HTTP DNS requires a preset or URL template')

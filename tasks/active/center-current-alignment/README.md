@@ -700,3 +700,28 @@ before acting on CCI execution files or proposing replacements.
 - Full frontend run 11255 is now terminal success: **456 tests across 88 files**.
   No active handles remain for this checkpoint. Existing Rust matrix findings are
   unchanged because these batches modify frontend, tests, and documentation only.
+
+### Redis/Kafka current-field alignment
+
+- CredentialSource batch committed as 69ad738, no push.
+- Redis now uses duration-string connect/command timeouts, db 0..255, pool 1..64,
+  redirects 0..64. Removed stale retry/observability/read-write timeout/minIdle/
+  replica-read controls and types; YAML retains obsolete data but submission
+  reports the removed fields rather than silently discarding them.
+- Corrected topology admission: standalone exactly one endpoint; cluster permits
+  omitted optional settings; Sentinel uses only its nested endpoints. Topology
+  switches clear incompatible known fields. Added endpoint/transport checks and
+  prevented URL normalization from concealing unsupported paths.
+- Kafka adds maxTopics/maxPendingRecords/maxPendingBytes controls and types;
+  all capacities are positive safe integers, zero linger remains valid.
+- Initial targeted run 84831 had one obsolete message expectation (standalone
+  changed from at-least-one to exactly-one endpoint). Corrected the expectation;
+  utility rerun passed 14 tests, log /tmp/ws5-center-redis-tests-v2.log. Form rerun
+  50388 passed four cases; build 90648, lint 22285, E2E typecheck 58874 passed.
+- Native 64408 passed auth and both typed Redis Sentinel/Kafka browser CRUD,
+  form/YAML preservation and Controller readback. Log:
+  /tmp/ws5-center-redis-runtime-v1.log. All owned services stopped; 70 fixtures
+  retained. No Redis/Kafka server was contacted by Center; no live data-plane
+  connectivity claim is made by this management test.
+- Next: remaining LinkSys provider schemas (Elasticsearch, etcd, HTTP DNS,
+  Webhook), advanced provider workflows, then remaining resource/menu ledger.

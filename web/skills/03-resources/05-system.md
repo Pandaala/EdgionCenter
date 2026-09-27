@@ -98,6 +98,20 @@ spec:
 - Preserve inactive TLS configuration and provider drafts while editing; only
   validate enabled local TLS policy. List summaries include OTLP endpoint.
 
+### Redis and Kafka
+
+- Redis timeout.connect and timeout.command are positive GEP-2257 strings,
+  bounded at 10s and 30s. Database is 0..255, pool size is 1..64, and cluster
+  maxRedirects is 0..64. Removed retry/observability, timeout.read/write,
+  pool.minIdle, and readFromReplicas are not editable controls.
+- Redis standalone requires exactly one endpoint; cluster requires one or more
+  and its cluster settings may be absent. Sentinel requires only its nested
+  sentinels and masterName, with no top-level endpoints or cluster settings.
+  Switching topology clears conflicting known fields; other config survives.
+- Kafka exposes channelSize, maxTopics, maxPendingRecords, maxPendingBytes, and
+  lingerMs. Capacities are positive integers; zero linger is valid. Defaults
+  appear as placeholders rather than being injected into existing documents.
+
 ### Credential source
 
 - Provider shape is flat: `provider: {type: oauth2ClientCredentials, tokenEndpoint,
