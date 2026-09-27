@@ -13,6 +13,31 @@ async function configData(request: APIRequestContext, slot: 'A' | 'B', name: str
   return response.json() as Promise<{ metadata?: { labels?: Record<string, string> }; spec?: { data?: { config?: { active?: string; description?: string; regions?: Array<{ name?: string; failoverTo?: string }> } } } }>
 }
 
+function expectRegionOutcome(body: unknown) {
+  expect(body).toMatchObject({ success: true, data: { modified: 2, failed: 0 } })
+  if (process.env.E2E_MODE === 'standalone') {
+    const outcomes = (body as { data: { outcomes: Array<{ controllerId: string; state: string }> } }).data.outcomes
+    expect(outcomes).toHaveLength(2)
+    for (const slot of ['A', 'B'] as const) {
+      expect(outcomes).toContainEqual(expect.objectContaining({ controllerId: controllerId(slot), state: 'converged' }))
+    }
+  }
+}
+
+async function expectGlobalFailover(request: APIRequestContext, failoverTo: string) {
+  await expect.poll(async () => {
+    const result = await request.get('/api/v1/center/region-route-overrides')
+    expect(result.ok()).toBeTruthy()
+    type Resource = Awaited<ReturnType<typeof configData>>
+    const body = await result.json() as { data?: Array<{ namespace: string; name: string; controllers: Record<string, Resource> }> }
+    const row = body.data?.find((item) => item.namespace === namespace && item.name === `${prefix}-region-route-override`)
+    return (['A', 'B'] as const).map((slot) => {
+      const east = row?.controllers[controllerId(slot)]?.spec?.data?.config?.regions?.find((region) => region.name === 'east')
+      return east ? east.failoverTo ?? '' : undefined
+    })
+  }, { timeout: 20_000 }).toEqual([failoverTo, failoverTo])
+}
+
 async function setRegionFailover(request: APIRequestContext, failoverTo: string) {
   const response = await request.post('/api/v1/center/region-route-overrides/failover', {
     data: {
@@ -24,7 +49,7 @@ async function setRegionFailover(request: APIRequestContext, failoverTo: string)
   })
   expect(response.status()).toBe(200)
   const body = await response.json() as { success?: boolean; data?: { modified?: number; failed?: number } }
-  expect(body).toMatchObject({ success: true, data: { modified: 2, failed: 0 } })
+  expectRegionOutcome(body)
   return response
 }
 
@@ -375,6 +400,7 @@ test.describe('Center and shell actions', () => {
   })
 
   test('region routes apply failover to both controllers and restore it', async ({ page, request }) => {
+    test.setTimeout(90_000)
     await page.goto('/region-routes/region')
     await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
     const filter = page.getByRole('combobox').first()
@@ -397,34 +423,29 @@ test.describe('Center and shell actions', () => {
         page.getByTestId('region-failover-apply').click(),
       ])
       expect(response.status()).toBe(200)
-      expect(await response.json()).toMatchObject({ success: true, data: { modified: 2, failed: 0 } })
+      expectRegionOutcome(await response.json())
       for (const slot of ['A', 'B'] as const) {
         await expect.poll(async () => (await configData(request, slot, overrideName)).spec?.data?.config?.regions?.find((region) => region.name === 'east')?.failoverTo).toBe('west')
         expect((await configData(request, slot, overrideName)).metadata?.labels?.['edgion.io/e2e-run']).toBe(runId)
       }
 
-      // The mutation deliberately waits for federation propagation before it
-      // invalidates the topology query. Wait for that lifecycle to complete,
-      // then force a fresh read rather than asserting against React Query cache.
       await expect(page.locator('.ant-popover')).toBeHidden()
-      await expect.poll(async () => {
-        const result = await request.get('/api/v1/center/region-route-overrides')
-        const body = await result.json() as { data?: Array<{ controllers?: Record<string, { spec?: { data?: { config?: { regions?: Array<{ name?: string; failoverTo?: string }> } } } }> }> }
-        return Object.values(body.data?.[0]?.controllers ?? {})[0]?.spec?.data?.config?.regions
-          ?.find((region) => region.name === 'east')?.failoverTo
-      }, { timeout: 20_000 }).toBe('west')
+      await expectGlobalFailover(request, 'west')
       await page.goto('/region-routes/region')
       await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
       await expect(page.getByText('east → west').first()).toBeVisible()
       await page.getByTestId('region-failover').first().click()
       await page.getByTestId('region-failover-select-east').click()
-      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: /Normal|Active/ }).click()
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: /^No failover$/ }).click()
       const [restoreResponse] = await Promise.all([
         page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-route-overrides/failover')),
         page.getByTestId('region-failover-apply').click(),
       ])
       expect(restoreResponse.status()).toBe(200)
-      expect(await restoreResponse.json()).toMatchObject({ success: true, data: { modified: 2, failed: 0 } })
+      expectRegionOutcome(await restoreResponse.json())
+      await expect(page.locator('.ant-popover')).toBeHidden()
+      await expectGlobalFailover(request, '')
+      await expect(page.getByText('east → west', { exact: true })).toHaveCount(0)
     } finally {
       await setRegionFailover(request, '')
       for (const slot of ['A', 'B'] as const) {

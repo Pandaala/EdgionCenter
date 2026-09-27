@@ -177,6 +177,7 @@ function FailoverEditor({
         <Space key={region.name}>
           <Text strong style={{ width: 140 }}>{region.name}</Text>
           <Select
+            data-testid={`region-failover-select-${region.name}`}
             value={pending[region.name] ?? ''}
             disabled={mutation.isPending}
             style={{ width: 180 }}
@@ -197,6 +198,7 @@ function FailoverEditor({
         </Space>
       ))}
       <Button
+        data-testid="region-failover-apply"
         type="primary"
         danger={changed.length > 0}
         disabled={!changed.length}
@@ -226,6 +228,7 @@ function FailoverAction({
   const [open, setOpen] = useState(false)
   const button = (
     <Button
+      data-testid="region-failover"
       size="small"
       type="primary"
       disabled={disabled}
@@ -381,7 +384,7 @@ export default function RegionRouteOverridePage() {
         title={title}
         subtitle={subtitle}
         actions={(
-          <Button icon={<ReloadOutlined />} onClick={() => query.refetch()}>
+          <Button data-testid="region-refresh" icon={<ReloadOutlined />} onClick={() => query.refetch()}>
             Refresh
           </Button>
         )}

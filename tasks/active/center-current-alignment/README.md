@@ -1076,3 +1076,30 @@ before acting on CCI execution files or proposing replacements.
   /tmp/ws5-center-stream-shape-{tests,build,lint}.log. All sessions terminal.
   No new browser/data-plane evidence claimed; remaining nested schema and menu
   runtime audit stays active.
+
+### RegionRoute failover and restore native proof
+
+- Restored stable action selectors on the current Override page and updated the
+  obsolete restore-option locator. Browser checks now require both standalone
+  Controller outcomes to be converged, identify the exact namespace/name in the
+  global watch view, and verify both Controllers after failover and restoration.
+- Native v1 exposed obsolete selectors; v2 reached real writes and correctly
+  rejected unversioned file seeds. Direct file installation bypasses Admin API
+  creation/version assignment. Standalone seeds now persist an initial CAS token;
+  Controller owns later versions. Production CAS validation was not relaxed.
+  Manually installed unversioned files still cannot receive Center CAS writes.
+- Native v3 passed browser assertions but exposed the retain script's seed-hash
+  assumption after legitimate writes. Retain now checks exact run labels, keeps
+  the original deletion hashes, and reports changed files. Deletion still refuses
+  changed content. Isolated scratch checks verified retain, unchanged hash,
+  rejection of modified deletion, and rejection of foreign labels.
+- Final run alignment-region-20260928-v4 passed authentication plus browser
+  failover/restore (2 tests), retained 70 files with 2 changed, and exited zero
+  (session 19289). Log: /tmp/ws5-center-region-v4.log. Earlier failed runs remain
+  available under their unique artifact directories.
+- Eight RegionRoute unit tests, E2E typecheck, lint and frontend build passed;
+  logs /tmp/ws5-center-region-{unit,types,lint,build}.log. Backend source unchanged;
+  prior matrix's unrelated English-only guard failure remains recorded above.
+- This proves configuration CAS and watch convergence, not Gateway traffic
+  redirection. RegionRoute conflict/sync actions, runtime traffic, Kubernetes
+  ownership behavior and the remaining full menu/type audit remain open.

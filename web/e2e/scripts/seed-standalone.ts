@@ -39,6 +39,10 @@ for (const controller of ['A', 'B'] as const) {
       const subdirectory = resolve(directory, namespace ?? 'cluster'); await mkdir(subdirectory, { recursive: true })
       const fileName = namespace ? `${document.kind}_${namespace}_${document.metadata.name}.yaml` : `${document.kind}__${document.metadata.name}.yaml`
       const path = resolve(subdirectory, fileName)
+      // File fixtures bypass Admin API creation, which normally assigns the
+      // initial CAS token. Persist a starting version so federation writes can
+      // use the same precondition path; subsequent versions belong to Controller.
+      document.metadata.resourceVersion ??= '1'
       const source = yaml.dump(document, { lineWidth: -1 })
       if (reset) {
         const entry = files.find((item) => resolve(item.path) === path && item.controller === controller)

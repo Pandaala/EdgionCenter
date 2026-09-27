@@ -52,3 +52,9 @@ credential reference, never inspects credentials or calls a DNS provider, and
 checks browser edits against real generation preconditions. Provider-account
 deletion is not exposed, so the uniquely named account remains only in the
 run-owned artifact database alongside retained fixtures.
+
+Standalone file seeds include an initial resourceVersion because direct file
+installation bypasses Admin API creation. Controller assigns subsequent versions.
+Unversioned manually installed files remain ineligible for Center CAS writes.
+The retain check allows changed content with the exact run label and keeps the
+original seed hashes; explicit file deletion still refuses modified fixtures.
