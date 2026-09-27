@@ -52,7 +52,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | GatewayClass | infrastructure/gatewayclasses | Cluster scope; parameter reference; shared status handling |
 | EdgionGatewayConfig | system/config | Current load-balancing controls, body/plugin policy, outbound TLS stripping |
 | Gateway | infrastructure/gateways | Native and shared Controller status, listener counts/kinds/conditions; current listener TLS runtime exclusions; protocol-specific TLS mode selection and Form/YAML submission guard |
-| ReferenceGrant | infrastructure/referencegrants | Version boundary and topology authorization projection |
+| ReferenceGrant | infrastructure/referencegrants | Version boundary and topology authorization projection; actual cross-namespace HTTP backend name/source grant edits drive RefNotPermitted and 500/200 transitions |
 | HTTPRoute | routes/http | Backend AI references, mirror annotations, retry bounds, optional policy clearing; rule admission/provenance exclusions; shared current hostname validation |
 | GRPCRoute | routes/grpc | Method-only/service-only/header-only edits, last-match removal, policy clearing; shared current hostname validation |
 | TCPRoute | routes/tcp | v1 plus accepted alternate; stream-plugin/keepalive native edits |
@@ -202,6 +202,12 @@ provider grants were removed after verification; 52 metadata-only CRDs remain
 in the owned namespace. The embedded v5 image predates these frontend changes.
 
 ## Next audit actions
+
+Priority confirmed gap: native resource-list conditions are blank although
+Controller processed status is available. See [STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md).
+The [ReferenceGrant traffic proof](REFERENCE-GRANT-TRAFFIC-EVIDENCE.md) verifies
+authorization and traffic, but explicitly does not establish list-status display.
+
 
 Current deployed Kubernetes authentication proof is recorded in
 [KUBERNETES-AUTH-EVIDENCE.md](KUBERNETES-AUTH-EVIDENCE.md). Two OrbStack Center

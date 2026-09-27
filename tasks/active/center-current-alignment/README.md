@@ -2633,3 +2633,20 @@ before acting on CCI execution files or proposing replacements.
   [REGION-ROUTE-TRAFFIC-EVIDENCE.md](REGION-ROUTE-TRAFFIC-EVIDENCE.md). The native
   backend includes the repair; Kubernetes v5 still predates it. Overall goal
   remains active, no Edgion changes or push.
+
+
+### 2026-09-28: ReferenceGrant traffic and native status-source gap
+
+- Cross-namespace HTTPRoute references now have live grant-form evidence:
+  correcting a named Service target permits traffic, changing the source
+  namespace denies it, and restoring it permits traffic again. Processed
+  ResolvedRefs conditions and 500/200 responses agree. Five checks pass.
+- Exact Controller config was restored; temporary ReferenceGrant update
+  permission is absent and the owned valid route remains healthy.
+- Actual route-list inspection found a gap: raw FS resource lists lack status,
+  while the Controller's processed response has conditions. The UI shows a dash.
+  Recorded [STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md) as the next repair, with
+  source/observation separation, bounded reads and permission/freshness guards.
+- See [REFERENCE-GRANT-TRAFFIC-EVIDENCE.md](REFERENCE-GRANT-TRAFFIC-EVIDENCE.md).
+  No production source change or fresh test-matrix claim in this pass. Overall
+  task remains active; no Edgion edits or push.
