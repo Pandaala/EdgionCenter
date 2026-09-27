@@ -538,3 +538,38 @@ before acting on CCI execution files or proposing replacements.
   English-only baseline failure explicitly recorded. No push. Next implementation
   remains GatewayConfig retry/forwardedHeaders/pluginPolicy and the other open
   coverage rows; the entire alignment goal is NOT complete.
+
+### GatewayConfig retry, forwarding, and plugin execution policy
+
+- Previous verified batch committed as **0178fe1**. No push; unrelated untracked
+  `.claude/` and `tasks/todo/` preserved.
+- Replaced removed root maxRetries with retry.attempts in types, default YAML,
+  create drafts, and form; current default is 2, permitted range 0..2147483647.
+  Added forwardedHeaders.remoteIpHeader with canonical header grammar/length
+  and framing/hop-by-hop/reserved-name checks.
+- Added pluginPolicy fields and explicit allow-list-mode control: absence/null
+  leaves allow-list mode off, an explicit empty array enables deny-all. Preserves
+  untouched defaults/unknown siblings. Validation checks canonical family/type
+  names, duplicates, enum actions, 400..599 statuses, and effective bypass/status
+  conflicts. Reused HTTP plugin catalog and extracted existing stream names to
+  shared constants consumed by the stream form and policy validator.
+- Optional policy/allow/entry action/status nulls follow Rust Option semantics;
+  no automatic migration of removed maxRetries (validation identifies it).
+- Extended the native GatewayConfig fixture with zero retries, a custom RemoteIp
+  header, and qualified allow/deny plugin names. New live browser run **24241**,
+  run ID `alignment-gateway-policy-20260927-v1`, log
+  `/tmp/ws5-center-gateway-policy-runtime-v1.log`; poll before restarting.
+- Validation: three targeted suites passed 24 tests (65601); build 28581 passed.
+  After null-semantics correction, validation-only rerun **10985** is logged at
+  `/tmp/ws5-center-gateway-policy-validation-v2.log`. Lint handle **46222**, log
+  `/tmp/ws5-center-gateway-policy-lint.log`. Changes remain uncommitted. No backend
+  code changed in this batch; previous Rust matrix evidence still applies.
+- GatewayConfig nested server/timeouts/security and complete advanced policy
+  workflows still need audit; do not mark the whole System row complete from
+  these edits or generic CRUD alone.
+- GatewayConfig browser 24241 finished successfully: auth plus real CRUD passed
+  (2 tests), including current retry/forwardedHeaders/pluginPolicy readback and
+  Form/YAML round trips. Validation rerun 10985 passed 10 tests; lint 46222 passed.
+  No live handles remain for this checkpoint. This frontend-only batch is ready
+  for a Center commit; no additional backend matrix rerun is needed absent any
+  backend changes since 0178fe1.

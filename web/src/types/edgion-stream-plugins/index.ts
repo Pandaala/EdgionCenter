@@ -1,3 +1,6 @@
+export const STREAM_PLUGIN_TYPES = ['IpRestriction', 'GlobalConnectionIpRestriction', 'ConnectionRateLimit', 'GeoIpLocation'] as const
+export const TLS_ROUTE_PLUGIN_TYPES = ['IpRestriction'] as const
+
 /**
  * EdgionStreamPlugins 类型定义
  * apiVersion: edgion.io/v1

@@ -3,7 +3,7 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import MetadataSection from '../common/MetadataSection'
 import StructuredConfigEditor from '../EdgionPlugins/StructuredConfigEditor'
 import { PLUGIN_DEFINITION_BY_TYPE, type PluginField } from '../EdgionPlugins/pluginCatalog'
-import type { EdgionStreamPlugins, StreamPlugin } from '@/types/edgion-stream-plugins'
+import { STREAM_PLUGIN_TYPES as STAGE_ONE_TYPES, TLS_ROUTE_PLUGIN_TYPES as TLS_ROUTE_TYPES, type EdgionStreamPlugins, type StreamPlugin } from '@/types/edgion-stream-plugins'
 import { useT } from '@/i18n'
 
 interface Props {
@@ -13,8 +13,6 @@ interface Props {
   isCreate?: boolean
 }
 
-const STAGE_ONE_TYPES = ['IpRestriction', 'GlobalConnectionIpRestriction', 'ConnectionRateLimit', 'GeoIpLocation'] as const
-const TLS_ROUTE_TYPES = ['IpRestriction'] as const
 
 const FIELDS: Record<string, readonly PluginField[]> = {
   IpRestriction: [

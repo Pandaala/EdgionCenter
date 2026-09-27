@@ -8,6 +8,14 @@ kind: EdgionGatewayConfig
 metadata: {name: "__PREFIX__-config", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
 spec:
   requestBody: {defaultMaxBodySize: 32MiB}
+  retry: {attempts: 0}
+  forwardedHeaders: {remoteIpHeader: X-Client-IP}
+  pluginPolicy:
+    allow: [http/RequestId, stream/GeoIpLocation, tls-route/IpRestriction]
+    deny: [{name: http/RequestId, action: bypass}]
+    defaultAction: allow
+    deniedAction: block
+    blockStatus: 503
   httpTimeout:
     client: {readTimeout: 30s, writeTimeout: 30s, keepaliveTimeout: 60s}
     backend: {defaultConnectTimeout: 5s, defaultRequestTimeout: 30s, defaultIdleTimeout: 60s}

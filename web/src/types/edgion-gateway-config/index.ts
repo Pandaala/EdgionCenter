@@ -58,7 +58,16 @@ export interface EdgionGatewayConfigSpec {
     client?: { readTimeout?: string; writeTimeout?: string; keepaliveTimeout?: string }
     backend?: { defaultConnectTimeout?: string; defaultRequestTimeout?: string; defaultIdleTimeout?: string }
   }
-  maxRetries?: number
+  retry?: { attempts?: number; [key: string]: unknown }
+  forwardedHeaders?: { remoteIpHeader?: string; [key: string]: unknown }
+  pluginPolicy?: {
+    allow?: string[]
+    deny?: Array<{ name: string; action?: 'block' | 'bypass'; blockStatus?: number; [key: string]: unknown }>
+    defaultAction?: 'allow' | 'deny'
+    deniedAction?: 'block' | 'bypass'
+    blockStatus?: number
+    [key: string]: unknown
+  }
   requestBody?: {
     enabled?: boolean
     defaultMemoryBufferSize?: string

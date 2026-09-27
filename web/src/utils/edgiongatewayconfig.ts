@@ -2,7 +2,9 @@ import * as yaml from 'js-yaml'
 import type { EdgionGatewayConfig } from '@/types/edgion-gateway-config'
 import { dumpYaml } from './yaml-utils'
 import { mutationDocumentToYaml } from './resource-document'
-import { isValidGep2257Duration } from './validation'
+import { HTTP_PLUGIN_CATALOG } from '@/components/ResourceEditor/EdgionPlugins/pluginCatalog'
+import { STREAM_PLUGIN_TYPES, TLS_ROUTE_PLUGIN_TYPES } from '@/types/edgion-stream-plugins'
+import { isValidGep2257Duration, isValidHTTPHeaderName } from './validation'
 
 export const DEFAULT_YAML = `apiVersion: edgion.io/v1alpha1
 kind: EdgionGatewayConfig
@@ -19,7 +21,8 @@ spec:
     backend:
       defaultConnectTimeout: "5s"
       defaultRequestTimeout: "60s"
-  maxRetries: 3
+  retry:
+    attempts: 2
   requestBody:
     defaultMaxBodySize: 32MiB
   preflightPolicy:
@@ -38,7 +41,7 @@ export function createEmpty(): EdgionGatewayConfig {
         client: { readTimeout: '60s', writeTimeout: '60s' },
         backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s' },
       },
-      maxRetries: 3,
+      retry: { attempts: 2 },
       requestBody: { defaultMaxBodySize: '32MiB' },
       preflightPolicy: { mode: 'cors-standard', statusCode: 204 },
     },
@@ -109,6 +112,53 @@ function validIpOrCidr(value: string): boolean {
 export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): string[] {
   const errors: string[] = []
   const spec = resource.spec || {}
+  if (spec.maxRetries !== undefined) errors.push('spec.maxRetries was removed; use spec.retry.attempts')
+  const attempts = spec.retry?.attempts
+  if (attempts !== undefined && (!Number.isInteger(attempts) || attempts < 0 || attempts > 2147483647)) {
+    errors.push('spec.retry.attempts must be an integer from 0 to 2147483647')
+  }
+  const remoteIpHeader = spec.forwardedHeaders?.remoteIpHeader
+  if (remoteIpHeader !== undefined) {
+    const reserved = ['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length', 'x-forwarded-for']
+    if (typeof remoteIpHeader !== 'string' || remoteIpHeader.length > 256 || !isValidHTTPHeaderName(remoteIpHeader)) {
+      errors.push('spec.forwardedHeaders.remoteIpHeader must be a valid HTTP header name')
+    } else if (reserved.includes(remoteIpHeader.toLowerCase())) {
+      errors.push('spec.forwardedHeaders.remoteIpHeader is reserved')
+    }
+  }
+  const policy = spec.pluginPolicy
+  if (policy != null && (typeof policy !== 'object' || Array.isArray(policy))) errors.push('spec.pluginPolicy must be an object')
+  if (policy && typeof policy === 'object' && !Array.isArray(policy)) {
+    const names = new Set([
+      ...HTTP_PLUGIN_CATALOG.map((plugin) => `http/${plugin.type}`),
+      ...STREAM_PLUGIN_TYPES.map((type) => `stream/${type}`),
+      ...TLS_ROUTE_PLUGIN_TYPES.map((type) => `tls-route/${type}`),
+    ])
+    const validStatus = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 400 && value <= 599
+    if (policy.defaultAction !== undefined && !['allow', 'deny'].includes(policy.defaultAction)) errors.push('pluginPolicy.defaultAction must be allow or deny')
+    if (policy.deniedAction !== undefined && !['block', 'bypass'].includes(policy.deniedAction)) errors.push('pluginPolicy.deniedAction must be block or bypass')
+    if (policy.blockStatus !== undefined && !validStatus(policy.blockStatus)) errors.push('pluginPolicy.blockStatus must be an integer from 400 to 599')
+    if (policy.allow != null) {
+      if (!Array.isArray(policy.allow) || policy.allow.some((name) => !names.has(name))) errors.push('pluginPolicy.allow must contain canonical qualified plugin names')
+      else if (new Set(policy.allow).size !== policy.allow.length) errors.push('pluginPolicy.allow contains duplicate names')
+    }
+    if (policy.deny !== undefined) {
+      if (!Array.isArray(policy.deny)) errors.push('pluginPolicy.deny must be an array')
+      else {
+        const seen = new Set<string>()
+        for (const entry of policy.deny) {
+          if (!entry || typeof entry !== 'object' || !names.has(entry.name)) { errors.push('pluginPolicy.deny contains an invalid plugin name'); continue }
+          if (seen.has(entry.name)) errors.push('pluginPolicy.deny contains duplicate names')
+          seen.add(entry.name)
+          if (entry.action != null && !['block', 'bypass'].includes(entry.action)) errors.push('pluginPolicy.deny action must be block or bypass')
+          if (entry.blockStatus != null) {
+            if (!validStatus(entry.blockStatus)) errors.push('pluginPolicy.deny blockStatus must be an integer from 400 to 599')
+            if ((entry.action ?? policy.deniedAction ?? 'block') === 'bypass') errors.push('pluginPolicy.deny blockStatus must not be set for bypass')
+          }
+        }
+      }
+    }
+  }
   const durations: Array<[string, unknown]> = [
     ['spec.httpTimeout.client.readTimeout', spec.httpTimeout?.client?.readTimeout],
     ['spec.httpTimeout.client.writeTimeout', spec.httpTimeout?.client?.writeTimeout],

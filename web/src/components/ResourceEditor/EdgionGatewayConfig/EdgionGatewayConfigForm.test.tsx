@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import EdgionGatewayConfigForm from './EdgionGatewayConfigForm'
 
@@ -85,6 +85,18 @@ describe('EdgionGatewayConfigForm', () => {
     expect(onChange.mock.lastCall?.[0]).toEqual({
       ...data, spec: { ...data.spec, requestBody: { ...data.spec.requestBody, maxMemoryBufferSize: '512KiB' } },
     })
+  })
+
+  it('distinguishes an absent plugin allow list from an explicit empty one', () => {
+    const onChange = vi.fn()
+    const data: any = {
+      apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionGatewayConfig', metadata: { name: 'default' },
+      spec: { retry: { attempts: 0 }, pluginPolicy: { deny: [{ name: 'http/RequestId', action: 'bypass' }] } },
+    }
+    render(<EdgionGatewayConfigForm data={data} onChange={onChange} />)
+    const item = screen.getByText('Enable allow list').closest('.ant-form-item') as HTMLElement
+    fireEvent.click(within(item).getByRole('switch'))
+    expect(onChange.mock.lastCall?.[0].spec).toEqual({ ...data.spec, pluginPolicy: { ...data.spec.pluginPolicy, allow: [] } })
   })
 
   it('renders requestBody and omits the removed ReferenceGrant control', () => {

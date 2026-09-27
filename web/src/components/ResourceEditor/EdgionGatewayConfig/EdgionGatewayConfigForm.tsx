@@ -12,6 +12,7 @@ import type {
   ObjectReference,
   SubjectAltName,
 } from '@/types/edgion-gateway-config'
+import StructuredConfigEditor from '../EdgionPlugins/StructuredConfigEditor'
 import { useT } from '@/i18n'
 
 interface EdgionGatewayConfigFormProps {
@@ -297,9 +298,11 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
         <Card title={t('section.retryResilience')} size="small">
           <Form.Item label={t('field.maxRetries')} style={{ marginBottom: 0 }}>
             <InputNumber
-              value={data.spec?.maxRetries}
-              onChange={(v) => onChange({ ...data, spec: { ...data.spec, maxRetries: v ?? undefined } })}
-              placeholder="3"
+              value={data.spec?.retry?.attempts}
+              onChange={(v) => updateSpecBlock('retry', { attempts: v ?? undefined })}
+              placeholder="2"
+              max={2147483647}
+              precision={0}
               min={0}
               disabled={readOnly}
               style={{ width: 160 }}
@@ -308,6 +311,28 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           <Form.Item label={t('field.tcpIdleTimeout')} style={{ marginBottom: 8, marginTop: 8 }}><Input value={tcpTimeout.idleTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { idleTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
           <Form.Item label={t('field.tcpConnectTimeout')} style={{ marginBottom: 8 }}><Input value={tcpTimeout.connectTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { connectTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
           <Form.Item label={t('field.degradeThreshold')} style={{ marginBottom: 0 }}><InputNumber value={loadBalancing.degradeThreshold} min={0} max={100} onChange={(value) => updateSpecBlock('loadBalancing', { degradeThreshold: value ?? undefined })} disabled={readOnly} /></Form.Item>
+        </Card>
+
+        <Card title={t('section.forwardedHeaders')} size="small">
+          <Form.Item label={t('field.remoteIpHeader')}>
+            <Input value={data.spec.forwardedHeaders?.remoteIpHeader ?? ''} placeholder="X-Real-IP" disabled={readOnly}
+              onChange={(event) => updateSpecBlock('forwardedHeaders', { remoteIpHeader: event.target.value || undefined })} />
+          </Form.Item>
+        </Card>
+
+        <Card title={t('section.pluginPolicy')} size="small">
+          <Form.Item label={t('field.pluginAllowMode')} help={t('field.pluginAllowModeHelp')}>
+            <Switch checked={data.spec.pluginPolicy?.allow != null} disabled={readOnly}
+              onChange={(enabled) => updateSpecBlock('pluginPolicy', { allow: enabled ? [] : undefined })} />
+          </Form.Item>
+          <StructuredConfigEditor value={data.spec.pluginPolicy ?? {}} readOnly={readOnly}
+            fields={[
+              { name: 'allow', kind: 'array' }, { name: 'deny', kind: 'array' },
+              { name: 'defaultAction', kind: 'string', options: ['allow', 'deny'] },
+              { name: 'deniedAction', kind: 'string', options: ['block', 'bypass'] },
+              { name: 'blockStatus', kind: 'number' },
+            ]}
+            onChange={(pluginPolicy) => onChange({ ...data, spec: { ...data.spec, pluginPolicy } })} />
         </Card>
 
         <Card title={t('section.requestBody')} size="small">

@@ -17,7 +17,7 @@ const fixture: any = {
   spec: {
     server: { threads: 4, workStealing: false, gracePeriodSeconds: 30, gracefulShutdownTimeoutS: 10, upstreamKeepalivePoolSize: 128, errorLog: '', enableCompression: true, downstreamKeepaliveRequestLimit: 0 },
     httpTimeout: { client: { readTimeout: '60s', writeTimeout: '61s', keepaliveTimeout: '75s' }, backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s', defaultIdleTimeout: '300s' } },
-    maxRetries: 0,
+    retry: { attempts: 0 },
     requestBody: { defaultMaxBodySize: '32MiB', futureBody: false },
     tcpTimeout: { idleTimeout: '1h', connectTimeout: '10s' },
     loadBalancing: { degradeThreshold: 50 },
@@ -160,6 +160,46 @@ describe('EdgionGatewayConfig lossless adapter', () => {
     expect(validateEdgionGatewayConfig(resource)).toEqual([])
     resource.spec.maxBodySize = '32MiB'
     expect(validateEdgionGatewayConfig(resource)).toContain('spec.maxBodySize was removed; use spec.requestBody.maxBodySize')
+  })
+
+  it('validates current retries and gateway-owned header targets', () => {
+    expect(createEmpty().spec.retry).toEqual({ attempts: 2 })
+    expect(createEmpty().spec).not.toHaveProperty('maxRetries')
+    for (const attempts of [0, 2, 2147483647]) {
+      const resource = structuredClone(fixture)
+      resource.spec.retry = { attempts }
+      expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    }
+    for (const attempts of [-1, 1.5, 2147483648, '2']) {
+      const resource = structuredClone(fixture)
+      resource.spec.retry = { attempts }
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('spec.retry.attempts')
+    }
+    for (const remoteIpHeader of ['HOST', 'Content-Length', 'X-Forwarded-For', 'Connection', '', 'bad header', 'x'.repeat(257)]) {
+      const resource = structuredClone(fixture)
+      resource.spec.forwardedHeaders = { remoteIpHeader }
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('remoteIpHeader')
+    }
+    const resource = structuredClone(fixture)
+    resource.spec.forwardedHeaders = { remoteIpHeader: 'X-Client-IP' }
+    expect(validateEdgionGatewayConfig(resource)).toEqual([])
+  })
+
+  it('preserves allow-list presence and validates plugin-policy precedence', () => {
+    const resource = structuredClone(fixture)
+    for (const policy of [null, {}, { allow: null }, { allow: [] }, { allow: ['http/RequestId', 'stream/GeoIpLocation', 'tls-route/IpRestriction'] }]) {
+      resource.spec.pluginPolicy = policy
+      expect(validateEdgionGatewayConfig(resource)).toEqual([])
+      expect((yaml.load(toMutationYaml(resource, 'update')) as any).spec.pluginPolicy).toEqual(policy)
+    }
+    resource.spec.pluginPolicy = { deniedAction: 'bypass', deny: [{ name: 'http/RequestId', blockStatus: 403 }] }
+    expect(validateEdgionGatewayConfig(resource)).toContain('pluginPolicy.deny blockStatus must not be set for bypass')
+    resource.spec.pluginPolicy.deny[0].action = 'block'
+    expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    for (const policy of [{ allow: ['http/Missing'] }, { allow: ['http/RequestId', 'http/RequestId'] }, { blockStatus: 200 }, { deny: [null] }, 'invalid']) {
+      resource.spec.pluginPolicy = policy
+      expect(validateEdgionGatewayConfig(resource).length).toBeGreaterThan(0)
+    }
   })
 
   it('does not emit the removed ReferenceGrant field in a newly created document', () => {
