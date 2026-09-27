@@ -88,7 +88,7 @@ transition time, and context. Pages must never synthesize an `Active` status.
 
 
 Condition colors follow their type's polarity: Accepted, ResolvedRefs and
-Programmed are positive conditions; Conflicted=True is an error and
+Programmed are positive conditions; Conflicted=True and ListenersNotValid=True are errors and
 PartiallyInvalid=True is a warning. False clears those negative conditions.
 Unknown status stays cautionary, and unrecognized condition types remain neutral
 instead of inferring success or failure from their boolean value.
@@ -114,3 +114,11 @@ Controller's listener allowedRoutes policy; the graph does not independently
 reimplement selector evaluation. When ReferenceGrant validation configuration or
 the grant inventory is unavailable, show an unknown check rather than a denial.
 A resolved structural edge is never an authorization or attachment-success claim.
+
+
+Gateway uses native top-level addresses, conditions and listeners, not the
+ControllerStatus envelope used by GatewayClass and several Edgion kinds.
+GatewayStatusDetails renders gateway-level conditions once and each listener's
+conditions alongside its attachedRoutes and supportedKinds. Do not flatten
+listener conditions into the gateway section as well. Listener freshness is
+compared against the Gateway metadata.generation.

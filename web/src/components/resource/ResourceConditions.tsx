@@ -88,7 +88,7 @@ export function collectResourceConditions(status: unknown): ContextualCondition[
 
 function conditionColor({ type, status }: DisplayCondition): string {
   if (status !== 'True' && status !== 'False') return 'gold'
-  if (type === 'Conflicted') return status === 'True' ? 'red' : 'green'
+  if (type === 'Conflicted' || type === 'ListenersNotValid') return status === 'True' ? 'red' : 'green'
   if (type === 'PartiallyInvalid') return status === 'True' ? 'orange' : 'green'
   if (['Accepted', 'ResolvedRefs', 'Programmed'].includes(type)) {
     return status === 'True' ? 'green' : 'red'

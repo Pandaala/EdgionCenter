@@ -19,7 +19,7 @@ export default function GatewayStatusDetails({ status, generation }: GatewayStat
     <Card title={t('section.statusAddresses')} size="small">
       {addresses.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> : addresses.map((address: any, index: number) => <Tag key={index}>{address.type ? `${address.type}: ` : ''}{address.value}</Tag>)}
     </Card>
-    <ResourceConditions status={value} generation={generation} emptyText={t('status.noConditions')} />
+    <ResourceConditions status={{ conditions: value.conditions }} generation={generation} emptyText={t('status.noConditions')} />
     {listeners.map((listener: any, index: number) => <Card key={`${listener.name}-${index}`} title={listener.name || t('gw.unnamed')} size="small">
       <Descriptions size="small" column={2}>
         <Descriptions.Item label={t('field.attachedRoutes')}>{listener.attachedRoutes ?? 0}</Descriptions.Item>

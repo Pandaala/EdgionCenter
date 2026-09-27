@@ -97,6 +97,8 @@ it.each([true, false])('colors condition semantics correctly in compact=%s', (co
     { type: 'Programmed', status: 'Unknown', color: 'gold' },
     { type: 'Conflicted', status: 'True', color: 'red' },
     { type: 'Conflicted', status: 'False', color: 'green' },
+    { type: 'ListenersNotValid', status: 'True', color: 'red' },
+    { type: 'ListenersNotValid', status: 'False', color: 'green' },
     { type: 'PartiallyInvalid', status: 'True', color: 'orange' },
     { type: 'PartiallyInvalid', status: 'False', color: 'green' },
     { type: 'FutureCondition', status: 'True', color: 'default' },

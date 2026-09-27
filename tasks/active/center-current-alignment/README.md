@@ -1402,3 +1402,20 @@ before acting on CCI execution files or proposing replacements.
 - Parent attachment acceptance remains Controller-condition evidence, not graph
   existence. Kubernetes selector evaluation and real traffic remain unverified;
   the overall resource/menu audit continues.
+
+
+### Gateway native status details
+
+- Rechecked current gateway.rs: GatewayStatus is native addresses/conditions/
+  listeners, unlike GatewayClass's ControllerStatus envelope. Kept that correct
+  boundary. GatewayHandler emits ListenersNotValid=True for listener port and
+  inbound PROXY policy conflicts; shared condition tags now treat it as an error.
+- Removed duplicate listener conditions from the Gateway-level detail section;
+  each listener retains its own conditions, counters, supported route kinds and
+  generation comparison. No condition content is dropped.
+- Sixteen component tests passed (15941 terminal zero), including native address,
+  two listener counters, route kinds, stale listener status, no duplicate tags,
+  empty status and condition polarity. Build 35097 and lint 42923 passed.
+  Logs /tmp/ws5-center-gateway-status-{tests,build,lint}.log.
+- This batch has component evidence, no new runtime listener-conflict or traffic
+  test. Broader per-resource/menu and Kubernetes ownership checks remain open.
