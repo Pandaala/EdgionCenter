@@ -1103,3 +1103,24 @@ before acting on CCI execution files or proposing replacements.
 - This proves configuration CAS and watch convergence, not Gateway traffic
   redirection. RegionRoute conflict/sync actions, runtime traffic, Kubernetes
   ownership behavior and the remaining full menu/type audit remain open.
+
+### RegionRoute source-to-target synchronization native proof
+
+- Added inventory-backed selectors for source selection and synchronization.
+  The native browser case creates a real CAS-protected divergence only on B,
+  observes the inconsistent row and disabled failover action, explicitly selects
+  B as source, and synchronizes to A through the page.
+- The response must contain one converged outcome for A. Both Controller watch
+  documents must agree afterward; A retains its own labels and changes version,
+  while B retains its version. The page removes the sync warning and re-enables
+  failover. Finally both resources return to no failover.
+- Run alignment-region-sync-20260928-v2 passed all 3 cases (login, failover/restore,
+  selected-source sync), retained 70 exact files with 2 changed, and exited zero
+  (session 74201). Log: /tmp/ws5-center-region-sync-v2.log. Initial v1 stopped
+  before runtime because the new selectors needed action-inventory entries.
+- E2E typecheck 94405, frontend build 1350, and lint 50879 passed. Logs:
+  /tmp/ws5-center-region-sync-{types,build,lint}.log. All processes terminal.
+- Remaining RegionRoute audit includes mixed/non-converged outcomes under watch
+  refresh, enable-state differences (consistency includes enable while sync
+  intentionally copies only spec.data), missing-resource sync, and traffic-level
+  proof. These are open inspection areas, not conclusions from this happy-path run.

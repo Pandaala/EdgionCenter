@@ -10,7 +10,7 @@ const namespace = `${prefix}-a`
 async function configData(request: APIRequestContext, slot: 'A' | 'B', name: string) {
   const response = await request.get(`/api/v1/proxy/${controllerPathId(slot)}/api/v1/namespaced/edgionconfigdata/${namespace}/${name}`)
   expect(response.ok()).toBeTruthy()
-  return response.json() as Promise<{ metadata?: { labels?: Record<string, string> }; spec?: { data?: { config?: { active?: string; description?: string; regions?: Array<{ name?: string; failoverTo?: string }> } } } }>
+  return response.json() as Promise<{ metadata?: { resourceVersion?: string; labels?: Record<string, string> }; spec?: { data?: { config?: { active?: string; description?: string; regions?: Array<{ name?: string; failoverTo?: string }> } } } }>
 }
 
 function expectRegionOutcome(body: unknown) {
@@ -452,6 +452,68 @@ test.describe('Center and shell actions', () => {
         await expect.poll(async () => (await configData(request, slot, overrideName)).spec?.data?.config?.regions?.find((region) => region.name === 'east')?.failoverTo ?? '').toBe('')
         expect((await configData(request, slot, overrideName)).metadata?.labels?.['edgion.io/e2e-run']).toBe(runId)
       }
+    }
+  })
+
+  test('region routes synchronize the selected source without copying metadata', async ({ page, request }) => {
+    test.skip(process.env.E2E_MODE !== 'standalone', 'Requires both Controller watches on the local Center')
+    test.setTimeout(90_000)
+    const name = `${prefix}-region-route-override`
+    const path = `/api/v1/proxy/${controllerPathId('B')}/api/v1/namespaced/edgionconfigdata/${namespace}/${name}`
+    await setRegionFailover(request, '')
+    const original = await configData(request, 'B', name)
+    expect(original.metadata?.resourceVersion).toBeTruthy()
+    const source = {
+      apiVersion: 'edgion.io/v1',
+      kind: 'EdgionConfigData',
+      metadata: { ...original.metadata, namespace, name, labels: { ...original.metadata?.labels, 'edgion.io/e2e-source': 'B' } },
+      spec: {
+        ...original.spec,
+        data: {
+          ...original.spec?.data,
+          config: {
+            ...original.spec?.data?.config,
+            regions: original.spec?.data?.config?.regions?.map((region) => region.name === 'east' ? { ...region, failoverTo: 'west' } : region),
+          },
+        },
+      },
+    }
+    try {
+      const changed = await request.put(path, {
+        headers: { 'Content-Type': 'application/yaml', 'If-Match': `"${original.metadata!.resourceVersion}"` },
+        data: JSON.stringify(source),
+      })
+      expect(changed.ok()).toBeTruthy()
+      const sourceAfter = await configData(request, 'B', name)
+      const targetBefore = await configData(request, 'A', name)
+      await page.goto('/region-routes/region')
+      await expect.poll(async () => {
+        await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
+        return page.getByTestId('region-sync-apply').count()
+      }).toBe(1)
+      await expect(page.getByTestId('region-failover')).toBeDisabled()
+      await page.getByTestId('region-sync-source').click()
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: controllerId('B') }).click()
+      const [response] = await Promise.all([
+        page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-route-overrides/sync')),
+        page.getByTestId('region-sync-apply').click(),
+      ])
+      expect(response.status()).toBe(200)
+      expect(await response.json()).toMatchObject({
+        success: true,
+        data: { modified: 1, failed: 0, outcomes: [{ controllerId: controllerId('A'), state: 'converged' }] },
+      })
+      await expectGlobalFailover(request, 'west')
+      await expect(page.getByTestId('region-sync-apply')).toHaveCount(0)
+      await expect(page.getByTestId('region-failover')).toBeEnabled()
+      const targetAfter = await configData(request, 'A', name)
+      expect(targetAfter.spec?.data).toEqual(sourceAfter.spec?.data)
+      expect(targetAfter.metadata?.labels).toEqual(targetBefore.metadata?.labels)
+      expect(targetAfter.metadata?.resourceVersion).not.toBe(targetBefore.metadata?.resourceVersion)
+      expect((await configData(request, 'B', name)).metadata?.resourceVersion).toBe(sourceAfter.metadata?.resourceVersion)
+    } finally {
+      await setRegionFailover(request, '')
+      await expectGlobalFailover(request, '')
     }
   })
 

@@ -322,6 +322,7 @@ function SyncOverrideButton({
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Space>
         <Select
+          data-testid="region-sync-source"
           size="small"
           value={source}
           options={sources.map((controllerId) => ({
@@ -332,6 +333,7 @@ function SyncOverrideButton({
           style={{ width: 210 }}
         />
         <Button
+          data-testid="region-sync-apply"
           size="small"
           loading={mutation.isPending}
           disabled={!source || !targets.length}

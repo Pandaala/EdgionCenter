@@ -105,6 +105,8 @@
       "region-refresh",
       "region-failover",
       "region-failover-apply",
+      "region-sync-source",
+      "region-sync-apply",
       "region-search"
     ],
     "/audit": [
