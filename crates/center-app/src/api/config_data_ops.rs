@@ -260,6 +260,16 @@ where
     if let Err(error) = mutate(&mut document) {
         return WriteOutcome::failed(controller_id, error);
     }
+    // Federation watches contain Controller-computed status, not writable spec.
+    if let Some(fields) = document.as_object_mut() {
+        fields.remove("status");
+    }
+    if let Some(spec) = document
+        .get_mut("spec")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        spec.remove("currentStatus");
+    }
     let body = match serde_json::to_vec(&document) {
         Ok(body) => body,
         Err(error) => {
@@ -781,3 +791,7 @@ mod tests {
         assert!(outcome.convergence_ms.is_some());
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/api/config_data_write_boundary_test.rs"]
+mod write_boundary_tests;

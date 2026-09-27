@@ -90,11 +90,18 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 |---|---|---|
 | Controller dashboard, operations, topology | Native controls; AI nodes; freshness, polarity, stale/partial/conflict states; grant boundaries | Cross-resource runtime changes beyond the recorded scenarios |
 | Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync; component read-failure/recovery states; deployed Kubernetes owner/non-owner reads, writes, CAS, connection migration and old-fence revocation | Pod crash takeover, post-dispatch transport faults and additional freshness transitions |
-| RegionRoute | Failover/restore, source-data sync, enable preservation, missing-target recovery; explicit write outcomes | Actual routed traffic and wider concurrent outcome scenarios |
+| RegionRoute | Failover/restore, source-data sync, enable preservation, missing-target recovery; explicit write outcomes; actual east/west traffic; clear removes invalid empty target and writes exclude cached status | Multi-Controller routed traffic and wider concurrent outcome scenarios |
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native and real Kubernetes browser create/edit, label retention and exact-generation conflict; 52-account pagination; staged SAR permissions, denied-read recovery and credential-value rejection | Metadata-only proof; external credential inspection is separate |
 | Cloudflare DNS and Route53 DNS | API DTO/form tests; sanitized read failure/recovery; lost-response uncertainty; 195 hermetic backend tests | New browser error states have component evidence, not native provider mutation evidence |
 | Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback; deployed Kubernetes SAR, disabled administration routes and proxy logout | Further permission transitions beyond the dual-Controller dependency namespace proof |
+
+[RegionRoute traffic evidence](REGION-ROUTE-TRAFFIC-EVIDENCE.md) records the
+reproduced false-convergence defect and native backend repair. Base behavior
+differs from overlay behavior so fallback cannot masquerade as restoration.
+The Kubernetes v5 image predates this repair. Its backend gates pass 876
+workspace and 247 no-default-feature app tests; the matrix retains the unrelated
+English-only failure described in the evidence.
 
 Native federation evidence: 27 lifecycle checks in
 `/tmp/ws5-center-federation-native-v2.log` and 9 mTLS checks in

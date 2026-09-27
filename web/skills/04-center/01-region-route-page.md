@@ -58,8 +58,14 @@ not aggregate pluginName, alias, entryIndex, routing rules, or service usage.
 
 ## Operations
 
-Failover writes `failoverTo` directly onto the identified `EdgionConfigData`
-document, once per online Controller, through the shared
+Failover sets `failoverTo` on the identified `EdgionConfigData` document.
+Clearing failover removes the optional field: an empty string is an invalid
+region target, not the absence of a target. The convergence predicate must not
+classify an existing empty string as already cleared. The shared writer excludes
+top-level `status` and `spec.currentStatus` from the cached document before PUT,
+preserving the CAS resourceVersion and operator-owned nested fields.
+
+The operation runs once per online Controller through the shared
 `config_data_ops::write_config_data` core: the payload is built from that
 Controller's LOCAL watch cache and the write carries a CAS `If-Match`
 precondition, so a 409 is terminal and never retried. After a successful
@@ -108,3 +114,7 @@ operation to confirmed convergence. Only the now-unnecessary sync controls hide.
 - Frontend tests cover missing-controller and metadata-insensitive consistency.
 - Two-Controller integration verifies the menu updates from watch without the
   retired effective RegionRoute poll.
+
+- Native traffic verification uses different base and overlay behavior, so
+  fail-to-base cannot masquerade as successful restoration. See
+  [RegionRoute traffic evidence](../../../tasks/active/center-current-alignment/REGION-ROUTE-TRAFFIC-EVIDENCE.md).

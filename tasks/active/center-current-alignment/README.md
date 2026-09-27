@@ -2584,3 +2584,32 @@ before acting on CCI execution files or proposing replacements.
 - Next focused menu flow is RegionRoute failover with actual routed traffic,
   retaining the current overlay/CAS/watch contract. The broader audit remains
   active. No Edgion changes committed and no push.
+
+
+### 2026-09-28: RegionRoute restoration defect found through traffic
+
+- A first east/west/east browser result was misleading: Gateway logs revealed
+  invalid-overlay fallback on clear. With different base and overlay targets,
+  old Center reports `converged` but traffic goes west instead of east.
+- Clearing now removes `failoverTo`; an existing empty string is no longer an
+  idempotent success. The shared ConfigData writer also strips top-level status
+  and `spec.currentStatus` instead of persisting Controller-derived fields.
+  CAS versions and nested user data stay intact.
+- Three new Rust regressions pass. The strengthened native browser run repairs
+  the existing bad document, then proves east/west/east through the actual
+  RegionRoute menu with no invalid-overlay fallback. Default Controller RBAC
+  still rejects plugin writes, and the restored overlay is valid.
+- Added persistent two-Controller E2E assertions for absent failover and status
+  fields; its type/inventory checks and lint pass. The new live traffic run is
+  single-Controller, not a rerun of that entire repository E2E scenario.
+- See [REGION-ROUTE-TRAFFIC-EVIDENCE.md](REGION-ROUTE-TRAFFIC-EVIDENCE.md) for
+  topology, initial weak oracle, before/after evidence and retained runtimes.
+  The native Center was rebuilt; deployed Kubernetes v5 is not updated by this
+  run. No Edgion production source changes. Overall goal remains active.
+
+- Final gates: 876 workspace plus 247 no-default-feature app tests passed,
+  alongside fmt, Clippy, dependency isolation and manifest rendering. Backend
+  matrix exits at the unchanged Chinese workflow document's English-only
+  violation. No-legacy and diff checks pass separately. Web dependency install
+  and full unit/build stages were skipped because frontend component code is
+  unchanged; focused E2E type/inventory/lint and real browser traffic passed.

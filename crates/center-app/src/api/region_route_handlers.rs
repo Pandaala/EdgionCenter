@@ -443,14 +443,17 @@ fn region_failover_matches(
     let Some(index) = region_index(document, region_name) else {
         return false;
     };
-    document
+    let value = document
         .pointer(REGIONS_POINTER)
         .and_then(serde_json::Value::as_array)
         .and_then(|regions| regions.get(index))
-        .and_then(|region| region.get("failoverTo"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        == failover_to
+        .and_then(|region| region.get("failoverTo"));
+    if failover_to.is_empty() {
+        // An empty string is an invalid region target, not a cleared override.
+        value.is_none_or(serde_json::Value::is_null)
+    } else {
+        value.and_then(serde_json::Value::as_str) == Some(failover_to)
+    }
 }
 
 /// Set `failoverTo` on the region named `region_name` under
@@ -469,7 +472,13 @@ fn set_region_failover_to(
         .and_then(serde_json::Value::as_array_mut)
         .and_then(|regions| regions.get_mut(index))
         .ok_or_else(|| format!("region '{region_name}' was not found under {REGIONS_POINTER}"))?;
-    region["failoverTo"] = serde_json::Value::String(failover_to.to_string());
+    if failover_to.is_empty() {
+        if let Some(fields) = region.as_object_mut() {
+            fields.remove("failoverTo");
+        }
+    } else {
+        region["failoverTo"] = serde_json::Value::String(failover_to.to_string());
+    }
     Ok(())
 }
 
@@ -980,3 +989,7 @@ mod tests {
         assert_eq!(outcome_for("ctrl-b")["state"], "failed");
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/api/region_route_clear_test.rs"]
+mod clear_tests;

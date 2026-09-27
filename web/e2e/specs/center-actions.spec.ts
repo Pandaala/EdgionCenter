@@ -456,6 +456,13 @@ test.describe('Center and shell actions', () => {
       expectRegionOutcome(await restoreResponse.json())
       await expect(page.locator('.ant-popover')).toBeHidden()
       await expectGlobalFailover(request, '')
+      for (const slot of ['A', 'B'] as const) {
+        const restored = await configData(request, slot, overrideName)
+        const eastRegion = restored.spec?.data?.config?.regions?.find((region) => region.name === 'east')
+        expect(eastRegion).toBeDefined()
+        expect(eastRegion).not.toHaveProperty('failoverTo')
+        expect(restored.spec).not.toHaveProperty('currentStatus')
+      }
       await expect(page.getByText('east → west', { exact: true })).toHaveCount(0)
     } finally {
       await setRegionFailover(request, '')
