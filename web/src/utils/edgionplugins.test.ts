@@ -221,3 +221,41 @@ describe('EdgionPlugins YAML structure', () => {
     expect(() => yamlToEdgionPlugins(yaml.dump({ ...document, kind: 'ConfigMap' }))).toThrow('EdgionPlugins')
   })
 })
+
+
+it.each(['create', 'update'] as const)('retains body policy when edited profiles outgrow stale resolved profiles on %s', (mode) => {
+  const profile = (validateRequestBody: boolean) => ({
+    requiredRuleGroups: [{ name: 'auth', anyOfRules: [{ name: 'signed', type: 'url', config: {
+      conditions: { allOf: [{ type: 'hmacAuth', validateRequestBody }] },
+    } }] }],
+  })
+  const resource = normalizeEdgionPlugins({
+    apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins',
+    metadata: { name: 'access', namespace: 'edge', resourceVersion: '9' },
+    spec: { requestPlugins: [{ type: 'RequestAccessPolicy', body: { maxBodySize: '1MiB' }, config: {
+      profiles: { edited: profile(true) }, resolvedProfiles: { edited: profile(false) },
+    } }] },
+  })
+  const before = structuredClone(resource)
+  const entry = resource.spec.requestPlugins![0]
+  expect(pluginAcceptsBodyRequirement('requestPlugins', entry.type, entry.config)).toBe(true)
+  expect(validatePluginBodyRequirements(resource.spec)).toEqual([])
+  const mutation = yaml.load(edgionPluginsToMutationYAML(resource, mode)) as any
+  expect(mutation.spec.requestPlugins[0].body).toEqual({ maxBodySize: '1MiB' })
+  expect(mutation.spec.requestPlugins[0].config).toEqual({ profiles: { edited: profile(true) } })
+  expect(resource).toEqual(before)
+})
+
+it('defers unresolved URL reference body capability to the Controller', () => {
+  const profiles = { external: { requiredRuleGroups: [{ name: 'auth', anyOfRules: [{ type: 'url', config: {
+    configRefs: [{ name: 'signed-paths' }],
+  } }] }] } }
+  const resolvedProfiles = structuredClone(profiles) as any
+  resolvedProfiles.external.requiredRuleGroups[0].anyOfRules[0].config.resolvedCandidates = [{
+    conditions: { anyOf: [{ type: 'hmacAuth', validateRequestBody: true }] },
+  }]
+  expect(pluginAcceptsBodyRequirement('requestPlugins', 'RequestAccessPolicy', { profiles, resolvedProfiles })).toBe(true)
+  expect(pluginAcceptsBodyRequirement('requestPlugins', 'RequestAccessPolicy', { profiles, resolvedProfiles: {} })).toBe(true)
+  expect(pluginAcceptsBodyRequirement('requestPlugins', 'RequestAccessPolicy', { profiles: {} })).toBe(false)
+  expect(pluginAcceptsBodyRequirement('upstreamResponsePlugins', 'RequestAccessPolicy', { profiles, resolvedProfiles })).toBe(false)
+})

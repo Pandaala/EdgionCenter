@@ -24,6 +24,16 @@ Plugin families:
 - **Outbound credentials and variables**: CredentialInjector, WebhookKeyGet
 - **Gateway API Filters**: Request Header Modifier, Response Header Modifier, Request Redirect, URL Rewrite
 
+### Body capability during edits
+
+The browser's body editor gate is conservative, not a replacement for Controller
+validation. RequestAccessPolicy checks both edited `profiles` and the last
+`resolvedProfiles`; an old resolved generation must not hide newly added HMAC
+body consumers. URL `configRefs` may resolve to body-consuming conditions, so
+unresolved references remain eligible for an operator body block. Controller
+resolution and validation determine whether the final configuration accepts it.
+Only operator profiles are submitted; resolved profiles/candidates are stripped.
+
 ### AI backend routing
 
 The Services menu exposes EdgionBackend provider/credential/model resources.

@@ -171,3 +171,22 @@ describe('structured plugin forms', () => {
     })
   })
 })
+
+
+it('keeps the body editor visible after adding a consumer to unresolved edited profiles', () => {
+  const onChange = vi.fn()
+  const resource: any = {
+    apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'access', namespace: 'edge' },
+    spec: { requestPlugins: [{ type: 'RequestAccessPolicy', body: { maxBodySize: '1MiB' }, config: {
+      profiles: { signed: { requiredRuleGroups: [{ name: 'auth', anyOfRules: [{ type: 'url', config: {
+        conditions: { allOf: [{ type: 'hmacAuth', validateRequestBody: true }] },
+      } }] }] } },
+      resolvedProfiles: {},
+    } }] },
+  }
+  render(<EdgionPluginsForm value={resource} onChange={onChange} />)
+  fireEvent.change(screen.getByDisplayValue('1MiB'), { target: { value: '2MiB' } })
+  expect(onChange).toHaveBeenLastCalledWith({ ...resource, spec: { ...resource.spec,
+    requestPlugins: [{ ...resource.spec.requestPlugins[0], body: { maxBodySize: '2MiB' } }],
+  } })
+})

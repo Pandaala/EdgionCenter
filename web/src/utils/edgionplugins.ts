@@ -152,13 +152,19 @@ export function pluginAcceptsBodyRequirement(
   if (type === 'ExtProc') return objectValue(config?.processingMode).requestBodyMode === 'BUFFERED'
   if (type === 'RequestRestriction') return conditionSetUsesRequestBody(config?.conditions)
   if (type === 'RequestAccessPolicy') {
-    return Object.values(objectValue(config?.resolvedProfiles ?? config?.profiles)).some((profile) => {
+    // Resolved profiles describe the last Controller generation. They must not
+    // hide newly edited body consumers; retain them as evidence for referenced
+    // URL candidates that the browser cannot resolve itself. New references
+    // are likewise potentially body-consuming until the Controller resolves them.
+    const profiles = [config?.profiles, config?.resolvedProfiles].flatMap((value) => Object.values(objectValue(value)))
+    return profiles.some((profile) => {
       const groups = objectValue(profile).requiredRuleGroups
       return Array.isArray(groups) && groups.some((group) => {
         const rules = objectValue(group).anyOfRules
         return Array.isArray(rules) && rules.some((rule) => {
           const ruleConfig = objectValue(objectValue(rule).config)
           return conditionSetUsesRequestBody(ruleConfig.conditions) ||
+            (objectValue(rule).type === 'url' && Array.isArray(ruleConfig.configRefs) && ruleConfig.configRefs.length > 0) ||
             (Array.isArray(ruleConfig.resolvedCandidates) && ruleConfig.resolvedCandidates.some((candidate) => conditionSetUsesRequestBody(objectValue(candidate).conditions)))
         })
       })

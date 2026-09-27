@@ -2058,3 +2058,25 @@ before acting on CCI execution files or proposing replacements.
   /tmp/ws5-center-plugin-resolved-build.log,
   /tmp/ws5-center-plugin-resolved-lint.log.
   No Edgion source or deployed cluster changed. Overall audit remains active.
+
+
+### RequestAccessPolicy edited body capability (2026-09-28)
+
+- Found that the browser body gate preferred stale resolvedProfiles over current
+  operator profiles. Adding an HMAC body condition to an existing policy could
+  hide the body editor or reject serialization until Controller reconciliation,
+  although the new operator document had not yet been submitted.
+- The conservative browser gate now checks both sources and permits URL rules
+  with unresolved configRefs: referenced candidates can consume a body, and the
+  browser cannot resolve them. Controller resolution/validation remains the
+  authority, so browser eligibility is not a claim of runtime acceptance.
+- Create/update tests preserve the body block alongside new operator profiles,
+  exclude old resolved profiles from the mutation, and check input immutability.
+  Covered unresolved references, resolved body evidence, no body demand and
+  request-stage restriction. A real form test edits maxBodySize with an empty
+  old resolvedProfiles map and verifies sibling preservation.
+- Session 79701 exited zero: 35 focused utility/component tests, build and lint.
+  Logs: /tmp/ws5-center-policy-body-{tests,build,lint}-v2.log.
+  Earlier session 23703 also exited zero before the unresolved-reference and
+  additional form cases. No new native request-body traffic claim; no Edgion
+  changes. Overall resource/menu audit remains active.

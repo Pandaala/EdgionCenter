@@ -51,7 +51,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | BackendTLSPolicy | security/backendtls | Current identity/target restrictions and lossless form edits |
 | Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model |
 | ConfigMap | security/dependencies | Restricted dependency operations and exact replacement/readback |
-| EdgionPlugins | plugins | 48 stage-plugin catalog entries; independent WAF form/count/references; mutation stripping |
+| EdgionPlugins | plugins | 48 stage-plugin catalog entries; independent WAF form/count/references; mutation stripping; edited/referenced access-policy body capability |
 | EdgionStreamPlugins | plugins/stream | Current connection/TLS-stage catalogs and stage-specific controls |
 | EdgionConfigData | plugins/metadata | Nine typed variants; four new variants have dedicated native CRUD |
 | LinkSys | system/linksys | All eight variants have dedicated native browser CRUD |
