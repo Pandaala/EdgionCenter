@@ -1,6 +1,6 @@
 import type { K8sObjectMeta } from '@/types/gateway-api/common'
 
-export type LinkSysType = 'redis' | 'elasticsearch' | 'etcd' | 'webhook' | 'kafka' | 'httpdns' | 'otlp'
+export type LinkSysType = 'redis' | 'elasticsearch' | 'etcd' | 'webhook' | 'kafka' | 'httpdns' | 'otlp' | 'credentialSource'
 
 export interface SecretObjectReference {
   group?: string
@@ -123,6 +123,28 @@ export interface HttpDnsConfig {
   connection?: { timeoutMs?: number; tls?: LinkTlsConfig }
 }
 
+export interface CredentialSourceConfig {
+  provider: {
+    type: 'oauth2ClientCredentials'
+    tokenEndpoint: string
+    clientAuthentication: {
+      method?: 'clientSecretBasic'
+      activeSecretRef: SecretObjectReference
+      previousSecretRef?: SecretObjectReference
+    }
+    scopes?: string[]
+    tls?: LinkTlsConfig
+  }
+  rotation?: {
+    interval?: string
+    requestTimeout?: string
+    retryInitialBackoff?: string
+    retryMaxBackoff?: string
+  }
+  egress?: { blockPrivate?: boolean }
+  publication?: { persist?: boolean; memoryMaxKeys?: number }
+}
+
 export type LinkSysConfig =
   | RedisConfig
   | ElasticsearchConfig
@@ -131,6 +153,7 @@ export type LinkSysConfig =
   | KafkaConfig
   | HttpDnsConfig
   | OtlpConfig
+  | CredentialSourceConfig
 
 export interface LinkSysSpec {
   type: LinkSysType

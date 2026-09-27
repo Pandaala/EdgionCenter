@@ -167,6 +167,8 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'config', 'sasl', 'password', 'secret'],
     ['spec', 'config', 'connection', 'tls', 'resolvedCaCertificates'],
     ['spec', 'config', 'connection', 'tls', 'resolvedClientCertificate'],
+    ['spec', 'config', 'provider', 'tls', 'resolvedCaCertificates'],
+    ['spec', 'config', 'provider', 'tls', 'resolvedClientCertificate'],
     ['spec', 'config', 'allowDegradation'],
     ['spec', 'config', 'allowDegradationTemplate'],
   ],

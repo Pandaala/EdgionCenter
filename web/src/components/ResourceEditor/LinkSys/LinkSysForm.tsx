@@ -1,5 +1,6 @@
 import React, { useRef } from 'react'
 import { Card, Form, Input, InputNumber, Select, Space, Switch } from 'antd'
+import CredentialSourceFields from './CredentialSourceFields'
 import MetadataSection from '../common/MetadataSection'
 import JsonValueField from '../common/JsonValueField'
 import type {
@@ -8,6 +9,7 @@ import type {
   HttpDnsConfig,
   KafkaConfig,
   OtlpConfig,
+  CredentialSourceConfig,
   LinkSys,
   LinkSysConfig,
   LinkSysType,
@@ -89,6 +91,7 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
               <Select.Option value="kafka">Kafka</Select.Option>
               <Select.Option value="httpdns">HTTP DNS</Select.Option>
               <Select.Option value="otlp">OTLP/gRPC</Select.Option>
+              <Select.Option value="credentialSource">Credential Source</Select.Option>
             </Select>
           </Form.Item>
         </Card>
@@ -271,6 +274,8 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
             </Card>
           )
         })()}
+
+        {type === 'credentialSource' && <CredentialSourceFields config={config as CredentialSourceConfig} readOnly={readOnly} onChange={(next) => updateConfig(next)} />}
 
         {type === 'otlp' && (() => {
           const otlp = config as OtlpConfig

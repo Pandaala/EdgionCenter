@@ -22,7 +22,7 @@ import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/c
 const { Search } = Input
 
 const typeColorMap: Record<string, string> = {
-  redis: 'red', elasticsearch: 'gold', etcd: 'blue', webhook: 'green', kafka: 'purple', httpdns: 'cyan', otlp: 'geekblue',
+  redis: 'red', elasticsearch: 'gold', etcd: 'blue', webhook: 'green', kafka: 'purple', httpdns: 'cyan', otlp: 'geekblue', credentialSource: 'orange',
 }
 
 const LinkSysList = () => {
@@ -117,6 +117,7 @@ const LinkSysList = () => {
     if (endpoints.length > 0) return endpoints.slice(0, 2).join(', ')
     const brokers = config.brokers || []
     if (brokers.length > 0) return brokers.slice(0, 2).join(', ')
+    if (config.provider?.tokenEndpoint) return config.provider.tokenEndpoint
     if (config.endpoint) return config.endpoint
     if (config.urlTemplate) return config.urlTemplate
     return config.target?.url || config.target?.name || ''

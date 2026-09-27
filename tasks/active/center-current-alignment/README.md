@@ -670,3 +670,33 @@ before acting on CCI execution files or proposing replacements.
   credentialSource provider. Audit its OAuth2 acquisition/rotation/publication
   schema and nested credential boundaries next. Other provider field drift and
   broader menu workflows still need verification.
+
+### LinkSys credentialSource provider
+
+- OTLP batch committed as 55329c6, no push.
+- Added eighth LinkSys variant credentialSource with flat oauth2ClientCredentials
+  provider, clientSecretBasic active/previous Secret references, scopes, nested
+  TLS, rotation durations, egress blockPrivate, and publication controls. Omitted
+  defaults and explicit false survive narrow form edits and mutation serialization.
+- Validation mirrors current provider limits: HTTPS issuer without userinfo/query/
+  fragment, distinct core bootstrap references, RFC 6749 scopes and aggregate
+  bounds, bounded GEP-2257 durations/retry ordering, memoryMaxKeys 1..10000.
+- Added exact nested provider TLS resolved-certificate exclusions. Credential
+  acquisition remains Controller-owned; Center does not read bootstrap secrets.
+- Unit suites passed 14 utility cases (42508), plus four form cases (29341).
+  Production build 65677, lint 76643, E2E typecheck 66540, and final TS/new-test
+  lint 37500 passed. Logs /tmp/ws5-center-credential-{tests,form,build,lint}.log.
+- Native browser 50832 passed auth plus both typed OTLP and credentialSource CRUD
+  with Form/YAML round trips and Controller readback. Log:
+  /tmp/ws5-center-credential-runtime-v1.log. All owned services stopped; 70 seed
+  fixtures retained. The missing bootstrap fixture intentionally prevents issuer
+  access; this proves configuration management, not token acquisition/rotation.
+- Full frontend regression currently runs as **11255**, log
+  /tmp/ws5-center-all-web-current.log. Poll this exact handle before restarting.
+- Next confirmed drift: Redis timeout.connect/command are GEP-2257 strings;
+  db allows 0..255, retry/observability and pool.minIdle were removed, cluster
+  readFromReplicas was removed. Kafka adds maxTopics/maxPendingRecords/
+  maxPendingBytes. Audit validation and controls before marking LinkSys complete.
+- Full frontend run 11255 is now terminal success: **456 tests across 88 files**.
+  No active handles remain for this checkpoint. Existing Rust matrix findings are
+  unchanged because these batches modify frontend, tests, and documentation only.

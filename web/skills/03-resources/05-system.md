@@ -85,8 +85,8 @@ spec:
   `spec: {type: redis, config: {...}}`. The type's fields live under config,
   never under a repeated provider name.
 - Current upstream also includes OTLP/gRPC and credentialSource. The dashboard
-  implements redis, elasticsearch, etcd, webhook, kafka, httpdns, and otlp;
-  credentialSource remains pending in the active alignment ledger.
+  implements all eight: redis, elasticsearch, etcd, webhook, kafka, httpdns, otlp,
+  and credentialSource. Provider-specific runtime workflows remain separate checks.
 - OTLP config fields: endpoint, timeoutMs (1..300000, default 10000), optional
   auth.secretRef, and optional tls. Endpoints are HTTP(S) origins; no URI
   credentials, path, query, or fragment. TLS enabled gates local policy; HTTPS
@@ -97,6 +97,19 @@ spec:
   is Controller-owned and excluded from mutation payloads by the shared catalog.
 - Preserve inactive TLS configuration and provider drafts while editing; only
   validate enabled local TLS policy. List summaries include OTLP endpoint.
+
+### Credential source
+
+- Provider shape is flat: `provider: {type: oauth2ClientCredentials, tokenEndpoint,
+  clientAuthentication, scopes, tls}`. Only clientSecretBasic is supported.
+- Bootstrap credentials remain Secret references (activeSecretRef and optional
+  previousSecretRef). The Controller owns acquisition and rotation; the Gateway
+  never contacts the issuer, and Center never fetches credential values.
+- Rotation fields use bounded GEP-2257 durations. Egress blockPrivate and
+  publication persist default true; memoryMaxKeys defaults 10000. Preserve false
+  and omitted values while editing.
+- Provider TLS is nested at config.provider.tls; exclude its resolved CA/client
+  certificate fields at the same mutation boundary as ordinary LinkSys TLS.
 
 ## EdgionAcme
 

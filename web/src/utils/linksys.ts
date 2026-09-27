@@ -13,6 +13,7 @@ import type {
   WebhookConfig,
 } from '@/types/link-sys'
 import { isValidDNS1123Label, isValidDNS1123Subdomain } from './validation'
+import { validateCredentialSource } from './linksys-credential-source'
 import { dumpYaml } from './yaml-utils'
 import { mutationDocumentToYaml } from './resource-document'
 
@@ -22,6 +23,7 @@ export const LINKSYS_RUST_FIELD_MATRIX = {
   elasticsearch: ['endpoints','auth','tls','timeout','pool','bulk','index'],
   etcd: ['endpoints','auth','tls','timeout','keepAlive','namespace','autoSyncInterval','maxCallSendSize','maxCallRecvSize','userAgent','rejectOldCluster','observability'],
   webhook: ['target','tls','timeoutMs','timeoutMsTemplate','retry','rateLimit','healthCheck','maxResponseBytes','success','statusOnError','request'],
+  credentialSource: ['provider','rotation','egress','publication'],
   otlp: ['endpoint','timeoutMs','auth','tls'],
   kafka: ['brokers','sasl','tls','channelSize','lingerMs'],
   httpdns: ['preset','urlTemplate','response','fallback','connection'],
@@ -52,6 +54,8 @@ export function createConfig(type: LinkSysType): LinkSysConfig {
       return { endpoints: [] }
     case 'webhook':
       return { target: { url: '' }, request: { method: { template: 'POST' } }, timeoutMs: 5000 }
+    case 'credentialSource':
+      return { provider: { type: 'oauth2ClientCredentials', tokenEndpoint: '', clientAuthentication: { activeSecretRef: { name: '' } } } }
     case 'otlp':
       return { endpoint: '', timeoutMs: 10000 }
     case 'kafka':
@@ -212,6 +216,9 @@ export function validateLinkSys(resource: LinkSys): void {
       }
       break
     }
+    case 'credentialSource':
+      validateCredentialSource(config)
+      break
     case 'otlp': {
       const otlp = config as OtlpConfig
       if (!isValidOtlpEndpoint(otlp.endpoint)) fail('OTLP endpoint must be an HTTP(S) origin without credentials, path, query, or fragment')
