@@ -996,6 +996,7 @@ const zh = {
   'help.maxEjectionTime': '未设置时为 max(5m, 基础驱逐时长)；低于基础时长的值会被 Controller 向上调整。',
   'help.authorityTemplate': '固定后缀必须匹配 Pattern；动态 label 区域必须包含变量且不能包含字面量点号。',
   'notice.upstreamAuthoritySafety': '拨号目标仍固定为 Service。建议 label 区域只包含一个变量，并在 upstream peer 选择前写入所需上下文。',
+  'notice.aiPolicySections': 'AI 后端不支持此策略中的负载均衡、健康检查或上游 Authority。保存前请移除这些配置；已有值会保留，直到你主动移除。',
   'notice.healthCheckHostRequired': '启用主动健康检查时必须配置静态健康检查 Authority。',
   'notice.completeRequiredFields': '提交前请补全所有必填策略字段。',
   'validation.expectedStatusesTokens': '预期 HTTP 状态码必须是用逗号分隔的整数。',

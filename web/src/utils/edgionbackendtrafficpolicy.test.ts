@@ -103,6 +103,8 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
     policy.spec.targetRefs = [ai, { ...ai }]
     expect(validateEdgionBackendTrafficPolicy(policy)).toContain('EdgionBackend targetRefs must not contain duplicate targets')
     expect(validateEdgionBackendTrafficPolicy(policy)).toContain('healthCheck is not supported for EdgionBackend targets')
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain('loadBalancer is not supported for AI EdgionBackend targets')
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain('upstreamAuthority is not supported for AI EdgionBackend targets')
     policy.spec.targetRefs = Array.from({ length: 17 }, (_, index) => ({ ...ai, name: `provider-${index}` }))
     expect(validateEdgionBackendTrafficPolicy(policy)).toContain('EdgionBackend targetRefs must contain at most 16 entries')
   })

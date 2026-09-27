@@ -1,3 +1,4 @@
+import { targetsAiBackends } from '@/utils/edgionbackendtrafficpolicy'
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
 import { Input, Modal, Space, Table, Tag, message } from 'antd'
@@ -97,7 +98,7 @@ const EdgionBackendTrafficPolicyList = () => {
     {
       title: t('col.loadBalancer'),
       key: 'loadBalancer',
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => item.spec.loadBalancer?.type ?? 'RoundRobin',
+      render: (_: unknown, item: EdgionBackendTrafficPolicy) => item.spec.loadBalancer?.type ?? (targetsAiBackends(item.spec.targetRefs) ? '—' : 'RoundRobin'),
     },
     {
       title: t('col.trafficPolicy'),

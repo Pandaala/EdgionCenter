@@ -6,12 +6,17 @@ import type {
   EdgionBackendTrafficPolicy,
   LoadBalancerConfig,
   OutlierDetectionConfig,
+  PolicyTargetRef,
   RetryConstraintConfig,
   UpstreamAuthorityConfig,
 } from '@/types/edgion-backend-traffic-policy'
 import { dumpYaml } from './yaml-utils'
 import { mutationDocumentToYaml } from './resource-document'
 import { isGep2257DurationInRange, isValidGep2257Duration, isValidPort } from './validation'
+
+export function targetsAiBackends(refs: readonly PolicyTargetRef[]): boolean {
+  return refs.length > 0 && refs.every((ref) => ref.kind === 'EdgionBackend' && ref.group === 'edgion.io')
+}
 
 export function createDefaultLoadBalancer(): LoadBalancerConfig {
   return { type: 'RoundRobin' }
@@ -169,6 +174,8 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
     if (refs.length > 16) errors.push('EdgionBackend targetRefs must contain at most 16 entries')
     if (hasDuplicateTarget) errors.push('EdgionBackend targetRefs must not contain duplicate targets')
     if (policy.spec.healthCheck != null) errors.push('healthCheck is not supported for EdgionBackend targets')
+    if (policy.spec.loadBalancer != null) errors.push('loadBalancer is not supported for AI EdgionBackend targets')
+    if (policy.spec.upstreamAuthority != null) errors.push('upstreamAuthority is not supported for AI EdgionBackend targets')
   }
 
   const lb = policy.spec.loadBalancer

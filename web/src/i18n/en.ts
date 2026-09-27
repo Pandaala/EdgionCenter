@@ -996,6 +996,7 @@ const en = {
   'help.maxEjectionTime': 'When absent, defaults to max(5m, base ejection); values below base are clamped by the Controller.',
   'help.authorityTemplate': 'The fixed suffix must match the pattern; the label slot must contain a variable and no literal dot.',
   'notice.upstreamAuthoritySafety': 'The dial target remains the Service. Prefer a label slot containing exactly one variable, and set its context before upstream peer selection.',
+  'notice.aiPolicySections': 'AI backends do not support load balancing, health checks or upstream authority in this policy. Remove those sections before saving; existing values are preserved until you remove them.',
   'notice.healthCheckHostRequired': 'Static health check authority is required while active health checking is enabled.',
   'notice.completeRequiredFields': 'Complete all required policy fields before submitting.',
   'validation.expectedStatusesTokens': 'Expected HTTP statuses must be comma-separated integers.',

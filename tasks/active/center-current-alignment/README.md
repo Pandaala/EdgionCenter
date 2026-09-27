@@ -1275,3 +1275,26 @@ before acting on CCI execution files or proposing replacements.
 - Full regression preceded this final list-only change; the list change has the
   targeted component/native/build evidence above. Remaining deeper target-policy
   and runtime behavior is still open.
+
+### AI backend traffic policy applicability
+
+- Current Controller evaluate_policy rejects loadBalancer and upstreamAuthority
+  for resolved AI targets; schema validation already rejects healthCheck.
+  Center only rejected healthCheck and incorrectly displayed RoundRobin as the
+  default algorithm for AI policies without a load-balancer section.
+- Added both missing validation restrictions, a localized applicability notice,
+  disabled creation of unsupported sections for homogeneous AI refs, and kept
+  existing sections available for explicit removal (including an empty
+  healthCheck envelope). No silent field deletion; supported siblings survive.
+  Shared target classification removes the invented AI RoundRobin list default.
+- Forty-eight adapter/form/editor/list tests passed (58400); build 42077, lint
+  59028 and E2E typecheck 91480 passed. Initial component attempt only had
+  inaccurate accessible label strings, corrected to current localized labels.
+- Native alignment-ai-policy-20260928-v1 passed login, Service policy CRUD and
+  the new AI policy create/form-YAML round-trip/save/readback/exact-delete case
+  (3 tests, 39625 terminal zero). Verified unsupported switches disabled,
+  supported sections preserved, and no RoundRobin list claim. All 70 seeds
+  retained. Logs /tmp/ws5-center-ai-policy-{tests,build,lint,e2e-typecheck,native}.log.
+- No Controller RBAC widening or Edgion edits. Attachment arbitration and live
+  resilience execution remain separate from this configuration/UI proof; the
+  full alignment objective stays active.

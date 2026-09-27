@@ -574,3 +574,48 @@ for (const variant of typedLinkSysCases) {
 })
 
 }
+
+test('AI backend traffic policy preserves supported sections through the browser form', async ({ page, request }) => {
+  test.skip(mode !== 'standalone', 'Native Controller policy editing coverage')
+  const catalog = RESOURCE_CATALOG.get('edgionbackendtrafficpolicy')!
+  const name = `${prefix}-ai-resilience-policy`
+  const document = mutationDocument(catalog, name)
+  document.spec = {
+    targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: `${prefix}-ai-backend` }],
+    outlierDetection: { consecutiveErrors: 3, ejectionTime: '30s', maxEjectionPercent: 50 },
+    retryConstraint: { budget: { percent: 10, interval: '10s' } },
+    circuitBreaker: { maxParallelRequests: 20 },
+    connection: { connectTimeout: '3s' },
+  }
+  const path = itemPath(catalog, namespace, name)
+  let created = false
+  try {
+    await openResourcePage(page, catalog)
+    await createThroughYaml(page, catalog, document)
+    created = true
+    await expectApiDocument(request, catalog, namespace, name)
+    const row = await resourceRow(page, catalog, name)
+    await expect(row).not.toContainText('RoundRobin')
+    await row.getByTestId('edgionbackendtrafficpolicy-row-edit').click()
+    await expect(page.getByText(/AI backends do not support load balancing/)).toBeVisible()
+    for (const label of ['Load Balancer (optional)', 'Active Health Check (optional)', 'Dynamic Upstream Authority (optional)']) {
+      await expect(page.getByRole('switch', { name: label, exact: true })).toBeDisabled()
+    }
+    await exerciseEditorRoundTrip(page, catalog.kind, document, 'ai-policy-edit')
+    const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().includes(path))
+    await page.getByTestId('editor-submit').click()
+    expect((await response).ok()).toBeTruthy()
+    const current = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+    expect(current.spec).toMatchObject(document.spec)
+    expect(current.metadata.annotations['edgion.io/e2e-form']).toBe('ai-policy-edit')
+    for (const section of ['loadBalancer', 'healthCheck', 'upstreamAuthority']) expect(current.spec[section] ?? undefined).toBeUndefined()
+  } finally {
+    if (created) {
+      const current = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+      expect(current.metadata.labels['edgion.io/e2e-run']).toBe(runId)
+      const deleted = await request.delete(path, { headers: { 'If-Match': `"${current.metadata.resourceVersion}"` } })
+      expect(deleted.ok()).toBeTruthy()
+      await expectApiAbsent(request, path)
+    }
+  }
+})

@@ -257,3 +257,31 @@ it('keeps malformed HTTPS status tokens blocking after a TLS draft is corrected'
   expect(onDraftValidationChange.mock.calls.at(-1)![0]).toHaveLength(1)
   expect(onDraftValidationChange.mock.calls.at(-1)![0]).not.toContain('Probe TLS must be a valid JSON object')
 })
+
+
+it('prevents adding Service-only sections to AI targets while allowing explicit removal', () => {
+  const onChange = vi.fn()
+  const policy: EdgionBackendTrafficPolicy = {
+    apiVersion: 'edgion.io/v1', kind: 'EdgionBackendTrafficPolicy',
+    metadata: { name: 'ai', namespace: 'prod' },
+    spec: { targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }] },
+  }
+  const view = render(<EdgionBackendTrafficPolicyForm data={policy} onChange={onChange} />)
+  const labels = ['Load Balancer (optional)', 'Active Health Check (optional)', 'Dynamic Upstream Authority (optional)']
+  for (const name of labels) expect(screen.getByRole('switch', { name })).toBeDisabled()
+  const existing = {
+    ...policy,
+    spec: { ...policy.spec, loadBalancer: { type: 'RoundRobin' as const }, healthCheck: {}, upstreamAuthority: { pattern: '*.example.com', template: '${ctx:tenant}.example.com' }, retryConstraint: {} },
+  }
+  view.rerender(<EdgionBackendTrafficPolicyForm data={existing} onChange={onChange} />)
+  expect(onChange).not.toHaveBeenCalled()
+  for (const [index, name] of labels.entries()) {
+    const toggle = screen.getByRole('switch', { name })
+    expect(toggle).toBeEnabled()
+    expect(toggle).toBeChecked()
+    fireEvent.click(toggle)
+    const changed = onChange.mock.calls.at(-1)![0] as EdgionBackendTrafficPolicy
+    expect(changed.spec).not.toHaveProperty(['loadBalancer', 'healthCheck', 'upstreamAuthority'][index])
+    expect(changed.spec.retryConstraint).toEqual({})
+  }
+})

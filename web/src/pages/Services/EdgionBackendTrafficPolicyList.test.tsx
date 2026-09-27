@@ -18,7 +18,7 @@ vi.mock('@/components/resource/PermissionAwareButton', () => ({
 }))
 vi.mock('@/hooks/useResourceList', () => ({
   useResourceList: () => ({
-    items: [{ apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionBackendTrafficPolicy', metadata: { namespace: 'prod', name: 'policy-a' }, spec: { targetRefs: [], healthCheck: { active: { type: 'https' } }, retryConstraint: {}, circuitBreaker: { maxParallelRequests: 20 }, connection: { connectTimeout: '3s' } } }],
+    items: [{ apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionBackendTrafficPolicy', metadata: { namespace: 'prod', name: 'policy-a' }, spec: { targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }], healthCheck: { active: { type: 'https' } }, retryConstraint: {}, circuitBreaker: { maxParallelRequests: 20 }, connection: { connectTimeout: '3s' } } }],
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -46,6 +46,7 @@ describe('EdgionBackendTrafficPolicy navigation', () => {
 
   it('shows probe protocol and every configured resilience section', () => {
     renderWithQueryClient(<EdgionBackendTrafficPolicyList />)
+    expect(screen.queryByText('RoundRobin')).not.toBeInTheDocument()
     for (const label of ['Health Check · HTTPS', 'Retry Constraint', 'Circuit Breaker', 'Connection Override']) {
       expect(screen.getByText(label)).toBeVisible()
     }

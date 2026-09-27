@@ -23,6 +23,7 @@ import {
   createDefaultOutlierDetection,
   createDefaultRetryConstraint,
   createDefaultUpstreamAuthority,
+  targetsAiBackends,
 } from '@/utils/edgionbackendtrafficpolicy'
 import { useT } from '@/i18n'
 
@@ -78,6 +79,7 @@ const EdgionBackendTrafficPolicyForm = ({
   const patchAuthority = (patch: Partial<UpstreamAuthorityConfig>) =>
     setSection('upstreamAuthority', { ...data.spec.upstreamAuthority!, ...patch })
 
+  const aiTargets = targetsAiBackends(data.spec.targetRefs)
   const lb = data.spec.loadBalancer
   const active = data.spec.healthCheck?.active
   const activeType = active?.type ?? 'http'
@@ -142,6 +144,8 @@ const EdgionBackendTrafficPolicyForm = ({
           isCreate={isCreate}
         />
 
+        {aiTargets && <Alert type="info" showIcon message={t('notice.aiPolicySections')} />}
+
         <Card title={t('section.targetRefs')} size="small">
           {data.spec.targetRefs.map((ref, index) => (
             <Card
@@ -195,7 +199,7 @@ const EdgionBackendTrafficPolicyForm = ({
         <Card
           title={t('section.loadBalancer')}
           size="small"
-          extra={<Switch checked={Boolean(lb)} disabled={readOnly} onChange={(checked) => setSection('loadBalancer', checked ? createDefaultLoadBalancer() : undefined)} />}
+          extra={<Switch aria-label={t('section.loadBalancer')} checked={Boolean(lb)} disabled={readOnly || (aiTargets && !lb)} onChange={(checked) => setSection('loadBalancer', checked ? createDefaultLoadBalancer() : undefined)} />}
         >
           {lb && (
             <>
@@ -247,7 +251,7 @@ const EdgionBackendTrafficPolicyForm = ({
         <Card
           title={t('section.activeHealthCheck')}
           size="small"
-          extra={<Switch checked={Boolean(active)} disabled={readOnly} onChange={toggleActiveHealthCheck} />}
+          extra={<Switch aria-label={t('section.activeHealthCheck')} checked={aiTargets ? Boolean(data.spec.healthCheck) : Boolean(active)} disabled={readOnly || (aiTargets && !data.spec.healthCheck)} onChange={(checked) => aiTargets && !checked ? setSection('healthCheck', undefined) : toggleActiveHealthCheck(checked)} />}
         >
           {active && (
             <>
@@ -423,7 +427,7 @@ const EdgionBackendTrafficPolicyForm = ({
         <Card
           title={t('section.upstreamAuthority')}
           size="small"
-          extra={<Switch checked={Boolean(authority)} disabled={readOnly} onChange={(checked) => setSection('upstreamAuthority', checked ? createDefaultUpstreamAuthority() : undefined)} />}
+          extra={<Switch aria-label={t('section.upstreamAuthority')} checked={Boolean(authority)} disabled={readOnly || (aiTargets && !authority)} onChange={(checked) => setSection('upstreamAuthority', checked ? createDefaultUpstreamAuthority() : undefined)} />}
         >
           {authority && (
             <Space direction="vertical" style={{ width: '100%' }}>

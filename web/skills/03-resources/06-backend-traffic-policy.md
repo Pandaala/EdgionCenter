@@ -20,9 +20,12 @@ load those source definitions when changing their fields.
 
 The editor supports homogeneous Service or EdgionBackend target references and
 the current load-balancer, active-health-check, outlier, retry-budget,
-circuit-breaker, connection and upstream-authority sections. Do not infer AI
-runtime support solely from the availability of a form section: Controller target
-capability validation and resolved references remain authoritative.
+circuit-breaker, connection and upstream-authority sections. AI targets support
+outlier detection, retry constraints, circuit breaking and connection settings;
+loadBalancer, healthCheck and upstreamAuthority are rejected. The form prevents
+adding those unsupported sections, retains existing values, and allows their
+explicit removal. The list never invents a RoundRobin default for an AI target.
+Controller target capability validation and resolved references remain authoritative.
 
 Active probe modes include http, https, tcp, grpc and grpcs. Encrypted modes expose
 the independent OutboundTlsLocal document through a JSON field, including
