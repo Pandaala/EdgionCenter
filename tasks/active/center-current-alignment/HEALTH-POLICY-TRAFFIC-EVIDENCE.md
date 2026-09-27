@@ -174,6 +174,34 @@ remained 200, and removing the temporary Center grant returned proxy read to
 
 No production source changes were needed. These runs establish the Center form
 integration with HTTP, HTTPS, gRPC and GRPCS probes, including basic identity
-failure and recovery. They do not establish TCP-only probes, every TLS option,
-certificate rotation, outlier ejection, retry budgets, circuit-breaking or
-load-balancer algorithms. The overall alignment goal remains active.
+failure and recovery. The TCP follow-up below completes the five basic probe
+protocols; wider TLS and resilience behavior remains separate.
+
+
+## TCP follow-up
+
+The current Center form also passed the TCP-only probe flow. A private-interface
+TCP listener on 18097 accepts and closes sockets without any application protocol.
+Port 18099 had no listener when checked. Three form saves select `tcp` and port
+18097, change to 18099, then restore 18097. Every PUT advances Controller
+resourceVersion and exact protocol/port readback matches the submitted values.
+Gateway application traffic converges to 200, 503 and 200 respectively.
+
+Healthy assertions require more than two additional connections at the TCP
+server before accepting the traffic result; the final counter is seven. The
+inspected screenshot displays the TCP health badge. Artifacts are
+`/tmp/ws5-center-tcp-health-20260928/`: `browser-proof.cjs`, passing
+`browser-result.json`, `tcp-stats.json`, `recovered.png` and `restored.json`.
+The retained TCP process is session 94688; revalidate before reuse.
+
+The entire active-health config was restored to the original HTTPS probe on
+18092. Exact Controller config restoration, removal of remote policy-update
+permission, healthy traffic after reload and Center grant removal all passed
+(the same three grouped restoration assertions as the earlier runs).
+
+All five active probe types now have live Center-form-to-Gateway evidence:
+HTTP, HTTPS, TCP, gRPC and GRPCS. HTTPS/GRPCS also include client-auth failures
+and recovery. No source fix was necessary in these probe runs. This does not
+establish every TLS option, certificate rotation, outlier ejection, retry
+budgets, circuit-breaking or load-balancer algorithms, and does not close the
+overall resource/menu alignment task.

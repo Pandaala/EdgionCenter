@@ -2568,3 +2568,19 @@ before acting on CCI execution files or proposing replacements.
 - See [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md) for
   the 14-case matrix, synthetic fixture limits, artifacts and retained processes.
   TCP-only probes and other resilience behavior remain open.
+
+
+### 2026-09-28: TCP probe flow and current verification index
+
+- Three TCP form saves passed exact Controller readback and actual Gateway
+  200/503/200 transitions. Fresh connection counters exclude stale health state.
+  All five basic probe types now have recorded live Center integration evidence.
+- Restored the pre-run HTTPS policy and exact Controller configuration; all
+  three grouped authorization/traffic restoration assertions passed.
+- Rechecked retained frontend logs and corrected CURRENT-COVERAGE.md's outdated
+  latest-suite section to the actual 679-test baseline. No source changes or
+  fresh full-suite claim. Probe details remain in
+  [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md).
+- Next focused menu flow is RegionRoute failover with actual routed traffic,
+  retaining the current overlay/CAS/watch contract. The broader audit remains
+  active. No Edgion changes committed and no push.

@@ -61,7 +61,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | Service | services/list | Immutable-field handling, zero weights, single/batch delete workflows |
 | EndpointSlice | services/endpointslices | Native top-level addressType/endpoints/ports envelope retained |
 | EdgionBackend | services/ai-backends | New resource, provider/credential/model editor, AI route and topology references |
-| EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary; live HTTP/HTTPS/gRPC/GRPCS probes, HTTPS/GRPCS mTLS, service and certificate failure/recovery through Center forms |
+| EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary; live HTTP/HTTPS/TCP/gRPC/GRPCS probes, HTTPS/GRPCS mTLS, service and certificate failure/recovery through Center forms |
 | EdgionTls | security/tls | Typed mTLS SANs and resolved-secret mutation boundary |
 | BackendTLSPolicy | security/backendtls | Current identity/target restrictions and lossless form edits |
 | Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model; read failure/recovery components and live default-policy denial; direct Kubernetes Controller namespace filtering plus the real dual-Controller Center proxy E2E |
@@ -72,11 +72,11 @@ No row implies complete nested-field coverage or data-plane conformance.
 | LinkSys | system/linksys | All eight variants have dedicated native browser CRUD |
 | EdgionAcme | system/acme | HTTP-01 scope; current renewal and notification boundaries |
 
-Active HTTP, HTTPS, gRPC and GRPCS health policies now have real Gateway traffic
+All five active probe types (HTTP, HTTPS, TCP, gRPC and GRPCS) have Gateway traffic
 proof, including Center form edits, Controller version readback and failure/
 recovery. HTTPS and GRPCS mTLS cover absent, trusted and untrusted client
 identities. See [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md).
-TCP-only probes, broader TLS options and other resilience mechanisms remain open.
+Broader TLS options and other resilience mechanisms remain open.
 
 Recent native logs supplement the baseline: `/tmp/ws5-center-waf-ui-native-v1.log`,
 `/tmp/ws5-center-http-retry-native-v1.log`, `/tmp/ws5-center-grpc-match-native-v1.log`,
@@ -130,14 +130,18 @@ Cloudflare test race was fixed and passed both focused and matrix runs.
 
 ## Latest complete frontend suite
 
-At Center commit `4c774c2`, session 81433 completed successfully: 101 test files,
-625 tests, including the recent Gateway/HTTP/plugin mutation boundaries, access
-policy body edits, Controller read-state fixes and GlobalResources recovery.
-Retained log: `/tmp/ws5-center-frontend-final-20260928.log`.
-The earlier 622-test run remains at
-`/tmp/ws5-center-frontend-full-20260928-current.log`.
-This supersedes the earlier 590-test frontend baseline for these changes. It is
-not native browser, backend compilation or deployed Kubernetes evidence.
+The latest full frontend run passed 679 tests in 103 files, including dependency
+read failure/recovery, current Gateway TLS-mode restrictions and route hostname
+validation. The retained log `/tmp/ws5-dependencies-full-final.log` was rechecked
+at this checkpoint. TypeScript/Vite build and ESLint also passed, recorded in
+`/tmp/ws5-dependencies-build-final.log` and
+`/tmp/ws5-dependencies-lint-final.log`. The build retains its bundle-size warning.
+
+This supersedes the earlier 590, 625, 635, 642, 647 and 676-test checkpoints for
+unit/component coverage. Subsequent health-probe work changed only runtime
+fixtures and evidence documents, so it did not rerun those unchanged gates.
+The full native browser regression above predates the later frontend fixes;
+focused browser evidence supplements it without upgrading that run's scope.
 
 The dedicated kind node was rechecked in the same pass: its API still returns
 EOF, `crictl ps -a` has no control-plane containers, and containerd's main thread
