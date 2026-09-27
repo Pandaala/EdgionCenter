@@ -61,6 +61,13 @@ change leaves acceptance ambiguous, the response is `UnknownOutcome`; the caller
 provider target before a safe next action. No generic operation queue or worker converts ambiguity
 into background work.
 
+The dashboard also treats an Axios write request with a transport object but no
+HTTP response as ambiguous: losing the browser response does not prove rejection.
+Cloudflare and Route53 share this classification. Local guards, request setup
+failures without a transport object, and failed reads do not establish mutation
+dispatch. Preserve the draft and require observation before another write; never
+automatically replay the mutation.
+
 ## DNS-specific threats
 
 DNS writes preserve provider-specific semantics rather than using a generic endpoint. They reject

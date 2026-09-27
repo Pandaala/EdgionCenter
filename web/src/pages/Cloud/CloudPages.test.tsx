@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AxiosError, AxiosHeaders } from 'axios'
 import type { ReactElement } from 'react'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { I18nProvider } from '@/i18n'
@@ -186,6 +187,7 @@ describe('Cloudflare DNS dashboard boundary', () => {
   it.each([
     ['conflict', { response: { status: 409, data: { error: 'conflict' } } }, 'The record changed before this request.'],
     ['unknown outcome', { response: { status: 503, data: { error: 'unknown_outcome' } } }, 'The provider outcome is unknown.'],
+    ['lost browser response', new AxiosError('lost response', 'ERR_NETWORK', { method: 'put', headers: new AxiosHeaders() }, {}), 'The provider outcome is unknown.'],
   ])('renders %s results without retrying automatically', async (_name, error, expected) => {
     state.putRecord.mockRejectedValueOnce(error)
     renderPage(<CloudflareDnsPage />)

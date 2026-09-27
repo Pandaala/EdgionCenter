@@ -3,9 +3,9 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { Alert, Button, Descriptions, Empty, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { cloudApi, type ProviderAccount } from '@/api/cloud'
+import { cloudMutationResult } from '@/api/cloudMutation'
 import {
   route53DnsApi,
-  route53MutationResult,
   type Route53AliasTarget,
   type Route53RecordDesired,
   type Route53RecordSet,
@@ -166,7 +166,7 @@ export default function Route53DnsPage({ dnsWriteAvailable = false, zoneLifecycl
   const readFailed = (canAccounts && accountsQuery.isError)
     || (canDnsAccess && accountId !== undefined && (zones.isError || (zone !== undefined && records.isError)))
   const invalidate = () => { queryClient.invalidateQueries({ queryKey: DNS_KEY }) }
-  const setError = (error: unknown) => setResult(route53MutationResult(error))
+  const setError = (error: unknown) => setResult(cloudMutationResult(error))
   const createZone = useMutation({
     mutationFn: (apex: string) => route53DnsApi.createZone(accountId!, apex, crypto.randomUUID()),
     onSuccess: () => { setResult('pending'); zoneForm.resetFields(); invalidate() }, onError: setError,

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import type { AxiosError } from 'axios'
+import { cloudMutationResult } from '@/api/cloudMutation'
 import { cloudApi, type ProviderAccount } from '@/api/cloud'
 import { cloudflareDnsApi, type CloudflareRecordPutRequest, type CloudflareRecordSet, type CloudflareRecordType, type CloudflareRecordValue, type CloudflareTtl, type CloudflareZone } from '@/api/cloudflareDns'
 import { useCan } from '@/utils/permissions'
@@ -66,14 +66,6 @@ function asRequest(values: RecordFormValues, existing?: CloudflareRecordSet): Cl
   }
 }
 
-function resultForError(error: unknown): MutationResult {
-  const status = (error as AxiosError<{ error?: string }>).response?.status
-  const code = (error as AxiosError<{ error?: string }>).response?.data?.error
-  if (code === 'unknown_outcome') return 'ambiguous'
-  if (status === 409 || status === 412) return 'conflicted'
-  return 'rejected'
-}
-
 function selectedCloudflareAccount(accounts: ProviderAccount[], accountId: string | undefined): ProviderAccount | undefined {
   return accounts.find((account) => account.accountId === accountId && account.provider === 'cloudflare')
 }
@@ -123,22 +115,22 @@ export default function CloudflareDnsPage() {
   const createZone = useMutation({
     mutationFn: (name: string) => cloudflareDnsApi.createZone(accountId!, name),
     onSuccess: () => { message.success(t('cloud.dns.zoneCreated')); zoneForm.resetFields(); invalidateDns() },
-    onError: (error) => setResult(resultForError(error)),
+    onError: (error) => setResult(cloudMutationResult(error)),
   })
   const deleteZone = useMutation({
     mutationFn: (target: CloudflareZone) => cloudflareDnsApi.deleteZone(accountId!, target),
     onSuccess: () => { setZone(undefined); setResult('applied'); message.success(t('cloud.dns.zoneDeleted')); invalidateDns() },
-    onError: (error) => setResult(resultForError(error)),
+    onError: (error) => setResult(cloudMutationResult(error)),
   })
   const writeRecord = useMutation({
     mutationFn: ({ record, request }: { record: CloudflareRecordSet; request: CloudflareRecordPutRequest }) => cloudflareDnsApi.putRecord(accountId!, zone!.zoneId, record, request),
     onSuccess: () => { setResult('applied'); setEditing(undefined); message.success(t('cloud.dns.recordApplied')); invalidateDns() },
-    onError: (error) => setResult(resultForError(error)),
+    onError: (error) => setResult(cloudMutationResult(error)),
   })
   const deleteRecord = useMutation({
     mutationFn: (record: CloudflareRecordSet) => cloudflareDnsApi.deleteRecord(accountId!, zone!.zoneId, record),
     onSuccess: () => { setResult('applied'); message.success(t('cloud.dns.recordDeleted')); invalidateDns() },
-    onError: (error) => setResult(resultForError(error)),
+    onError: (error) => setResult(cloudMutationResult(error)),
   })
   const openEditor = (record: CloudflareRecordSet | null) => {
     setResult(null)

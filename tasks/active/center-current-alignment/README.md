@@ -1944,3 +1944,27 @@ before acting on CCI execution files or proposing replacements.
   been dispatched, so distinguish this from explicit rejection without treating
   local validation guards as dispatched. Verify this boundary next. Overall
   audit active; Kubernetes readiness and remaining menu workflows are open.
+
+### Cloud browser transport ambiguity (2026-09-28)
+
+- Replaced the two cloud mutation-error classifiers with one provider-neutral
+  `api/cloudMutation.ts` implementation. Explicit unknown_outcome remains
+  ambiguous, 409/412 remain conflicts, and an Axios POST/PUT/PATCH/DELETE with
+  a transport request but no response is now ambiguous instead of rejected.
+  Local pre-dispatch guards, setup errors without a request, and failed GETs
+  do not become dispatched mutations. Existing definitive rejections remain.
+- Both DNS pages consume the shared helper; removed the obsolete provider-
+  specific classifier. No backend, credential, retry or dispatch changes.
+  Updated the owning cloud security guide with the browser observation boundary.
+- Added actual AxiosError-shaped tests for all write verbs and the non-dispatch
+  cases, plus Cloudflare/Route53 component workflows preserving drafts and
+  asserting one dispatch after network failure/timeout. Final session 47373
+  exited zero: 30 tests, frontend build and lint passed. Logs:
+  `/tmp/ws5-center-cloud-transport-tests-v2.log`, `-build.log`, `-lint.log`.
+  Initial session 75880 failed because the new Route53 test queried the edit
+  button before async inventory arrived; changed it to await the button and
+  reran all three suites. Existing jsdom/Ant Design advisories remain.
+- These are deterministic frontend transport/component checks, not real cloud
+  mutations or a browser-to-provider acceptance claim. Prior 195 hermetic cloud
+  backend tests remain applicable because no backend code changed. Overall
+  resource/menu audit is active; no goal completion claim.

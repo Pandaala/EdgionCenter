@@ -3,7 +3,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { I18nProvider } from '@/i18n'
 import { renderWithQueryClient } from '@/test/render'
 import Route53DnsPage, { recordDesiredFromForm } from './Route53DnsPage'
-import { route53MutationResult } from '@/api/route53Dns'
+import { cloudMutationResult } from '@/api/cloudMutation'
+import { AxiosError, AxiosHeaders } from 'axios'
 
 const state = vi.hoisted(() => ({ grants: new Set<string>(), listAccounts: vi.fn(), listZones: vi.fn(), listRecords: vi.fn(), putRecord: vi.fn(), deleteRecord: vi.fn(), createZone: vi.fn(), observeZoneLifecycle: vi.fn(), deleteZone: vi.fn() }))
 
@@ -39,6 +40,19 @@ beforeEach(() => {
 })
 
 describe('Route 53 DNS dashboard boundary', () => {
+  it('keeps a lost browser mutation response unknown and preserves the draft without replay', async () => {
+    state.putRecord.mockRejectedValueOnce(new AxiosError('lost response', 'ECONNABORTED', { method: 'put', headers: new AxiosHeaders() }, {}))
+    renderPage()
+    fireEvent.mouseDown(screen.getByRole('combobox'))
+    fireEvent.click(await screen.findByText('AWS Main (aws-main)'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Records' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0])
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/The provider outcome is unknown/)).toBeInTheDocument()
+    expect(within(dialog).getByDisplayValue('blue')).toBeInTheDocument()
+    expect(state.putRecord).toHaveBeenCalledTimes(1)
+  })
   it.each(['accounts', 'zones', 'records'] as const)('shows sanitized %s read failures and recovers on refresh', async (boundary) => {
     const failed = boundary === 'accounts' ? state.listAccounts : boundary === 'zones' ? state.listZones : state.listRecords
     failed.mockRejectedValue(new Error('private-provider-error'))
@@ -64,8 +78,8 @@ describe('Route 53 DNS dashboard boundary', () => {
   })
 
   it('classifies revision conflicts and unknown outcomes without retrying', () => {
-    expect(route53MutationResult({ response: { status: 409, data: { error: 'conflict' } } })).toBe('conflicted')
-    expect(route53MutationResult({ response: { status: 503, data: { error: 'unknown_outcome' } } })).toBe('ambiguous')
+    expect(cloudMutationResult({ response: { status: 409, data: { error: 'conflict' } } })).toBe('conflicted')
+    expect(cloudMutationResult({ response: { status: 503, data: { error: 'unknown_outcome' } } })).toBe('ambiguous')
   })
 
   it('renders real Route 53 read fixtures and preserves Alias/routing/health identity on edit', async () => {

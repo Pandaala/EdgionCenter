@@ -168,10 +168,3 @@ export const route53DnsApi = {
     return data
   },
 }
-
-export function route53MutationResult(error: unknown): 'conflicted' | 'ambiguous' | 'rejected' {
-  const response = (error as { response?: { status?: number; data?: { error?: string } } }).response
-  if (response?.data?.error === 'unknown_outcome') return 'ambiguous'
-  if (response?.status === 409 || response?.status === 412) return 'conflicted'
-  return 'rejected'
-}
