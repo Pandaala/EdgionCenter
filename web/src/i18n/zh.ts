@@ -441,6 +441,7 @@ const zh = {
   'routePolicy.codes': '重试状态码',
   'routePolicy.httpCodes': 'HTTP 重试状态码（400-599）',
   'routePolicy.grpcCodes': 'gRPC 重试状态码（0-16）',
+  'routePolicy.grpcCodesIgnored': '此字段会保存，但当前网关运行时会忽略它。尚未实现按 gRPC 状态码重试；attempts 和 backoff 仍用于连接重试。',
   'routePolicy.session': '会话保持',
   'routePolicy.sessionName': '会话名称',
   'routePolicy.type': '保持类型',

@@ -441,6 +441,7 @@ const en = {
   'routePolicy.codes': 'Retry Status Codes',
   'routePolicy.httpCodes': 'HTTP Retry Status Codes (400-599)',
   'routePolicy.grpcCodes': 'gRPC Retry Status Codes (0-16)',
+  'routePolicy.grpcCodesIgnored': 'Stored in configuration, but currently ignored by the Gateway. gRPC status-code retries are not implemented; attempts and backoff still apply to connection retries.',
   'routePolicy.session': 'Session Persistence',
   'routePolicy.sessionName': 'Session Name',
   'routePolicy.type': 'Persistence Type',

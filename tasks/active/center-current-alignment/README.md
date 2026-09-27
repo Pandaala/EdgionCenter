@@ -1848,3 +1848,37 @@ before acting on CCI execution files or proposing replacements.
   TCP/UDP v1alpha2 examples, GRPC RequestMirror example, UDP stream-plugin claim).
   Reconcile those against source during the next route-menu pass. Overall goal
   remains active; no Kubernetes readiness or data-plane completion claim.
+
+### Stream route menu annotation verification (2026-09-28)
+
+- Checked StreamAnnotationsSection against current TCP/TLS route-unit builders
+  and UDP route-unit/session admission wiring. Controls match the implementation:
+  all three route kinds support StreamPlugins; TCP/TLS expose keepalive; only
+  TLSRoute exposes upstream Proxy Protocol v2 and bounded connection retries.
+  No changes to those production controls were needed.
+- Added native per-menu annotation edits, preserving unrelated annotations and
+  the complete route spec, round-tripping through YAML, then checking the real
+  Controller resource. Existing stream-plugin fixtures are referenced; no new
+  permissions or Gateway behavior were introduced.
+- Added the gRPC retry-code runtime limitation to the shared rule-policy form
+  in both locales. Current `grpc_route.rs::parse_retry` retains attempts/backoff
+  but sets parsed codes to None; the prior UI implied status retries worked.
+  The existing gRPC browser case now verifies the visible limitation.
+- Updated the route guide from current source: TCP/UDP v1, UDP Stage-1 support
+  and session boundary, TLS `v2`, no GRPC RequestMirror, route-level HTTP mirror
+  tuning annotations, removed nonexistent extensionRefMaxDepth, and removed
+  stale pending/completed development labels. This is an editor guide, not a
+  claim to reproduce the complete authoritative schema.
+- Typecheck/build/lint session 4551 exited zero. Logs:
+  `/tmp/ws5-center-stream-annotations-{types,build,lint}.log`.
+- Native v1 session 80431 exited one: authentication, TCP annotation edit, UDP
+  annotation edit and gRPC workflow passed; TLS stopped on an ambiguous test
+  locator matching both visible and accessibility option nodes. Restricted the
+  locator to the visible option content. Focused TLS v2 session 66649 exited
+  zero, authentication plus TLS annotation workflow, 2 passed. Logs:
+  `/tmp/ws5-center-stream-annotations-native-v1.log` and `-v2.log`.
+  Both runs retained all 70 original fixtures unchanged and stopped owned
+  services. Exact mutation fixtures were removed. No live forwarding claim.
+- Next route edit boundary to inspect: shared RulePoliciesEditor still stores
+  empty strings when clearing optional timeout/backoff/session fields. Compare
+  omission semantics and validation before changing them. Overall audit active.

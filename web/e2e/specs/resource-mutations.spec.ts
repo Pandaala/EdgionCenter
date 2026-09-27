@@ -373,6 +373,55 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+for (const kind of ['tcproute', 'udproute', 'tlsroute'] as const) {
+  test(`stream annotation browser edits preserve current ${kind} controls`, async ({ page, request }) => {
+    const catalog = RESOURCE_CATALOG.get(kind)!
+    await waitForControllerCapabilities(request, controller, [{ resourceKind: kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+    const name = `${prefix}-${kind}-annotations`
+    const document = mutationDocument(catalog, name)
+    document.metadata.annotations = { 'example.test/preserved': 'yes' }
+    const path = itemPath(catalog, namespace, name)
+    const expected: Record<string, string> = { ...document.metadata.annotations, 'edgion.io/edgion-stream-plugins': `${namespace}/${prefix}-stream` }
+    const formItem = (label: string) => page.locator('.ant-form-item').filter({ has: page.getByText(label, { exact: true }) })
+    try {
+      await openResourcePage(page, catalog)
+      await createThroughYaml(page, catalog, document)
+      await expectApiDocument(request, catalog, namespace, name)
+      await (await resourceRow(page, catalog, name)).getByTestId(`${kind}-row-edit`).click()
+      await page.getByPlaceholder('default/my-stream-plugins').fill(expected['edgion.io/edgion-stream-plugins'])
+      if (kind === 'udproute') {
+        await expect(page.getByText('TCP Keepalive Idle Time (seconds)', { exact: true })).toHaveCount(0)
+      } else {
+        await formItem('TCP Keepalive Idle Time (seconds)').locator('input').fill('60')
+        expected['edgion.io/tcp-keepalive-time'] = '60'
+      }
+      if (kind === 'tlsroute') {
+        await formItem('Proxy Protocol Version').getByRole('combobox').click()
+        await page.locator('.ant-select-item-option-content').filter({ hasText: /^v2$/ }).click()
+        await formItem('Max Connection Retries').locator('input').fill('3')
+        expected['edgion.io/proxy-protocol'] = 'v2'
+        expected['edgion.io/max-connect-retries'] = '3'
+      } else {
+        await expect(page.getByText('Proxy Protocol Version', { exact: true })).toHaveCount(0)
+        await expect(page.getByText('Max Connection Retries', { exact: true })).toHaveCount(0)
+      }
+      await page.getByTestId('editor-yaml-tab').click()
+      const edited = await yamlEditorDocument(page)
+      expect(edited.metadata.annotations).toEqual(expected)
+      expect(edited.spec).toMatchObject(document.spec)
+      const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().includes(path))
+      await page.getByTestId('editor-submit').click()
+      const result = await response
+      expect(result.ok(), await result.text()).toBeTruthy()
+      const updated = await readControllerResourceDocument(request, controller, kind, 'Namespaced', namespace, name)
+      expect(updated.metadata.annotations).toMatchObject(expected)
+    } finally {
+      const cleanup = await request.delete(path)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact stream annotation fixture cleanup failed').toBeTruthy()
+    }
+  })
+}
+
 test('gRPC browser form clears optional method predicates without empty names', async ({ page, request }) => {
   const catalog = RESOURCE_CATALOG.get('grpcroute')!
   await waitForControllerCapabilities(request, controller, [{ resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
@@ -396,6 +445,7 @@ test('gRPC browser form clears optional method predicates without empty names', 
     await createThroughYaml(page, catalog, document)
     await expectApiDocument(request, catalog, namespace, name)
     await (await resourceRow(page, catalog, name)).getByTestId('grpcroute-row-edit').click()
+    await expect(page.getByText(/Stored in configuration, but currently ignored by the Gateway/)).toBeVisible()
     await page.getByRole('textbox', { name: 'gRPC Method', exact: true }).fill('')
     await save([{ method: { type: 'Exact', service: 'demo.Service' }, headers }])
     await (await resourceRow(page, catalog, name)).getByTestId('grpcroute-row-edit').click()

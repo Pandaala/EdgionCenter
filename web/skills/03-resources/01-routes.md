@@ -1,6 +1,6 @@
 ---
 name: route-resources
-description: Route resource development guide — complete Schema for HTTPRoute/GRPCRoute/TCPRoute/UDPRoute/TLSRoute (based on feature-04-06 user documentation)
+description: Current dashboard editing contracts and examples for HTTPRoute, GRPCRoute, TCPRoute, UDPRoute and TLSRoute; resource schemas remain authoritative in Edgion.
 ---
 
 # Route Resources
@@ -22,7 +22,7 @@ These checks establish editing and Controller persistence, not data-plane
 forwarding or cross-namespace authorization. Schema examples below must be
 checked against current Edgion source before extending a form.
 
-## HTTPRoute ✅ Completed
+## HTTPRoute
 
 - apiVersion: `gateway.networking.k8s.io/v1`
 - Kind: `httproute`
@@ -45,11 +45,13 @@ Key fields:
 - `spec.rules[].sessionPersistence` — session affinity (Cookie/Header)
 
 **Edgion Extension Fields**:
-- `extensionRefMaxDepth` — ExtensionRef nesting depth limit
 - `sessionPersistence.strict` — strict affinity mode
-- RequestMirror extension: `connectTimeoutMs`, `writeTimeoutMs`, `maxBufferedChunks`, `mirrorLog`, `maxConcurrent`
+- RequestMirror transport tuning uses route annotations, including
+  `edgion.io/mirror-connect-timeout-ms`, `edgion.io/mirror-write-timeout-ms`,
+  `edgion.io/mirror-max-buffered-chunks`, `edgion.io/mirror-log`, and
+  `edgion.io/mirror-max-concurrent`; these are not inline RequestMirror fields.
 
-## GRPCRoute (Pending Development)
+## GRPCRoute
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -80,10 +82,6 @@ spec:
         - type: ResponseHeaderModifier
           responseHeaderModifier:
             add: [{ name: x-trace-id, value: "{{generated}}" }]
-        - type: RequestMirror
-          requestMirror:
-            backendRef: { name: mirror-service, port: 50051 }
-            fraction: { numerator: 5, denominator: 100 }
         - type: ExtensionRef
           extensionRef: { group: edgion.io, kind: EdgionPlugins, name: grpc-auth }
       backendRefs:
@@ -104,7 +102,8 @@ spec:
 
 **Development Notes**:
 - Very similar to HTTPRoute; the main difference is that matches uses `method` (gRPC service/method) instead of `path`
-- **Does not support** RequestRedirect and URLRewrite filters
+- Current filters are RequestHeaderModifier, ResponseHeaderModifier and
+  ExtensionRef. RequestMirror, RequestRedirect and URLRewrite are not supported.
 - `retry.codes` are gRPC status codes (0-16), parsed but **runtime-ignored**
 - Automatically detects and supports gRPC-Web requests
 - Can heavily reuse HTTPRoute components
@@ -123,18 +122,17 @@ method predicate while retaining header conditions and unknown sibling fields.
 An omitted method predicate is unconstrained. The last match can be removed;
 new matches start without invalid empty method names.
 
-## TCPRoute (Pending Development)
+## TCPRoute
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1alpha2
+apiVersion: gateway.networking.k8s.io/v1
 kind: TCPRoute
 metadata:
   name: my-tcp-route
   namespace: default
   annotations:
     edgion.io/edgion-stream-plugins: "default/my-stream-plugins"  # StreamPlugins binding
-    edgion.io/proxy-protocol: "1"       # Proxy Protocol version (1|2)
-    edgion.io/max-connect-retries: "3"  # Maximum connection retry count
+    edgion.io/tcp-keepalive-time: "60"
 spec:
   parentRefs:
     - name: my-gateway
@@ -147,17 +145,17 @@ spec:
 ```
 
 **Development Notes**:
-- apiVersion: `gateway.networking.k8s.io/v1alpha2`
+- apiVersion: `gateway.networking.k8s.io/v1`
 - Simplest route type: **no matches, no hostnames, no filters**
 - Only `parentRefs` + `rules[].backendRefs`
-- Binds StreamPlugins, Proxy Protocol, and connection retries via annotations
-- Form requires annotation editing support
+- Supports StreamPlugins and TCP keepalive annotations. The form does not offer
+  TLSRoute-only Proxy Protocol and connection-retry controls for TCPRoute.
 - Use cases: Redis, MySQL, PostgreSQL, MQTT, and other TCP protocols
 
-## UDPRoute (Pending Development)
+## UDPRoute
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1alpha2
+apiVersion: gateway.networking.k8s.io/v1
 kind: UDPRoute
 metadata:
   name: my-udp-route
@@ -175,10 +173,13 @@ spec:
 **Development Notes**:
 - Structure is nearly identical to TCPRoute
 - Use cases: DNS, log collection, game communications, and other stateless protocols
-- UDP is connectionless and does not support StreamPlugins annotations
+- UDPRoute supports the StreamPlugins annotation for Stage-1 checks at new
+  session admission. Established sessions do not re-run it for every packet.
+  Gateway-level StreamPlugins do not protect UDP listeners; attach the policy
+  to the UDPRoute. UDP has no TCP keepalive, Proxy Protocol or TLS-route stage.
 - Can share editor components with TCPRoute
 
-## TLSRoute (Pending Development)
+## TLSRoute
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -188,7 +189,7 @@ metadata:
   namespace: default
   annotations:
     edgion.io/edgion-stream-plugins: "default/my-stream-plugins"
-    edgion.io/proxy-protocol: "2"
+    edgion.io/proxy-protocol: "v2"
     edgion.io/max-connect-retries: "3"
 spec:
   parentRefs:
@@ -208,7 +209,8 @@ spec:
 - apiVersion: `gateway.networking.k8s.io/v1` (promoted from v1alpha3 to v1)
 - Routes based on the SNI in the TLS ClientHello
 - Has `hostnames` (SNI matching) in addition to TCPRoute
-- Supports StreamPlugins and Proxy Protocol annotations
+- Supports StreamPlugins, upstream TCP keepalive, Proxy Protocol `v2` and
+  connection-retry annotations. Other Proxy Protocol values are not enabled.
 - No matches, no filters
 
 ## Route Resource Reuse Matrix
@@ -216,16 +218,18 @@ spec:
 | Component | HTTPRoute | GRPCRoute | TCPRoute | UDPRoute | TLSRoute |
 |-----------|-----------|-----------|----------|----------|----------|
 | MetadataSection | ✅ | Reuse | Reuse | Reuse | Reuse |
-| AnnotationsEditor | — | — | New (stream) | — | Reuse (stream) |
+| StreamAnnotationsSection | — | — | Shared | Shared (plugins only) | Shared |
 | ParentRefsSection | ✅ | Reuse | Reuse | Reuse | Reuse |
 | HostnamesSection | ✅ | Reuse | ❌ | ❌ | Reuse |
 | PathMatchField | ✅ | ❌ | ❌ | ❌ | ❌ |
 | HeaderMatchField | ✅ | Reuse | ❌ | ❌ | ❌ |
-| GRPCMethodMatch | ❌ | New | ❌ | ❌ | ❌ |
+| GRPCMethodMatch | ❌ | Implemented | ❌ | ❌ | ❌ |
 | BackendRefsEditor | ✅ | Reuse | Reuse | Reuse | Reuse |
 | FiltersEditor | ✅ | Reuse (partial) | ❌ | ❌ | ❌ |
 | TimeoutsEditor | ✅ | Reuse | ❌ | ❌ | ❌ |
 | RetryEditor | ✅ | Reuse | ❌ | ❌ | ❌ |
 | SessionPersistence | ✅ | Reuse | ❌ | ❌ | ❌ |
 
-**Conclusion**: Extract shared components into `src/components/ResourceEditor/common/`.
+Common metadata, parent, hostname and backend controls live in
+`src/components/ResourceEditor/common/`. StreamRouteForm serves all three L4
+route menus and preserves multiple rules and unknown fields during edits.
