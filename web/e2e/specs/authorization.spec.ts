@@ -4,6 +4,32 @@ import { controllerPathId } from '../support/controllers.ts'
 
 test('authenticated identity endpoint is available', async ({ request }) => { expect((await request.get('/api/v1/auth/me')).ok()).toBeTruthy() })
 
+test('Kubernetes capabilities hide SQL administration and reject direct access', async ({ page, request, baseURL }) => {
+  test.skip(process.env.E2E_MODE !== 'kubernetes', 'Kubernetes capability boundary only')
+  const info = await request.get('/api/v1/server-info')
+  expect(info.ok()).toBeTruthy()
+  expect(await info.json()).toMatchObject({ data: {
+    platformMode: 'kubernetes', dbAuthEnabled: false,
+    capabilities: { userAdmin: false, roleAdmin: false, auditQuery: false, passwordLogin: false, nativeRbac: true, leaderElection: true },
+  } })
+  await page.goto('/controllers')
+  await expect(page.getByTestId('user-menu')).toBeVisible()
+  for (const name of ['Users', 'Roles', 'Audit Log']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0)
+  }
+  for (const [route, action, endpoint] of [
+    ['/users', 'user-create', 'users'],
+    ['/roles', 'role-create', 'roles'],
+    ['/audit', 'audit-refresh', 'audit-logs'],
+  ]) {
+    const response = await request.get(`/api/v1/center/admin/${endpoint}`)
+    expect([403, 404], endpoint).toContain(response.status())
+    await page.goto(route)
+    await expect(page).toHaveURL(new URL('/', baseURL!).href)
+    await expect(page.getByTestId(action)).toHaveCount(0)
+  }
+})
+
 test('restricted dependency metadata stays inside configured namespaces', async ({ request }) => {
   test.skip(process.env.E2E_MODE !== 'kubernetes', 'Kubernetes namespace boundary only')
   const runId = process.env.E2E_RUN_ID

@@ -1608,3 +1608,30 @@ before acting on CCI execution files or proposing replacements.
   edgion-center-kubernetes:alignment-kube-20260928-v2. Last confirmed progressing
   through base-image resolution. Poll this handle before starting another build.
   Image completion and Kubernetes browser evidence remain unproven.
+
+### Kubernetes schema drift and capability boundary preparation
+
+- Read-only comparison found six existing OrbStack Edgion CRDs differ from the
+  current source: EdgionGatewayConfig, EdgionPlugins, EdgionBackend,
+  EdgionStreamPlugins, EdgionConfigData and LinkSys. Differences include the old
+  WAF rules requirement, absent policyRef, old ConfigData enum and required
+  gatewayClassName/gatewayClassUid in shared status. Existing CRDs were preserved.
+- Extended browser preflight to compare all nine cataloged Edgion CRD schemas
+  against the selected checkout, including descriptive metadata, ignoring object
+  key order. Discovery remains the check for built-ins and Gateway API resources.
+  Final real-cluster negative run 19124 exited one with exactly the six expected
+  schema mismatches; /tmp/ws5-center-kube-schema-preflight.log. A matching live
+  schema positive run remains pending an isolated current-schema cluster.
+- Added a Kubernetes-only browser case for capability discovery, hidden SQL
+  administration menus, direct-route redirects and denied user/role/audit APIs.
+  E2E typecheck passed and Playwright lists the new case with its OIDC setup.
+  Browser execution is pending; initial list attempt lacked harness environment
+  variables and was repeated successfully with explicit run/Controller IDs.
+- Center build 62359 remains live, now with a 5.77 MB transferred context.
+  Edgion image build 91476 is also live, compiling current source; log
+  /tmp/ws5-edgion-kube-image-v2.log. Both use local-only alignment-kube-20260928-v2
+  tags and neither pushes. Poll both handles before launching replacements.
+- Existing Edgion changes belong to other work and were preserved. No Edgion
+  source edits or commits. Next: finish images and establish an isolated cluster
+  with current CRDs rather than altering shared OrbStack contracts. Overall
+  alignment remains active.

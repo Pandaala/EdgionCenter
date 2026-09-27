@@ -26,6 +26,19 @@ For repeated frontend-only runs after building both native programs, set
 build locks. Rebuild whenever either program's source changes. The runner checks that
 both executables exist before creating runtime configuration.
 
+Kubernetes preflight checks served API identities and compares every cataloged
+Edgion custom-resource schema against the selected Controller checkout. Comparison
+includes descriptive metadata and is independent of object key order. API discovery
+alone is insufficient: an old schema can prune current fields or reject status
+updates. The preflight is read-only and refuses drift; use an isolated cluster with
+current CRDs instead of overwriting a shared cluster's contracts. Gateway API and
+built-in resources currently receive discovery checks only.
+
+The Kubernetes authorization suite also verifies native-RBAC/password-login
+capabilities, hidden SQL administration menus, direct-route redirects, and rejected
+user/role/audit API requests. Unsupported management scenarios must not be evidenced
+solely by skipped standalone tests.
+
 Standalone permission-denial coverage uses `E2E_RBAC=1` to enable database
 password login and RBAC in the isolated runtime. Supply `EDGION_ADMIN_USERNAME`
 and `EDGION_ADMIN_PASSWORD` matching `E2E_USERNAME` and `E2E_PASSWORD` so first-run
