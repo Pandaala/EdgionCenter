@@ -1,83 +1,57 @@
 ---
 name: system-resources
-description: System configuration resource development guide — EdgionGatewayConfig/LinkSys/EdgionAcme (based on feature-04-06 user documentation)
+description: System configuration resource development guide — EdgionGatewayConfig/LinkSys/EdgionAcme
 ---
 
 # System Configuration Resources
 
-## EdgionGatewayConfig (Pending Development)
+## EdgionGatewayConfig
 
-```yaml
-apiVersion: edgion.io/v1alpha1
-kind: EdgionGatewayConfig
-metadata:
-  name: default-config
-spec:
-  # Pingora server configuration
-  server:
-    threads: 0                              # uint32, default: number of CPU cores
-    workStealing: true                      # bool
-    gracePeriodSeconds: 30                  # uint64
-    gracefulShutdownTimeoutS: 10            # uint64
-    upstreamKeepalivePoolSize: 128          # uint32
-    enableCompression: false                # bool, downstream response compression
-    downstreamKeepaliveRequestLimit: 1000   # uint32, 0=unlimited
+- Cluster-scoped `edgion.io/v1alpha1`, catalog key `edgiongatewayconfig`.
+  GatewayClass.spec.parametersRef selects the configuration. Do not impose a
+  singleton: separate GatewayClasses may select separate configurations.
+- Canonical schema: sibling
+  `Edgion/edgion-resources/src/resources/edgion_gateway_config.rs`.
+- Center implementation: `src/types/edgion-gateway-config/index.ts`,
+  `src/utils/edgiongatewayconfig.ts`, and
+  `src/components/ResourceEditor/EdgionGatewayConfig/`.
 
-  # HTTP timeout configuration
-  httpTimeout:
-    client:
-      readTimeout: "60s"
-      writeTimeout: "60s"
-      keepaliveTimeout: "75s"
-    backend:
-      defaultConnectTimeout: "5s"
-      defaultRequestTimeout: "60s"
-      defaultIdleTimeout: "300s"
+### Current operator fields
 
-  # Maximum retry count (migrated from annotation)
-  maxRetries: 3                             # uint32
+| Field | Editor contract |
+| --- | --- |
+| server | enableCompression and downstreamKeepaliveRequestLimit only; process threads/shutdown/pool settings are not resource fields |
+| httpTimeout | client read/write/keepalive and backend connect/request/idle duration strings |
+| retry.attempts | Integer 0..2147483647; replaces the removed root maxRetries |
+| forwardedHeaders.remoteIpHeader | Outbound header name; validate token syntax and reserved-header restrictions |
+| requestBody | enabled, defaultMemoryBufferSize, maxMemoryBufferSize, defaultMaxBodySize, maxBodySize, storageOperationTimeout |
+| pluginPolicy | Qualified plugin allow/deny entries, defaultAction, deniedAction, blockStatus; absent allow differs from an empty allow list |
+| realIp | trustedIps is a list of named groups with cidrs, not a string array; realIpHeader, recursive, optional maxTrustedHops |
+| securityProtect | xForwardedForLimit, requireSniHostMatch, fallbackSni, tlsProxyLogRecord, allowLoopbackUpstream |
+| tcpTimeout | idleTimeout and connectTimeout |
+| loadBalancing | degradeThreshold |
+| globalPluginsRef | Namespaced plugin references |
+| accessLogExtern.unmaskedKeys | header, respHeader, query, cookie and ctx arrays |
+| preflightPolicy | cors-standard or all-options, statusCode 200..599 |
+| linkSys | webhookMaxResponseBytes and maxInstancesPerKind (1..10000) |
+| outboundTls | verify, validation and clientCertificateRef; preserve reference group/kind/namespace |
+| dnsResolver | linkSysRef, servers and cacheTtl |
 
-  # Real IP extraction
-  realIp:
-    trustedIps: []                          # Trusted proxy IP/CIDR
-    realIpHeader: "X-Forwarded-For"         # Header used to extract the Real IP
-    recursive: true                         # Traverse right-to-left, skipping trustedIps
+### Editing and validation
 
-  # Security protection
-  securityProtect:
-    xForwardedForLimit: 200                 # Maximum XFF bytes
-    requireSniHostMatch: true               # HTTPS 421 Misdirected Request detection
-    fallbackSni: ""                         # Fallback when client sends no SNI
-    tlsProxyLogRecord: true                 # Log TLS proxy connection records
-
-  # Global plugin reference
-  globalPluginsRef:                         # Global plugins applied to all routes
-    - name: "global-cors"
-      namespace: "edgion-system"
-
-  # Preflight policy
-  preflightPolicy:
-    mode: "cors-standard"                   # "cors-standard" | "all-options"
-    statusCode: 204                         # Response code when no CORS plugin is present
-
-  # ReferenceGrant validation
-  enableReferenceGrantValidation: false     # bool
-```
-
-**Development Notes**:
-- **Cluster-scoped resource**, uses `clusterResourceApi`, kind: `edgiongatewayconfig`
-- apiVersion: `edgion.io/v1alpha1` (note: not v1)
-- Associated via GatewayClass.spec.parametersRef
-- Typically only one instance (consider a singleton edit page)
-- Form sections (grouped by function):
-  - **Server** — threads, workStealing, gracePeriod, keepalive, compression
-  - **HTTP Timeout** — client(read/write/keepalive) + backend(connect/request/idle)
-  - **Max Retries** — global upstream maximum retries
-  - **Real IP** — trustedIps list + header + recursive
-  - **Security** — XFF limit, SNI/Host matching, fallback SNI, TLS logging
-  - **Global Plugins** — global plugin reference list
-  - **Preflight** — mode selector + statusCode
-  - **ReferenceGrant** — toggle
+- Defaults belong only in create drafts/placeholders. Preserve explicit zero,
+  false, empty lists, and unknown operator fields when reading or editing.
+- Do not restore removed maxRetries, process-level server controls,
+  rejectDuplicateHost or enableReferenceGrantValidation from historical examples.
+- RealIp requires at least one trusted group when configured; its inbound header
+  semantics differ from forwardedHeaders, which writes an outbound header.
+- Outbound TLS resolved CA/client-certificate material and currentStatus are
+  Controller-owned and must be stripped by the mutation boundary. Custom CA
+  references may coexist with System in this global policy; do not copy the
+  BackendTLSPolicy mutually-exclusive rule into this resource.
+- Form and YAML submit share the adapter's validation. Native CRUD establishes
+  persistence and round-trip behavior, not DNS resolution, TLS verification,
+  plugin execution or request-body behavior at the Gateway.
 
 ## LinkSys
 

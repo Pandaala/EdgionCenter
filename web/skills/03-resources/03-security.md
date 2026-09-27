@@ -1,11 +1,11 @@
 ---
 name: security-resources
-description: Security resource development guide — EdgionTls/Secret/BackendTLSPolicy (based on feature-04-06 user documentation)
+description: Security resource development guide — EdgionTls/Secret/BackendTLSPolicy
 ---
 
 # Security & TLS Resources
 
-## EdgionTls (Pending Development)
+## EdgionTls
 
 ```yaml
 apiVersion: edgion.io/v1
@@ -30,12 +30,15 @@ spec:
       namespace: default
     verifyDepth: 1                     # Certificate chain validation depth (1-9), default 1
     allowedSans:                       # Optional: allowed client certificate SAN whitelist
-      - "client1.example.com"
-      - "*.internal.example.com"
+      - type: DNS
+        value: "client1.example.com"
+      - type: URI
+        match: Prefix
+        value: "spiffe://internal/"
     allowedCns:                        # Optional: allowed client certificate CN whitelist
       - "AdminClient"
   minTlsVersion: "TLS1_2"             # Optional: minimum TLS version TLS1_0|TLS1_1|TLS1_2|TLS1_3
-  cipherSuites:                        # Optional: custom cipher suites
+  ciphers:                        # Optional: custom cipher suites
     - ECDHE-RSA-AES256-GCM-SHA384
     - ECDHE-RSA-AES128-GCM-SHA256
     - ECDHE-RSA-CHACHA20-POLY1305
@@ -51,8 +54,16 @@ spec:
   - SecretRefSection — certificate reference selector
   - ClientAuthSection — mTLS configuration (mode conditionally renders caSecretRef, etc.)
   - TlsVersionSection — minimum version dropdown
-  - CipherSuitesSection — cipher suite multi-select
+  - Cipher controls write spec.ciphers (not cipherSuites)
 - List page displays: name, namespace, host count, mTLS mode, TLS version
+- allowedSans entries use DNS/URI/Email/IP/OtherName with match
+  Exact/Prefix/Suffix/Contains/RegularExpression, value and optional ignoreCase.
+  OtherName requires oid; other types forbid it. Omitted match defaults to Exact.
+  Rust regex compilation remains Controller-owned; browser checks are preflight.
+- At most 16 hosts and 32 parent references. Reference edits preserve group/kind,
+  namespace, sectionName and port where supported by the reference schema.
+- Strip resolved certificate material and Controller runtime fields on mutation.
+  Native configuration CRUD does not establish certificate or handshake success.
 
 ## Secret (Pending Development)
 

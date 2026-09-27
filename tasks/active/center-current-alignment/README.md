@@ -926,3 +926,19 @@ before acting on CCI execution files or proposing replacements.
   stopped, 70 exact seeds retained, all sessions terminal. No production change
   was necessary. This covers the roleless-user case; individual permission
   combinations, existing-session revocation, OIDC and Kubernetes remain open.
+
+### System and TLS developer-guide reconciliation
+
+- Restricted browser batch committed as fa5a300, no push.
+- Replaced obsolete GatewayConfig examples with a field map checked against
+  current edgion_gateway_config.rs, Center TypeScript and form controls. Removed
+  guidance to edit process settings/maxRetries/enableReferenceGrantValidation,
+  and the unsupported singleton suggestion. Recorded grouped RealIp, retry,
+  forwarded headers, plugin policy, request-body and remaining current fields.
+- Corrected the TLS guide's scalar allowedSans examples and cipherSuites name
+  to typed SANs and ciphers; documented current identity variants and resource
+  bounds from edgion_tls.rs/allowed_san.rs.
+- These are targeted knowledge corrections, not new claims of runtime coverage.
+  Reviewed the documentation diff and checked whitespace. No executable code
+  changed, so no application tests rerun. Other older guide sections and the
+  remaining menu/runtime ledger still require their own audits.
