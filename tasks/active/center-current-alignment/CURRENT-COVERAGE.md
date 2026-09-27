@@ -29,6 +29,14 @@ current source; the frontend corresponds to commit 712ed0f (later commits before
 this run completed only changed backend test code and evidence documentation).
 Log: `/tmp/ws5-center-full-current-native-v3.log`.
 Artifacts: `web/test-results/alignment-full-current-20260928-v3/`.
+The dependency namespace skip now has a separate passing Kubernetes execution:
+`alignment-namespace-proxy-20260928` ran the strengthened repository case through
+two mTLS Controllers and deployed Center, with both Secret and ConfigMap key
+lists and explicit out-of-scope denial. Six additional browser checks cover both
+menus/controllers and metadata-only permissions. Artifacts:
+`/tmp/ws5-center-namespace-proxy-20260928/`. This does not replace the full
+custom-resource Kubernetes matrix or its CRD-schema gate.
+
 The older 147-test run remains historical evidence, superseded by this run.
 The subsequent authentication repair has separate current browser/component
 evidence below; the full resource run predates that repair.
@@ -56,8 +64,8 @@ No row implies complete nested-field coverage or data-plane conformance.
 | EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary |
 | EdgionTls | security/tls | Typed mTLS SANs and resolved-secret mutation boundary |
 | BackendTLSPolicy | security/backendtls | Current identity/target restrictions and lossless form edits |
-| Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model; read failure/recovery components and live default-policy denial; direct Kubernetes Controller namespace filtering |
-| ConfigMap | security/dependencies | Restricted dependency operations and exact replacement/readback; live Kubernetes Center metadata-only reads, SAR denial and recovery; direct Kubernetes Controller namespace filtering |
+| Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model; read failure/recovery components and live default-policy denial; direct Kubernetes Controller namespace filtering plus the real dual-Controller Center proxy E2E |
+| ConfigMap | security/dependencies | Restricted dependency operations and exact replacement/readback; live Kubernetes Center metadata-only reads, SAR denial and recovery; direct Kubernetes Controller namespace filtering plus the real dual-Controller Center proxy E2E |
 | EdgionPlugins | plugins | 48 stage-plugin catalog entries; independent WAF form/count/references; mutation stripping; edited/referenced access-policy body capability |
 | EdgionStreamPlugins | plugins/stream | Current connection/TLS-stage catalogs and stage-specific controls |
 | EdgionConfigData | plugins/metadata | Nine typed variants; four new variants have dedicated native CRUD |
@@ -80,7 +88,7 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native and real Kubernetes browser create/edit, label retention and exact-generation conflict; 52-account pagination; staged SAR permissions, denied-read recovery and credential-value rejection | Metadata-only proof; external credential inspection is separate |
 | Cloudflare DNS and Route53 DNS | API DTO/form tests; sanitized read failure/recovery; lost-response uncertainty; 195 hermetic backend tests | New browser error states have component evidence, not native provider mutation evidence |
-| Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback; deployed Kubernetes SAR, disabled administration routes and proxy logout | Dependency namespace workflow and further permission transitions |
+| Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback; deployed Kubernetes SAR, disabled administration routes and proxy logout | Further permission transitions beyond the dual-Controller dependency namespace proof |
 
 Native federation evidence: 27 lifecycle checks in
 `/tmp/ws5-center-federation-native-v2.log` and 9 mTLS checks in

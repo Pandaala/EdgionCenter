@@ -2474,3 +2474,50 @@ before acting on CCI execution files or proposing replacements.
   neither is being reported as the full two-Controller E2E gate. Goal active.
 - Final Center lint and diff checks passed. No production code changed in this
   pass; the frontend unit baseline remains the preceding 679-test run.
+
+
+### 2026-09-28: Dual-Controller namespace proxy and browser proof
+
+- Extended the isolated metadata-only probe with two native Kubernetes-mode
+  Controllers, each using a distinct CA-signed mTLS identity and Center
+  registration: `e2e-a/namespace-scope-a` and `e2e-b/namespace-scope-b`.
+  They use Admin ports 15914/15915, probes 15934/15935, metrics 15944/15945,
+  conf-sync 50966/50967, and independent Leases/Pod metadata anchors.
+  Both registered Online on the retained Kubernetes Center v5 owner replica.
+  This is an explicit isolated namespace probe, not another Gateway traffic
+  topology; the original federation runtime and direct namespace probe remain.
+- Created labeled `eruie2e-5c376d07-{a,b,denied}` namespaces for run
+  `alignment-namespace-proxy-20260928`. Controller federation RBAC enumerates
+  Secret/ConfigMap `list-keys` only, EdgionConfigData get/list/watch, and
+  NonResource server-info. No wildcard grants or dependency value-read/write
+  permission were added. Temporary Center SAR grants were GET-only and limited
+  to these two identities' access, server-info and dependency-key paths.
+- Executed the actual strengthened repository test from commit 69f6240:
+  `authorization.spec.ts` / `restricted dependency metadata stays inside
+  configured namespaces`, project kubernetes, against Vite 15174 and real
+  deployed Center. Existing verified Dex storage state was reused with
+  `--no-deps`. Result: one test passed in 22 seconds, covering both controllers,
+  both kinds, fixture presence, all returned namespaces, absence of content/
+  spec/status fields, and explicit `/default` namespace requests returning 403.
+- Six additional real browser checks passed: for each Controller, the access
+  document grants exactly `list-keys` for both dependency kinds; both menus
+  show the three allowed namespaces, never request dependency values, and
+  disable create/replace. Screenshots and request-path evidence were retained.
+  Initial browser probes needed a longer bounded startup wait and a fixture-row
+  locator that distinguishes Kubernetes `kube-root-ca.crt` rows; these were
+  probe corrections, not application changes. Adding the exact server-info
+  SAR URL removed unrelated header-fetch permission errors.
+- Removed the temporary ClusterRole and binding. Four API reads (two kinds on
+  two Controllers) returned 403 afterwards, and a fresh browser page showed
+  access denied with no dependency rows. Five restoration checks passed.
+- Artifacts: `/tmp/ws5-center-namespace-proxy-20260928/` contains private configs,
+  setup/run scripts, `repo-browser.log`, `repo-browser/` Playwright artifacts,
+  `browser-result.json`, inspected `namespace-metadata.png`, and `restored.json`.
+  Controller process handles at this checkpoint: A 57312, B 30098; revalidate
+  before reuse. Keys/tokens are private and not committed. Fixtures are retained.
+- This closes the previously skipped dual-Controller dependency namespace gate.
+  The reduced Controller profiles still deny unrelated DNS background Service
+  reads; no general Controller readiness, gateway traffic, or custom-resource
+  CRD compatibility claim follows. Shared CRD schemas and the retained Center
+  image were not changed. No production source changed in this pass; the last
+  full frontend baseline remains 679 passing tests. Goal remains active.
