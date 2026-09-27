@@ -2521,3 +2521,20 @@ before acting on CCI execution files or proposing replacements.
   CRD compatibility claim follows. Shared CRD schemas and the retained Center
   image were not changed. No production source changed in this pass; the last
   full frontend baseline remains 679 passing tests. Goal remains active.
+
+
+### 2026-09-28: Center health policy edits drive real traffic
+
+- Fresh native Gateway build and the retained Controller now have a synthetic
+  Service/EndpointSlice/HTTPRoute health-check topology. Center form edits to
+  the policy probe path produced real Gateway 200 → 503 → 200 transitions,
+  with Controller resourceVersion readback and backend request counters.
+- The initial default loopback denial was resolved only for the test Gateway
+  through its existing operator setting; the final probe sends the proper Host
+  authority. No production code repair was necessary for this HTTP flow.
+- Controller's exact original policy configuration and Center permissions were
+  restored; three restoration checks passed and traffic remains healthy.
+- See [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md) for
+  exact topology, artifacts, failed setup probes, retained handles and limits.
+  This is HTTP active-health evidence, not encrypted-probe or resilience-wide
+  proof. No Edgion edits or commits; overall goal remains active, no push.

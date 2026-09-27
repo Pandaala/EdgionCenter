@@ -48,5 +48,8 @@ and a null healthCheck does not enable active probes for an AI target.
 
 Mutation documents use the shared resource adapter to remove status and
 Controller-owned fields. Round-trip, form and editor tests cover preservation
-and validation. Native browser actions/CRUD establish control-plane editing,
-not live load balancing, health probes, ejection or retry behavior.
+and validation. Native browser actions/CRUD establish control-plane editing. The focused
+[HTTP health traffic proof](../../../tasks/active/center-current-alignment/HEALTH-POLICY-TRAFFIC-EVIDENCE.md)
+additionally covers Center form probe-path edits, Controller version readback,
+and real Gateway 200/503/200 failure/recovery. It does not cover encrypted probes,
+load-balancer algorithms, ejection or retry behavior.
