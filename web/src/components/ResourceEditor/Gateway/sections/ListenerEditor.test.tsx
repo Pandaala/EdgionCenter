@@ -73,3 +73,16 @@ describe('ListenerEditor', () => {
     expect(onChange).toHaveBeenCalledWith({ ...listener, protocol: 'example.io/QUIC' })
   })
 })
+
+it.each([
+  ['TLS', 'Terminate'],
+  ['HTTPS', 'Passthrough'],
+])('disables unsupported %s mode %s without rewriting an existing document', (protocol, unsupported) => {
+  const onChange = vi.fn()
+  const listener: any = { name: 'secure', port: 443, protocol, tls: { mode: unsupported, options: { custom: 'keep' } } }
+  render(<ListenerEditor listener={listener} index={0} canRemove={false} onChange={onChange} onRemove={vi.fn()} />)
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'TLS Mode' }))
+  const option = document.querySelector(`.ant-select-item-option[title="${unsupported}"]`)
+  expect(option).toHaveClass('ant-select-item-option-disabled')
+  expect(onChange).not.toHaveBeenCalled()
+})

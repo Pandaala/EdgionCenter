@@ -98,6 +98,7 @@ export function validateGateway(resource: Gateway): string[] {
     if (listener.protocol === 'HTTPS' && !listener.tls) errors.push(`${path}.tls is required for HTTPS`)
     if (listener.protocol === 'HTTPS' && listener.tls?.mode === 'Passthrough') errors.push(`${path}.tls.mode must be Terminate for HTTPS`)
     if (listener.protocol === 'TLS' && (!listener.tls || !listener.tls.mode)) errors.push(`${path}.tls.mode must be explicitly set for TLS`)
+    if (listener.protocol === 'TLS' && listener.tls?.mode === 'Terminate') errors.push(`${path}.tls.mode must be Passthrough for TLS; the current Controller does not support TLS termination`)
     if (['TCP', 'UDP'].includes(listener.protocol) && listener.hostname) errors.push(`${path}.hostname must not be specified for ${listener.protocol}`)
     if (listener.tls && (listener.tls.mode ?? 'Terminate') === 'Terminate') {
       if (!listener.tls.certificateRefs?.length && !Object.keys(listener.tls.options || {}).length) errors.push(`${path}.tls.certificateRefs or options is required for Terminate`)

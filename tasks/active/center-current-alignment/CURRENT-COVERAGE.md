@@ -43,7 +43,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 |---|---|---|
 | GatewayClass | infrastructure/gatewayclasses | Cluster scope; parameter reference; shared status handling |
 | EdgionGatewayConfig | system/config | Current load-balancing controls, body/plugin policy, outbound TLS stripping |
-| Gateway | infrastructure/gateways | Native and shared Controller status, listener counts/kinds/conditions; current listener TLS runtime exclusions |
+| Gateway | infrastructure/gateways | Native and shared Controller status, listener counts/kinds/conditions; current listener TLS runtime exclusions; protocol-specific TLS mode selection and Form/YAML submission guard |
 | ReferenceGrant | infrastructure/referencegrants | Version boundary and topology authorization projection |
 | HTTPRoute | routes/http | Backend AI references, mirror annotations, retry bounds, optional policy clearing; rule admission/provenance exclusions |
 | GRPCRoute | routes/grpc | Method-only/service-only/header-only edits, last-match removal, policy clearing |

@@ -107,6 +107,26 @@ describe('Gateway family editor submit boundaries', () => {
     expect(payload.status).toBeUndefined()
   })
 
+  it.each(['Form', 'YAML'])('Gateway %s blocks TLS termination and allows explicit passthrough repair', async (tab) => {
+    const resource: any = {
+      apiVersion: 'gateway.networking.k8s.io/v1', kind: 'Gateway',
+      metadata: { name: 'edge', namespace: 'prod', resourceVersion: '8' },
+      spec: { gatewayClassName: 'edgion', listeners: [{ name: 'tls', port: 443, protocol: 'TLS', tls: { mode: 'Terminate', certificateRefs: [{ name: 'cert' }] } }] },
+    }
+    renderEditor(<GatewayEditor visible mode="edit" resource={resource} onClose={vi.fn()} />)
+    if (tab === 'YAML') fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+    fireEvent.click(screen.getByTestId('editor-submit'))
+    expect(resourceUpdate).not.toHaveBeenCalled()
+    if (tab === 'Form') fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+    expect(yaml.load((screen.getByLabelText('Editor YAML') as HTMLTextAreaElement).value)).toEqual(resource)
+    const repaired = structuredClone(resource)
+    repaired.spec.listeners[0].tls = { mode: 'Passthrough' }
+    fireEvent.change(screen.getByLabelText('Editor YAML'), { target: { value: yaml.dump(repaired) } })
+    fireEvent.click(screen.getByTestId('editor-submit'))
+    await waitFor(() => expect(resourceUpdate).toHaveBeenCalledOnce())
+    expect(yaml.load(resourceUpdate.mock.calls[0][4])).toEqual(repaired)
+  })
+
   it('GatewayClass Form create validates and strips status', async () => {
     renderEditor(<GatewayClassEditor visible mode="create" onClose={vi.fn()} />)
     fireEvent.click(screen.getByTestId('editor-submit'))

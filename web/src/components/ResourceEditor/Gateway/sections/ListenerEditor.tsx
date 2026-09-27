@@ -120,13 +120,14 @@ const ListenerEditor: React.FC<ListenerEditorProps> = ({
           <Card title={t('gw.tlsConfig')} size="small" type="inner">
             <Form.Item label={t('field.tlsMode')} style={{ marginBottom: 8 }}>
               <Select
-                value={listener.tls?.mode || 'Terminate'}
+                aria-label={t('field.tlsMode')}
+                value={listener.tls?.mode ?? (listener.protocol === 'HTTPS' ? 'Terminate' : undefined)}
                 onChange={(v) => update({ tls: { ...listener.tls, mode: v } })}
                 disabled={disabled}
                 style={{ width: 160 }}
               >
-                <Select.Option value="Terminate">{t('gw.terminate')}</Select.Option>
-                <Select.Option value="Passthrough">{t('gw.passthrough')}</Select.Option>
+                <Select.Option value="Terminate" disabled={listener.protocol === 'TLS'}>{t('gw.terminate')}</Select.Option>
+                <Select.Option value="Passthrough" disabled={listener.protocol === 'HTTPS'}>{t('gw.passthrough')}</Select.Option>
               </Select>
             </Form.Item>
 

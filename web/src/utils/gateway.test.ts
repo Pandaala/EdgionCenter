@@ -136,3 +136,13 @@ it.each(['create', 'update'] as const)('omits current listener TLS resolution fi
   expect(mutation.metadata.resourceVersion).toBe(mode === 'update' ? '8' : undefined)
   expect(resource).toEqual(before)
 })
+
+it('rejects TLS termination without changing the operator document', () => {
+  const resource = structuredClone(fixture)
+  resource.spec.listeners[0].protocol = 'TLS'
+  const before = structuredClone(resource)
+  expect(validateGateway(resource)).toContain('spec.listeners[0].tls.mode must be Passthrough for TLS; the current Controller does not support TLS termination')
+  expect(resource).toEqual(before)
+  resource.spec.listeners[0].tls = { mode: 'Passthrough' }
+  expect(validateGateway(resource)).toEqual([])
+})

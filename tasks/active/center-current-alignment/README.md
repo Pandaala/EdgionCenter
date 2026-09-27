@@ -2346,3 +2346,25 @@ before acting on CCI execution files or proposing replacements.
   syntax. Current Vite source was tested; the retained v5 image was not rebuilt.
   See [PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md](PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md).
   No Edgion changes; goal remains active, no push.
+
+
+### 2026-09-28: Gateway listener TLS mode alignment
+
+- Current Controller `listener_has_unsupported_tls_mode` rejects TLS/Terminate
+  and HTTPS/Passthrough for listener support; Center previously guarded only
+  the HTTPS combination. Added the missing TLS guard to the shared Form/YAML
+  validator and disabled unsupported choices in the listener dropdown.
+- An omitted TLS mode no longer appears as an implicitly selected Terminate.
+  Existing invalid documents remain intact for explicit repair; the editor
+  does not rewrite certificates, options, or the protocol automatically.
+- Five added regression cases cover validator immutability, both disabled
+  protocol/mode choices, and Form/YAML submission followed by passthrough repair.
+  Full frontend suite: 647 tests in 102 files passed. Build (TypeScript + Vite),
+  lint and diff whitespace checks passed. Existing Vite chunk-size warnings
+  remain. Logs: `/tmp/ws5-gateway-tls-{focused,full,build,lint}.log`.
+- TLSRoute source-version registry still explicitly registers v1alpha3, so
+  Center's alternate-version allowance remains. The older upstream feature
+  document's canonical-only statement is not current source authority.
+- Evidence is source, unit and component validation; this pass adds no live
+  data-plane TLS conformance proof. No backend/Edgion source changes, no image
+  rebuild, and no push. The full alignment goal remains active.
