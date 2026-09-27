@@ -2273,3 +2273,26 @@ before acting on CCI execution files or proposing replacements.
   validating real SAR/capability behavior without altering shared Gateway CRDs.
   No resources were installed in OrbStack during this batch. The full goal
   remains active; native/browser auth proof is not deployed Kubernetes proof.
+
+### Deployed Kubernetes authentication and disabled route repair (2026-09-28)
+
+- Completed image v3, then deployed two real Center replicas and pinned canonical
+  OAuth sidecars with Dex in OrbStack namespace `eruie2e-c0c61d3a-system`.
+  Existing Controller/ProviderAccount CRDs matched the current schemas; only the
+  absent ProviderCapabilitySnapshot CRD was created. Shared Gateway CRDs and
+  existing workloads were not changed.
+- Nine live ServiceAccount/viewer RBAC checks passed. Real OIDC browser access
+  reproduced a blank page on capability-disabled `/users`, `/roles` and `/audit`.
+  Their APIs already rejected access. Added a Center unmatched-route redirect
+  to the authenticated home page; permissions remain enforced there and by APIs.
+- Built image v4, rolled both replicas successfully, and passed five custom
+  browser scenarios plus all three selected repository authorization cases.
+  The denied-user screenshot shows explicit missing fleet access; proxy logout
+  deletes the cookie and `/oauth2/auth` returns 401.
+- Frontend full suite: 102 files, 635 tests passed. Fixed a test readiness race
+  by waiting for the refresh button to leave its loading state before clicking.
+  Build/lint and E2E types passed. No backend source changed in this batch;
+  the prior backend matrix English-only baseline limitation remains open.
+- See [KUBERNETES-AUTH-EVIDENCE.md](KUBERNETES-AUTH-EVIDENCE.md) for retained
+  runtime, artifact locations, image identity and explicit coverage limits.
+  No push; the overall alignment goal remains active.

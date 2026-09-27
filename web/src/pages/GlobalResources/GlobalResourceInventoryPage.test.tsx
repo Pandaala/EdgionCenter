@@ -239,7 +239,11 @@ describe('GlobalResourceInventoryPage', () => {
     mount()
     expect(await screen.findByText('globalResources.error.loadFailed')).toBeInTheDocument()
     expect(screen.queryByText('private cache diagnostics')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /globalResources\.action\.refresh/ }))
+    const refresh = screen.getByRole('button', { name: /globalResources\.action\.refresh/ })
+    // The other initial query may still be finishing when the error appears.
+    // Ant Design suppresses clicks while the button is loading.
+    await waitFor(() => expect(refresh).not.toHaveClass('ant-btn-loading'))
+    fireEvent.click(refresh)
     await waitFor(() => expect(screen.queryByText('globalResources.error.loadFailed')).not.toBeInTheDocument())
     expect(await screen.findByText('trusted-proxies')).toBeInTheDocument()
     expect(globalResourcesApi[source]).toHaveBeenCalledTimes(2)

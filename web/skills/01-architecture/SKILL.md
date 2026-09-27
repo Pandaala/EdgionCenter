@@ -63,7 +63,11 @@ description: Edgion Center project architecture overview — directory structure
 
 ## Route Structure
 
-Auth note: all business routes are wrapped by the `RequireAuth` component — unauthenticated users are automatically redirected to `/login`. Login state is tracked via a `sessionStorage` flag (no JS-readable token; actual credentials are stored in an httpOnly Cookie).
+Auth note: all business routes are wrapped by the `RequireAuth` component — unauthenticated users are automatically redirected to `/login`. Login state is tracked via a `localStorage` flag (no JS-readable token; actual credentials are stored in an httpOnly Cookie).
+
+Center routes omitted by capability gates, and other unmatched Center paths,
+redirect to `/` instead of rendering an empty route tree. This does not grant
+permissions: the destination and all APIs retain their authentication gates.
 
 ```
 /login                             → LoginPage (public, no auth required)

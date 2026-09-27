@@ -207,6 +207,7 @@ function App() {
           <Route path="system/acme" element={<EdgionAcmeList />} />
           <Route path="region-routes" element={<RegionRouteList />} />
         </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     )
   }

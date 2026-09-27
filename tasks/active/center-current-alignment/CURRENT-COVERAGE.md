@@ -80,7 +80,7 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native create/edit, label retention, exact-generation conflict | Kubernetes dashboard capability/identity workflow |
 | Cloudflare DNS and Route53 DNS | API DTO/form tests; sanitized read failure/recovery; lost-response uncertainty; 195 hermetic backend tests | New browser error states have component evidence, not native provider mutation evidence |
-| Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback | Deployed Kubernetes capability workflows |
+| Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback; deployed Kubernetes SAR, disabled administration routes and proxy logout | Cross-replica ownership/forwarding and dependency namespace workflow |
 
 Native federation evidence: 27 lifecycle checks in
 `/tmp/ws5-center-federation-native-v2.log` and 9 mTLS checks in
@@ -168,14 +168,16 @@ English-only guard; the later no-legacy guard passes when run separately.
 
 ## Next audit actions
 
-Current deployment preparation: canonical Kubernetes and both cloud overlays
-now configure the bundled proxy's logout path; all three render checks and eight
-Kubernetes config tests passed. Native Kubernetes binary build passed. Linux
-image `alignment-auth-20260928-v3` is building in session 69460; inspect that
-handle and `/tmp/ws5-center-kube-auth-image-v3.log` before proceeding. Restarting
-only the owned kind containerd restored the service but not API readiness.
-OrbStack is reachable; an isolated Center/Dex/proxy deployment can validate SAR
-without changing the shared Edgion Gateway CRDs. No such deployment is yet proven.
+Current deployed Kubernetes authentication proof is recorded in
+[KUBERNETES-AUTH-EVIDENCE.md](KUBERNETES-AUTH-EVIDENCE.md). Two OrbStack Center
+replicas run the current v4 image with canonical OAuth sidecars and a private Dex
+fixture. Nine live RBAC checks, five browser scenarios, and all three selected
+repository E2E cases passed. The discovered disabled-route blank page is fixed;
+635 frontend tests, build, lint and E2E type checks pass. The isolated kind API
+remains unavailable; existing shared Gateway CRDs were not changed.
+This deployment does not yet prove cross-replica federation forwarding. Continue
+that flow using the retained owned namespace and current Controller, without
+replacing the user's shared Gateway schemas.
 
 1. Continue the exact operator/runtime-field audit against all current resource
    structs. Catalog coverage alone is insufficient: the current pass found the

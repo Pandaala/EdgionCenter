@@ -6,7 +6,9 @@ setup('kubernetes OIDC authentication', async ({ page, baseURL }) => {
   const username = process.env.E2E_USERNAME
   const password = process.env.E2E_PASSWORD
   if (!username || !password || !baseURL) throw new Error('Kubernetes E2E credentials and base URL are required')
-  if (new URL('/oauth2/callback', baseURL).host !== '127.0.0.1:14180') throw new Error('Unexpected OAuth callback host')
+  const callback = new URL(process.env.E2E_OAUTH_CALLBACK_URL ?? 'http://127.0.0.1:14180/oauth2/callback')
+  if (callback.hostname !== '127.0.0.1' || callback.protocol !== 'http:' ||
+    new URL('/oauth2/callback', baseURL).href !== callback.href) throw new Error('Unexpected OAuth callback URL')
   await page.goto('/')
   await page.getByPlaceholder(/email|username/i).fill(username)
   await page.getByPlaceholder(/password/i).fill(password)

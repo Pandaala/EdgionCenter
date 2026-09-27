@@ -54,6 +54,11 @@ Every editor must prove:
 
 ## Browser E2E
 
+The OIDC setup defaults to callback `http://127.0.0.1:14180/oauth2/callback`.
+For an isolated runtime using a different loopback port, set
+`E2E_OAUTH_CALLBACK_URL` to the exact registered callback and use the matching
+`E2E_BASE_URL`. The setup still rejects non-loopback hosts or mismatched URLs.
+
 Prefer repeatable Playwright cases with stable `data-testid` selectors. For each
 page exercise navigation, Controller switching, filters, pagination, refresh,
 create/view/edit/delete, batch actions, Form/YAML switching, status details,
