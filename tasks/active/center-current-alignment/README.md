@@ -28,7 +28,7 @@ All rows remain open unless explicitly marked complete.
 | Plugins | EdgionPlugins, EdgionStreamPlugins, EdgionConfigData | Current HTTP/stream catalogs aligned; nine ConfigData types editable, four new variants passed native browser CRUD; deeper validation and plugin workflows pending |
 | System | EdgionGatewayConfig, LinkSys, EdgionAcme | GatewayConfig controls/policy aligned; ACME HTTP-01 aligned; all eight LinkSys variants have typed browser CRUD evidence; advanced behavior and remaining validation open |
 | Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Native dashboard/topology controls and AI backend nodes passed; graph freshness/partial-invalid/grant boundaries tested; advanced attachment semantics pending |
-| Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Native two-Controller federation/proxy/watch and reload convergence passed; ownership/fencing, reconnect and count freshness scenarios remain open |
+| Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Native registration/counts/proxy/watch/reload, default RBAC, reconnect/resync/eviction and large-response scenarios passed; Kubernetes ownership/fencing and additional count-freshness scenarios remain open |
 | Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification and native RegionRoute failover/restore/source sync/enable preservation/missing-target recovery passed; mixed outcome retention covered by component tests; actual traffic remains open |
 | Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Native local account create/edit/CAS conflict/label preservation passed; provider DNS adapters and external workflows still pending |
 | Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Native standalone auth/logout, audit filters/pagination, user/role mutations and restricted-role denial passed; OIDC and Kubernetes capability workflows pending |
@@ -1510,3 +1510,28 @@ before acting on CCI execution files or proposing replacements.
   RBAC proof, isolate cleanup to owned PIDs and preserve run artifacts. No backend
   integration process was launched through that unsafe cleanup path this turn.
   Overall alignment remains active.
+
+
+### Native federation backend lifecycle verification
+
+- Updated run_center_test.sh to refuse occupied ports and stop only its own shell
+  child jobs. Removed global kill_all calls from startup, normal cleanup and
+  failure paths. Retain private run directories (umask 077) on both outcomes.
+  Occupied-port experiment confirmed startup refusal without disrupting the
+  unrelated listener. Shell syntax and diff checks passed.
+- Initial run stopped because current Controller requires explicit
+  conf_center.controller_name outside Kubernetes. Added the current identity
+  field to generated configurations; no Controller code or production RBAC
+  changes. Initial 42002 terminal 1 with retained diagnostic directory.
+- Final run 92288 terminal zero: 27 passed, zero failed. Covered registration,
+  StatsReport counts, multi-namespace cached reads, proxied create/update/delete
+  and CAS conflicts, default Secret/other-kind write denial, RegionRoute terminal
+  outcomes, reload re-watch, disconnect/offline/reconnect/resync/eviction, a
+  4,801,350-byte proxied list, and terminal deny-all watch refusal with a stable
+  denial count. /tmp/ws5-center-federation-native-v2.log.
+- Artifacts retained at
+  /var/folders/tn/mmms5lc161v541bskkg3rtz00000gn/T/tmp.9MQUX9HdGC.
+  Verified all recorded child PIDs stopped and all 16 test endpoints closed.
+- This adds backend lifecycle/default-policy evidence beyond the browser fixture
+  RBAC. It does not establish Kubernetes Lease/fencing, MySQL/OIDC or Gateway
+  data-plane behavior. Overall alignment remains active.

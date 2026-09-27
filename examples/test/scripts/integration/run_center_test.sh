@@ -80,6 +80,7 @@
 # =============================================================================
 
 set -euo pipefail
+umask 077
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,7 +88,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 # The controller binary comes from the sibling Edgion repo (Center was extracted
 # out of that monorepo). Override with EDGION_DIR if it lives elsewhere.
 EDGION_DIR="${EDGION_DIR:-$(cd "$REPO_ROOT/.." && pwd)/Edgion}"
-KILL_ALL="$REPO_ROOT/examples/test/scripts/utils/kill_all.sh"
 CENTER_BIN="$REPO_ROOT/target/debug/edgion-center-standalone"
 CTRL_BIN="$EDGION_DIR/target/debug/edgion-controller"
 CONF_SRC="$REPO_ROOT/examples/test/conf/Center"
@@ -146,10 +146,17 @@ pass() { echo -e "[$(date '+%H:%M:%S')] ${GREEN}PASS${NC}: $1"; ((PASS++)) || tr
 fail() { echo -e "[$(date '+%H:%M:%S')] ${RED}FAIL${NC}: $1 — $2"; ((FAIL++)) || true; }
 
 cleanup() {
-  log "Cleaning up..."
-  "$KILL_ALL" 2>/dev/null || true
+  log "Stopping this run's child processes..."
+  local pid attempt
+  for pid in $(jobs -pr); do kill -TERM "$pid" 2>/dev/null || true; done
+  for attempt in 1 2 3 4 5; do
+    [[ -z "$(jobs -pr)" ]] && break
+    sleep 1
+  done
+  for pid in $(jobs -pr); do kill -KILL "$pid" 2>/dev/null || true; done
+  wait 2>/dev/null || true
   if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
-    rm -rf "$WORK_DIR"
+    log "Run artifacts retained: $WORK_DIR"
   fi
 }
 trap cleanup EXIT
@@ -248,9 +255,24 @@ for bin in "$CENTER_BIN" "$CTRL_BIN"; do
   fi
 done
 
-# ── Kill stale processes ──────────────────────────────────────────────────────
-log "Killing stale processes..."
-"$KILL_ALL" 2>/dev/null || true
+# Refuse occupied ports rather than stopping another developer's services.
+python3 - "$CENTER_GRPC_PORT" "$CENTER_HTTP_PORT" "$CENTER_PROBE_PORT" "$CENTER_METRICS_PORT" \
+  "$CTRL1_GRPC_PORT" "$CTRL1_ADMIN_PORT" "$CTRL1_PROBE_PORT" "$CTRL1_METRICS_PORT" \
+  "$CTRL2_GRPC_PORT" "$CTRL2_ADMIN_PORT" "$CTRL2_PROBE_PORT" "$CTRL2_METRICS_PORT" \
+  "$CTRL3_GRPC_PORT" "$CTRL3_ADMIN_PORT" "$CTRL3_PROBE_PORT" "$CTRL3_METRICS_PORT" <<'PYPORTS'
+import socket, sys
+sockets = []
+try:
+    for port in sys.argv[1:]:
+        sock = socket.socket()
+        sockets.append(sock)
+        sock.bind(('0.0.0.0', int(port)))
+except OSError as error:
+    sys.exit(f'Port {port} unavailable; no existing process was stopped: {error}')
+finally:
+    for sock in sockets:
+        sock.close()
+PYPORTS
 
 # ── Work dir ──────────────────────────────────────────────────────────────────
 WORK_DIR=$(mktemp -d)
@@ -362,6 +384,7 @@ logging:
 
 conf_center:
   type: "file_system"
+  controller_name: "edgion.io/gateway-controller"
   conf_dir: "${dir}/conf"
 
 conf_sync:
@@ -470,8 +493,6 @@ if ! poll_until "two controllers online" 40 two_online; then
     echo "--- ctrl${i} file logs ---" >&2
     find "$WORK_DIR/ctrl${i}/logs" -type f -name '*.log' -exec tail -25 {} + >&2 2>/dev/null || true
   done
-  trap - EXIT
-  "$KILL_ALL" 2>/dev/null || true
   log "Work dir kept for inspection: $WORK_DIR"
   exit 1
 fi
@@ -901,9 +922,6 @@ else
   log "  Controller 1: $WORK_DIR/logs/ctrl1.log"
   log "  Controller 2: $WORK_DIR/logs/ctrl2.log"
   log "  Controller 3: $WORK_DIR/logs/ctrl3.log"
-  # Keep the work dir for post-mortem when something failed.
-  trap - EXIT
-  "$KILL_ALL" 2>/dev/null || true
   log "Work dir kept for inspection: $WORK_DIR"
 fi
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
