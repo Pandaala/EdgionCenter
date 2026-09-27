@@ -26,6 +26,15 @@ For repeated frontend-only runs after building both native programs, set
 build locks. Rebuild whenever either program's source changes. The runner checks that
 both executables exist before creating runtime configuration.
 
+Standalone permission-denial coverage uses `E2E_RBAC=1` to enable database
+password login and RBAC in the isolated runtime. Supply `EDGION_ADMIN_USERNAME`
+and `EDGION_ADMIN_PASSWORD` matching `E2E_USERNAME` and `E2E_PASSWORD` so first-run
+bootstrap grants the harness administrator its role. Use a new run ID/database.
+The default remains single-admin authentication with `allow_all`; the restricted
+user lifecycle case skips that configuration. The RBAC case creates a roleless
+user, verifies management/proxy denials and password/status changes, and deletes
+that exact user in cleanup. It does not test revocation of already-issued tokens.
+
 Cleanup is always explicit:
 
 ```bash

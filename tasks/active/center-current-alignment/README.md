@@ -890,3 +890,25 @@ before acting on CCI execution files or proposing replacements.
   All tool sessions terminal; production code and federation contracts unchanged.
 - Updated stale Pending cells with actual partial evidence. No broad coverage
   row is declared complete; remaining requirements stay visible in the ledger.
+
+### Standalone database authentication and RBAC denial evidence
+
+- Reload proof batch committed as 4a26155, no push.
+- Added opt-in E2E_RBAC=1 runtime rendering (DB authentication + RBAC), retaining
+  the existing allow_all default. Documented required database admin bootstrap
+  environment and fresh run/database. Rendering rejects invalid toggle values.
+- Added an isolated roleless user lifecycle case with a fresh request context:
+  successful login/me, 403 for users/roles/audit/Controller proxy, password reset
+  rejecting the old password, disabled-login rejection, and successful login
+  after reactivation. Finally deletes exactly the created user. This proves the
+  Center authorization boundary, not the independent Controller RBAC boundary.
+- First run 32335 failed because creation correctly returned 201, not the test's
+  assumed 200. Second run 86458 exposed that the existing fixture enabled only
+  single-admin auth/allow_all, so the DB user's login correctly failed. Neither
+  was a production defect; the test now requires the explicit RBAC topology.
+  The first failed run's isolated artifact database may retain its test user;
+  no shared or user-owned database was modified.
+- RBAC run 31717 passed both auth and the full lifecycle case (14.8 s); log
+  /tmp/ws5-center-denial-v3.log. E2E typecheck 70949 passed. Owned runtime stopped,
+  70 exact seeds retained. All sessions terminal. Existing-token revocation,
+  browser restricted-menu behavior, OIDC and Kubernetes remain open.
