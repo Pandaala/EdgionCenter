@@ -1,10 +1,14 @@
 import { defineConfig, devices } from '@playwright/test'
 import { resolve } from 'node:path'
+import { validateKubeContext } from './e2e/support/kube-context'
 
 const mode = process.env.E2E_MODE ?? 'standalone'
 if (!['standalone', 'kubernetes', 'mock'].includes(mode)) throw new Error(`Unsupported E2E_MODE: ${mode}`)
 const artifactRoot = resolve(process.env.E2E_ARTIFACT_DIR ?? `test-results/${mode}`)
 const authState = resolve(artifactRoot, `auth-${mode}.json`)
+const isolatedContext = mode === 'kubernetes' && process.env.E2E_KUBE_CONTEXT?.startsWith('kind-')
+  ? validateKubeContext(process.env.E2E_KUBE_CONTEXT, process.env.E2E_RUN_ID) : undefined
+const kindName = isolatedContext?.slice('kind-'.length)
 
 export default defineConfig({
   globalSetup: './e2e/global-setup.ts', testDir: './e2e', outputDir: resolve(artifactRoot, 'playwright'),
@@ -17,6 +21,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL ?? (mode === 'kubernetes' ? 'http://127.0.0.1:14180' : 'http://127.0.0.1:15173'),
     ignoreHTTPSErrors: mode === 'kubernetes',
+    // Keep the OIDC issuer and TLS host intact while reaching the owned Dex
+    // port-forward; kind Service DNS is not reachable from the host browser.
+    launchOptions: kindName ? { args: [`--host-resolver-rules=MAP ${kindName}-dex.${kindName}-system.svc.cluster.local 127.0.0.1`] } : undefined,
     trace: 'retain-on-failure', screenshot: 'only-on-failure', video: 'retain-on-failure',
   },
   projects: mode === 'mock' ? [{ name: 'mock-static', testMatch: /specs\/mock-static\.spec\.ts/, use: { ...devices['Desktop Chrome'] } }] : [

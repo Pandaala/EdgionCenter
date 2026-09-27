@@ -34,6 +34,31 @@ updates. The preflight is read-only and refuses drift; use an isolated cluster w
 current CRDs instead of overwriting a shared cluster's contracts. Gateway API and
 built-in resources currently receive discovery checks only.
 
+The context guard accepts `orbstack` or exactly `kind-eruie2e-<hash>`, where hash
+is the first eight hexadecimal characters of SHA-256 of `E2E_RUN_ID`. Other kind
+clusters and names derived from a previous run are refused by seed, reset and
+cleanup as well as preflight. For an isolated cluster, create it explicitly with
+that name and a private kubeconfig (from `web/`):
+
+```bash
+umask 077
+mkdir -p "$E2E_ARTIFACT_DIR"
+prefix="eruie2e-$(printf %s "$E2E_RUN_ID" | shasum -a 256 | cut -c1-8)"
+export KUBECONFIG="$E2E_ARTIFACT_DIR/kubeconfig"
+export E2E_KUBE_CONTEXT="kind-$prefix"
+kind create cluster --name "$prefix" --kubeconfig "$KUBECONFIG"
+```
+
+Install current Edgion/Gateway API and Center CRDs in that owned cluster before
+running preflight. The runner imports locally built Center/Controller images with
+`kind load docker-image`. It also requires free loopback ports 14180 and 5556;
+the latter forwards Dex, while Chromium resolves only the run's Dex hostname to
+loopback. The OIDC issuer, TLS hostname and in-cluster URLs remain unchanged.
+The additional forwarding process is owned by the runner and stopped on exit;
+the cluster and labeled resources are retained. See the
+[kind quick start](https://kind.sigs.k8s.io/docs/user/quick-start/) for cluster and
+image-loading commands.
+
 The Kubernetes authorization suite also verifies native-RBAC/password-login
 capabilities, hidden SQL administration menus, direct-route redirects, and rejected
 user/role/audit API requests. Unsupported management scenarios must not be evidenced

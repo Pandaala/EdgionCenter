@@ -39,7 +39,8 @@ check_owned_processes() {
 }
 wait_url() {
   local url="$1" deadline=$((SECONDS + 60))
-  until curl --fail --silent --show-error "$url" >/dev/null; do
+  shift
+  until curl --fail --silent --show-error "$@" "$url" >/dev/null; do
     check_owned_processes
     if (( SECONDS >= deadline )); then echo "readiness deadline exceeded: $url" >&2; return 1; fi
     sleep 1
@@ -90,10 +91,12 @@ if [[ "$mode" == standalone ]]; then
   if (( ${#playwright_args[@]} )); then npm run e2e:standalone -- "${playwright_args[@]}"; else npm run e2e:standalone; fi
 else
   : "${KUBECONFIG:?}" "${E2E_OAUTH_CLIENT_SECRET:?}" "${E2E_KUBE_CONTEXT:?}"
-  if [[ "$E2E_KUBE_CONTEXT" != orbstack ]]; then echo 'E2E_KUBE_CONTEXT must be exactly orbstack' >&2; exit 2; fi
-  if [[ "$(kubectl config get-contexts orbstack -o name)" != orbstack ]]; then echo 'Kubernetes context is unavailable: orbstack' >&2; exit 2; fi
+  if [[ "$(kubectl config get-contexts "$E2E_KUBE_CONTEXT" -o name)" != "$E2E_KUBE_CONTEXT" ]]; then echo "Kubernetes context is unavailable: $E2E_KUBE_CONTEXT" >&2; exit 2; fi
+  # The shared context guard accepts only OrbStack or this run's exact kind name.
   npx tsx e2e/scripts/check-kubernetes-apis.ts
+  if [[ "$E2E_KUBE_CONTEXT" != orbstack ]]; then command -v kind >/dev/null || { echo 'kind is required for the isolated cluster' >&2; exit 2; }; fi
   assert_port_free 14180
+  if [[ "$E2E_KUBE_CONTEXT" != orbstack ]]; then assert_port_free 5556; fi
   (cd .. && cicd/build-image.sh --mode kubernetes -t "edgion-center-kubernetes:$E2E_RUN_ID")
   "$edgion_dir/cicd/build-image.sh" --version "$E2E_RUN_ID"
   case "$(uname -m)" in
@@ -102,6 +105,9 @@ else
     *) echo "unsupported local image architecture: $(uname -m)" >&2; exit 2 ;;
   esac
   docker tag "docker.io/pandaala/edgion-controller:${E2E_RUN_ID}_${image_arch}" "pandaala/edgion-controller:$E2E_RUN_ID"
+  if [[ "$E2E_KUBE_CONTEXT" != orbstack ]]; then
+    kind load docker-image --name "${E2E_KUBE_CONTEXT#kind-}" "edgion-center-kubernetes:$E2E_RUN_ID" "pandaala/edgion-controller:$E2E_RUN_ID"
+  fi
   npx tsx e2e/scripts/apply-runtime.ts
   prefix="eruie2e-$(printf %s "$E2E_RUN_ID" | shasum -a 256 | cut -c1-8)"; namespace="$prefix-system"
   center_actor="system:serviceaccount:$namespace:$prefix-center-service-account"
@@ -148,6 +154,11 @@ else
   assert_can_i no "$oidc_actor" get "/edgion-center-authz/permissions/audit:read"
   e2e/scripts/seed.sh
   for deployment in "$prefix-center" "$prefix-controller-a" "$prefix-controller-b" "$prefix-dex" "$prefix-oauth2-proxy"; do kubectl --context "$E2E_KUBE_CONTEXT" -n "$namespace" rollout status "deployment/$deployment" --timeout=180s; done
+  if [[ "$E2E_KUBE_CONTEXT" != orbstack ]]; then
+    kubectl --context "$E2E_KUBE_CONTEXT" -n "$namespace" port-forward --address 127.0.0.1 "service/$prefix-dex" 5556:5556 >"$E2E_ARTIFACT_DIR/dex-port-forward.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/dex-port-forward.log")
+    dex_host="$prefix-dex.$namespace.svc.cluster.local"
+    wait_url "https://$dex_host:5556/dex/.well-known/openid-configuration" --resolve "$dex_host:5556:127.0.0.1" --cacert "$E2E_ARTIFACT_DIR/tls/oidc-ca.crt" --noproxy "$dex_host"
+  fi
   kubectl --context "$E2E_KUBE_CONTEXT" -n "$namespace" port-forward "service/$prefix-oauth2-proxy" 14180:80 >"$E2E_ARTIFACT_DIR/port-forward.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/port-forward.log")
   wait_url http://127.0.0.1:14180/api/v1/auth/status
   npx tsx e2e/scripts/wait-controllers.ts

@@ -1635,3 +1635,32 @@ before acting on CCI execution files or proposing replacements.
   source edits or commits. Next: finish images and establish an isolated cluster
   with current CRDs rather than altering shared OrbStack contracts. Overall
   alignment remains active.
+
+### Isolated kind runtime preparation
+
+- Added a shared context guard: accept OrbStack or only the exact
+  kind-eruie2e-<SHA-256 run prefix> context for the current E2E_RUN_ID. Seed,
+  reset, preflight and cleanup all use it. Unit tests cover accepted contexts,
+  unrelated/missing names and previous-run rejection (two passed, session 80751).
+- The Kubernetes runner imports local images into that kind cluster and owns a
+  loopback Dex port-forward. Chromium maps only the run's Dex hostname to loopback;
+  issuer and certificate identities remain unchanged. Full login/forwarding
+  behavior awaits deployment; no live OIDC success is claimed here.
+- E2E typecheck and shell syntax passed. Kind-context Playwright discovery passed
+  (67863). Frontend build 36579 and lint 76710 completed zero; existing bundle-size
+  warning remains. Documented private-kubeconfig setup and retention behavior.
+- Direct kind binary downloads timed out. Built kind v0.33.0 from the official
+  Go module in a temporary owned container (1883 terminal zero), executable
+  /tmp/ws5-center-tools/kind/kind. Existing kind cluster edgion-standard-162 is
+  unrelated and preserved.
+- Isolated creation session 35885 remains live for eruie2e-655cd051, using the
+  cached arm64 kindest/node digest a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5.
+  Private kubeconfig and create.log are under
+  /tmp/ws5-center-kind-alignment-20260928-v2. Last inspection shows the owned
+  control-plane container Created; cluster readiness is not established.
+- Auxiliary cached-image kubeadm-version inspection session 40231 is also live
+  (owned --rm container wonderful_shockley, ID c557cab82a69); poll it rather than
+  repeating the command. Center image 62359 and Edgion image 91476 remain live;
+  Center reached frontend build and Edgion is compiling current Rust sources.
+  Continue polling these handles, install CRDs only in the new cluster once ready,
+  then execute Kubernetes preflight and browser cases. Overall alignment is active.

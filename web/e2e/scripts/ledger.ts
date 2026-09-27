@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { validateKubeContext } from '../support/kube-context.ts'
 const cleanupKindMap = JSON.parse(readFileSync(new URL('../cleanup-kind-map.json', import.meta.url), 'utf8')) as Record<string, string>
 
 const execFileAsync = promisify(execFile)
@@ -37,9 +38,7 @@ export function resourceForKind(kind: string): string {
   return value
 }
 export function kubeContext(): string {
-  const context = process.env.E2E_KUBE_CONTEXT
-  if (context !== 'orbstack') throw new Error('E2E_KUBE_CONTEXT must be exactly "orbstack"')
-  return context
+  return validateKubeContext(process.env.E2E_KUBE_CONTEXT, process.env.E2E_RUN_ID)
 }
 export function kubectlArgs(args: string[]): string[] { return ['--context', kubeContext(), ...args] }
 export async function currentContext(): Promise<string> {
