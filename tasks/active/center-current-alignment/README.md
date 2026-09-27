@@ -2172,3 +2172,25 @@ before acting on CCI execution files or proposing replacements.
   with current frontend, backend and native evidence. This still does not claim
   deployed Kubernetes, external provider mutations or exhaustive data-plane
   conformance. Remaining audit actions stay explicit; the overall goal is active.
+
+
+### Global inventory failure and expired-cursor recovery (2026-09-28)
+
+- Reviewed aggregate inventory list/catalog queries and detail snapshot fallback
+  against the canonical watch-cache read model. Existing page logic already
+  reports query failures and resets the paginated inventory on explicit refresh;
+  no production change was needed for the scenarios checked here.
+- Added catalog/list failure-and-recovery cases that verify sanitized errors,
+  restored rows and fresh requests. Added expired continuation-token coverage:
+  a failed next-page read retains current rows with a warning; refresh requests
+  page one without the old token, replaces old rows and removes Load more when
+  the new snapshot has no continuation token.
+- Initial test run 12551 failed because its exact accessible button-name matcher
+  omitted Ant Design's reload icon label; corrected the matcher. Session 41920
+  exited zero: 20 global inventory/consistency tests, build and lint passed.
+  Logs: /tmp/ws5-center-global-recovery-tests-v2.log,
+  /tmp/ws5-center-global-recovery-build.log,
+  /tmp/ws5-center-global-recovery-lint.log.
+- This is component recovery evidence in addition to the previously completed
+  native inventory checks; no deployed multi-replica outage is claimed.
+  No production code or Edgion files changed; the overall audit remains active.

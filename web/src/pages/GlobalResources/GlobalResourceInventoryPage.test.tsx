@@ -233,4 +233,42 @@ describe('GlobalResourceInventoryPage', () => {
     expect(screen.queryByText('RegionRouteOverride')).not.toBeInTheDocument()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
   })
+
+  it.each(['catalog', 'list'] as const)('recovers a failed %s read without exposing raw diagnostics', async (source) => {
+    vi.mocked(globalResourcesApi[source]).mockRejectedValueOnce(new Error('private cache diagnostics'))
+    mount()
+    expect(await screen.findByText('globalResources.error.loadFailed')).toBeInTheDocument()
+    expect(screen.queryByText('private cache diagnostics')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /globalResources\.action\.refresh/ }))
+    await waitFor(() => expect(screen.queryByText('globalResources.error.loadFailed')).not.toBeInTheDocument())
+    expect(await screen.findByText('trusted-proxies')).toBeInTheDocument()
+    expect(globalResourcesApi[source]).toHaveBeenCalledTimes(2)
+  })
+
+  it('discards an expired continuation token on refresh and replaces the old snapshot', async () => {
+    vi.mocked(globalResourcesApi.list)
+      .mockResolvedValueOnce({ ...inventory, continueToken: 'old-snapshot-page-2' })
+      .mockRejectedValueOnce(new Error('stale_continue_token'))
+      .mockResolvedValue({ ...inventory, groups: [{ ...inventory.groups[0],
+        key: { ...inventory.groups[0].key, name: 'new-snapshot' },
+      }] })
+    mount()
+    expect(await screen.findByText('trusted-proxies')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'globalResources.action.loadMore' }))
+    expect(await screen.findByText('globalResources.error.loadFailed')).toBeInTheDocument()
+    expect(screen.getByText('trusted-proxies')).toBeInTheDocument()
+    expect(globalResourcesApi.list).toHaveBeenLastCalledWith('edgion-config-data', expect.objectContaining({
+      continueToken: 'old-snapshot-page-2', configDataType: 'IpList',
+    }))
+    fireEvent.click(screen.getByRole('button', { name: /globalResources\.action\.refresh/ }))
+    expect(await screen.findByText('new-snapshot')).toBeInTheDocument()
+    expect(screen.queryByText('trusted-proxies')).not.toBeInTheDocument()
+    expect(screen.queryByText('globalResources.error.loadFailed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'globalResources.action.loadMore' })).not.toBeInTheDocument()
+    expect(globalResourcesApi.list).toHaveBeenCalledTimes(3)
+    expect(globalResourcesApi.list).toHaveBeenLastCalledWith('edgion-config-data', expect.objectContaining({
+      continueToken: undefined, configDataType: 'IpList',
+    }))
+  })
+
 })
