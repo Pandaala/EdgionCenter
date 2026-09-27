@@ -85,7 +85,8 @@ function policyStructureError(raw: unknown): string | undefined {
   }
   for (const path of [
     ['loadBalancer'], ['loadBalancer', 'consistentHash'],
-    ['healthCheck'], ['healthCheck', 'active'], ['outlierDetection'],
+    ['healthCheck'], ['healthCheck', 'active'], ['healthCheck', 'active', 'tls'],
+    ['healthCheck', 'active', 'tls', 'validation'], ['outlierDetection'],
     ['retryConstraint'], ['retryConstraint', 'budget'], ['retryConstraint', 'minRetryRate'],
     ['circuitBreaker'], ['connection'], ['upstreamAuthority'],
   ]) {
@@ -191,13 +192,22 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
 
   const active = policy.spec.healthCheck?.active
   if (active) {
-    if (active.type !== undefined && !['http', 'tcp', 'grpc'].includes(active.type)) errors.push('healthCheck.active.type is invalid')
+    if (active.type !== undefined && !['http', 'https', 'tcp', 'grpc', 'grpcs'].includes(active.type)) errors.push('healthCheck.active.type is invalid')
     if (active.healthyThreshold !== undefined && !isPositiveInteger(active.healthyThreshold)) errors.push('healthyThreshold must be >= 1')
     if (active.unhealthyThreshold !== undefined && !isPositiveInteger(active.unhealthyThreshold)) errors.push('unhealthyThreshold must be >= 1')
     validateDuration(active.interval, 'interval', errors)
     validateDuration(active.timeout, 'timeout', errors)
     if (active.port !== undefined && !isValidPort(active.port)) errors.push('port must be 1-65535')
-    if ((active.type ?? 'http') === 'http') {
+    if (active.type === 'https' || active.type === 'grpcs') {
+      if (!active.tls) errors.push('Encrypted health checks require tls')
+      else {
+        if (active.tls.verify === false) errors.push('Encrypted health checks require certificate verification')
+        if (typeof active.tls.validation?.hostname !== 'string' || !active.tls.validation.hostname) {
+          errors.push('Encrypted health checks require tls.validation.hostname')
+        }
+      }
+    }
+    if (['http', 'https'].includes(active.type ?? 'http')) {
       if (active.path === '') errors.push('path must not be empty for http health check')
       if (active.expectedStatuses?.length === 0) errors.push('expectedStatuses must not be empty for http health check')
       if (active.expectedStatuses?.some((status) => !Number.isInteger(status) || status < 100 || status > 599)) {

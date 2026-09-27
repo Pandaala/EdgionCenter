@@ -222,3 +222,38 @@ describe('EdgionBackendTrafficPolicyForm', () => {
     })
   })
 })
+
+
+it.each(['https', 'grpcs'] as const)('edits %s probe TLS references without dropping other probe fields', (type) => {
+  const onChange = vi.fn()
+  const onDraftValidationChange = vi.fn()
+  const policy: EdgionBackendTrafficPolicy = {
+    apiVersion: 'edgion.io/v1', kind: 'EdgionBackendTrafficPolicy',
+    metadata: { name: 'tls-probe', namespace: 'prod' },
+    spec: { targetRefs: [{ kind: 'Service', name: 'backend' }], healthCheck: { active: { type, path: '/ready', grpcServiceName: 'health', futureProbe: true, tls: { validation: { hostname: 'old.example.com' } } } } },
+  }
+  render(<EdgionBackendTrafficPolicyForm data={policy} onChange={onChange} onDraftValidationChange={onDraftValidationChange} />)
+  const tls = { verify: true, validation: { hostname: 'probe.example.com', wellKnownCACertificates: 'System' }, clientCertificateRef: { name: 'client' } }
+  fireEvent.change(screen.getByLabelText('Probe TLS'), { target: { value: JSON.stringify(tls) } })
+  const changed = onChange.mock.calls.at(-1)![0] as EdgionBackendTrafficPolicy
+  expect(changed.spec.healthCheck!.active).toMatchObject({ type, path: '/ready', grpcServiceName: 'health', futureProbe: true, tls })
+  fireEvent.change(screen.getByLabelText('Probe TLS'), { target: { value: '{' } })
+  expect(onDraftValidationChange).toHaveBeenLastCalledWith(['Probe TLS must be a valid JSON object'])
+})
+
+
+it('keeps malformed HTTPS status tokens blocking after a TLS draft is corrected', () => {
+  const onDraftValidationChange = vi.fn()
+  const policy: EdgionBackendTrafficPolicy = {
+    apiVersion: 'edgion.io/v1', kind: 'EdgionBackendTrafficPolicy',
+    metadata: { name: 'probe', namespace: 'prod' },
+    spec: { targetRefs: [{ kind: 'Service', name: 'backend' }], healthCheck: { active: { type: 'https', expectedStatuses: [200] } } },
+  }
+  render(<EdgionBackendTrafficPolicyForm data={policy} onChange={vi.fn()} onDraftValidationChange={onDraftValidationChange} />)
+  fireEvent.change(screen.getByDisplayValue('200'), { target: { value: 'bad-status' } })
+  fireEvent.change(screen.getByLabelText('Probe TLS'), { target: { value: '{' } })
+  expect(onDraftValidationChange.mock.calls.at(-1)![0]).toHaveLength(2)
+  fireEvent.change(screen.getByLabelText('Probe TLS'), { target: { value: '{"validation":{"hostname":"probe.example.com"}}' } })
+  expect(onDraftValidationChange.mock.calls.at(-1)![0]).toHaveLength(1)
+  expect(onDraftValidationChange.mock.calls.at(-1)![0]).not.toContain('Probe TLS must be a valid JSON object')
+})

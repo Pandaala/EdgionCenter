@@ -293,3 +293,34 @@ describe('backend policy structural boundary', () => {
     expect(validateEdgionBackendTrafficPolicy(document as unknown as EdgionBackendTrafficPolicy)).toEqual([])
   })
 })
+
+
+describe('encrypted health check mutation boundary', () => {
+  it.each(['https', 'grpcs'] as const)('preserves %s TLS references and strips Controller-resolved material', (type) => {
+    const policy = structuredClone(fullPolicy)
+    const tls = {
+      verify: true,
+      validation: { hostname: 'probe.example.com', caCertificateRefs: [{ group: '', kind: 'Secret' as const, name: 'probe-ca' }] },
+      clientCertificateRef: { name: 'probe-client' },
+    }
+    policy.spec.healthCheck!.active = {
+      type, tls, path: '/health', grpcServiceName: 'health.v1',
+      resolvedCaCertificates: '[redacted]',
+      resolvedClientCertificate: '[redacted]',
+      resolvedTlsError: 'resolution failed',
+      futureProbe: { retained: true },
+    }
+    expect(validateEdgionBackendTrafficPolicy(policy)).toEqual([])
+    const output = yaml.load(edgionBackendTrafficPolicyToMutationYaml(policy, 'update')) as EdgionBackendTrafficPolicy
+    expect(output.spec.healthCheck!.active).toMatchObject({ type, tls, futureProbe: { retained: true } })
+    for (const key of ['resolvedCaCertificates', 'resolvedClientCertificate', 'resolvedTlsError']) {
+      expect(output.spec.healthCheck!.active).not.toHaveProperty(key)
+    }
+  })
+
+  it('applies HTTP status validation to HTTPS probes', () => {
+    const policy = structuredClone(fullPolicy)
+    policy.spec.healthCheck!.active = { type: 'https', expectedStatuses: [] }
+    expect(validateEdgionBackendTrafficPolicy(policy)).toContain('expectedStatuses must not be empty for http health check')
+  })
+})

@@ -2,7 +2,7 @@ import type { K8sMetadata } from '@/api/types'
 
 export type LoadBalancerType = 'RoundRobin' | 'LeastConn' | 'Ewma' | 'ConsistentHash'
 export type ConsistentHashOn = 'header' | 'cookie' | 'queryParam' | 'sourceIp'
-export type HealthCheckType = 'http' | 'tcp' | 'grpc'
+export type HealthCheckType = 'http' | 'https' | 'tcp' | 'grpc' | 'grpcs'
 
 export interface PolicyTargetRef {
   group?: string
@@ -24,6 +24,18 @@ export interface LoadBalancerConfig {
   [key: string]: unknown
 }
 
+export interface HealthCheckTlsConfig {
+  verify?: boolean
+  validation?: {
+    hostname?: string
+    wellKnownCACertificates?: 'System'
+    caCertificateRefs?: Array<{ group: string; kind: 'Secret' | 'ConfigMap'; name: string; namespace?: string }>
+    subjectAltNames?: Array<{ type: 'Hostname' | 'URI'; hostname?: string; uri?: string }>
+    [key: string]: unknown
+  }
+  clientCertificateRef?: { group?: string; kind?: string; name: string; namespace?: string }
+}
+
 export interface ActiveHealthCheckConfig {
   type?: HealthCheckType
   path?: string
@@ -35,6 +47,7 @@ export interface ActiveHealthCheckConfig {
   expectedStatuses?: number[]
   host?: string
   grpcServiceName?: string
+  tls?: HealthCheckTlsConfig
   [key: string]: unknown
 }
 

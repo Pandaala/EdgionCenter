@@ -21,6 +21,18 @@ circuit-breaker, connection and upstream-authority sections. Do not infer AI
 runtime support solely from the availability of a form section: Controller target
 capability validation and resolved references remain authoritative.
 
+Active probe modes include http, https, tcp, grpc and grpcs. Encrypted modes expose
+the independent OutboundTlsLocal document through a JSON field, including
+validation.hostname, CA/SAN settings and a client-certificate reference. Invalid
+TLS JSON and malformed HTTP status drafts jointly block submission. Basic TLS
+presence/verification requirements are checked locally; Controller identity,
+CA-resolution and same-namespace enforcement remain authoritative.
+
+The mutation adapter removes healthCheck.active.resolvedCaCertificates,
+resolvedClientCertificate and resolvedTlsError at their exact paths. Operator
+TLS references and unrelated fields must survive. HTTPS native browser CRUD
+proves round-trip configuration only; it does not prove successful TLS probes.
+
 Normalization preserves unknown operator fields and omitted defaults. Before
 rendering, it rejects invalid document/section containers, malformed target
 references, non-array health-check status lists and non-string authority fields

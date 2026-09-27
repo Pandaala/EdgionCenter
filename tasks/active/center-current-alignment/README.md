@@ -1233,3 +1233,26 @@ before acting on CCI execution files or proposing replacements.
   establishes editing boundaries, not runtime balancing/probes/ejection/retry
   semantics or all target attachment cases. Those and the remaining menu/type
   rows stay open. No Edgion changes or commits.
+
+### HTTPS and GRPCS active health checks
+
+- Current Edgion health_check.rs supports five probe modes and independent
+  OutboundTlsLocal configuration. Center still allowed only http/tcp/grpc and
+  omitted new Controller-resolved health TLS fields from mutation filtering.
+- Added https/grpcs types/options, HTTP fields for HTTPS and gRPC service fields
+  for GRPCS, plus a TLS JSON editor covering hostname, CA/SAN settings and client
+  identity references. Basic encrypted-probe TLS/verification/hostname checks
+  precede submission; full identity, trust and namespace validation stays with
+  Controller. Invalid TLS drafts and HTTP-status drafts aggregate independently.
+- Mutation filtering now drops exactly healthCheck.active.resolvedCaCertificates,
+  resolvedClientCertificate and resolvedTlsError, preserving operator references
+  and unknown sibling fields. Added HTTPS/GRPCS round-trip, resolved-field removal,
+  form TLS edits and simultaneous draft-error tests.
+- Final 63 tests passed (91329); build 20414 and lint 53906 passed. Native run
+  alignment-health-tls-20260928-v1 used a HTTPS fixture and passed login, policy
+  page actions and full browser CRUD (3 tests, 21255 terminal zero). All 70
+  fixture files retained. Logs /tmp/ws5-center-health-tls-{tests,build,lint,native}.log.
+- The Controller binary postdates the inspected health-check source. No Edgion
+  edits or commits. Native evidence proves HTTPS configuration round-trips,
+  not a successful probe handshake; GRPCS editing has component/adapter evidence.
+  Runtime probes and remaining policy/menu cases stay open.

@@ -175,6 +175,9 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'config', 'allowDegradationTemplate'],
   ],
   edgionbackendtrafficpolicy: [
+    ['spec', 'healthCheck', 'active', 'resolvedCaCertificates'],
+    ['spec', 'healthCheck', 'active', 'resolvedClientCertificate'],
+    ['spec', 'healthCheck', 'active', 'resolvedTlsError'],
     ['spec', 'currentStatus'],
     ['spec', 'resolvedTargetClass'],
     ['spec', 'outlierDetection', 'ejectionSeconds'],

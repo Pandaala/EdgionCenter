@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import HealthCheckTlsFields from './HealthCheckTlsFields'
 import MetadataSection from '../common/MetadataSection'
 import type {
   ActiveHealthCheckConfig,
@@ -84,6 +85,7 @@ const EdgionBackendTrafficPolicyForm = ({
     () => (active?.expectedStatuses ?? []).join(', '),
   )
   const [expectedStatusesTouched, setExpectedStatusesTouched] = useState(false)
+  const [tlsDraftErrors, setTlsDraftErrors] = useState<string[]>([])
   const outlier = data.spec.outlierDetection
   const retryConstraint = data.spec.retryConstraint
   const retryBudget = { percent: 20, interval: '10s', ...retryConstraint?.budget }
@@ -98,12 +100,19 @@ const EdgionBackendTrafficPolicyForm = ({
   }, [active?.expectedStatuses])
 
   useEffect(() => {
-    if (!active || activeType !== 'http') {
+    if (!active || !['http', 'https'].includes(activeType)) {
       setExpectedStatusesDraft((active?.expectedStatuses ?? []).join(', '))
       setExpectedStatusesTouched(false)
-      onDraftValidationChange?.([])
     }
   }, [active, activeType, onDraftValidationChange])
+
+  useEffect(() => {
+    const errors = active && ['http', 'https'].includes(activeType)
+      && expectedStatusesTouched && hasInvalidExpectedStatusTokens(expectedStatusesDraft)
+      ? [t('validation.expectedStatusesTokens')] : []
+    if (active && ['https', 'grpcs'].includes(activeType)) errors.push(...tlsDraftErrors)
+    onDraftValidationChange?.(errors)
+  }, [active, activeType, expectedStatusesTouched, expectedStatusesDraft, tlsDraftErrors, onDraftValidationChange, t])
 
   const toggleActiveHealthCheck = (checked: boolean) => {
     const healthCheck = { ...(data.spec.healthCheck ?? {}) }
@@ -111,7 +120,6 @@ const EdgionBackendTrafficPolicyForm = ({
     else delete healthCheck.active
     setSection('healthCheck', Object.keys(healthCheck).length > 0 ? healthCheck : undefined)
     setExpectedStatusesTouched(false)
-    onDraftValidationChange?.([])
   }
 
   const updateExpectedStatuses = (source: string) => {
@@ -119,10 +127,8 @@ const EdgionBackendTrafficPolicyForm = ({
     setExpectedStatusesTouched(true)
     const tokens = source.split(',').map((token) => token.trim())
     if (hasInvalidExpectedStatusTokens(source)) {
-      onDraftValidationChange?.([t('validation.expectedStatusesTokens')])
       return
     }
-    onDraftValidationChange?.([])
     patchActive({ expectedStatuses: tokens.map(Number) })
   }
 
@@ -251,7 +257,7 @@ const EdgionBackendTrafficPolicyForm = ({
                     value={activeType}
                     disabled={readOnly}
                     style={{ width: 120 }}
-                    options={['http', 'tcp', 'grpc'].map((value) => ({ value, label: value }))}
+                    options={['http', 'https', 'tcp', 'grpc', 'grpcs'].map((value) => ({ value, label: value }))}
                     onChange={(type) => patchActive({ type })}
                   />
                 </Form.Item>
@@ -271,7 +277,7 @@ const EdgionBackendTrafficPolicyForm = ({
                   <InputNumber min={1} value={active.unhealthyThreshold} disabled={readOnly} onChange={(value) => patchActive({ unhealthyThreshold: value ?? 0 })} />
                 </Form.Item>
               </Space>
-              {activeType === 'http' && (
+              {['http', 'https'].includes(activeType) && (
                 <Space wrap align="start">
                   <Form.Item label={t('field.healthCheckPath')} required>
                     <Input value={active.path} disabled={readOnly} onChange={(event) => patchActive({ path: event.target.value })} />
@@ -296,10 +302,18 @@ const EdgionBackendTrafficPolicyForm = ({
                   </Form.Item>
                 </Space>
               )}
-              {activeType === 'grpc' && (
+              {['grpc', 'grpcs'].includes(activeType) && (
                 <Form.Item label={t('field.grpcServiceName')}>
                   <Input value={active.grpcServiceName} disabled={readOnly} onChange={(event) => patchActive({ grpcServiceName: event.target.value || undefined })} />
                 </Form.Item>
+              )}
+              {['https', 'grpcs'].includes(activeType) && (
+                <HealthCheckTlsFields
+                  value={active.tls}
+                  readOnly={readOnly}
+                  onChange={(tls) => patchActive({ tls })}
+                  onDraftValidationChange={setTlsDraftErrors}
+                />
               )}
             </>
           )}

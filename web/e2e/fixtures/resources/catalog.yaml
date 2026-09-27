@@ -152,6 +152,14 @@ kind: EdgionBackendTrafficPolicy
 metadata: {name: "__PREFIX__-traffic", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
 spec:
   targetRefs: [{group: "", kind: Service, name: "__PREFIX__-service"}]
+  healthCheck:
+    active:
+      type: https
+      path: /healthz
+      expectedStatuses: [200, 204]
+      tls:
+        verify: true
+        validation: {hostname: probe.example.com, wellKnownCACertificates: System}
   loadBalancer: {type: RoundRobin}
   retryConstraint: {budget: {percent: 20, interval: 10s}, minRetryRate: {count: 10, interval: 1s}}
   circuitBreaker: {maxParallelRequests: 128}
