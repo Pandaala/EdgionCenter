@@ -1664,3 +1664,78 @@ before acting on CCI execution files or proposing replacements.
   Center reached frontend build and Edgion is compiling current Rust sources.
   Continue polling these handles, install CRDs only in the new cluster once ready,
   then execute Kubernetes preflight and browser cases. Overall alignment is active.
+
+### Isolated control-plane bootstrap diagnosis
+
+- Kind creation 35885 terminated one during kubeadm admin bootstrap: the API
+  server was not serving before its deadline. Retained the owned node and logs.
+  Version inspection 40231 completed zero, reporting Kubernetes v1.37.0; its
+  --rm container finished. These two handles are no longer live.
+- Kubelet/containerd are active. Four static-pod sandboxes report Ready but no
+  application containers exist yet; this is not control-plane readiness. Image
+  content is present, while containerd reports unpacked=false and six active
+  extraction snapshots (62 MB at last inspection). Do not confuse sandbox state
+  with running API/controller processes or repeat cluster creation blindly.
+- Exported the private kubeconfig to the existing run directory without changing
+  the user's default kubeconfig. API readiness check 32073 terminated one (EOF).
+  Attempted to resume only remaining kubeadm phases, preserving certificates,
+  configuration and static manifests; 38708 terminated one with the same admin
+  bootstrap deadline. Log: resume-init.log in the retained kind run directory.
+  Inspect extraction/API progress before another bootstrap attempt.
+- Real Chromium experiment 86110 completed zero: the exact Dex hostname mapping
+  reached an ephemeral loopback server and preserved the original Host header.
+  Browser/server were closed in finally. This validates resolver behavior only,
+  not OIDC authentication or TLS against the deployed Dex instance.
+- Image builds 62359 and 91476 remain live. Center completed its frontend build
+  and is copying Rust/dashboard inputs; Edgion completed the Controller/CLI release
+  build and moved to Gateway compilation. No user workload or existing cluster
+  was modified. Overall alignment remains active.
+
+### Container toolchain failure and snapshot recovery attempt
+
+- Center build 62359 terminated one. Cargo explicitly rejects rustc 1.92.0 for
+  the locked AWS SDK/Smithy packages, which require 1.94.1. Updated the Dockerfile
+  default to Rust 1.96.1 (also used by the sibling build), and added --locked to
+  preserve the checked-in dependency resolution. No dependency downgrade/update.
+  Replacement build 43367 is live, same local-only v2 tag, log
+  /tmp/ws5-center-kube-image-rust196.log. Image validation remains pending; keep
+  the Dockerfile change uncommitted until the replacement gate establishes it.
+- Containerd logs now prove repeated overlayfs snapshot commit timeouts, beyond
+  simply slow initialization. Backed up the isolated node's original config to
+  /kind/containerd-before-native.toml and switched its supported snapshotter to
+  native; restart command 95390 completed zero. Only this owned node changed.
+- Native extraction also reached the CRI deadline. Started a single API-server
+  image prewarm with ctr images mount/unmount and a 600 s timeout, session 95256,
+  log /tmp/ws5-center-kind-alignment-20260928-v2/prewarm-apiserver.log. Kubelet is
+  stopped on the isolated node to prevent competing retries. On success the
+  command unmounts and restarts kubelet. If it fails, explicitly restart kubelet
+  after inspecting the log (set -e skips that final command). Do not launch a
+  second prewarm while this handle is live. No validated cluster exists yet.
+- Edgion build 91476 remains live in Gateway compilation. Source changes in that
+  repository remain untouched. Diff whitespace check passed; overall alignment
+  remains active, with no claim of Kubernetes browser completion.
+
+### Native WAF mutation-boundary audit
+
+- Current WafConfig is a top-level spec.waf logical plugin, separate from the
+  four stage arrays. Its operator inputs are policyRef, activeProfile or
+  activeProfileRef, mode, requestBody and priority. The existing stage-only
+  mutation exclusions did not cover this structure.
+- Added exact WAF exclusions for inspection-only rules, resolved policy/bundles,
+  selected profile/reference indices, resolution diagnostics and owner namespace.
+  Operator refs, request-body settings, zero priority, sibling stages and nested
+  unknown operator fields remain intact. Create/update tests also verify CAS
+  resourceVersion behavior. No Controller/backend contract change.
+- Final mutation suite passed 20 tests and frontend build completed zero in
+  session 51812. Lint 75733 passed. Initial build 57935 found type errors in the
+  new test's unknown-document access; changed assertions to typed-safe property
+  checks, then reran tests/build. Diff whitespace check passed.
+- Remaining concrete WAF gaps: no top-level form/type, list totals omit WAF,
+  topology omits policyRef and policy bundleRefs. Continue these against current
+  source, then add native UI/API proof. The unrelated WAF diagnostic task under
+  tasks/todo is preserved. This batch does not complete WAF alignment.
+- Builds 43367 and 91476 and prewarm 95256 remain live. Native extraction grew
+  from about 2.8 to 12 MB; no API readiness yet. Center build 43367 staged its
+  source before this WAF boundary fix, so its future image cannot prove the fix;
+  rebuild current sources before browser validation. Dockerfile change remains
+  uncommitted pending its build gate. Overall alignment remains active.

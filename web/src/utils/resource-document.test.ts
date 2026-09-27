@@ -271,6 +271,30 @@ describe('resource document preservation', () => {
     expect(result).not.toHaveProperty('spec.requestPlugins.0.extAuth.config.nested.resolvedSecrets')
   })
 
+  it.each(['create', 'update'] as const)('removes resolved WAF inputs on %s while preserving operator configuration', (mode) => {
+    const operator = {
+      policyRef: { name: 'shared-policy', namespace: 'security' },
+      activeProfileRef: { name: 'selection' }, mode: 'detectionOnly', priority: 0,
+      requestBody: { inspection: 'prefix', prefixSize: '64KiB' },
+      futureOperator: { rules: 'nested operator content', selectedProfile: 'keep' },
+    }
+    const result = buildMutationDocument({
+      apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins',
+      metadata: { name: 'waf', namespace: 'edge', resourceVersion: '7' },
+      spec: {
+        waf: { ...operator, rules: 'inspection-only', resolvedPolicy: { defaultProfile: 'base' },
+          selectedProfile: 'base', resolvedRefIndices: [0], resolvedBundles: '[redacted]',
+          resolutionErrors: [], resolutionWarnings: ['warning'], policyResolved: true,
+          selectorResolved: true, ownerNamespace: 'security' },
+        requestPlugins: [{ type: 'Mock', config: { status: 200 } }],
+      },
+    }, { mode, resourceKind: 'edgionplugins' })
+    expect(result).toHaveProperty('spec.waf', operator)
+    expect(result).toHaveProperty('spec.requestPlugins', [{ type: 'Mock', config: { status: 200 } }])
+    if (mode === 'update') expect(result).toHaveProperty('metadata.resourceVersion', '7')
+    else expect(result).not.toHaveProperty('metadata.resourceVersion')
+  })
+
   it('fails closed when no resource boundary is registered', () => {
     expect(() => buildMutationDocument({
       apiVersion: 'example.io/v1',

@@ -135,7 +135,15 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'resolvedCaCertificates'], ['spec', 'resolvedClientCertificate'],
     ['spec', 'useSystemCa'],
   ],
-  edgionplugins: [['spec', 'currentStatus'], ...HTTP_PLUGIN_INTERNAL_PATHS],
+  edgionplugins: [
+    ['spec', 'currentStatus'], ...HTTP_PLUGIN_INTERNAL_PATHS,
+    ['spec', 'waf', 'rules'],
+    ['spec', 'waf', 'resolvedPolicy'], ['spec', 'waf', 'selectedProfile'],
+    ['spec', 'waf', 'resolvedRefIndices'], ['spec', 'waf', 'resolvedBundles'],
+    ['spec', 'waf', 'resolutionErrors'], ['spec', 'waf', 'resolutionWarnings'],
+    ['spec', 'waf', 'policyResolved'], ['spec', 'waf', 'selectorResolved'],
+    ['spec', 'waf', 'ownerNamespace'],
+  ],
   edgionstreamplugins: [
     ['spec', 'currentStatus'],
     ['spec', 'plugins', '*', 'policyAction'],
