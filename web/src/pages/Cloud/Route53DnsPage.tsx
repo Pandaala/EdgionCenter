@@ -163,6 +163,8 @@ export default function Route53DnsPage({ dnsWriteAvailable = false, zoneLifecycl
   })
   const zoneItems = zones.data?.pages.flatMap((page) => page.data?.items ?? []) ?? []
   const recordItems = records.data?.pages.flatMap((page) => page.data?.items ?? []) ?? []
+  const readFailed = (canAccounts && accountsQuery.isError)
+    || (canDnsAccess && accountId !== undefined && (zones.isError || (zone !== undefined && records.isError)))
   const invalidate = () => { queryClient.invalidateQueries({ queryKey: DNS_KEY }) }
   const setError = (error: unknown) => setResult(route53MutationResult(error))
   const createZone = useMutation({
@@ -209,9 +211,10 @@ export default function Route53DnsPage({ dnsWriteAvailable = false, zoneLifecycl
   const lifecycleSafe = lifecycle?.nonDefaultRecordCount === 0 && lifecycle?.dnssec.state === 'disabled'
 
   return <div>
-    <PageHeader title={t('cloud.route53.title')} subtitle={t('cloud.route53.subtitle')} actions={<Button icon={<ReloadOutlined />} onClick={() => { invalidate(); setResult(null) }}>{t('btn.refresh')}</Button>} />
+    <PageHeader title={t('cloud.route53.title')} subtitle={t('cloud.route53.subtitle')} actions={<Button icon={<ReloadOutlined />} onClick={() => { invalidate(); queryClient.invalidateQueries({ queryKey: ['cloud-provider-accounts'] }); setResult(null) }}>{t('btn.refresh')}</Button>} />
     {!canRead && <Alert type="warning" showIcon message={t('cloud.route53.permissionDenied')} />}
     {canRead && !canAccounts && <Alert type="warning" showIcon message={t('cloud.route53.accountDenied')} />}
+    {readFailed && <Alert type="error" showIcon message={t('cloud.inventoryReadFailed')} />}
     {canDnsAccess && <Space direction="vertical" size={16} style={{ width: '100%' }}>
       {statusAlert}
       <Space wrap><Typography.Text>{t('cloud.route53.account')}</Typography.Text><Select data-testid="route53-account" style={{ minWidth: 260 }} value={accountId} onChange={(value) => { setAccountId(value); setZone(undefined); setLifecycle(undefined); setResult(null) }} options={accounts.map((account) => ({ value: account.accountId, label: `${account.displayName} (${account.accountId})` }))} placeholder={t('cloud.route53.selectAccount')} /></Space>
@@ -228,7 +231,7 @@ export default function Route53DnsPage({ dnsWriteAvailable = false, zoneLifecycl
         { title: t('cloud.route53.control'), render: () => <Tag>{t('cloud.route53.externalOrManual')}</Tag> },
         { title: t('col.actions'), render: (_, record: Route53RecordSet) => <Space>{canWrite && isSafelyEditable(record) && <Button size="small" onClick={() => openEditor(record)}>{t('btn.edit')}</Button>}{canWrite && record.recordSet.key.recordType !== 'SOA' && <Popconfirm title={t('cloud.route53.deleteRecordConfirm', { name: `${record.recordSet.key.owner} ${record.recordSet.key.recordType}` })} onConfirm={() => deleteRecord.mutate(record)} okText={t('btn.delete')} cancelText={t('btn.cancel')}><Button danger size="small">{t('btn.delete')}</Button></Popconfirm>}</Space> },
       ]} />}
-      {zone === undefined && selected && !zones.isLoading && zoneItems.length === 0 && <Empty description={t('cloud.route53.noZones')} />}
+      {zone === undefined && selected && !zones.isLoading && !zones.isError && zoneItems.length === 0 && <Empty description={t('cloud.route53.noZones')} />}
     </Space>}
     <Modal title={t(editing ? 'cloud.route53.editRecord' : 'cloud.route53.createRecord')} open={editing !== undefined} onCancel={() => setEditing(undefined)} onOk={submitRecord} confirmLoading={putRecord.isPending} okText={t('btn.save')} cancelText={t('btn.cancel')} destroyOnClose>
       {editing && !isSafelyEditable(editing) && <Alert type="info" showIcon message={t('cloud.route53.readOnlyRecord')} />}

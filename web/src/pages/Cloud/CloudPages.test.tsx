@@ -147,6 +147,24 @@ describe('Provider accounts dashboard boundary', () => {
 })
 
 describe('Cloudflare DNS dashboard boundary', () => {
+  it.each(['accounts', 'zones', 'records'] as const)('shows sanitized %s read failures and recovers on refresh', async (boundary) => {
+    const failed = boundary === 'accounts' ? state.listAccounts : boundary === 'zones' ? state.listZones : state.listRecords
+    failed.mockRejectedValue(new Error('private-provider-error'))
+    renderPage(<CloudflareDnsPage />)
+    if (boundary !== 'accounts') {
+      fireEvent.mouseDown(screen.getByRole('combobox'))
+      fireEvent.click(await screen.findByText('CF Main (cf-main)'))
+      if (boundary === 'records') fireEvent.click(await screen.findByTestId('cloudflare-zone-open'))
+    }
+    expect(await screen.findByText(/Could not load provider accounts or DNS inventory/)).toBeInTheDocument()
+    expect(screen.queryByText('private-provider-error')).not.toBeInTheDocument()
+    expect(screen.queryByText('No Zones found')).not.toBeInTheDocument()
+    failed.mockResolvedValue(boundary === 'accounts' ? { success: true, data: [ACCOUNT] } : { success: true, data: { items: [] } })
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
+    await waitFor(() => expect(screen.queryByText(/Could not load provider accounts or DNS inventory/)).not.toBeInTheDocument())
+    expect(state.putRecord).not.toHaveBeenCalled()
+    expect(state.deleteRecord).not.toHaveBeenCalled()
+  })
   async function selectAccountAndOpenZone() {
     fireEvent.mouseDown(screen.getByRole('combobox'))
     fireEvent.click(await screen.findByText('CF Main (cf-main)'))

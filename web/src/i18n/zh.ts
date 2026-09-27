@@ -1195,6 +1195,7 @@ const zh = {
   'cloud.dns.zoneDeleted': 'Zone 已删除',
   'cloud.dns.deleteZoneConfirm': '删除 Zone {name}？仅会在确认当前修订版本后删除提供商 Zone。',
   'cloud.dns.noZones': '未找到 Zone',
+  'cloud.inventoryReadFailed': '无法读取云账户或 DNS 资源。已显示的数据可能过时或不完整，请刷新重试。',
   'cloud.dns.loadMore': '加载更多',
   'cloud.dns.nameservers': '权威名称服务器',
   'cloud.dns.createRecord': '创建记录',

@@ -110,11 +110,14 @@ export default function CloudflareDnsPage() {
   })
   const zoneItems = zones.data?.pages.flatMap((page) => page.data?.items ?? []) ?? []
   const recordItems = records.data?.pages.flatMap((page) => page.data?.items ?? []) ?? []
+  const readFailed = (canReadAccounts && accountQuery.isError)
+    || (canDnsAccess && accountId !== undefined && (zones.isError || (zone !== undefined && records.isError)))
   const invalidateDns = () => {
     queryClient.invalidateQueries({ queryKey: DNS_KEY })
   }
   const refresh = () => {
     invalidateDns()
+    queryClient.invalidateQueries({ queryKey: ['cloud-provider-accounts'] })
     setResult(null)
   }
   const createZone = useMutation({
@@ -170,6 +173,7 @@ export default function CloudflareDnsPage() {
       <PageHeader title={t('cloud.dns.title')} subtitle={t('cloud.dns.subtitle')} actions={<Button icon={<ReloadOutlined />} onClick={refresh}>{t('btn.refresh')}</Button>} />
       {!canRead && <Alert type="warning" showIcon message={t('cloud.permission.dnsDenied')} />}
       {canRead && !canReadAccounts && <Alert type="warning" showIcon message={t('cloud.permission.dnsAccountDenied')} />}
+      {readFailed && <Alert type="error" showIcon message={t('cloud.inventoryReadFailed')} />}
       {canDnsAccess && <Space direction="vertical" size={16} style={{ width: '100%' }}>
         {statusAlert}
         <Space wrap>
@@ -191,7 +195,7 @@ export default function CloudflareDnsPage() {
           { title: t('cloud.dns.control'), render: (_, record: CloudflareRecordSet) => record.control.type === 'remote' ? <Tag color="blue">{t('cloud.dns.remote', { caller: record.control.callerAlias })}</Tag> : <Tag color={record.control.type === 'manual' ? 'default' : 'red'}>{t(`cloud.dns.control.${record.control.type}`)}</Tag> },
           { title: t('col.actions'), render: (_, record: CloudflareRecordSet) => <Space>{canWrite && isSafelyEditable(record) && <Button size="small" onClick={() => openEditor(record)}>{t('btn.edit')}</Button>}{canWrite && record.recordType !== 'SOA' && <Popconfirm title={t('cloud.dns.deleteRecordConfirm', { name: `${record.owner} ${record.recordType}` })} onConfirm={() => deleteRecord.mutate(record)} okText={t('btn.delete')} cancelText={t('btn.cancel')}><Button danger size="small">{t('btn.delete')}</Button></Popconfirm>}</Space> },
         ]} />}
-        {zone === undefined && selected && !zones.isLoading && zoneItems.length === 0 && <Empty description={t('cloud.dns.noZones')} />}
+        {zone === undefined && selected && !zones.isLoading && !zones.isError && zoneItems.length === 0 && <Empty description={t('cloud.dns.noZones')} />}
       </Space>}
       <Modal title={t(editing ? 'cloud.dns.editRecord' : 'cloud.dns.createRecord')} open={editing !== undefined} onCancel={() => setEditing(undefined)} onOk={submitRecord} confirmLoading={writeRecord.isPending} okButtonProps={{ disabled: editing !== null && editing !== undefined && !isSafelyEditable(editing) }} okText={t('btn.save')} cancelText={t('btn.cancel')} destroyOnClose>
         {editing && !isSafelyEditable(editing) && <Alert type="info" showIcon message={t('cloud.dns.readOnlyRecordType')} />}

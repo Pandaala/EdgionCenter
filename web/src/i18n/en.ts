@@ -1195,6 +1195,7 @@ const en = {
   'cloud.dns.zoneDeleted': 'Zone deleted',
   'cloud.dns.deleteZoneConfirm': 'Delete Zone {name}? This only deletes the provider Zone after its current revision is confirmed.',
   'cloud.dns.noZones': 'No Zones found',
+  'cloud.inventoryReadFailed': 'Could not load provider accounts or DNS inventory. Displayed data may be stale or incomplete. Refresh to retry.',
   'cloud.dns.loadMore': 'Load more',
   'cloud.dns.nameservers': 'Authoritative Nameservers',
   'cloud.dns.createRecord': 'Create Record',

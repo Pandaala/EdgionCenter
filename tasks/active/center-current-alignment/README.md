@@ -1914,3 +1914,33 @@ before acting on CCI execution files or proposing replacements.
   Logs `/tmp/ws5-center-route-policy-clear-native-v1.log` and `-v2.log`.
   Seventy original fixtures retained unchanged; exact mutation fixtures removed
   and runner-owned services stopped. Overall audit remains active.
+
+### Cloud DNS inventory failure handling and contract gates (2026-09-28)
+
+- Cloudflare and Route53 pages did not render account/zone/record query errors;
+  zone failures could display the normal empty-inventory message. Added a
+  sanitized error alert that identifies stale/incomplete observations and
+  suppresses the no-zones message on query failure. Refresh now invalidates
+  the account query as well as DNS queries, so account-list failures recover.
+  Permission-disabled reads remain disabled; no mutation retry was introduced.
+- Six new component workflows cover both providers' account, zone and record
+  failures, refresh recovery, absence of raw provider errors, and absence of
+  mutation dispatch. Session 64155 exited zero: 22 cloud page tests, frontend
+  build and lint. Logs `/tmp/ws5-center-cloud-read-errors-{tests,build,lint}.log`.
+  These use deterministic API mocks; no native browser/provider claim for the
+  new error states.
+- Full frontend baseline session 92305 exited zero: 590 tests across 100 files,
+  `/tmp/ws5-center-frontend-full-current.log`. It started before the cloud read
+  changes; the subsequent targeted suite validates the six new workflows.
+- Hermetic cloud contract session 18896 exited zero: Cloudflare adapter 71,
+  Route53 adapter 45, AWS SDK HTTP transport fixtures 13, Cloudflare integration
+  service 50, Route53 integration service 16, totaling 195 passed. One explicit
+  real-account test stayed ignored; no cloud credentials or external mutations
+  were used. `/tmp/ws5-center-cloud-contract-tests.log`. This exercises actual
+  SDK/HTTP fixtures, one-shot writes, guards and ambiguous dispatch outcomes;
+  optional real-account tests are not part of the required hermetic gate.
+- Next confirmed cloud concern: both frontend mutation classifiers map an Axios
+  transport failure with no HTTP response to rejected. Such a request may have
+  been dispatched, so distinguish this from explicit rejection without treating
+  local validation guards as dispatched. Verify this boundary next. Overall
+  audit active; Kubernetes readiness and remaining menu workflows are open.

@@ -39,6 +39,24 @@ beforeEach(() => {
 })
 
 describe('Route 53 DNS dashboard boundary', () => {
+  it.each(['accounts', 'zones', 'records'] as const)('shows sanitized %s read failures and recovers on refresh', async (boundary) => {
+    const failed = boundary === 'accounts' ? state.listAccounts : boundary === 'zones' ? state.listZones : state.listRecords
+    failed.mockRejectedValue(new Error('private-provider-error'))
+    renderPage()
+    if (boundary !== 'accounts') {
+      fireEvent.mouseDown(screen.getByRole('combobox'))
+      fireEvent.click(await screen.findByText('AWS Main (aws-main)'))
+      if (boundary === 'records') fireEvent.click(await screen.findByRole('button', { name: 'Records' }))
+    }
+    expect(await screen.findByText(/Could not load provider accounts or DNS inventory/)).toBeInTheDocument()
+    expect(screen.queryByText('private-provider-error')).not.toBeInTheDocument()
+    expect(screen.queryByText('No hosted zones found')).not.toBeInTheDocument()
+    failed.mockResolvedValue(boundary === 'accounts' ? { success: true, data: [{ accountId: 'aws-main', displayName: 'AWS Main', provider: 'aws' }] } : { success: true, data: { items: [] } })
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
+    await waitFor(() => expect(screen.queryByText(/Could not load provider accounts or DNS inventory/)).not.toBeInTheDocument())
+    expect(state.putRecord).not.toHaveBeenCalled()
+    expect(state.deleteRecord).not.toHaveBeenCalled()
+  })
   it('serializes Alias, routing, and health-check fields using the native Alias shape', () => {
     expect(recordDesiredFromForm({ owner: 'api.example.com.', recordType: 'A', aliasEnabled: true, aliasTargetZoneId: 'ZALIAS', aliasTarget: 'dualstack.example.elb.amazonaws.com.', evaluateTargetHealth: true, routingKind: 'failover', failoverRole: 'primary', healthCheckId: 'hc-1' })).toEqual({
       ttl: { type: 'inherited' }, values: [], aliasTarget: { targetZoneId: 'ZALIAS', target: 'dualstack.example.elb.amazonaws.com.', evaluateTargetHealth: true }, routingPolicy: { type: 'failover', role: 'primary' }, healthCheckId: 'hc-1',
