@@ -82,7 +82,13 @@ only an all-converged operation closes the editor automatically.
 
 Consistency compares only managed spec fields. Server-owned metadata such as
 `resourceVersion`, UID, generation, and status never creates a conflict.
-Missing online Controllers are inconsistent.
+Missing online Controllers are inconsistent. The sync action reports two
+boundaries explicitly: it cannot create missing resources, and it does not copy
+the envelope's enable switch. Operators create missing EdgionConfigData or align
+spec.enable in the per-Controller editor. An enable-only difference therefore
+remains inconsistent even after successful data synchronization. Disabled
+overrides display that base routing applies instead of advertising stored
+failover settings as active.
 
 The warning action lets an operator choose a Controller that has the resource
 and copy its `spec.data` payload to the other online Controllers, through the

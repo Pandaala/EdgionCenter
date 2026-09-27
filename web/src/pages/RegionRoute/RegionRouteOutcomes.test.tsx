@@ -81,3 +81,25 @@ it.each(['accepted', 'unknown', 'superseded'])('retains sync %s after the row be
   expect(screen.getByTestId(`write-outcome-${state}`)).toBeVisible()
   expect(screen.getByText('Consistent')).toBeVisible()
 })
+
+
+it('explains enable-only divergence without presenting disabled overrides as active failover', async () => {
+  const data = snapshot('west', 'west')
+  data.data[0].controllers.a.spec.enable = false
+  api.listOverrides.mockResolvedValue(data)
+  renderWithQueryClient(<App><I18nProvider><RegionRouteOverridePage /></I18nProvider></App>)
+  expect(await screen.findByText(/Enable state differs/)).toBeVisible()
+  expect(screen.getByText('Overlay disabled — base routing applies')).toBeVisible()
+  expect(screen.getByTestId('region-failover')).toBeDisabled()
+  expect(api.syncOverride).not.toHaveBeenCalled()
+})
+
+it('explains that syncing cannot create a missing override', async () => {
+  const data = snapshot()
+  delete data.data[0].controllers.b
+  api.listOverrides.mockResolvedValue(data)
+  renderWithQueryClient(<App><I18nProvider><RegionRouteOverridePage /></I18nProvider></App>)
+  expect(await screen.findByText(/Missing on b.*Sync updates existing overrides only/)).toBeVisible()
+  expect(screen.getByTestId('region-failover')).toBeDisabled()
+  expect(api.syncOverride).not.toHaveBeenCalled()
+})

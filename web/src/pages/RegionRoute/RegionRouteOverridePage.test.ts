@@ -37,6 +37,16 @@ describe('RegionRoute override consistency', () => {
     expect(overrideConsistent(row, ['first', 'second'])).toBe(false)
   })
 
+  it('treats omitted enable as enabled and detects a disabled Controller', () => {
+    const first = resource('west')
+    const second = resource('west')
+    second.spec.enable = true
+    const row = { namespace: 'shop', name: 'checkout', controllers: { first, second } }
+    expect(overrideConsistent(row, ['first', 'second'])).toBe(true)
+    second.spec.enable = false
+    expect(overrideConsistent(row, ['first', 'second'])).toBe(false)
+  })
+
   it('compares only the managed spec rather than server metadata', () => {
     const first = resource('west')
     const second = resource('west')

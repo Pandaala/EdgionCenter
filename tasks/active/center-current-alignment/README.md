@@ -1167,3 +1167,27 @@ before acting on CCI execution files or proposing replacements.
   establish transport-failure injection or Gateway traffic behavior. The full
   type/menu objective remains active, including RegionRoute enable/missing
   resource boundaries and the other open coverage rows.
+
+### RegionRoute enable and missing-resource boundaries
+
+- Verified current Edgion: envelope spec.enable is the actual kill switch,
+  default true; the nested RegionRouteOverride.enable is reserved/inert. Center
+  sync copies spec.data only, and its CAS write core cannot create a missing
+  target. Retained this contract.
+- Page now explains enable-state divergence and missing target IDs, pointing
+  operators to per-Controller EdgionConfigData creation/editing. Disabled override
+  summaries explicitly state that base routing applies, rather than showing
+  stored failover settings as active.
+- Added component coverage for both explanations and disabled failover, plus
+  consistency coverage for omitted enable versus true/false. Seventeen tests
+  passed (99425), build 13930, lint 85308 and E2E typecheck 43560 passed.
+- Native alignment-region-boundaries-20260928-v1 passed 5 cases including the
+  new enable-preservation workflow, failover/restore, selected-source sync,
+  login and operation discovery. Data sync reported convergence while B remained
+  disabled and the page correctly retained its enable warning/inconsistent
+  state. The test restored B's enable switch. Session 42554 exited zero and
+  retained 70 exact files. Logs /tmp/ws5-center-region-boundaries-{unit,build,
+  lint,e2e-typecheck,native}.log. All sessions terminal.
+- Missing-resource behavior currently has source/component evidence; native
+  missing-target failure/recovery and Gateway traffic remain unverified. Other
+  resource/menu rows remain open.

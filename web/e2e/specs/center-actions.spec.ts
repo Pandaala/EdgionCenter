@@ -10,7 +10,7 @@ const namespace = `${prefix}-a`
 async function configData(request: APIRequestContext, slot: 'A' | 'B', name: string) {
   const response = await request.get(`/api/v1/proxy/${controllerPathId(slot)}/api/v1/namespaced/edgionconfigdata/${namespace}/${name}`)
   expect(response.ok()).toBeTruthy()
-  return response.json() as Promise<{ metadata?: { resourceVersion?: string; labels?: Record<string, string> }; spec?: { data?: { config?: { active?: string; description?: string; regions?: Array<{ name?: string; failoverTo?: string }> } } } }>
+  return response.json() as Promise<{ metadata?: { resourceVersion?: string; labels?: Record<string, string> }; spec?: { enable?: boolean; data?: { config?: { active?: string; description?: string; regions?: Array<{ name?: string; failoverTo?: string }> } } } }>
 }
 
 function expectRegionOutcome(body: unknown) {
@@ -514,6 +514,49 @@ test.describe('Center and shell actions', () => {
     } finally {
       await setRegionFailover(request, '')
       await expectGlobalFailover(request, '')
+    }
+  })
+
+  test('region route data sync preserves the target enable switch', async ({ page, request }) => {
+    test.skip(process.env.E2E_MODE !== 'standalone', 'Requires local Controller watch convergence')
+    test.setTimeout(90_000)
+    const name = `${prefix}-region-route-override`
+    const path = `/api/v1/proxy/${controllerPathId('B')}/api/v1/namespaced/edgionconfigdata/${namespace}/${name}`
+    const setEnabled = async (enable: boolean) => {
+      const current = await configData(request, 'B', name)
+      expect(current.metadata?.resourceVersion).toBeTruthy()
+      const response = await request.put(path, {
+        headers: { 'Content-Type': 'application/yaml', 'If-Match': `"${current.metadata!.resourceVersion}"` },
+        data: JSON.stringify({
+          apiVersion: 'edgion.io/v1', kind: 'EdgionConfigData',
+          metadata: { ...current.metadata, namespace, name },
+          spec: { ...current.spec, enable },
+        }),
+      })
+      expect(response.ok()).toBeTruthy()
+    }
+    try {
+      await setEnabled(false)
+      await page.goto('/region-routes/region')
+      await expect.poll(async () => {
+        await clickAndWaitForGet(page, 'region-refresh', '/region-route-overrides')
+        return page.getByText(/Enable state differs/).count()
+      }).toBe(1)
+      await expect(page.getByTestId('region-failover')).toBeDisabled()
+      const [response] = await Promise.all([
+        page.waitForResponse((item) => item.request().method() === 'POST' && item.url().includes('/center/region-route-overrides/sync')),
+        page.getByTestId('region-sync-apply').click(),
+      ])
+      expect(response.status()).toBe(200)
+      expect(await response.json()).toMatchObject({
+        success: true, data: { outcomes: [{ controllerId: controllerId('B'), state: 'converged' }] },
+      })
+      expect((await configData(request, 'B', name)).spec?.enable).toBe(false)
+      await expect(page.getByText(/Enable state differs/)).toBeVisible()
+      await expect(page.getByTestId('region-failover')).toBeDisabled()
+    } finally {
+      await setEnabled(true)
+      await expect.poll(async () => (await configData(request, 'B', name)).spec?.enable).toBe(true)
     }
   })
 

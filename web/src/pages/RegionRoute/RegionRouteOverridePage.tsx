@@ -90,6 +90,9 @@ function representativeResource(row: CenterRegionRouteOverride) {
 }
 
 function FailoverStatus({ resource }: { resource: RegionRouteOverrideResource }) {
+  if (resource.spec.enable === false) {
+    return <Tag>Overlay disabled — base routing applies</Tag>
+  }
   const values = regions(resource)
   if (!values.length) return <Text type="secondary">—</Text>
   return (
@@ -284,6 +287,11 @@ function SyncOverrideButton({
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const sources = Object.keys(row.controllers).sort()
+  const missing = onlineControllerIds.filter((controllerId) => !row.controllers[controllerId])
+  const enabledStates = new Set(onlineControllerIds.flatMap((controllerId) => {
+    const resource = row.controllers[controllerId]
+    return resource ? [resource.spec.enable ?? true] : []
+  }))
   const [source, setSource] = useState(sources[0] ?? '')
   const targets = onlineControllerIds.filter((controllerId) => controllerId !== source)
   const [outcomeItems, setOutcomeItems] = useState<WriteOutcomeItem[]>([])
@@ -349,6 +357,16 @@ function SyncOverrideButton({
             Sync to {targets.length}
           </Button>
         </Space>
+      )}
+      {!consistent && missing.length > 0 && (
+        <Text type="warning">
+          Missing on {missing.join(', ')}. Sync updates existing overrides only; create the missing EdgionConfigData in each Controller before syncing.
+        </Text>
+      )}
+      {!consistent && enabledStates.size > 1 && (
+        <Text type="warning">
+          Enable state differs. Sync copies data only; align spec.enable in each Controller's EdgionConfigData editor.
+        </Text>
       )}
       {outcomeItems.length > 0 && <WriteOutcomeList items={outcomeItems} />}
     </Space>
