@@ -50,21 +50,31 @@ export function createEmptyEdgionPlugins(): EdgionPlugins {
 }
 
 /**
- * 规范化 EdgionPlugins（填充缺失的默认值）
+ * Validate editor structure without inserting defaults or projecting fields.
  */
 export function normalizeEdgionPlugins(resource: EdgionPlugins | Record<string, unknown>): EdgionPlugins {
   if (!resource || typeof resource !== 'object' || resource.kind !== EDGION_PLUGINS_KIND) {
     throw new Error('Expected an EdgionPlugins document')
   }
-  if (!resource.metadata || typeof resource.metadata !== 'object' || !resource.spec || typeof resource.spec !== 'object') {
+  if (!resource.metadata || typeof resource.metadata !== 'object' || Array.isArray(resource.metadata) || !resource.spec || typeof resource.spec !== 'object' || Array.isArray(resource.spec)) {
     throw new Error('EdgionPlugins metadata and spec are required')
+  }
+  const spec = resource.spec as Record<string, unknown>
+  for (const stage of ['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins', 'upstreamResponsePlugins']) {
+    const entries = spec[stage]
+    if (entries == null) continue
+    if (!Array.isArray(entries)) throw new Error(`${stage} must be an array`)
+    entries.forEach((entry, index) => {
+      const path = `${stage}[${index}]`
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.type !== 'string') throw new Error(`${path} must be a typed plugin object`)
+      if (entry.config != null && (typeof entry.config !== 'object' || Array.isArray(entry.config))) throw new Error(`${path}.config must be an object`)
+    })
   }
   return structuredClone(resource) as EdgionPlugins
 }
 
 /**
- * 将 EdgionPlugins 序列化为 YAML 字符串
- * 遵循 Edgion 的 serde 规则：省略空数组、默认 true 的 enable 字段
+ * Serialize the complete editable document, including explicit empty values.
  */
 export function edgionPluginsToYAML(resource: EdgionPlugins): string {
   return dumpYaml(resource)
@@ -80,14 +90,14 @@ export function edgionPluginsToMutationYAML(resource: EdgionPlugins, mode: 'crea
 }
 
 /**
- * 将 YAML 字符串解析为 EdgionPlugins 对象
+ * Parse YAML through the same identity and structural boundary as API views.
  */
 export function yamlToEdgionPlugins(yamlStr: string): EdgionPlugins {
   const parsed = yaml.load(yamlStr)
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('无效的 YAML：期望对象格式')
+    throw new Error('EdgionPlugins YAML must contain an object')
   }
-  return parsed as EdgionPlugins
+  return normalizeEdgionPlugins(parsed as Record<string, unknown>)
 }
 
 export function countPluginsByStage(spec: EdgionPluginsSpec | undefined) {

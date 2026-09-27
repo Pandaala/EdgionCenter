@@ -194,3 +194,17 @@ describe('EdgionPlugins body requirement capability', () => {
     expect(() => edgionPluginsToMutationYAML(resource, 'update')).toThrow(/RequestId.*does not accept/)
   })
 })
+
+
+describe('EdgionPlugins YAML structure', () => {
+  it.each([[], { requestPlugins: {} }, { requestPlugins: [null] }, { requestPlugins: ['ProxyRewrite'] }, { requestPlugins: [{ type: 'ProxyRewrite', config: [] }] }].map(spec => ({ spec })))('rejects an unusable form structure $spec', ({ spec }) => {
+    const document = { apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'plugins' }, spec }
+    expect(() => yamlToEdgionPlugins(yaml.dump(document))).toThrow()
+  })
+
+  it('preserves unknown plugin types and fields without fabricating config defaults', () => {
+    const document = { apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'plugins' }, spec: { requestPlugins: [{ type: 'FuturePlugin', config: { enabled: false }, future: [] }], upstreamResponsePlugins: null } }
+    expect(yamlToEdgionPlugins(yaml.dump(document))).toEqual(document)
+    expect(() => yamlToEdgionPlugins(yaml.dump({ ...document, kind: 'ConfigMap' }))).toThrow('EdgionPlugins')
+  })
+})

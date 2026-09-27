@@ -1039,3 +1039,23 @@ before acting on CCI execution files or proposing replacements.
   /tmp/ws5-center-plugin-boolean-*.log. All current sessions terminal.
 - Generic browser coverage above does not specifically prove the new boolean
   interaction. The per-plugin nested schema and runtime audit remains open.
+
+### Rewrite plugin audit and YAML structure boundary
+
+- Optional boolean batch committed as 539eab3, no push.
+- Checked ProxyRewrite and ResponseRewrite top-level catalog fields against
+  current Rust config structs. All current operator fields are represented;
+  nested patch/header validation and execution remain Controller/Gateway-owned
+  and are not marked verified by this top-level comparison.
+- Found YAML parser returned unvalidated objects while form normalization only
+  checked broad object types. Unified YAML parsing with normalization and reject
+  array metadata/spec, non-array stages, null/scalar plugin entries, missing
+  string type and non-object configs before rendering/submit. Optional null
+  stage values, unknown plugin names and unknown fields remain lossless; this
+  is editor structure validation, not acceptance of unknown runtime plugins.
+- Updated misleading adapter comments that claimed defaults/empty values were
+  rewritten. Added malformed-input and unknown-field preservation cases.
+- Fifteen adapter tests passed; build 96120 and lint 54678 passed. Logs
+  /tmp/ws5-center-plugin-shape-{tests,build,lint}.log. No native rerun for this
+  structural guard; prior generic plugin CRUD remains separate evidence. All
+  sessions terminal; nested plugin semantics and runtime coverage remain open.
