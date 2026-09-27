@@ -114,7 +114,7 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
               <InputNumber
                 value={backend.weight ?? DEFAULT_VALUES.backendRef.weight}
                 onChange={(weight) =>
-                  handleBackendChange(index, { ...backend, weight: weight || undefined })
+                  handleBackendChange(index, { ...backend, weight: weight ?? undefined })
                 }
                 min={WEIGHT_MIN}
                 max={WEIGHT_MAX}

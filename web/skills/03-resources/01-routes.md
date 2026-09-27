@@ -12,6 +12,16 @@ All route resources share:
 - `spec.rules` — routing rules
 - Namespaced resource, uses `resourceApi`
 
+The shared backend reference editor must preserve an explicit `weight: 0`.
+Clearing the input omits weight; entering zero must not omit it, because the
+Gateway defaults an absent weight to one. Zero excludes a backend from weighted
+selection; HTTP named-jump behavior is a separate contract.
+
+All five route menus have standalone browser list-action and CRUD coverage.
+These checks establish editing and Controller persistence, not data-plane
+forwarding or cross-namespace authorization. Schema examples below must be
+checked against current Edgion source before extending a form.
+
 ## HTTPRoute ✅ Completed
 
 - apiVersion: `gateway.networking.k8s.io/v1`

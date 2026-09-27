@@ -844,3 +844,26 @@ before acting on CCI execution files or proposing replacements.
 - No native browser or handshake rerun in this follow-up; prior security CRUD
   coverage is recorded above. Security runtime, routes, fleet and administration
   coverage remain open. All current tool sessions terminal.
+
+### Route menus and explicit zero backend weight
+
+- BackendTLSPolicy identity batch committed as c524197, no push.
+- Inspected all stream-route adapters, shared editor and current TLSRoute schema.
+  Controller gateway.rs still explicitly rejects TLS/Terminate; do not advertise
+  termination from Center. Alternate source versions remain a separate inventory
+  contract and were not changed based on older canonical-only prose.
+- Fixed shared BackendRefsEditor converting weight zero to undefined. Gateway's
+  backend runtime defaults absent weight to one; explicit zero must survive form
+  edits. The new real Ant Design input test distinguishes zero from clearing and
+  asserts preservation of another backend and unknown fields.
+- Unit handle 43998 passed eight cases across backend input, stream form and
+  route adapters. Build 18597 and lint 23199 passed. Logs:
+  /tmp/ws5-center-route-weight-{tests,build,lint}.log.
+- Native handle 28521 passed eleven cases: auth, list actions and real CRUD for
+  HTTPRoute/GRPCRoute/TCPRoute/UDPRoute/TLSRoute. Log:
+  /tmp/ws5-center-route-menus-v1.log. Owned services stopped; 70 exact seeds
+  retained. Action cases cancel deletion confirmations; CRUD executes isolated
+  deletion. The zero-input regression is component-level evidence, not a claim
+  that the browser CRUD cases specifically exercised zero weights.
+- Forwarding, advanced route features and cross-namespace authorization remain
+  open, as do the remaining fleet/admin menus. All current sessions terminal.
