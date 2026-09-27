@@ -90,7 +90,7 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
 
 - Full frontend baseline: 590 tests in 100 files passed in
   `/tmp/ws5-center-frontend-full-current.log`, before the latest cloud fixes.
-  Superseded for frontend unit/component coverage by the 622-test run below.
+  Superseded for frontend unit/component coverage by the 625-test run below.
   The complete native browser regression is recorded above (155 passed).
 - Two real Kubernetes adapter scenarios passed earlier: reconstruction/CAS and
   Lease takeover/fencing. This is not deployed OIDC, ServiceAccount RBAC or
@@ -114,9 +114,11 @@ Cloudflare test race was fixed and passed both focused and matrix runs.
 
 ## Latest complete frontend suite
 
-At Center commit `712ed0f`, session 89063 completed successfully: 101 test files,
-622 tests, including the recent Gateway/HTTP/plugin mutation boundaries, access
-policy body edits and Controller read-state fixes. Retained log:
+At Center commit `4c774c2`, session 81433 completed successfully: 101 test files,
+625 tests, including the recent Gateway/HTTP/plugin mutation boundaries, access
+policy body edits, Controller read-state fixes and GlobalResources recovery.
+Retained log: `/tmp/ws5-center-frontend-final-20260928.log`.
+The earlier 622-test run remains at
 `/tmp/ws5-center-frontend-full-20260928-current.log`.
 This supersedes the earlier 590-test frontend baseline for these changes. It is
 not native browser, backend compilation or deployed Kubernetes evidence.
@@ -127,6 +129,30 @@ is blocked in `wait_for_partner -> fifo_open -> openat` while repeated container
 creation requests report reserved names. This is stronger evidence than the
 previous assumption of slow image unpacking. The node services remain running;
 no unrelated cluster was modified and no runtime restart was attempted.
+
+## Source-to-coverage reconciliation
+
+The current source audit confirmed exact equality between Edgion ResourceKind
+(excluding Unspecified) and the 22 Center catalog kinds. All 22 have passing
+native CRUD ledger entries; all 20 first-class catalog routes appear in both the
+Controller menu and this index. Secret/ConfigMap share the restricted dependency
+menu. The 48 HTTP plugin names match the current Edgion enum exactly. All nine
+ConfigData variants and all eight LinkSys variants have operator form support;
+stream catalogs match the four connection-stage and one TLSRoute-stage variants.
+
+The backend matrix covers OIDC token/identity validation, SAR identity scoping,
+lease fencing and owner forwarding/no-ambiguous-replay behavior. These checks do
+not prove a real browser OAuth redirect/callback flow or deployed cross-replica
+operation. The original work log also retains open cross-resource traffic,
+attachment, probe and failure scenarios. Consequently this reconciliation proves
+catalog/menu completeness but does not close the overall task.
+
+Next concrete authentication evidence: exercise the existing OAuth browser path.
+`web/e2e/auth/kubernetes.setup.ts` currently depends on the dedicated Kubernetes
+OAuth proxy/Dex runtime. Investigate whether that same login path can be tested
+with an isolated local OIDC composition while preserving its trust boundaries;
+otherwise recover the owned cluster. Do not count password login or unit token
+validation as equivalent browser evidence.
 
 ## Next audit actions
 

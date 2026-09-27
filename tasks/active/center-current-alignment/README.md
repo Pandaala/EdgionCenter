@@ -2194,3 +2194,24 @@ before acting on CCI execution files or proposing replacements.
 - This is component recovery evidence in addition to the previously completed
   native inventory checks; no deployed multi-replica outage is claimed.
   No production code or Edgion files changed; the overall audit remains active.
+
+
+### Completion audit: catalogs closed, runtime gaps remain (2026-09-28)
+
+- Verified current ResourceKind/catalog equality (22), all 22 passed native CRUD
+  ledger entries, and all 20 first-class catalog routes in menus and coverage.
+  Verified exact 48 HTTP-plugin name equality; all nine ConfigData variants,
+  eight LinkSys variants, four connection-stage and one TLSRoute-stage plugin
+  variants are represented by the current forms/catalogs. These are direct
+  source comparisons, not inferred from the test count.
+- Re-read the original completion criteria and remaining runtime scenarios.
+  OIDC signature/claim validation, SAR identity mapping, fencing and owner
+  forwarding tests passed in the current backend matrix, but are not actual
+  browser OIDC or deployed replica evidence. Kept those limits explicit and
+  identified the existing OAuth browser setup as the next authentication path.
+- Final frontend suite session 81433 exited zero: 101 files, 625 tests, 49.90s.
+  Log: /tmp/ws5-center-frontend-final-20260928.log. The only changes since the
+  complete native run were test/evidence files; no production regression is
+  implied by this count increase.
+- Updated CURRENT-COVERAGE.md with these findings. This is not a completion claim:
+  source/menu completeness does not prove all original runtime flow criteria.
