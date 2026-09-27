@@ -147,12 +147,14 @@ export default function ProviderAccountsPage() {
       return { account: current.body.data, etag: current.etag }
     },
     onSuccess: ({ account, etag }) => {
-      form.setFieldsValue(formValues(account))
       setTarget(account)
       setRevision(etag)
       setOpen(true)
     },
   })
+  useEffect(() => {
+    if (open && target) form.setFieldsValue(formValues(target))
+  }, [open, target, form])
   const submit = async () => {
     const values = await form.validateFields()
     if (target) replace.mutate(values)
@@ -163,6 +165,7 @@ export default function ProviderAccountsPage() {
     <div>
       <PageHeader title={t('cloud.accounts.title')} subtitle={t('cloud.accounts.subtitle')} actions={<Space><Button icon={<ReloadOutlined />} onClick={() => accounts.refetch()}>{t('btn.refresh')}</Button>{canWrite && <Button data-testid="cloud-account-create" type="primary" disabled={loadEdit.isPending} onClick={openCreate}>{t('cloud.action.createAccount')}</Button>}</Space>} />
       {!canWrite && <Alert type="info" showIcon message={t('cloud.permission.accountReadonly')} style={{ marginBottom: 16 }} />}
+      {loadEdit.isError && <Alert type="error" showIcon message={t('msg.operationFailed')} style={{ marginBottom: 16 }} />}
       <Table rowKey="accountId" loading={accounts.isLoading} dataSource={accounts.data?.data ?? []} pagination={{ pageSize: 20 }} columns={[
         { title: t('cloud.col.account'), dataIndex: 'accountId' },
         { title: t('cloud.col.provider'), dataIndex: 'provider', render: (value: string) => <Tag>{value}</Tag> },
@@ -171,7 +174,7 @@ export default function ProviderAccountsPage() {
         { title: t('col.actions'), render: (_, row: ProviderAccount) => <Space><Button size="small" onClick={() => setCapabilityAccount(row)}>{t('cloud.action.capabilities')}</Button>{canWrite && <Button size="small" disabled={loadEdit.isPending} onClick={() => loadEdit.mutate(row.accountId)}>{t('btn.edit')}</Button>}</Space> },
       ]} />
       <Modal title={t(target ? 'cloud.accounts.editTitle' : 'cloud.accounts.createTitle')} open={open} onCancel={close} onOk={submit} confirmLoading={create.isPending || replace.isPending} destroyOnClose okText={target ? t('btn.save') : t('btn.create')} cancelText={t('btn.cancel')}>
-        <Form form={form} layout="vertical" preserve={false}>
+        <Form form={form} layout="vertical" preserve={false} initialValues={target ? formValues(target) : { provider: 'cloudflare', managementPolicy: 'observe_only', credentialType: 'static_secret' }}>
           <Form.Item name="accountId" label={t('cloud.field.accountId')} rules={[{ required: true }]}><Input disabled={target !== null} autoComplete="off" /></Form.Item>
           <Form.Item name="displayName" label={t('cloud.field.displayName')} rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
           <Form.Item name="owner" label={t('cloud.field.owner')}><Input autoComplete="off" /></Form.Item>

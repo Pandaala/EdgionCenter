@@ -978,3 +978,26 @@ before acting on CCI execution files or proposing replacements.
   Logs /tmp/ws5-center-cloud-edit-*.log; all sessions terminal.
 - Native account CRUD/conflict proof and provider-specific live DNS workflows
   remain open. This batch is component and source-level evidence only.
+
+### Provider account conflict and native browser verification
+
+- Account revision fix committed as 4bda2fe, no push.
+- Added missing-revision load feedback and component tests for blocked edits,
+  retained conflict drafts, captured ETag and no automatic retry. Native browser
+  verification found delayed Modal/Form mounting cleared prefilled values;
+  seeded Form initialValues from the captured account and retained synchronization
+  for mounted forms. This was not visible in the component mock runtime.
+- Added standalone cloud-account metadata browser test: create isolated account,
+  open edit, concurrently update via real API, require 412 and unchanged stored
+  concurrent values, reopen and save with the new revision while retaining labels.
+  No provider adapters, DNS mutation or credential inspection are involved.
+  Account has no delete endpoint and remains in the isolated run database.
+- Native attempts: 70651 stopped on wrong test API prefix (404); 82780 and 46405
+  exposed empty edit inputs; corrected rendering, then 17657 passed both auth
+  and full account conflict/edit scenario. Logs /tmp/ws5-center-cloud-metadata-v*.log.
+  Owned runtimes stopped and exact seeds retained. E2E typecheck 99301 passed.
+- Component runs 76952/63363 passed 12 cases; final rerun 79373 pending at this
+  checkpoint. Build 16560 passed; lint 61877 passed before the initialValues fix.
+  Provider-specific live DNS workflows remain unverified; this closes only local
+  account metadata editing and concurrency evidence.
+- Final component run 79373 passed all 12 cases. All current sessions terminal.

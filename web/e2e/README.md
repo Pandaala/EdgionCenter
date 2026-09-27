@@ -46,3 +46,9 @@ Cleanup refuses context, run-label, UID, static-inventory, or resource-plural mi
 prints the ledger first, uses UID-preconditioned API deletes, deletes exact children before
 Namespaces, and proves every identity is absent. It never uses namespace-wide or selector-wide
 deletion.
+
+The standalone cloud-account case is metadata-only: it stores an unresolved
+credential reference, never inspects credentials or calls a DNS provider, and
+checks browser edits against real generation preconditions. Provider-account
+deletion is not exposed, so the uniquely named account remains only in the
+run-owned artifact database alongside retained fixtures.

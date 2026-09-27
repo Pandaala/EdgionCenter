@@ -103,6 +103,31 @@ describe('Provider accounts dashboard boundary', () => {
     expect(state.getAccount).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a conflicted edit draft and never refreshes its revision or retries', async () => {
+    state.replaceAccount.mockRejectedValue({ response: { status: 412 } })
+    renderPage(<ProviderAccountsPage />)
+    await screen.findByText('cf-main')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Display Name'), { target: { value: 'Unsaved draft' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(state.replaceAccount).toHaveBeenCalledOnce())
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Save' }).querySelector('.ant-btn-loading-icon')).toBeNull())
+    expect(within(dialog).getByLabelText('Display Name')).toHaveValue('Unsaved draft')
+    expect(state.getAccount).toHaveBeenCalledTimes(1)
+    expect(state.replaceAccount.mock.calls[0][2]).toBe('"2"')
+  })
+
+  it('shows a failed edit load when the server omits the revision and sends no mutation', async () => {
+    state.getAccount.mockResolvedValue({ body: { success: true, data: ACCOUNT } })
+    renderPage(<ProviderAccountsPage />)
+    await screen.findByText('cf-main')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(await screen.findByText('Operation failed')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(state.replaceAccount).not.toHaveBeenCalled()
+  })
+
   it('shows stale capability evidence', async () => {
     renderPage(<ProviderAccountsPage />)
     await screen.findByText('cf-main')
