@@ -8,6 +8,36 @@ vi.mock('@/components/ResourceEditor/HTTPRoute/sections/MetadataSection', () => 
 vi.mock('../common/MetadataSection', () => ({ default: () => null }))
 
 describe('structured plugin forms', () => {
+  it('edits logical WAF references and body settings without changing stage plugins', () => {
+    const onChange = vi.fn()
+    const resource: any = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'waf', namespace: 'edge' },
+      spec: {
+        waf: { policyRef: { name: 'policy', namespace: 'security' }, activeProfile: 'base',
+          mode: 'detectionOnly', priority: 0, requestBody: { inspection: 'prefix', prefixSize: '64KiB' }, future: false },
+        requestPlugins: [{ type: 'RequestId', config: {} }], futureSpec: [],
+      },
+    }
+    const { rerender } = render(<EdgionPluginsForm value={resource} onChange={onChange} />)
+    fireEvent.change(screen.getByDisplayValue('policy'), { target: { value: 'next-policy' } })
+    expect(onChange).toHaveBeenLastCalledWith({ ...resource, spec: { ...resource.spec,
+      waf: { ...resource.spec.waf, policyRef: { name: 'next-policy', namespace: 'security' } },
+    } })
+    fireEvent.change(screen.getByDisplayValue('64KiB'), { target: { value: '128KiB' } })
+    expect(onChange).toHaveBeenLastCalledWith({ ...resource, spec: { ...resource.spec,
+      waf: { ...resource.spec.waf, requestBody: { inspection: 'prefix', prefixSize: '128KiB' } },
+    } })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove WAF' }))
+    const withoutWaf = { ...resource.spec }
+    delete withoutWaf.waf
+    expect(onChange).toHaveBeenLastCalledWith({ ...resource, spec: withoutWaf })
+    rerender(<EdgionPluginsForm value={{ ...resource, spec: withoutWaf }} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add WAF' }))
+    expect(onChange).toHaveBeenLastCalledWith({ ...resource, spec: { ...withoutWaf, waf: { policyRef: { name: '' } } } })
+    rerender(<EdgionPluginsForm value={resource} onChange={onChange} disabled />)
+    expect(screen.getByDisplayValue('policy')).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Remove WAF' })).not.toBeInTheDocument()
+  })
   it('edits connection GeoIP rules without changing TLSRoute stage entries', () => {
     const onChange = vi.fn()
     const resource: any = {

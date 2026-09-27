@@ -298,6 +298,23 @@ function referencesFor(kind: ResourceKind, resource: K8sResource): Reference[] {
   if (kind === 'edgionplugins' || kind === 'edgionstreamplugins' || kind === 'linksys') {
     collectApprovedReferences(spec, namespace, refs)
   }
+  if (kind === 'edgionplugins') {
+    const ref = refFrom(spec.waf?.policyRef, 'edgionconfigdata', namespace, 'WAF policy')
+    if (ref) refs.push(ref)
+  }
+  if (kind === 'edgionconfigdata' && spec.data?.type === 'WafPolicy') {
+    const profiles = spec.data.config?.profiles
+    if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+      for (const [name, profile] of Object.entries(profiles)) {
+        const bundles = (profile as { bundleRefs?: unknown[] } | null)?.bundleRefs
+        if (!Array.isArray(bundles)) continue
+        for (const bundle of bundles) {
+          const ref = refFrom(bundle, 'edgionconfigdata', namespace, `WAF bundle (${name})`)
+          if (ref) refs.push(ref)
+        }
+      }
+    }
+  }
   return refs.filter((ref, index) => refs.findIndex((item) => (
     item.kind === ref.kind && item.name === ref.name && item.namespace === ref.namespace
     && item.label === ref.label && item.reverse === ref.reverse

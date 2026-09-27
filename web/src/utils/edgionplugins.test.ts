@@ -1,6 +1,7 @@
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import {
+  countPluginsByStage,
   edgionPluginsToMutationYAML,
   edgionPluginsToYAML,
   normalizeEdgionPlugins,
@@ -11,6 +12,15 @@ import {
 } from './edgionplugins'
 
 describe('EdgionPlugins lossless adapter', () => {
+  it('counts a logical WAF once, independently of execution stages', () => {
+    expect(countPluginsByStage({ waf: { policyRef: { name: 'policy' } } })).toEqual({
+      waf: 1, request: 0, responseFilter: 0, responseBodyFilter: 0, response: 0,
+    })
+    expect(countPluginsByStage(undefined).waf).toBe(0)
+    expect(countPluginsByStage({ waf: { policyRef: { name: 'policy' } }, requestPlugins: [
+      { type: 'RequestId', config: {} },
+    ] })).toMatchObject({ waf: 1, request: 1 })
+  })
   it('preserves access-policy rules and strips Controller-expanded profiles', () => {
     const resource: any = {
       apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'access', namespace: 'edge' },
@@ -197,6 +207,9 @@ describe('EdgionPlugins body requirement capability', () => {
 
 
 describe('EdgionPlugins YAML structure', () => {
+  it.each(['invalid', [], { policyRef: 'policy' }, { activeProfileRef: [] }, { requestBody: 'full' }])('rejects an unusable WAF form structure %j', (waf) => {
+    expect(() => yamlToEdgionPlugins(yaml.dump({ apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'waf' }, spec: { waf } }))).toThrow('spec.waf')
+  })
   it.each([[], { requestPlugins: {} }, { requestPlugins: [null] }, { requestPlugins: ['ProxyRewrite'] }, { requestPlugins: [{ type: 'ProxyRewrite', config: [] }] }].map(spec => ({ spec })))('rejects an unusable form structure $spec', ({ spec }) => {
     const document = { apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'plugins' }, spec }
     expect(() => yamlToEdgionPlugins(yaml.dump(document))).toThrow()

@@ -1,13 +1,11 @@
-/**
- * EdgionPlugins 表单组件
- * 元数据使用可编辑表单，插件配置以只读概览展示（编辑请用 YAML 模式）
- */
+/** Structured editor for metadata, logical WAF, stage plugins and access-log fields. */
 
 import React from 'react'
 import { Alert, Button, Card, Form, Input, Select, Space } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import MetadataSection from '@/components/ResourceEditor/HTTPRoute/sections/MetadataSection'
 import PluginStagesSection from './sections/PluginStagesSection'
+import WafSection from './sections/WafSection'
 import type {
   AccessLogExternField,
   AccessLogExternSource,
@@ -133,6 +131,12 @@ const EdgionPluginsForm: React.FC<EdgionPluginsFormProps> = ({
         isCreate={isCreate}
       />
       <div style={{ marginTop: 16 }}>
+        <WafSection value={value.spec.waf} readOnly={disabled} onChange={(waf) => {
+          const spec = { ...value.spec }
+          if (waf === undefined) delete spec.waf
+          else spec.waf = waf
+          onChange({ ...value, spec })
+        }} />
         <PluginStagesSection
           value={value.spec}
           onChange={(spec) => onChange({ ...value, spec })}

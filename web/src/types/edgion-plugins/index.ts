@@ -98,11 +98,20 @@ export interface UpstreamResponseEntry extends PluginEntry {
   body?: BodyRequirement
 }
 
-/**
- * EdgionPlugins Spec
- * 包含四个执行阶段的插件列表
- */
+/** Operator fields of the logical WAF plugin. */
+export interface WafConfig {
+  policyRef: { name: string; namespace?: string; [key: string]: unknown }
+  activeProfile?: string
+  activeProfileRef?: { name: string; namespace?: string; [key: string]: unknown }
+  mode?: 'on' | 'detectionOnly'
+  requestBody?: { inspection?: 'prefix' | 'full'; prefixSize?: string; [key: string]: unknown }
+  priority?: number
+  [key: string]: unknown
+}
+
 export interface EdgionPluginsSpec {
+  /** Logical WAF plugin; independent of the four execution-stage arrays. */
+  waf?: WafConfig
   /** 请求阶段插件（异步） */
   requestPlugins?: RequestFilterEntry[]
   /** 上游响应过滤阶段插件（同步） */

@@ -1739,3 +1739,40 @@ before acting on CCI execution files or proposing replacements.
   source before this WAF boundary fix, so its future image cannot prove the fix;
   rebuild current sources before browser validation. Dockerfile change remains
   uncommitted pending its build gate. Overall alignment remains active.
+
+### Logical WAF dashboard follow-through (2026-09-28)
+
+- Added the operator WAF type and a separate `spec.waf` form section, keeping
+  WAF outside the HTTP execution-stage catalog. Policy/Selector references,
+  profile selection, mode, priority, and request-body inspection are editable;
+  removing WAF preserves all stage arrays and unrelated spec fields. Read-only
+  views disable controls. The Controller remains the semantic validator.
+- List totals now count logical WAF once and show a WAF tag. Topology follows
+  plugin policy/Selector references and WafPolicy profile bundle references,
+  resolving omitted namespaces from each referencing resource. Scope guards
+  prevent unrelated policyRef/bundleRefs payloads from creating false edges.
+- Structural YAML checks reject scalar/array WAF objects and nested references
+  or body configs before entering the form. Narrow edits preserve unknown fields.
+- Focused unit/component/topology suite: 46 passed, session 78420 exit zero,
+  `/tmp/ws5-center-waf-ui-tests-v2.log`. E2E typecheck and lint also passed in
+  that sequential session; the initial lint found an unused test destructuring
+  variable, which was removed. Final build 98687 exited zero, with the existing
+  chunk-size advisory (`/tmp/ws5-center-waf-ui-build-v2.log`).
+- Native standalone browser run `alignment-waf-ui-20260928-v1`, session 60411
+  exit zero: authentication plus the logical-WAF case, 2 passed. It creates
+  real WafRuleBundle/WafPolicy inputs, creates a WAF-only plugin through the
+  browser, checks count/tag, round-trips Form/YAML, edits prefixSize, verifies
+  the exact outgoing operator WAF object and Controller result, then deletes
+  the exact test resources. Log: `/tmp/ws5-center-waf-ui-native-v1.log`.
+  Seventy original fixture files remain unchanged; owned services were stopped
+  by the runner. This proves dashboard CRUD, not Gateway WAF enforcement.
+- Environment checkpoint: Edgion build 91476 exited one after compilation;
+  runtime image packaging could not find `target/aarch64-unknown-linux-gnu/release`
+  in the build context. No Edgion changes made. Center build 43367 remains live
+  at OCI layer export after successful locked release compilation with Rust
+  1.96.1; its staged source predates these frontend changes.
+- API-server image prewarm 95256 exited 124 at its bounded timeout. Explicitly
+  restarted kubelet in our `eruie2e-655cd051-control-plane` node and confirmed
+  systemd reports active. No Kubernetes browser readiness claim. Preserve the
+  private context and existing user clusters. The Dockerfile toolchain fix is
+  still separate and uncommitted pending image completion. Overall goal active.

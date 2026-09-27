@@ -152,8 +152,9 @@ const EdgionPluginsList = () => {
       key: 'pluginCount',
       render: (_: any, record: K8sResource) => {
         const stages = countPluginsByStage((record as any).spec)
-        const total = stages.request + stages.responseFilter + stages.responseBodyFilter + stages.response
+        const total = stages.waf + stages.request + stages.responseFilter + stages.responseBodyFilter + stages.response
         const tooltipText = [
+          `WAF: ${stages.waf}`,
           `${t('plugins.requestStage')}: ${stages.request}`,
           `${t('plugins.responseFilter')}: ${stages.responseFilter}`,
           `${t('plugins.responseBody')}: ${stages.responseBodyFilter}`,
@@ -175,9 +176,10 @@ const EdgionPluginsList = () => {
       key: 'stageSummary',
       render: (_: any, record: K8sResource) => {
         const stages = countPluginsByStage((record as any).spec)
-        const total = stages.request + stages.responseFilter + stages.responseBodyFilter + stages.response
+        const total = stages.waf + stages.request + stages.responseFilter + stages.responseBodyFilter + stages.response
         return (
           <Space size={4}>
+            {stages.waf > 0 && <Tag color="red">WAF</Tag>}
             {stages.request > 0 && (
               <Tooltip title={`${t('plugins.requestStage')}: ${t('plugins.stagePlugins', { n: stages.request })}`}>
                 <Tag color="blue">Req×{stages.request}</Tag>

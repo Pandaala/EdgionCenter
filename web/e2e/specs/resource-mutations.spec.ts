@@ -373,6 +373,63 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+test('logical WAF browser form preserves policy references and counts one plugin', async ({ page, request }) => {
+  const catalog = RESOURCE_CATALOG.get('edgionplugins')!
+  const dataCatalog = RESOURCE_CATALOG.get('edgionconfigdata')!
+  await waitForControllerCapabilities(request, controller, [
+    { resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] },
+    { resourceKind: dataCatalog.kind, verbs: ['get', 'create', 'delete'] },
+  ])
+  const name = `${prefix}-logical-waf`
+  const bundleName = `${prefix}-waf-bundle`
+  const policyName = `${prefix}-waf-policy`
+  const path = itemPath(catalog, namespace, name)
+  const ownedPaths: string[] = []
+  try {
+    for (const [dataName, data] of [
+      [bundleName, { type: 'WafRuleBundle', config: { version: 'one', profile: 'local', provenance: 'e2e', roots: ['main.conf'], rules: [{ name: 'main.conf', content: 'SecRuleEngine On' }] } }],
+      [policyName, { type: 'WafPolicy', config: { defaultProfile: 'base', profiles: { base: { bundleRefs: [{ name: bundleName }] } } } }],
+    ] as const) {
+      const document = mutationDocument(dataCatalog, dataName)
+      document.spec = { data }
+      const result = await request.post(collectionPath(dataCatalog, namespace), { data: yaml.dump(document), headers: yamlHeaders })
+      expect(result.ok(), await result.text()).toBeTruthy()
+      ownedPaths.push(itemPath(dataCatalog, namespace, dataName))
+    }
+    const document = mutationDocument(catalog, name)
+    document.spec = { waf: { policyRef: { name: policyName }, activeProfile: 'base', mode: 'detectionOnly', priority: 0,
+      requestBody: { inspection: 'prefix', prefixSize: '64KiB' } } }
+    await openResourcePage(page, catalog)
+    await createThroughYaml(page, catalog, document)
+    ownedPaths.push(path)
+    await expectApiDocument(request, catalog, namespace, name)
+    const row = await resourceRow(page, catalog, name)
+    await expect(row.locator('.ant-tag').filter({ hasText: /^WAF$/ })).toBeVisible()
+    await expect(row.locator('.ant-badge-count')).toHaveAttribute('title', '1')
+    await row.getByTestId('edgionplugins-row-edit').click()
+    await exerciseEditorRoundTrip(page, catalog.kind, document, 'waf-update')
+    await page.getByRole('textbox').locator('xpath=self::*[@value="64KiB"]').fill('128KiB')
+    const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().includes(path))
+    await page.getByTestId('editor-submit').click()
+    const result = await response
+    expect(result.ok(), await result.text()).toBeTruthy()
+    const submitted = yaml.load(result.request().postData()!) as Record<string, any>
+    expect(submitted.spec.waf).toEqual({ ...document.spec.waf, requestBody: { inspection: 'prefix', prefixSize: '128KiB' } })
+    const updated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+    expect(updated.spec.waf).toMatchObject(submitted.spec.waf)
+    await (await resourceRow(page, catalog, name)).getByTestId('edgionplugins-row-delete').click()
+    const deleted = page.waitForResponse((value) => value.request().method() === 'DELETE' && value.url().includes(path))
+    await page.getByTestId('resource-delete-confirm').click()
+    expect((await deleted).ok()).toBeTruthy()
+    await expectApiAbsent(request, path)
+  } finally {
+    for (const owned of ownedPaths.reverse()) {
+      const cleanup = await request.delete(owned)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact WAF fixture cleanup failed').toBeTruthy()
+    }
+  }
+})
+
 const typedConfigDataCases = [
   { type: 'RequestAccessUrlAllowList', config: { items: [{ name: 'health', hosts: ['example.com'], paths: [{ type: 'Exact', value: '/health' }] }] }, before: '/health', after: '/ready' },
   { type: 'ProxyProtocolTrust', config: { mode: 'trustedSources', trustedCidrs: ['192.0.2.0/24'] }, before: '192.0.2.0/24', after: '198.51.100.0/24' },

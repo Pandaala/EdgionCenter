@@ -61,6 +61,16 @@ export function normalizeEdgionPlugins(resource: EdgionPlugins | Record<string, 
     throw new Error('EdgionPlugins metadata and spec are required')
   }
   validatePluginStages(resource.spec as Record<string, unknown>, ['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins', 'upstreamResponsePlugins'])
+  const waf = (resource.spec as Record<string, unknown>).waf
+  if (waf != null) {
+    if (typeof waf !== 'object' || Array.isArray(waf)) throw new Error('EdgionPlugins spec.waf must be an object')
+    for (const key of ['policyRef', 'activeProfileRef', 'requestBody']) {
+      const field = (waf as Record<string, unknown>)[key]
+      if (field != null && (typeof field !== 'object' || Array.isArray(field))) {
+        throw new Error(`EdgionPlugins spec.waf.${key} must be an object`)
+      }
+    }
+  }
   return structuredClone(resource) as EdgionPlugins
 }
 
@@ -93,6 +103,7 @@ export function yamlToEdgionPlugins(yamlStr: string): EdgionPlugins {
 
 export function countPluginsByStage(spec: EdgionPluginsSpec | undefined) {
   return {
+    waf: spec?.waf != null ? 1 : 0,
     request: spec?.requestPlugins?.length ?? 0,
     responseFilter: spec?.upstreamResponseFilterPlugins?.length ?? 0,
     responseBodyFilter: spec?.upstreamResponseBodyFilterPlugins?.length ?? 0,

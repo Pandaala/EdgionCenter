@@ -8,6 +8,30 @@ function resource(kind: string, name: string, namespace: string | undefined, spe
 }
 
 describe('buildTopologyGraph', () => {
+  it('links WAF policy, selector and bundles using each owning resource namespace', () => {
+    const graph = buildTopologyGraph({
+      edgionplugins: [resource('EdgionPlugins', 'waf', 'edge', {
+        waf: { policyRef: { name: 'policy', namespace: 'security' }, activeProfileRef: { name: 'selector' } },
+        future: { policyRef: { name: 'unrelated' } },
+      })],
+      edgionconfigdata: [
+        resource('EdgionConfigData', 'policy', 'security', { data: { type: 'WafPolicy', config: {
+          profiles: { base: { bundleRefs: [{ name: 'rules' }, { name: 'extra', namespace: 'shared', optional: true }] } },
+        } } }),
+        resource('EdgionConfigData', 'selector', 'edge'),
+        resource('EdgionConfigData', 'rules', 'security'),
+        resource('EdgionConfigData', 'misc', 'security', { data: { type: 'Misc', config: {
+          profiles: { base: { bundleRefs: [{ name: 'unrelated' }] } },
+        } } }),
+      ],
+    }, null, new Set(), true)
+    const edges = graph.edges.map((edge) => `${edge.source}->${edge.target}`)
+    expect(edges).toContain('edgionplugins/edge/waf->edgionconfigdata/security/policy')
+    expect(edges).toContain('edgionplugins/edge/waf->edgionconfigdata/edge/selector')
+    expect(edges).toContain('edgionconfigdata/security/policy->edgionconfigdata/security/rules')
+    expect(edges).toContain('edgionconfigdata/security/policy->edgionconfigdata/shared/extra')
+    expect(graph.nodes.some((node) => node.data.name === 'unrelated')).toBe(false)
+  })
   it('builds gateway-to-backend and policy/dependency relationships', () => {
     const graph = buildTopologyGraph({
       gatewayclass: [resource('GatewayClass', 'edgion', undefined)],

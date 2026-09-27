@@ -39,6 +39,20 @@ Plugin stage eligibility is authoritative in Edgion's
 response handling is configured by its request-stage entry; it is not a directly
 configurable upstreamResponsePlugins entry.
 
+### Logical WAF
+
+WAF is configured at `spec.waf`, outside the four execution-stage arrays, and
+counts as one plugin in the list. The form edits `policyRef`, `activeProfile`,
+`activeProfileRef`, `mode`, `priority`, and `requestBody`. Rule source belongs in
+WafRuleBundle ConfigData, referenced by named profiles in WafPolicy ConfigData.
+The plugin chooses either a fixed profile or a Selector reference; omitting both
+uses the policy default. The Controller validates the complete configuration.
+
+Topology follows the plugin's policy/selector references and each policy's
+profile bundle references. Implicit namespaces belong to the referencing
+resource, including the policy for its bundles. Mutation serialization removes
+Controller-resolved WAF fields without removing operator references or settings.
+
 ## EdgionStreamPlugins
 
 The connection stage (`spec.plugins`) offers IpRestriction,
@@ -79,7 +93,7 @@ filtering removes Controller-owned status and compiled matcher fields. Inspect
 current Gateway/listener and route annotation rules in Edgion before changing
 attachment behavior; this page does not define a separate attachment contract.
 
-## EdgionConfigData ✅ Completed
+## EdgionConfigData
 
 ```yaml
 apiVersion: edgion.io/v1
@@ -101,7 +115,8 @@ spec:
 **Development Notes**:
 - **Namespaced resource**, uses `resourceApi`, kind: `edgionconfigdata`
 - The hot-swappable data overlay (`spec.data` is a tagged enum: `KeyList`,
-  `IpList`, `Selector`, `RegionRouteOverride`, `Misc`); base config stays in
+  `IpList`, `Selector`, `RegionRouteOverride`, `RequestAccessUrlAllowList`,
+  `ProxyProtocolTrust`, `WafRuleBundle`, `WafPolicy`, `Misc`); base config stays in
   `EdgionPlugins`, only data lives here
 - Page: `src/pages/Plugins/EdgionConfigDataList.tsx`, route `plugins/metadata`
 - The one kind the Center default policy lets a federated Center write remotely
