@@ -3,6 +3,7 @@
  */
 
 import * as yaml from 'js-yaml';
+import { validateRouteHostnames } from './route-hostnames'
 import type { HTTPRoute } from '@/types/gateway-api';
 import { DEFAULT_VALUES } from '@/constants/gateway-api';
 import { buildMutationDocument } from './resource-document';
@@ -148,6 +149,7 @@ const isHTTPDelegationRef = (ref: any) =>
   ref?.group === 'gateway.networking.k8s.io' && ref?.kind === 'HTTPRoute';
 
 export function validateHTTPRouteForMutation(route: HTTPRoute): void {
+  validateRouteHostnames(route.spec?.hostnames, 'HTTPRoute')
   for (const [ruleIndex, rule] of (route.spec.rules || []).entries()) {
     const validateFilters = (filters: any[], location: string) => {
       for (const filter of filters) {

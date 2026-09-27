@@ -2368,3 +2368,31 @@ before acting on CCI execution files or proposing replacements.
 - Evidence is source, unit and component validation; this pass adds no live
   data-plane TLS conformance proof. No backend/Edgion source changes, no image
   rebuild, and no push. The full alignment goal remains active.
+
+
+### 2026-09-28: Current route hostname mutation contract
+
+- Added one shared hostname-list validator at the HTTPRoute, GRPCRoute and
+  TLSRoute mutation adapters. TLSRoute requires explicit SNI names (1..1024);
+  HTTPRoute/GRPCRoute allow omitted/empty lists with at most 16 entries.
+  Current resource `hostname.rs`, algorithm `radix_hostname/pattern.rs`, and
+  both vendored v1.6.2 CRD channels agree on these bounds.
+- Invalid DNS patterns, IP literals, trailing newline/CR and oversized names
+  now fail submission. Single-label names, 253-character labels, wildcard
+  numeric suffixes and numeric DNS labels outside strict IPv4 syntax remain
+  accepted. No input normalization or operator-field projection was added.
+- New tests cover both mutation modes, all three route adapters, immutability,
+  list bounds, non-array input, and TLSRoute Form/YAML block-and-repair flows.
+  Two existing mutation fixtures had invalid empty TLSRoute hostnames; they
+  now contain valid names. The first run's two failures were those fixtures;
+  the final suite passes 676 tests in 103 files.
+- Build (TypeScript + Vite), lint and diff checks passed. Logs are
+  `/tmp/ws5-route-hostnames-final.log`,
+  `/tmp/ws5-route-hostnames-build-final.log`, and
+  `/tmp/ws5-route-hostnames-lint-final.log`. Existing chunk-size warnings remain.
+- Upstream `skills/04-review/routing/regression-guards/tls-hostnames-per-attachment.md`
+  still describes a v1.5/16-hostname TLSRoute contract. This is a documentation
+  discrepancy against current source and the v1.6.2 bundles; it was not used
+  to reintroduce a stale limit. No Edgion files were changed in this pass.
+- This is source/adapter/component evidence, not new live TLS forwarding proof.
+  Backend/runtime coverage remains as recorded above; the full goal stays active.

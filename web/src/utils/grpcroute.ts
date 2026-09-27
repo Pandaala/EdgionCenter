@@ -3,6 +3,7 @@
  */
 
 import * as yaml from 'js-yaml'
+import { validateRouteHostnames } from './route-hostnames'
 import type { GRPCRoute } from '@/types/gateway-api/grpcroute'
 import { mutationDocumentToYaml } from './resource-document'
 
@@ -72,6 +73,7 @@ const isGRPCDelegationRef = (ref: any) =>
   ref?.group === 'gateway.networking.k8s.io' && ref?.kind === 'GRPCRoute'
 
 export function validateGRPCRouteForMutation(route: GRPCRoute): void {
+  validateRouteHostnames(route.spec?.hostnames, 'GRPCRoute')
   for (const [ruleIndex, rule] of (route.spec.rules || []).entries()) {
     for (const code of rule.retry?.codes || []) {
       if (!Number.isInteger(code) || code < 0 || code > 16) {

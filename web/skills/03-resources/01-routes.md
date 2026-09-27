@@ -17,6 +17,15 @@ Clearing the input omits weight; entering zero must not omit it, because the
 Gateway defaults an absent weight to one. Zero excludes a backend from weighted
 selection; HTTP named-jump behavior is a separate contract.
 
+The shared mutation hostname validator follows the current Controller parser and
+vendored Gateway API v1.6.2 CRDs: HTTPRoute/GRPCRoute allow an omitted or empty
+list, with at most 16 entries; TLSRoute requires 1 through 1024 entries. Names
+must use lowercase DNS labels, optionally prefixed with `*.`, and fit 253 ASCII
+characters. IP literals, bare wildcards, trailing dots and malformed labels
+are rejected. Single-label names and wildcard numeric suffixes remain valid.
+Validation never trims, lowercases or deletes operator values; invalid drafts
+remain editable and Form/YAML submissions use the same mutation guard.
+
 All five route menus have standalone browser list-action and CRUD coverage.
 These checks establish editing and Controller persistence, not data-plane
 forwarding or cross-namespace authorization. Schema examples below must be

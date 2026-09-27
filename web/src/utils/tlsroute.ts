@@ -3,6 +3,7 @@
  */
 
 import * as yaml from 'js-yaml'
+import { validateRouteHostnames } from './route-hostnames'
 import type { TLSRoute } from '@/types/gateway-api/tlsroute'
 import { mutationDocumentToYaml } from './resource-document'
 
@@ -54,6 +55,7 @@ export function tlsRouteToYaml(route: TLSRoute): string {
 }
 
 export function tlsRouteToMutationYaml(route: TLSRoute, mode: 'create' | 'update'): string {
+  validateRouteHostnames(route.spec?.hostnames, 'TLSRoute')
   return mutationDocumentToYaml(route, 'tlsroute', mode)
 }
 

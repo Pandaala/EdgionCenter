@@ -152,7 +152,7 @@ describe('lossless route and gateway adapters', () => {
       metadata: { name: kind.toLowerCase(), namespace: 'prod', ...serverMetadata },
       spec: {
         parentRefs: [{ name: 'gw', sectionName: 'stream', futureParent: true }],
-        hostnames: kind === 'TLSRoute' ? [] : undefined,
+        hostnames: kind === 'TLSRoute' ? ['secure.example.com'] : undefined,
         futureSpec: { emptyIsMeaningful: '' },
         rules: [
           { name: 'one', backendRefs: [{ name: 'a', namespace: 'backend', port: 9000, weight: 0, refDenied: true }], futureRule: true },

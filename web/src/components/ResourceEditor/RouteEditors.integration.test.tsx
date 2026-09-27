@@ -96,8 +96,23 @@ describe('route Editor mutation paths', () => {
     expect(mutationPayload()).toEqual(resource)
   })
 
+  it.each(['Form', 'YAML'])('blocks empty TLSRoute hostnames from %s and preserves the draft for repair', async (tab) => {
+    const resource: any = { apiVersion: 'gateway.networking.k8s.io/v1', kind: 'TLSRoute', metadata: { name: 'tls', namespace: 'edge', resourceVersion: '8' }, spec: { hostnames: [], rules: [], futureSpec: { keep: true } } }
+    mount(<StreamRouteEditor visible mode="edit" kind="TLSRoute" resource={resource} onClose={vi.fn()} />)
+    if (tab === 'YAML') fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(update).not.toHaveBeenCalled()
+    if (tab === 'Form') fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+    expect(yaml.load((screen.getByLabelText('Route YAML') as HTMLTextAreaElement).value)).toEqual(resource)
+    const repaired = { ...resource, spec: { ...resource.spec, hostnames: ['*.example.com'] } }
+    fireEvent.change(screen.getByLabelText('Route YAML'), { target: { value: yaml.dump(repaired) } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(update).toHaveBeenCalledOnce())
+    expect(mutationPayload()).toEqual(repaired)
+  })
+
   it('submits Stream YAML edits through the mutation boundary', async () => {
-    const resource: any = { apiVersion: 'gateway.networking.k8s.io/v1', kind: 'TLSRoute', metadata: { name: 'tls', namespace: 'edge' }, spec: { parentRefs: [{ name: 'gw' }], rules: [] } }
+    const resource: any = { apiVersion: 'gateway.networking.k8s.io/v1', kind: 'TLSRoute', metadata: { name: 'tls', namespace: 'edge' }, spec: { parentRefs: [{ name: 'gw' }], hostnames: ['secure.example.com'], rules: [] } }
     mount(<StreamRouteEditor visible mode="edit" kind="TLSRoute" resource={resource} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
     fireEvent.change(screen.getByLabelText('Route YAML'), { target: { value: yaml.dump({ ...resource, metadata: { ...resource.metadata, uid: 'server' }, spec: { ...resource.spec, futureSpec: 'stream' }, status: { runtime: true } }) } })
