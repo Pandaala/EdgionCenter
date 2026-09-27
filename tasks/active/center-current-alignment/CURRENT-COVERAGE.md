@@ -56,8 +56,8 @@ No row implies complete nested-field coverage or data-plane conformance.
 | EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary |
 | EdgionTls | security/tls | Typed mTLS SANs and resolved-secret mutation boundary |
 | BackendTLSPolicy | security/backendtls | Current identity/target restrictions and lossless form edits |
-| Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model; read failure/recovery components and live default-policy denial |
-| ConfigMap | security/dependencies | Restricted dependency operations and exact replacement/readback; live Kubernetes Center metadata-only reads, SAR denial and recovery |
+| Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model; read failure/recovery components and live default-policy denial; direct Kubernetes Controller namespace filtering |
+| ConfigMap | security/dependencies | Restricted dependency operations and exact replacement/readback; live Kubernetes Center metadata-only reads, SAR denial and recovery; direct Kubernetes Controller namespace filtering |
 | EdgionPlugins | plugins | 48 stage-plugin catalog entries; independent WAF form/count/references; mutation stripping; edited/referenced access-policy body capability |
 | EdgionStreamPlugins | plugins/stream | Current connection/TLS-stage catalogs and stage-specific controls |
 | EdgionConfigData | plugins/metadata | Nine typed variants; four new variants have dedicated native CRUD |

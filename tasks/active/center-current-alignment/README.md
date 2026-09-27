@@ -2428,3 +2428,49 @@ before acting on CCI execution files or proposing replacements.
   lint and diff checks passed. Logs: `/tmp/ws5-dependencies-full-final.log`,
   `/tmp/ws5-dependencies-build-final.log`, `/tmp/ws5-dependencies-lint-final.log`.
   Existing Vite chunk-size warnings remain. Goal active; no push.
+
+
+### 2026-09-28: Direct Kubernetes Controller namespace boundary
+
+- Built the current Edgion Controller (`cargo build -p edgion-controller --bin
+  edgion-controller`, exit zero) and ran an isolated native Kubernetes-mode
+  Controller on loopback Admin 15912, probe 15932, metrics 15942 and conf-sync
+  50964. This focused namespace probe intentionally uses a separate identity,
+  ports and ServiceAccount from the retained full resource/federation runtime;
+  no Gateway or traffic topology was started. Federation is disabled here.
+- Created only run-owned namespaces `ws5-center-ns-20260928-{a,b,outside}`,
+  labeled synthetic Secret/ConfigMap fixtures, scoped roles and ServiceAccount.
+  The account can read both kinds in all three namespaces, but Controller
+  `watch_namespaces` includes only a and b. A dedicated pause Pod supplies the
+  Pod metadata identity required by native Kubernetes startup; get/patch is
+  limited to that exact Pod. No existing CRDs were modified.
+- Startup evidence required two fixture corrections: POD_NAME is mandatory,
+  and startup must patch its Pod identity. The current Controller also starts
+  EndpointSlice and ACME background reads despite this reduced no-watch set;
+  their read-only permissions were added only in a and b. These are not proof
+  of full custom-resource CRD compatibility. The first process wrote startup
+  diagnostics into the inherited prior runtime log; the final process uses
+  its own `logs/namespace-proof.log`.
+- Six live assertions passed: for Secret and ConfigMap, the same ServiceAccount
+  can read the outside fixture, metadata lists include both watched namespaces
+  and exclude all others without returning values, and explicitly requesting
+  the outside namespace returns 403. The initial ConfigMap count assertion
+  failed because Kubernetes also creates `kube-root-ca.crt`; the corrected
+  oracle requires both labeled fixtures and verifies every returned namespace.
+  No Controller restart was used to resolve that assertion failure.
+- Artifacts and private runtime configuration are under
+  `/tmp/ws5-center-namespace-20260928/`; `result.json` and `proof-v2.log` are
+  passing evidence, `result-initial.json` preserves the earlier failed oracle.
+  The runtime remains live (session 55730 at this checkpoint); revalidate before
+  reuse. ServiceAccount token lifetime is eight hours; no token is committed.
+- Strengthened the repository's Kubernetes namespace authorization E2E to test
+  both dependency kinds, absence of value/spec/status fields, and explicit
+  out-of-scope denial for both Controller slots. E2E TypeScript and inventory
+  checks passed (22 kinds, 224 cases). The strengthened two-Controller proxy
+  case was not run against this direct-only probe and remains outstanding.
+  The shared cluster's six CRD schema differences remain unmodified.
+- No Edgion source edits or commits. This is new direct Kubernetes namespace
+  evidence, complementary to the previous live Center browser/SAR evidence;
+  neither is being reported as the full two-Controller E2E gate. Goal active.
+- Final Center lint and diff checks passed. No production code changed in this
+  pass; the frontend unit baseline remains the preceding 679-test run.

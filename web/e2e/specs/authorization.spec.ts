@@ -37,12 +37,19 @@ test('restricted dependency metadata stays inside configured namespaces', async 
   const prefix = `eruie2e-${createHash('sha256').update(runId).digest('hex').slice(0, 8)}`
   const allowed = new Set([`${prefix}-a`, `${prefix}-b`, `${prefix}-denied`])
   for (const slot of ['A', 'B'] as const) {
-    const response = await request.get(`/api/v1/proxy/${controllerPathId(slot)}/api/v1/keys/namespaced/secret`)
-    expect(response.ok(), await response.text()).toBeTruthy()
-    const body = await response.json() as { data?: Array<{ metadata?: { namespace?: string; name?: string } }> }
-    const keys = body.data ?? []
-    expect(keys.some(({ metadata }) => metadata?.name === `${prefix}-secret`)).toBeTruthy()
-    expect(keys.every(({ metadata }) => metadata?.namespace !== undefined && allowed.has(metadata.namespace))).toBeTruthy()
+    for (const kind of ['secret', 'configmap']) {
+      const path = `/api/v1/proxy/${controllerPathId(slot)}/api/v1/keys/namespaced/${kind}`
+      const response = await request.get(path)
+      expect(response.ok(), await response.text()).toBeTruthy()
+      const body = await response.json() as { data?: Array<{ metadata?: { namespace?: string; name?: string } }> }
+      const keys = body.data ?? []
+      expect(keys.some(({ metadata }) => metadata?.name === `${prefix}-${kind}`)).toBeTruthy()
+      expect(keys.every(({ metadata }) => metadata?.namespace !== undefined && allowed.has(metadata.namespace))).toBeTruthy()
+      for (const key of keys) {
+        for (const field of ['data', 'stringData', 'binaryData', 'spec', 'status']) expect(key).not.toHaveProperty(field)
+      }
+      expect((await request.get(`${path}/default`)).status()).toBe(403)
+    }
   }
 })
 
