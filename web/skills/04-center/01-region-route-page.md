@@ -75,6 +75,11 @@ aggregates these into `modified` (`converged`/`superseded`/`accepted`/
 `unknown` — the write landed) and `failed` (`failed`/`conflict` — nothing was
 applied), alongside the full per-controller `outcomes` list.
 
+An open failover editor retains its operation snapshot and outcome list across
+watch refreshes. A newly inconsistent row disables further edits without
+unmounting the result. Reopening starts from the latest representative document;
+only an all-converged operation closes the editor automatically.
+
 Consistency compares only managed spec fields. Server-owned metadata such as
 `resourceVersion`, UID, generation, and status never creates a conflict.
 Missing online Controllers are inconsistent.

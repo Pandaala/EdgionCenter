@@ -113,10 +113,12 @@ function FailoverStatus({ resource }: { resource: RegionRouteOverrideResource })
 function FailoverEditor({
   row,
   resource,
+  disabled,
   onDone,
 }: {
   row: CenterRegionRouteOverride
   resource: RegionRouteOverrideResource
+  disabled: boolean
   onDone?: () => void
 }) {
   const t = useT()
@@ -179,7 +181,7 @@ function FailoverEditor({
           <Select
             data-testid={`region-failover-select-${region.name}`}
             value={pending[region.name] ?? ''}
-            disabled={mutation.isPending}
+            disabled={disabled || mutation.isPending}
             style={{ width: 180 }}
             onChange={(value) => setPending((current) => ({
               ...current,
@@ -201,7 +203,7 @@ function FailoverEditor({
         data-testid="region-failover-apply"
         type="primary"
         danger={changed.length > 0}
-        disabled={!changed.length}
+        disabled={disabled || !changed.length}
         loading={mutation.isPending}
         onClick={() => mutation.mutate()}
       >
@@ -226,6 +228,9 @@ function FailoverAction({
   disabled: boolean
 }) {
   const [open, setOpen] = useState(false)
+  // Keep the active operation mounted through watch refreshes. A changed
+  // representative or inconsistent row must not erase its terminal outcomes.
+  const [session, setSession] = useState({ revision: 0, resource })
   const button = (
     <Button
       data-testid="region-failover"
@@ -237,32 +242,31 @@ function FailoverAction({
     </Button>
   )
 
-  if (disabled) {
-    return (
-      <Tooltip title="Synchronize the override before changing failover">
-        <span>{button}</span>
-      </Tooltip>
-    )
-  }
-
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen && disabled) return
+        if (nextOpen) setSession((current) => ({ revision: current.revision + 1, resource }))
+        setOpen(nextOpen)
+      }}
       trigger="click"
       title="Failover configuration"
       content={(
         <div style={{ minWidth: 360 }}>
           <FailoverEditor
-            key={normalizedConfig(resource)}
+            key={session.revision}
             row={row}
-            resource={resource}
+            resource={session.resource}
+            disabled={disabled}
             onDone={() => setOpen(false)}
           />
         </div>
       )}
     >
-      {button}
+      <Tooltip title={disabled ? 'Synchronize the override before changing failover' : undefined}>
+        <span>{button}</span>
+      </Tooltip>
     </Popover>
   )
 }

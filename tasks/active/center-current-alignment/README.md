@@ -1124,3 +1124,27 @@ before acting on CCI execution files or proposing replacements.
   refresh, enable-state differences (consistency includes enable while sync
   intentionally copies only spec.data), missing-resource sync, and traffic-level
   proof. These are open inspection areas, not conclusions from this happy-path run.
+
+### RegionRoute failover outcome lifetime
+
+- Reproduced loss of per-controller outcomes: refetch inside the mutation changed
+  the row to inconsistent, and FailoverAction replaced the Popover with a disabled
+  tooltip. Even consistent refetches could reset the editor through its
+  config-derived React key. Component regression failed before the fix because
+  the conflict outcome vanished.
+- Keep one editor snapshot per explicit opening, retain the active component
+  through watch updates, and disable selects/apply when the live row becomes
+  inconsistent. A new opening uses the latest document; automatic close still
+  requires all outcomes to be converged.
+- Added three full-page component cases for converged/conflict, accepted/unknown,
+  and converged/superseded while refetch changes the underlying documents.
+  Eleven RegionRoute tests passed (session 59900); initial reproduction log
+  /tmp/ws5-center-region-outcomes-before.log and fixed results
+  /tmp/ws5-center-region-outcomes-final.log.
+- Build 39028 and lint 1191 passed. Native run
+  alignment-region-outcomes-20260928-v1 passed all 3 login/failover/restore/sync
+  cases and retained 70 files (session 94545, terminal zero). Logs
+  /tmp/ws5-center-region-outcomes-{build,lint,native}.log.
+- Mixed outcomes are deterministic component evidence, not injected native
+  transport failures. Sync-action outcome lifetime, enable differences, missing
+  resources and Gateway traffic remain separate open audit items.
