@@ -13,7 +13,8 @@
 # (the non-host arch runs under QEMU/Rosetta emulation); BuildKit cache mounts,
 # keyed per target arch, keep emulated rebuilds incremental.
 
-ARG RUST_VERSION=1.92
+# Current locked AWS SDK dependencies require Rust 1.94.1 or newer.
+ARG RUST_VERSION=1.96.1
 ARG NODE_VERSION=20
 ARG RUNTIME_BASE=debian:bookworm-slim
 
@@ -69,7 +70,7 @@ ARG TARGETARCH
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/EdgionCenter/target,id=center-target-${TARGETARCH},sharing=locked \
-    cargo build --release -p "${CENTER_PACKAGE}" --features embed-dashboard \
+    cargo build --locked --release -p "${CENTER_PACKAGE}" --features embed-dashboard \
     && cp "target/release/${CENTER_BINARY}" /usr/local/bin/edgion-center
 
 # ── Stage 3: slim runtime ─────────────────────────────────────────────────────

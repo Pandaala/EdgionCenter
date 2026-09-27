@@ -1776,3 +1776,19 @@ before acting on CCI execution files or proposing replacements.
   systemd reports active. No Kubernetes browser readiness claim. Preserve the
   private context and existing user clusters. The Dockerfile toolchain fix is
   still separate and uncommitted pending image completion. Overall goal active.
+
+### Center image build toolchain gate completed (2026-09-28)
+
+- Session 43367 exited zero. The canonical Kubernetes image script completed
+  locked release compilation, OCI export and Docker import with Rust 1.96.1.
+  Image `edgion-center-kubernetes:alignment-kube-20260928-v2` is linux/arm64;
+  local image ID is
+  `sha256:30c0cecba87368e5fab7ab712fbac4cd916f7d38b39b4fefbea2e9c8706d95bd`.
+  Full log: `/tmp/ws5-center-kube-image-rust196.log`.
+- Commit the Dockerfile's Rust default update and `cargo build --locked`
+  separately from logical WAF commit `150ed3c`. No dependency/lockfile changes.
+  This resolves the prior Rust 1.92 dependency MSRV rejection. Other target
+  architectures and standalone image composition were not built in this run.
+- This image's staged frontend predates the latest WAF work; rebuild current
+  sources before using an image as proof for that UI. Kubernetes browser
+  validation still requires a ready isolated cluster and Controller image.
