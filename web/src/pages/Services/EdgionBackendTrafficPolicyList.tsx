@@ -104,9 +104,12 @@ const EdgionBackendTrafficPolicyList = () => {
       key: 'features',
       render: (_: unknown, item: EdgionBackendTrafficPolicy) => (
         <Space wrap>
-          {item.spec.healthCheck?.active && <Tag color="green">{t('tag.healthCheck')}</Tag>}
+          {item.spec.healthCheck?.active && <Tag color="green">{t('tag.healthCheck')} · {(item.spec.healthCheck.active.type ?? 'http').toUpperCase()}</Tag>}
           {item.spec.outlierDetection && <Tag color="orange">{t('tag.outlierDetection')}</Tag>}
           {item.spec.upstreamAuthority && <Tag color="purple">{t('tag.upstreamAuthority')}</Tag>}
+          {item.spec.retryConstraint && <Tag color="blue">{t('tag.retryConstraint')}</Tag>}
+          {item.spec.circuitBreaker && <Tag color="red">{t('tag.circuitBreaker')}</Tag>}
+          {item.spec.connection && <Tag>{t('tag.connectionOverride')}</Tag>}
         </Space>
       ),
     },

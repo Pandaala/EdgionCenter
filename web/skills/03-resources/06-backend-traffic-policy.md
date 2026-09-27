@@ -8,6 +8,9 @@ description: EdgionBackendTrafficPolicy editor boundaries and verification
 The Controller-scoped menu is Services → Backend Traffic Policies, at
 `/controller/:controllerId/services/backend-traffic-policies`.
 The page uses the ordinary Controller proxy and resource authorization.
+The list identifies the configured probe protocol and each configured resilience
+section, including retry constraints, circuit breaking and connection overrides.
+These tags describe configuration presence; they are not live health results.
 
 The schema authority is the sibling Edgion implementation:
 `edgion-resources/src/resources/edgion_backend_traffic_policy.rs`, with

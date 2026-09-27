@@ -18,7 +18,7 @@ vi.mock('@/components/resource/PermissionAwareButton', () => ({
 }))
 vi.mock('@/hooks/useResourceList', () => ({
   useResourceList: () => ({
-    items: [{ apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionBackendTrafficPolicy', metadata: { namespace: 'prod', name: 'policy-a' }, spec: { targetRefs: [] } }],
+    items: [{ apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionBackendTrafficPolicy', metadata: { namespace: 'prod', name: 'policy-a' }, spec: { targetRefs: [], healthCheck: { active: { type: 'https' } }, retryConstraint: {}, circuitBreaker: { maxParallelRequests: 20 }, connection: { connectTimeout: '3s' } } }],
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -42,6 +42,13 @@ describe('EdgionBackendTrafficPolicy navigation', () => {
     ))
     const paths = controllerMenu.flatMap((section) => collectPaths(section.children))
     expect(paths).toContain('/services/backend-traffic-policies')
+  })
+
+  it('shows probe protocol and every configured resilience section', () => {
+    renderWithQueryClient(<EdgionBackendTrafficPolicyList />)
+    for (const label of ['Health Check · HTTPS', 'Retry Constraint', 'Circuit Breaker', 'Connection Override']) {
+      expect(screen.getByText(label)).toBeVisible()
+    }
   })
 
   it('keeps batch confirmation semantics when only one resource is selected', async () => {

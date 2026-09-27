@@ -117,6 +117,11 @@ for (const catalog of RESOURCE_CATALOG.values()) {
     if (!actions.searchExceptions.includes(catalog.kind)) await page.getByTestId(`${catalog.kind}-search`).fill(fixtureName)
     const row = page.getByRole('row').filter({ hasText: fixtureName }).first()
     await expect(row).toBeVisible()
+    if (catalog.kind === 'edgionbackendtrafficpolicy') {
+      for (const label of ['Health Check · HTTPS', 'Retry Constraint', 'Circuit Breaker', 'Connection Override']) {
+        await expect(row).toContainText(label)
+      }
+    }
     if (catalog.kind === 'edgionacme') await row.getByTestId('acme-trigger').click()
 
     const view = row.getByTestId(`${catalog.kind}-row-view`)

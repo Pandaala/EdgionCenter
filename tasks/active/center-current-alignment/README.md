@@ -1256,3 +1256,22 @@ before acting on CCI execution files or proposing replacements.
   edits or commits. Native evidence proves HTTPS configuration round-trips,
   not a successful probe handshake; GRPCS editing has component/adapter evidence.
   Runtime probes and remaining policy/menu cases stay open.
+
+### Backend policy list completeness and full frontend regression
+
+- Full frontend regression after encrypted-probe editing passed 527 tests across
+  95 files (29260 terminal zero, /tmp/ws5-center-full-web-health-tls.log).
+- Found the list omitted retryConstraint, circuitBreaker and connection tags;
+  policies configured only with those sections appeared to have no features.
+  Added localized tags and the probe protocol to the health-check tag. These
+  report configuration presence, not live health or probe success.
+- Three targeted list tests passed (55584). Build 40384, lint 15466 and E2E
+  typecheck 45344 passed; /tmp/ws5-center-policy-list-{tests,build,lint,types}.log.
+- Native v1 exposed a too-specific exact text-node locator although the visible
+  row contained the expected labels. Switched to asserting text on the visible
+  resource row. Final alignment-policy-list-20260928-v2 passed login plus page
+  actions and all four new labels (2 tests, 35002 terminal zero), retained 70
+  fixtures. Log /tmp/ws5-center-policy-list-native-v2.log. All sessions terminal.
+- Full regression preceded this final list-only change; the list change has the
+  targeted component/native/build evidence above. Remaining deeper target-policy
+  and runtime behavior is still open.
