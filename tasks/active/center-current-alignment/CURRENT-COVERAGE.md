@@ -38,7 +38,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | EdgionGatewayConfig | system/config | Current load-balancing controls, body/plugin policy, outbound TLS stripping |
 | Gateway | infrastructure/gateways | Native and shared Controller status, listener counts/kinds/conditions; current listener TLS runtime exclusions |
 | ReferenceGrant | infrastructure/referencegrants | Version boundary and topology authorization projection |
-| HTTPRoute | routes/http | Backend AI references, mirror annotations, retry bounds, optional policy clearing |
+| HTTPRoute | routes/http | Backend AI references, mirror annotations, retry bounds, optional policy clearing; rule admission/provenance exclusions |
 | GRPCRoute | routes/grpc | Method-only/service-only/header-only edits, last-match removal, policy clearing |
 | TCPRoute | routes/tcp | v1 plus accepted alternate; stream-plugin/keepalive native edits |
 | UDPRoute | routes/udp | v1 plus accepted alternate; stream-plugin native edits and TCP-control exclusion |
@@ -103,7 +103,11 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
 
 1. Continue the exact operator/runtime-field audit against all current resource
    structs. Catalog coverage alone is insufficient: the current pass found the
-   missing ExtensionRef.resolvedNamespace exclusion for HTTP and gRPC filters.
+   missing ExtensionRef.resolvedNamespace, Gateway TLS resolution and HTTP rule
+   admission/provenance exclusions (now fixed). Next inspect shared plugin
+   conditions: SecretMatch.resolvedValues and IP-match resolvedIps are serialized
+   by current Edgion but absent from the mutation exclusions. Verify every owning
+   condition placement before choosing scoped filtering paths.
 2. Finish capability/permission and asynchronous state transitions in Center
    menus, including OIDC and owner forwarding evidence. Keep native, component,
    hermetic transport and unavailable environment evidence distinct.

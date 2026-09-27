@@ -342,3 +342,30 @@ describe('resource document preservation', () => {
     expect(output).not.toContain('status:')
   })
 })
+
+
+it.each(['create', 'update'] as const)('strips HTTP rule admission and delegation provenance on %s', (mode) => {
+  const runtime = {
+    resolvedAiAdmission: { backends: [{ kind: 'edgionBackend', specValid: true, canonicalModels: ['chat'] }] },
+    resolvedTerminalRouteUid: 'route-uid',
+    resolvedTerminalRuleIdentity: 'name:chat',
+  }
+  const rules = [
+    { name: 'chat', matches: [{ path: { type: 'PathPrefix', value: '/chat' } }],
+      backendRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'ai', weight: 1 }],
+      sessionPersistence: {}, futureOperator: runtime },
+    { backendRefs: [{ name: 'fallback', port: 8080 }], filters: [] },
+  ]
+  const document = {
+    apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute',
+    metadata: { name: 'ai-route', namespace: 'edge', resourceVersion: '12' },
+    spec: { parentRefs: [{ name: 'edge' }], useDefaultGateways: 'All',
+      rules: rules.map((rule) => ({ ...rule, ...runtime })) },
+  }
+  const before = structuredClone(document)
+  const result = buildMutationDocument(document, { mode, resourceKind: 'httproute' })
+  expect(result.spec).toEqual({ ...document.spec, rules })
+  if (mode === 'update') expect(result).toHaveProperty('metadata.resourceVersion', '12')
+  else expect(result).not.toHaveProperty('metadata.resourceVersion')
+  expect(document).toEqual(before)
+})

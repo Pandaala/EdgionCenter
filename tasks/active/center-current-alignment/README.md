@@ -2014,3 +2014,24 @@ before acting on CCI execution files or proposing replacements.
   /tmp/ws5-center-gateway-resolution-lint-v2.log.
   This verifies serialization boundaries, not new native TLS traffic coverage.
   The full resource/menu audit remains active.
+
+
+### HTTP rule admission and provenance boundary (2026-09-28)
+
+- Inspected current serialized runtime fields across top-level resource structs.
+  EdgionTls, EdgionAcme, BackendTLSPolicy and the health-check/TLS portion of
+  EdgionBackendTrafficPolicy already have corresponding mutation exclusions.
+  This is a source boundary audit, not a claim of complete field/UI coverage.
+- HTTPRouteRule now carries resolvedAiAdmission, resolvedTerminalRouteUid and
+  resolvedTerminalRuleIdentity. Verified their Controller owners in the HTTP
+  handler and route_delegation::set_terminal_rule_identity; added exact rule-level
+  exclusions. Preserve operator rules, backend references, explicit empty values,
+  unsupported-but-operator-owned useDefaultGateways, and unknown nested content.
+- Added create/update cases with multiple rules, AI and Service references,
+  same-name nested operator keys, CAS version behavior and input immutability.
+  Session 67212 passed tests but caught an unknown metadata type in the new test
+  at build time. Corrected the assertion; session 82242 exited zero with 64 tests,
+  build and lint. Logs: /tmp/ws5-center-http-provenance-{tests,build,lint}-v2.log.
+- No Edgion source changed. No new native AI/delegation traffic test is claimed.
+  Recorded the next discovered condition-runtime omission in CURRENT-COVERAGE.md;
+  the resource/menu audit remains active.
