@@ -151,7 +151,7 @@ const HTTPRouteList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: (_: unknown, record: K8sResource) => <ResourceConditions status={record.status} compact />,
+      render: (_: unknown, record: K8sResource) => <ResourceConditions status={record.status} generation={record.metadata.generation} compact />,
     },
     {
       title: t('col.actions'),

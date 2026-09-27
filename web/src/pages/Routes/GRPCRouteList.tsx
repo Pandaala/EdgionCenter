@@ -148,7 +148,7 @@ const GRPCRouteList = () => {
         </Space>
       ),
     },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
     {
       title: t('col.actions'),
       key: 'actions',

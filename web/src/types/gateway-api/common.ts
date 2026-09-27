@@ -16,6 +16,7 @@ export interface K8sObjectMeta {
   annotations?: Record<string, string>;
   creationTimestamp?: string;
   resourceVersion?: string;
+  generation?: number;
   uid?: string;
 }
 

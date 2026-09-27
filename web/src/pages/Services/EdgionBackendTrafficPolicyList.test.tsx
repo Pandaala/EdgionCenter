@@ -18,7 +18,7 @@ vi.mock('@/components/resource/PermissionAwareButton', () => ({
 }))
 vi.mock('@/hooks/useResourceList', () => ({
   useResourceList: () => ({
-    items: [{ apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionBackendTrafficPolicy', metadata: { namespace: 'prod', name: 'policy-a' }, spec: { targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }], healthCheck: { active: { type: 'https' } }, retryConstraint: {}, circuitBreaker: { maxParallelRequests: 20 }, connection: { connectTimeout: '3s' } } }],
+    items: [{ apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionBackendTrafficPolicy', metadata: { namespace: 'prod', name: 'policy-a', generation: 4 }, status: { ancestors: [{ ancestorRef: { name: 'provider' }, conditions: [{ type: 'Accepted', status: 'True', observedGeneration: 3 }] }] }, spec: { targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }], healthCheck: { active: { type: 'https' } }, retryConstraint: {}, circuitBreaker: { maxParallelRequests: 20 }, connection: { connectTimeout: '3s' } } }],
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -50,6 +50,11 @@ describe('EdgionBackendTrafficPolicy navigation', () => {
     for (const label of ['Health Check · HTTPS', 'Retry Constraint', 'Circuit Breaker', 'Connection Override']) {
       expect(screen.getByText(label)).toBeVisible()
     }
+  })
+
+  it('marks an older attachment observation stale in the resource list', () => {
+    renderWithQueryClient(<EdgionBackendTrafficPolicyList />)
+    expect(screen.getByText('Accepted=True (stale)')).toHaveClass('ant-tag-gold')
   })
 
   it('keeps batch confirmation semantics when only one resource is selected', async () => {

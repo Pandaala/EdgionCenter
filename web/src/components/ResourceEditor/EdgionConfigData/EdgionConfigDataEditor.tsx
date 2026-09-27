@@ -168,7 +168,7 @@ const EdgionConfigDataEditor: React.FC<EdgionConfigDataEditorProps> = ({
           ...(mode !== 'create' ? [{
             key: 'conditions',
             label: t('tab.conditions'),
-            children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} />,
+            children: <ResourceConditions status={formData.status} generation={formData.metadata.generation} emptyText={t('status.noConditions')} />,
           }] : []),
         ]}
       />

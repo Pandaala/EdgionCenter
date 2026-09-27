@@ -127,7 +127,7 @@ const BackendTLSPolicyEditor: React.FC<BackendTLSPolicyEditorProps> = ({ visible
         },
         {
           key: 'conditions', label: 'Conditions', disabled: mode === 'create',
-          children: <ResourceConditions status={resource?.status ?? formData.status} />,
+          children: <ResourceConditions status={resource?.status ?? formData.status} generation={resource?.metadata.generation ?? formData.metadata.generation} />,
         },
       ]} />
     </Modal>

@@ -126,7 +126,7 @@ const EdgionAcmeEditor: React.FC<EdgionAcmeEditorProps> = ({ visible, mode, reso
           key: 'yaml', label: editorYamlTab(t('tab.yaml')),
           children: <YamlEditor value={yamlContent} onChange={setYamlContent} readOnly={isReadOnly} height="500px" />,
         },
-        ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} /> }] : []),
+        ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} generation={formData.metadata.generation} emptyText={t('status.noConditions')} /> }] : []),
       ]} />
     </Modal>
   )

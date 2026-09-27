@@ -100,7 +100,7 @@ const EdgionBackendList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: (_: unknown, item: EdgionBackend) => <ResourceConditions status={item.status} compact />,
+      render: (_: unknown, item: EdgionBackend) => <ResourceConditions status={item.status} generation={item.metadata.generation} compact />,
     },
     {
       title: t('col.actions'),

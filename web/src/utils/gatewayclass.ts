@@ -7,6 +7,7 @@ export interface GatewayClass {
   kind: string
   metadata: {
     name: string
+    generation?: number
     labels?: Record<string, string>
     annotations?: Record<string, string>
     resourceVersion?: string

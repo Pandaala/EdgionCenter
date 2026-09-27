@@ -94,7 +94,7 @@ export default function TopologyDetailDrawer({ visible, data, onClose }: Props) 
           {data.resource?.status && (
             <>
               <Divider style={{ margin: '12px 0 8px' }}>Conditions</Divider>
-              <ResourceConditions status={data.resource.status} />
+              <ResourceConditions status={data.resource.status} generation={data.resource.metadata.generation} />
               <Divider style={{ margin: '12px 0 8px' }}>Resource document</Divider>
             </>
           )}

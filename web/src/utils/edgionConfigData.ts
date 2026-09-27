@@ -21,6 +21,7 @@ export interface EdgionConfigDataResource {
   kind: 'EdgionConfigData'
   metadata: {
     name: string
+    generation?: number
     namespace?: string
     labels?: Record<string, string>
     annotations?: Record<string, string>

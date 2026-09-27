@@ -117,7 +117,7 @@ const EdgionBackendTrafficPolicyList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => <ResourceConditions status={item.status} compact />,
+      render: (_: unknown, item: EdgionBackendTrafficPolicy) => <ResourceConditions status={item.status} generation={item.metadata.generation} compact />,
     },
     {
       title: t('col.actions'),

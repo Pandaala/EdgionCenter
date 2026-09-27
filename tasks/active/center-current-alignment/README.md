@@ -1316,3 +1316,27 @@ before acting on CCI execution files or proposing replacements.
   passed; logs /tmp/ws5-center-condition-colors-{tests,build,lint}.log. All terminal.
 - This is rendering evidence only. Generation freshness and status propagation
   through real attachment changes remain open, along with the broader audit.
+
+
+### Condition generation freshness in lists and details
+
+- Pass resource metadata.generation through every ResourceConditions caller,
+  including Gateway listener details and topology details. Older observedGeneration
+  values now display as gold stale observations with both versions available,
+  preserving the original condition and writer/ancestor context. Unknown versions
+  do not manufacture staleness; stale reference observations cannot satisfy the
+  current grant/denial browser selectors.
+- Added numeric generation to shared and local resource metadata interfaces.
+  Initial validation caught three missing metadata declarations and an unsafe
+  HTTPRoute processed-response metadata access; all corrected before commit.
+- Full frontend suite: 538 tests in 95 files passed (73487 terminal zero),
+  including compact/detail multi-writer freshness, reference recovery, missing
+  versions, list integration and existing route editor mutation tests. Build
+  87244 and lint 41716 terminal zero. Logs:
+  /tmp/ws5-center-generation-tests-v2.log,
+  /tmp/ws5-center-generation-build-v2.log,
+  /tmp/ws5-center-generation-lint.log.
+- No native browser run or Controller change in this batch. Topology summary
+  classification (resourceIssues), real attachment transitions, Kubernetes writer
+  behavior and the remaining resource/menu audit are still open. Do not infer
+  runtime propagation or full alignment completion from component rendering tests.

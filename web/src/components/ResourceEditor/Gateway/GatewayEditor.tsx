@@ -136,7 +136,7 @@ const GatewayEditor: React.FC<GatewayEditorProps> = ({ visible, mode, resource, 
         },
         ...(mode !== 'create' ? [{
           key: 'conditions', label: t('tab.conditions'),
-          children: <GatewayStatusDetails status={formData.status} />,
+          children: <GatewayStatusDetails status={formData.status} generation={formData.metadata.generation} />,
         }] : []),
       ]} />
     </Modal>

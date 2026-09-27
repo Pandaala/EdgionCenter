@@ -159,7 +159,7 @@ const GRPCRouteEditor: React.FC<GRPCRouteEditorProps> = ({
               />
             ),
           },
-          ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} /> }] : []),
+          ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} generation={formData.metadata.generation} emptyText={t('status.noConditions')} /> }] : []),
         ]}
       />
     </Modal>

@@ -84,3 +84,12 @@ Programmed are positive conditions; Conflicted=True is an error and
 PartiallyInvalid=True is a warning. False clears those negative conditions.
 Unknown status stays cautionary, and unrecognized condition types remain neutral
 instead of inferring success or failure from their boolean value.
+
+When both metadata.generation and a condition's observedGeneration are safe
+nonnegative integers, an older observation is marked `stale` in gold. Pass the
+resource generation into every list/detail caller, including Gateway listeners.
+The detail shows both generations; compact tooltips explain the mismatch.
+Each deployment observation is checked separately. Missing generation information
+does not establish staleness. Stale reference conditions do not carry the current
+reference-granted/denied test selectors. This rendering rule does not yet change
+resourceIssues or the topology summary classification.

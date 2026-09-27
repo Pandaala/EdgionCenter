@@ -105,7 +105,7 @@ const EdgionStreamPluginsEditor: React.FC<Props> = ({ visible, mode, resource, o
           children: <EdgionStreamPluginsForm data={formData} onChange={setFormData} readOnly={isRO} isCreate={mode === 'create'} /> },
         { key: 'yaml', label: editorYamlTab(t('tab.yaml')),
           children: <YamlEditor value={yamlContent} onChange={setYamlContent} readOnly={isRO} height="480px" /> },
-        ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} emptyText={t('status.noConditions')} /> }] : []),
+        ...(mode !== 'create' ? [{ key: 'conditions', label: t('tab.conditions'), children: <ResourceConditions status={formData.status} generation={formData.metadata.generation} emptyText={t('status.noConditions')} /> }] : []),
       ]} />
     </Modal>
   )

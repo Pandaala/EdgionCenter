@@ -112,7 +112,7 @@ const LinkSysEditor: React.FC<Props> = ({ visible, mode, resource, onClose }) =>
         { key: 'yaml', label: editorYamlTab(t('tab.yaml')),
           children: <YamlEditor value={yamlContent} onChange={setYamlContent} readOnly={isRO} height="480px" /> },
         { key: 'conditions', label: 'Conditions', disabled: mode === 'create',
-          children: <ResourceConditions status={resource?.status ?? formData.status} /> },
+          children: <ResourceConditions status={resource?.status ?? formData.status} generation={resource?.metadata.generation ?? formData.metadata.generation} /> },
       ]} />
     </Modal>
   )

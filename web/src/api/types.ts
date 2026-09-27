@@ -20,6 +20,7 @@ export interface K8sMetadata {
   labels?: Record<string, string>
   annotations?: Record<string, string>
   resourceVersion?: string
+  generation?: number
   creationTimestamp?: string
 }
 

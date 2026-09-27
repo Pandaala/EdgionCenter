@@ -109,3 +109,39 @@ it.each([true, false])('colors condition semantics correctly in compact=%s', (co
     expect(screen.getByText(`${type}=${status}`)).toHaveClass(`ant-tag-${color}`)
   }
 })
+
+it.each([true, false])('marks each deployment observation independently when compact=%s', (compact) => {
+  render(<ResourceConditions compact={compact} generation={8} status={{
+    controllers: [
+      { controllerName: 'old', status: { ancestors: [{ ancestorRef: { name: 'gateway' }, conditions: [{ type: 'Accepted', status: 'True', observedGeneration: 7 }] }] } },
+      { controllerName: 'current', status: { ancestors: [{ ancestorRef: { name: 'gateway' }, conditions: [{ type: 'Accepted', status: 'False', observedGeneration: 8 }] }] } },
+    ],
+  }} />)
+  expect(screen.getByText('Accepted=True (stale)')).toHaveClass('ant-tag-gold')
+  expect(screen.getByText('Accepted=False')).toHaveClass('ant-tag-red')
+  if (!compact) expect(screen.getAllByText('Current generation')).toHaveLength(2)
+})
+
+it('does not expose stale reference permission as a current grant', () => {
+  const { rerender } = render(<ResourceConditions generation={3} status={{
+    parents: [{ parentRef: { name: 'gateway' }, conditions: [{ type: 'ResolvedRefs', status: 'True', observedGeneration: 2 }] }],
+  }} />)
+  expect(screen.queryByTestId('route-ref-granted')).not.toBeInTheDocument()
+  expect(screen.getByText('ResolvedRefs=True (stale)')).toBeVisible()
+  rerender(<ResourceConditions generation={3} status={{
+    parents: [{ parentRef: { name: 'gateway' }, conditions: [{ type: 'ResolvedRefs', status: 'True', observedGeneration: 3 }] }],
+  }} />)
+  expect(screen.getByTestId('route-ref-granted')).toBeVisible()
+})
+
+it.each([
+  { generation: undefined, observedGeneration: 2 },
+  { generation: 3, observedGeneration: undefined },
+  { generation: 3, observedGeneration: 3 },
+])('does not invent staleness without an older reported generation: %j', ({ generation, observedGeneration }) => {
+  render(<ResourceConditions generation={generation} status={{
+    conditions: [{ type: 'Accepted', status: 'True', observedGeneration }],
+  }} />)
+  expect(screen.getByText('Accepted=True')).toHaveClass('ant-tag-green')
+  expect(screen.queryByText(/stale/)).not.toBeInTheDocument()
+})

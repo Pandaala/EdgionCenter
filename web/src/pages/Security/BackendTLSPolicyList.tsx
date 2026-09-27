@@ -116,7 +116,7 @@ const BackendTLSPolicyList = () => {
       title: t('col.hostname'), key: 'hostname',
       render: (_: any, r: K8sResource) => r.spec?.validation?.hostname || '-',
     },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (

@@ -255,7 +255,7 @@ const HTTPRouteEditor: React.FC<HTTPRouteEditorProps> = ({
         ...(initialMode !== 'create' ? [{
           key: 'conditions',
           label: editorConditionsTab(t('tab.conditions')),
-          children: <ResourceConditions status={processedResource.data?.status ?? formData?.status} emptyText={t('status.noConditions')} />,
+          children: <ResourceConditions status={processedResource.data?.status ?? formData?.status} generation={processedResource.data?.metadata?.generation ?? formData?.metadata?.generation} emptyText={t('status.noConditions')} />,
         }] : []),
       ]} />
     </Modal>

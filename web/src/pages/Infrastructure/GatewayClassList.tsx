@@ -67,7 +67,7 @@ const GatewayClassList = () => {
       render: (_: any, r: K8sResource) => <Tag color="blue">{r.spec?.controllerName || '-'}</Tag> },
     { title: t('col.description'), key: 'desc',
       render: (_: any, r: K8sResource) => r.spec?.description || '-' },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (

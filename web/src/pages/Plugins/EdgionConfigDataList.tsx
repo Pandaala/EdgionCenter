@@ -72,7 +72,7 @@ const EdgionConfigDataList = () => {
       items: configDataItems,
     }),
     { title: t('col.type'), key: 'type', render: (_: any, r: K8sResource) => r.spec?.data?.type || '-' },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, record: K8sResource) => (

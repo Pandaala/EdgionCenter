@@ -27,6 +27,7 @@ export interface BackendTLSPolicy {
   kind: string
   metadata: {
     name: string
+    generation?: number
     namespace?: string
     labels?: Record<string, string>
     annotations?: Record<string, string>

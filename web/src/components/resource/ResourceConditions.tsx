@@ -98,23 +98,33 @@ function conditionColor({ type, status }: DisplayCondition): string {
   return 'default'
 }
 
-function ConditionTag({ condition }: { condition: DisplayCondition }) {
-  const content = `${condition.type}=${condition.status}`
-  if (condition.type === 'ResolvedRefs' && condition.status === 'True') {
-    return <Tag data-testid="route-ref-granted" color={conditionColor(condition)}>{content}</Tag>
+function isStale(condition: DisplayCondition, generation?: number): boolean {
+  return Number.isSafeInteger(generation) && generation! >= 0
+    && Number.isSafeInteger(condition.observedGeneration) && condition.observedGeneration! >= 0
+    && condition.observedGeneration! < generation!
+}
+
+function ConditionTag({ condition, generation }: { condition: DisplayCondition; generation?: number }) {
+  const stale = isStale(condition, generation)
+  const content = `${condition.type}=${condition.status}${stale ? ' (stale)' : ''}`
+  const color = stale ? 'gold' : conditionColor(condition)
+  if (!stale && condition.type === 'ResolvedRefs' && condition.status === 'True') {
+    return <Tag data-testid="route-ref-granted" color={color}>{content}</Tag>
   }
-  if (condition.type === 'ResolvedRefs' && condition.reason === 'RefNotPermitted') {
-    return <Tag data-testid="route-ref-denied" color={conditionColor(condition)}>{content}</Tag>
+  if (!stale && condition.type === 'ResolvedRefs' && condition.reason === 'RefNotPermitted') {
+    return <Tag data-testid="route-ref-denied" color={color}>{content}</Tag>
   }
-  return <Tag color={conditionColor(condition)}>{content}</Tag>
+  return <Tag color={color}>{content}</Tag>
 }
 
 export default function ResourceConditions({
   status,
+  generation,
   compact = false,
   emptyText = 'No status conditions reported',
 }: {
   status: unknown
+  generation?: number
   compact?: boolean
   emptyText?: string
 }) {
@@ -125,8 +135,8 @@ export default function ResourceConditions({
     return (
       <Space size={[4, 4]} wrap>
         {items.map(({ context, condition }, index) => (
-          <Tooltip key={`${context}-${condition.type}-${index}`} title={[context, condition.reason, condition.message].filter(Boolean).join(' — ')}>
-            <ConditionTag condition={condition} />
+          <Tooltip key={`${context}-${condition.type}-${index}`} title={[context, isStale(condition, generation) ? `Observed generation ${condition.observedGeneration}; current generation ${generation}` : undefined, condition.reason, condition.message].filter(Boolean).join(' — ')}>
+            <ConditionTag condition={condition} generation={generation} />
           </Tooltip>
         ))}
       </Space>
@@ -139,10 +149,13 @@ export default function ResourceConditions({
         <Descriptions key={`${context}-${condition.type}-${index}`} bordered size="small" column={1}>
           <Descriptions.Item label="Context">{context}</Descriptions.Item>
           <Descriptions.Item label="Condition">
-            <ConditionTag condition={condition} />
+            <ConditionTag condition={condition} generation={generation} />
           </Descriptions.Item>
           {condition.reason && <Descriptions.Item label="Reason">{condition.reason}</Descriptions.Item>}
           {condition.message && <Descriptions.Item label="Message">{condition.message}</Descriptions.Item>}
+          {generation !== undefined && (
+            <Descriptions.Item label="Current generation">{generation}</Descriptions.Item>
+          )}
           {condition.observedGeneration !== undefined && (
             <Descriptions.Item label="Observed generation">{condition.observedGeneration}</Descriptions.Item>
           )}
