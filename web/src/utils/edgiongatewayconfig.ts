@@ -205,8 +205,19 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
   if (degradeThreshold !== undefined && (!Number.isInteger(degradeThreshold) || degradeThreshold < 0 || degradeThreshold > 100)) {
     errors.push('spec.loadBalancing.degradeThreshold must be an integer from 0 to 100')
   }
+  const realIp = spec.realIp
+  if (realIp != null) {
+    if (!Array.isArray(realIp.trustedIps) || realIp.trustedIps.length === 0) errors.push('spec.realIp.trustedIps requires at least one group')
+    const header = realIp.realIpHeader
+    if (header !== undefined && (typeof header !== 'string' || header.length > 256 || !isValidHTTPHeaderName(header))) {
+      errors.push('spec.realIp.realIpHeader must be a valid HTTP header name')
+    }
+    const hops = realIp.maxTrustedHops
+    if (hops != null && (!Number.isInteger(hops) || hops < 0 || hops > 4294967295)) errors.push('spec.realIp.maxTrustedHops must be an integer from 0 to 4294967295')
+  }
   const groupNames = new Set<string>()
-  spec.realIp?.trustedIps?.forEach((group, index) => {
+  const trustedGroups = Array.isArray(realIp?.trustedIps) ? realIp.trustedIps : []
+  trustedGroups.forEach((group, index) => {
     const path = `spec.realIp.trustedIps[${index}]`
     if (!IP_GROUP_NAME_PATTERN.test(group.name || '')) errors.push(`${path}.name is invalid`)
     else if (groupNames.has(group.name)) errors.push(`${path}.name must be unique`)
@@ -234,6 +245,7 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
   if (dns?.linkSysRef && dns.servers?.length) errors.push('spec.dnsResolver.linkSysRef and servers are mutually exclusive')
   if (dns?.linkSysRef && (!dns.linkSysRef.name?.trim() || !dns.linkSysRef.namespace?.trim())) errors.push('spec.dnsResolver.linkSysRef namespace and name are required')
   dns?.servers?.forEach((server, index) => { if (!server.trim()) errors.push(`spec.dnsResolver.servers[${index}] is required`) })
-  if (spec.preflightPolicy?.statusCode !== undefined && (spec.preflightPolicy.statusCode < 100 || spec.preflightPolicy.statusCode > 599)) errors.push('spec.preflightPolicy.statusCode must be 100-599')
+  const preflightStatus = spec.preflightPolicy?.statusCode
+  if (preflightStatus !== undefined && (!Number.isInteger(preflightStatus) || preflightStatus < 200 || preflightStatus > 599)) errors.push('spec.preflightPolicy.statusCode must be an integer from 200 to 599')
   return errors
 }

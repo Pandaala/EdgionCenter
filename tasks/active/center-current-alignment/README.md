@@ -602,3 +602,22 @@ before acting on CCI execution files or proposing replacements.
   browser 42633 passed all four tests (auth plus GatewayConfig/TLSRoute/EdgionTls
   CRUD). Owned services exited; 70 exact fixture files retained. All handles for
   this batch are terminal. Ready for the authorized Center commit.
+
+### RealIp and preflight admission alignment
+
+- Previous nested-controls batch committed as 82b2639; no push.
+- Matched current RealIp shared admission validation: require a nonempty trusted
+  group array and a valid header token of at most 256 characters. The read header
+  continues to allow X-Forwarded-For; outbound header write restrictions do not
+  apply. Added optional u32 maxTrustedHops bounds, preserving zero and null.
+- Preflight response status now requires an integer from 200 through 599, matching
+  validate_preflight_policy. Form numeric controls use the same bounds.
+- Targeted adapter/form suites passed 19 tests (59517), production build passed
+  (51020), and full lint passed (23914). Logs: /tmp/ws5-center-realip-tests.log,
+  /tmp/ws5-center-realip-build.log, /tmp/ws5-center-realip-lint.log. All handles
+  terminal. This batch changes frontend validation only; existing runtime CRUD
+  and Rust matrix evidence above does not prove the newly rejected input cases.
+- Confirmed GatewayConfig mutation exclusions already strip outbound TLS resolved
+  CA/client certificate data. Outbound TLS validation, access-log behavior, and
+  remaining System resources still require further audit; overall goal remains
+  open. No Edgion files changed and no push performed.

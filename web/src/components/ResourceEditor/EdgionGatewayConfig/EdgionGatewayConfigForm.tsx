@@ -340,7 +340,7 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               disabled={readOnly}
             />
           </Form.Item>
-          <Form.Item label={t('field.maxTrustedHops')} style={{ marginBottom: 0, marginTop: 8 }}><InputNumber value={realIp.maxTrustedHops} min={0} onChange={(maxTrustedHops) => updateRealIp({ maxTrustedHops: maxTrustedHops ?? undefined })} disabled={readOnly} /></Form.Item>
+          <Form.Item label={t('field.maxTrustedHops')} style={{ marginBottom: 0, marginTop: 8 }}><InputNumber value={realIp.maxTrustedHops} min={0} max={4294967295} precision={0} onChange={(maxTrustedHops) => updateRealIp({ maxTrustedHops: maxTrustedHops ?? undefined })} disabled={readOnly} /></Form.Item>
         </Card>
 
         <Card title={t('section.securityProtect')} size="small">
@@ -385,8 +385,9 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               value={preflight.statusCode}
               onChange={(v) => updatePreflight({ statusCode: v ?? undefined })}
               placeholder="204"
-              min={100}
+              min={200}
               max={599}
+              precision={0}
               disabled={readOnly}
               style={{ width: 160 }}
             />

@@ -218,6 +218,44 @@ describe('EdgionGatewayConfig lossless adapter', () => {
     expect(createEmpty().spec.server).toBeUndefined()
   })
 
+  it('requires trusted proxies and validates the RealIp read header without write-target restrictions', () => {
+    const resource = structuredClone(fixture)
+    for (const trustedIps of [undefined, [], 'invalid']) {
+      resource.spec.realIp.trustedIps = trustedIps
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('trustedIps requires at least one group')
+    }
+    resource.spec.realIp.trustedIps = fixture.spec.realIp.trustedIps
+    for (const realIpHeader of [undefined, 'X-Forwarded-For', 'x'.repeat(256)]) {
+      resource.spec.realIp.realIpHeader = realIpHeader
+      expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    }
+    for (const realIpHeader of ['', 'bad header', 'x'.repeat(257), null]) {
+      resource.spec.realIp.realIpHeader = realIpHeader
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('realIpHeader')
+    }
+    delete resource.spec.realIp.realIpHeader
+    for (const maxTrustedHops of [undefined, null, 0, 4294967295]) {
+      resource.spec.realIp.maxTrustedHops = maxTrustedHops
+      expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    }
+    for (const maxTrustedHops of [-1, 0.5, 4294967296, '3']) {
+      resource.spec.realIp.maxTrustedHops = maxTrustedHops
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('maxTrustedHops')
+    }
+  })
+
+  it('accepts only final integer HTTP statuses for preflight responses', () => {
+    const resource = structuredClone(fixture)
+    for (const statusCode of [undefined, 200, 204, 599]) {
+      resource.spec.preflightPolicy.statusCode = statusCode
+      expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    }
+    for (const statusCode of [100, 199, 600, 204.5, '204', null]) {
+      resource.spec.preflightPolicy.statusCode = statusCode
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('preflightPolicy.statusCode')
+    }
+  })
+
   it('does not emit the removed ReferenceGrant field in a newly created document', () => {
     const created = createEmpty()
     expect(created.spec).not.toHaveProperty('enableReferenceGrantValidation')
