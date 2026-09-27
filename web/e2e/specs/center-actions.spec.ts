@@ -84,7 +84,7 @@ test.describe('Center and shell actions', () => {
     ])
   })
 
-  test('Controllers page refreshes, filters, reloads, and enters a controller', async ({ page }) => {
+  test('Controllers page refreshes, filters, reloads, and enters a controller', async ({ page, request }) => {
     // The reload response is terminal: Center waits up to 20 s for the new
     // server_id before answering, so give the whole flow room to breathe.
     test.setTimeout(90_000)
@@ -115,6 +115,18 @@ test.describe('Center and shell actions', () => {
       await page.keyboard.press('Escape')
     }
 
+    const baseline = new Map<string, string>()
+    if (process.env.E2E_MODE === 'standalone') {
+      for (const slot of ['A', 'B'] as const) {
+        const info = await request.get(`/api/v1/proxy/${controllerPathId(slot)}/api/v1/server-info`)
+        expect(info.ok()).toBeTruthy()
+        const body = await info.json() as { data: { server_id: string; ready: boolean } }
+        expect(body.data.ready).toBe(true)
+        expect(body.data.server_id).not.toBe('')
+        baseline.set(controllerId(slot), body.data.server_id)
+      }
+    }
+
     await page.getByTestId('controller-reload').first().click()
     await cancelModal(page, 'controller-reload-cancel')
     await page.getByTestId('controller-reload').first().click()
@@ -128,6 +140,20 @@ test.describe('Center and shell actions', () => {
     // 200 converged surfaces as a toast; every other terminal state opens a
     // modal the operator must acknowledge — dismiss it so the page is usable.
     expect([200, 202, 409, 502, 503]).toContain(reloadResponse.status())
+    if (process.env.E2E_MODE === 'standalone') {
+      // This topology has one owning Center and healthy filesystem Controllers.
+      // An initiation acknowledgement or timeout is not reload completion.
+      expect(reloadResponse.status()).toBe(200)
+      const body = await reloadResponse.json() as { data: { state: string; controllerId: string; serverId: string } }
+      expect(body.data.state).toBe('converged')
+      expect(baseline.has(body.data.controllerId)).toBe(true)
+      expect(body.data.serverId).toEqual(expect.any(String))
+      expect(body.data.serverId).not.toBe('')
+      expect(body.data.serverId).not.toBe(baseline.get(body.data.controllerId))
+      const info = await request.get(`/api/v1/proxy/${body.data.controllerId.replaceAll('/', '~')}/api/v1/server-info`)
+      expect(info.ok()).toBeTruthy()
+      expect(await info.json()).toMatchObject({ data: { server_id: body.data.serverId, ready: true } })
+    }
     const outcomeOk = page.getByTestId('controller-reload-outcome-ok')
     if (await outcomeOk.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true, () => false)) {
       await outcomeOk.click()

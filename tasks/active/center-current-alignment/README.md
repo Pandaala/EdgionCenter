@@ -20,18 +20,18 @@ All rows remain open unless explicitly marked complete.
 | Area | Items | Current status |
 | --- | --- | --- |
 | Shared infrastructure | Resource catalog, mutation envelopes, conditions, permissions, Controller switching, pagination | In progress: deployment status display and currentStatus filtering |
-| Infrastructure | GatewayClass, Gateway, ReferenceGrant | Pending |
+| Infrastructure | GatewayClass, Gateway, ReferenceGrant | Native list actions and CRUD passed; validation/runtime stripping aligned; cross-namespace grant and listener attachment behavior pending |
 | Routes | HTTPRoute, GRPCRoute, TCPRoute, UDPRoute, TLSRoute | Generic native CRUD passed; TCP/UDP v1 aligned; advanced route/attachment semantics pending |
-| Services | Service, EndpointSlice, EdgionBackendTrafficPolicy | Pending |
+| Services | Service, EndpointSlice, EdgionBackendTrafficPolicy | Lossless Service/EndpointSlice adapters, native actions/CRUD and actual Service batch deletion passed; traffic-policy and discovery runtime workflows pending |
 | AI backends | EdgionBackend, HTTPRoute references, AiProxy, policy attachments | Catalog/access map, menu, editor, route/plugin/policy wiring added; native browser CRUD passed; advanced attachment and failure workflows pending |
-| Security | EdgionTls, BackendTLSPolicy, Secret/ConfigMap restricted dependencies | Pending |
+| Security | EdgionTls, BackendTLSPolicy, Secret/ConfigMap restricted dependencies | Native actions/CRUD passed; typed mTLS SANs and backend identity admission aligned; handshake and authorization denial workflows pending |
 | Plugins | EdgionPlugins, EdgionStreamPlugins, EdgionConfigData | Current HTTP/stream catalogs aligned; nine ConfigData types editable, four new variants passed native browser CRUD; deeper validation and plugin workflows pending |
 | System | EdgionGatewayConfig, LinkSys, EdgionAcme | GatewayConfig controls/policy aligned; ACME HTTP-01 aligned; all eight LinkSys variants have typed browser CRUD evidence; advanced behavior and remaining validation open |
-| Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Pending |
+| Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Native dashboard refresh/topology controls passed; topology semantic completeness and RegionRoute remain pending |
 | Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Pending |
 | Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification passed; RegionRoute audit pending |
 | Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Pending |
-| Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Pending |
+| Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Native standalone auth/logout, audit filters/pagination, user and role mutations passed; restricted-role denial, OIDC and Kubernetes capability workflows pending |
 | Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Pending |
 
 ## Findings and work log
@@ -867,3 +867,26 @@ before acting on CCI execution files or proposing replacements.
   that the browser CRUD cases specifically exercised zero weights.
 - Forwarding, advanced route features and cross-namespace authorization remain
   open, as do the remaining fleet/admin menus. All current sessions terminal.
+
+### Administration menus and reload completion evidence
+
+- Route weight batch committed as ebeb3cf, no push.
+- Native standalone run 31774 passed nine cases: password login, identity API,
+  shell language/navigation/reload/logout, Controller search/filter/reload/entry,
+  both dashboards/topology controls, audit filters/reset/pagination, Controller
+  deletion confirmation cancellation, isolated role/user CRUD/status/password/
+  membership changes, and Controller switching. Log:
+  /tmp/ws5-center-admin-menus-v1.log. This does not prove restricted-role denials,
+  changed-password login, OIDC, actual Controller deletion or Kubernetes behavior.
+- Existing reload test accepted failed/unknown outcomes, which proved response
+  handling but not completion. For the healthy single-owner standalone topology,
+  it now reads both initial server IDs through the federation HTTP tunnel,
+  requires converged/200 with a changed nonempty ID, then reads Controller
+  server-info through the same tunnel and requires that exact ID and ready=true.
+  Kubernetes retains its multi-replica outcome handling contract.
+- Strengthened native reload run 55078 passed auth plus Controller page flow;
+  log /tmp/ws5-center-reload-proof-v1.log. E2E TypeScript handle 84487 passed.
+  Both runtime runs stopped their owned services and retained 70 exact seeds.
+  All tool sessions terminal; production code and federation contracts unchanged.
+- Updated stale Pending cells with actual partial evidence. No broad coverage
+  row is declared complete; remaining requirements stay visible in the ledger.
