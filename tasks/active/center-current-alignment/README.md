@@ -1564,3 +1564,26 @@ before acting on CCI execution files or proposing replacements.
   checks passed. No production Rust or Edgion changes.
 - Kubernetes mTLS/ownership and other remaining mode/provider/data-plane scenarios
   are still open. Overall alignment remains active.
+
+### Real Kubernetes adapter persistence and Lease verification
+
+- OrbStack context was verified available. Created only the previously absent
+  EdgionController and EdgionProviderAccount CRDs and the isolated namespace
+  center-alignment-20260928024712. Existing Edgion resources and deployment
+  configuration were not changed. Used a private context-pinned kubeconfig.
+- Opt-in real_cluster integration target completed in session 94856, exit zero:
+  two passed, zero failed, zero skipped. Log:
+  /tmp/ws5-center-kube-adapter.en6y2P/test.log.
+- Verified provider account persistence across fresh adapters and stale-generation
+  CAS rejection; Controller status resourceVersion advancement without changing
+  spec generation, observedGeneration and directory reconstruction; real Lease
+  expiry/takeover, increasing fencing epoch and stale-holder release rejection.
+- Post-run API listing confirmed no Controller, provider account or Lease objects
+  remain in the test namespace. Namespace, CRDs and private artifacts are retained.
+- Updated integration instructions to pin context, install only absent required
+  CRDs and use a unique namespace instead of applying the complete deployment to
+  edgion-system. Documented provider account coverage and adapter-test boundaries.
+  Diff whitespace and documented shell syntax checks passed.
+- This does not prove deployed runtime RBAC, OIDC login, internal mTLS forwarding,
+  browser Kubernetes capabilities or managed-cluster data-plane behavior. Those
+  remain open; overall alignment remains active.

@@ -46,22 +46,44 @@ explicit environment opt-in; their absence does not reduce or skip the hermetic 
 
 ## Real kube-apiserver matrix
 
-Use a disposable namespace in a test cluster. Install the checked-in CRD and
-RBAC first, then opt in explicitly:
+Use a disposable namespace in a test cluster. These adapter tests use your
+kubeconfig identity directly; they do not require a Center Deployment or its
+runtime ServiceAccount. The identity needs access to Controller and provider
+account CRDs (including Controller status), and namespaced Leases.
+
+Pin a test-cluster context in a private kubeconfig, then install only missing
+CRDs. If either CRD already exists, inspect its schema before reusing it; do not
+overwrite an existing cluster contract just to run a test.
 
 ```sh
-kubectl apply -k cicd/deploy/center-kubernetes
+set -e
+umask 077
+export CENTER_TEST_CONTEXT=orbstack # Replace with your test-cluster context.
+fixture_dir=$(mktemp -d)
+kubectl --context "$CENTER_TEST_CONTEXT" config view --minify --raw > "$fixture_dir/kubeconfig"
+export KUBECONFIG="$fixture_dir/kubeconfig"
+# On a test cluster where these CRDs are absent:
+kubectl create -f cicd/deploy/center-kubernetes/crd.yaml
+kubectl create -f cicd/deploy/center-kubernetes/provider-account-crd.yaml
+kubectl wait --for=condition=Established --timeout=45s \
+  crd/edgioncontrollers.center.edgion.io crd/edgionprovideraccounts.center.edgion.io
 export EDGION_TEST_KUBERNETES=1
-export EDGION_TEST_KUBERNETES_NAMESPACE=edgion-system
+export EDGION_TEST_KUBERNETES_NAMESPACE="center-integration-$(date +%Y%m%d%H%M%S)"
+kubectl create namespace "$EDGION_TEST_KUBERNETES_NAMESPACE"
 cargo test -p edgion-center-adapter-kubernetes --test real_cluster -- --nocapture
 ```
 
-The test creates uniquely named namespaced Controller and Lease objects, proves
-that a fresh directory instance reconstructs state, exercises expiry/takeover
-with two replica identities, verifies the stale holder cannot release the new
-fence, and removes its resources. It never installs or deletes cluster-scoped
-resources. If the opt-in variable is absent, it prints a clear skip message and
-performs no external mutation.
+The tests create uniquely named namespaced Controller, provider account, and
+Lease objects. They verify provider account reconstruction and generation CAS,
+Controller status/resourceVersion updates without spec-generation changes,
+fresh-directory reconstruction, Lease expiry/takeover with two replica identities,
+and rejection of a stale holder's release. They remove their own resources; the
+namespace, CRDs, and private kubeconfig remain for inspection. The tests themselves
+never install or delete cluster-scoped resources. If the opt-in variable is absent,
+they print a clear skip message and perform no external mutation.
+
+This proves adapter behavior against an API server, not deployed Center
+authentication, replica forwarding, or runtime ServiceAccount permissions.
 
 To exercise RBAC denial in a deployed cluster, remove one permission at a time
 (`edgioncontrollers`, `edgioncontrollers/status`, `leases`, `pods`, or
