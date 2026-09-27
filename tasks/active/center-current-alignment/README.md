@@ -2100,3 +2100,21 @@ before acting on CCI execution files or proposing replacements.
   Earlier focused runs 52957 and 93337 also completed successfully before the
   final no-snapshot overview guard. This is component evidence, not a new native
   federation outage run. No Edgion files changed; overall audit remains active.
+
+
+### Current frontend suite and environment revalidation (2026-09-28)
+
+- Session 89063 exited zero at Center commit 712ed0f: 101 files / 622 tests passed.
+  Log: /tmp/ws5-center-frontend-full-20260928-current.log. This includes all recent
+  committed frontend fixes, not just their focused test subsets. The working
+  tree had only unrelated .claude/ and tasks/todo/ entries before this log update.
+- Compared the Controller menu's RequirePermission(controllers:read) route guard
+  with backend middleware mapping. The route protects page mounting; a missing
+  per-query gate on that protected list page is not itself a permission bypass.
+- Revalidated dedicated kind node eruie2e-655cd051-control-plane. API readiness
+  returns EOF; crictl ps -a is empty; containerd reports reserved CreateContainer
+  names for control-plane pods. Its main thread is blocked in fifo_open per
+  /proc/862/stack and openat per /proc/862/syscall. Services are running, but this
+  is not a healthy Kubernetes runtime. No restart or user-cluster mutation.
+- Current UI suite success does not close the native regression, backend gates,
+  OIDC/ownership/forwarding or remaining nested-field evidence. Goal stays active.

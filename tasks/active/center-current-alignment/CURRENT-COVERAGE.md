@@ -85,8 +85,8 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
 
 - Full frontend baseline: 590 tests in 100 files passed in
   `/tmp/ws5-center-frontend-full-current.log`, before the latest cloud fixes.
-  Subsequent focused suites/build/lint cover those edits; no final-tree full
-  frontend/browser regression is claimed yet.
+  Superseded for frontend unit/component coverage by the 622-test run below.
+  A complete current-tree native browser regression remains outstanding.
 - Two real Kubernetes adapter scenarios passed earlier: reconstruction/CAS and
   Lease takeover/fencing. This is not deployed OIDC, ServiceAccount RBAC or
   cross-replica forwarding proof.
@@ -98,6 +98,22 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
 - Edgion image compilation finished, but packaging failed to find its configured
   release directory. No Edgion source change or commit was made for that failure.
 - Existing OrbStack workloads and the user's other kind cluster remain untouched.
+
+## Latest complete frontend suite
+
+At Center commit `712ed0f`, session 89063 completed successfully: 101 test files,
+622 tests, including the recent Gateway/HTTP/plugin mutation boundaries, access
+policy body edits and Controller read-state fixes. Retained log:
+`/tmp/ws5-center-frontend-full-20260928-current.log`.
+This supersedes the earlier 590-test frontend baseline for these changes. It is
+not native browser, backend compilation or deployed Kubernetes evidence.
+
+The dedicated kind node was rechecked in the same pass: its API still returns
+EOF, `crictl ps -a` has no control-plane containers, and containerd's main thread
+is blocked in `wait_for_partner -> fifo_open -> openat` while repeated container
+creation requests report reserved names. This is stronger evidence than the
+previous assumption of slow image unpacking. The node services remain running;
+no unrelated cluster was modified and no runtime restart was attempted.
 
 ## Next audit actions
 
