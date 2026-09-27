@@ -2613,3 +2613,23 @@ before acting on CCI execution files or proposing replacements.
   violation. No-legacy and diff checks pass separately. Web dependency install
   and full unit/build stages were skipped because frontend component code is
   unchanged; focused E2E type/inventory/lint and real browser traffic passed.
+
+
+### 2026-09-28: Two-Controller RegionRoute traffic and partial recovery
+
+- Added an independent second Controller/Gateway to the owned native topology.
+  Both menu failover and clear report two converged outcomes, advance each CAS
+  version and change actual traffic east/west/east on both Gateways. Both base
+  plugin documents stay identical; the overlay validity oracle remains distinct.
+- Removing only B's ConfigData update permission produces a real HTTP 207 mixed
+  result. The editor retains each outcome, disables inconsistent application,
+  and actual traffic splits west/east. After exact policy restoration, menu
+  source synchronization makes both Gateways reach west; final clear restores
+  east/east. No invalid-overlay fallback occurred.
+- Five fan-out checks and three partial/restoration checkpoints pass. The first
+  partial attempt's incorrect 200 expectation was fixed to canonical 207; its
+  finally restoration also passed. No production source change in this follow-up.
+- Evidence and retained handles are in
+  [REGION-ROUTE-TRAFFIC-EVIDENCE.md](REGION-ROUTE-TRAFFIC-EVIDENCE.md). The native
+  backend includes the repair; Kubernetes v5 still predates it. Overall goal
+  remains active, no Edgion changes or push.

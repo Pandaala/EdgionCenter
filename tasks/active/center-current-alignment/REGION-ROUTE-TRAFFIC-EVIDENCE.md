@@ -74,10 +74,10 @@ files removed. Gateway started before those resources and required one normal
 restart to acquire its listener. These are setup corrections, not product fixes;
 no Gateway restart occurred during the final menu transitions.
 
-This is a single-Controller actual-traffic proof. Earlier two-Controller menu/CAS
-coverage remains distinct; multi-Controller routed traffic, concurrent mixed
-outcomes and Kubernetes deployment of the new backend repair are not established
-by this run. The existing Kubernetes v5 image does not include this repair.
+This first run establishes single-Controller actual traffic. The subsequent
+two-Controller run below extends it to fan-out and partial failure. Kubernetes
+deployment of the repair remains separate; the existing v5 image does not
+include this repair.
 
 
 ## Validation
@@ -100,3 +100,51 @@ browser/traffic proof above runs against the rebuilt native backend.
 
 Logs: `app-tests.log`, `build.log`, `matrix.log`, `e2e-types.log`,
 `e2e-inventory.log`, and `lint.log` in the artifact directory above.
+
+
+## Two Controllers: fan-out, partial failure and source synchronization
+
+The follow-up adds a separate FS Controller `e2e-b/alignment-b`, with its own
+configuration directory, mTLS client identity, Admin port 15922 and conf-sync
+51002. Its independent Gateway listens on 18210. Both Gateways use the same
+synthetic east/west backends; separate access logs and destination ports identify
+each data-plane path. Only run-owned fixtures were copied, using canonical FS
+filenames and excluding computed status. Both base plugins route east to west;
+both valid overlays keep east local, retaining the stronger fallback oracle.
+
+Five initial assertions pass: both Gateways initially reach east; one menu
+failover reports two `converged` outcomes and moves both Gateways to west; one
+menu clear reports two `converged` outcomes and returns both to east. Every
+Controller's resourceVersion advances. Cleared targets and persisted
+`spec.currentStatus` are absent, and both base plugin documents stay identical.
+
+A second run temporarily removes only ConfigData `update` from Controller B's
+otherwise equivalent default policy, preserving its read/watch behavior:
+
+1. Menu failover returns HTTP 207 with one converged and one failed outcome.
+   The open editor retains both results after the row becomes inconsistent,
+   and its apply action is disabled. Gateway A reaches west; Gateway B stays east.
+2. Restoring B's exact original config re-enables its default update permission.
+   The page synchronizes A's overlay data to B. The result reports B converged,
+   both actual Gateways reach west, and the row permits failover edits again.
+3. A finally step clears failover on both and verifies both return east. B's
+   configuration bytes match the pre-test file exactly; no temporary policy
+   remains. B's seven logged Gateway requests contain no invalid-overlay fallback.
+
+The first partial-run attempt incorrectly expected HTTP 200. The API correctly
+returned 207, so the script failed that assertion and successfully restored both
+policy and traffic in its finally block. The corrected run passed all three
+partial/recovery checkpoints. That first attempt is not a product defect.
+
+Artifacts: `/tmp/ws5-center-region-dual-20260928/`, including passing
+`browser-result.json`, `partial-result.json`, inspected `recovered.png` and
+`partial.png`, scripts, access logs and private configuration. Retained Controller
+B session is 41313 and Gateway B session is 2207; revalidate before reuse.
+Controller A, Gateway A, native Center and backend handles remain as above.
+No production source change or permission expansion was needed in this follow-up.
+The backend/frontend gate results above therefore remain the applicable baseline.
+
+This proves two-Controller actual traffic and a real authorization-induced mixed
+outcome followed by menu synchronization. It does not establish simultaneous
+operator races, every terminal outcome, or deployment of the repair into the
+Kubernetes image. The overall resource/menu audit remains active.
