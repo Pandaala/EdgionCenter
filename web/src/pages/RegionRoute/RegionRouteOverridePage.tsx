@@ -274,9 +274,11 @@ function FailoverAction({
 function SyncOverrideButton({
   row,
   onlineControllerIds,
+  consistent,
 }: {
   row: CenterRegionRouteOverride
   onlineControllerIds: string[]
+  consistent: boolean
 }) {
   const t = useT()
   const { message } = App.useApp()
@@ -324,28 +326,30 @@ function SyncOverrideButton({
   })
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Space>
-        <Select
-          data-testid="region-sync-source"
-          size="small"
-          value={source}
-          options={sources.map((controllerId) => ({
-            value: controllerId,
-            label: controllerId,
-          }))}
-          onChange={setSource}
-          style={{ width: 210 }}
-        />
-        <Button
-          data-testid="region-sync-apply"
-          size="small"
-          loading={mutation.isPending}
-          disabled={!source || !targets.length}
-          onClick={() => mutation.mutate()}
-        >
-          Sync to {targets.length}
-        </Button>
-      </Space>
+      {!consistent && (
+        <Space>
+          <Select
+            data-testid="region-sync-source"
+            size="small"
+            value={source}
+            options={sources.map((controllerId) => ({
+              value: controllerId,
+              label: controllerId,
+            }))}
+            onChange={setSource}
+            style={{ width: 210 }}
+          />
+          <Button
+            data-testid="region-sync-apply"
+            size="small"
+            loading={mutation.isPending}
+            disabled={!source || !targets.length}
+            onClick={() => mutation.mutate()}
+          >
+            Sync to {targets.length}
+          </Button>
+        </Space>
+      )}
       {outcomeItems.length > 0 && <WriteOutcomeList items={outcomeItems} />}
     </Space>
   )
@@ -480,21 +484,22 @@ export default function RegionRouteOverridePage() {
             },
             {
               title: 'Consistency',
-              render: (_value, row) => overrideConsistent(row, online)
-                ? <Tag color="green">Consistent</Tag>
-                : (
-                  <Space direction="vertical" size={4}>
+              render: (_value, row) => (
+                <Space direction="vertical" size={4}>
+                  {overrideConsistent(row, online) ? <Tag color="green">Consistent</Tag> : (
                     <Tooltip title="The resource is missing or differs on one or more Controllers">
                       <Tag icon={<WarningOutlined />} color="orange">Inconsistent</Tag>
                     </Tooltip>
-                    {canWrite && (
-                      <SyncOverrideButton
-                        row={row}
-                        onlineControllerIds={online}
-                      />
-                    )}
-                  </Space>
-                ),
+                  )}
+                  {canWrite && (
+                    <SyncOverrideButton
+                      row={row}
+                      onlineControllerIds={online}
+                      consistent={overrideConsistent(row, online)}
+                    />
+                  )}
+                </Space>
+              ),
             },
             {
               title: 'Failover Status',

@@ -29,7 +29,7 @@ All rows remain open unless explicitly marked complete.
 | System | EdgionGatewayConfig, LinkSys, EdgionAcme | GatewayConfig controls/policy aligned; ACME HTTP-01 aligned; all eight LinkSys variants have typed browser CRUD evidence; advanced behavior and remaining validation open |
 | Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Native dashboard refresh/topology controls passed; topology semantic completeness and RegionRoute remain pending |
 | Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Pending |
-| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification passed; RegionRoute audit pending |
+| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification and native RegionRoute failover/restore/source sync passed; mixed outcome retention covered by component tests; enable/missing-resource/traffic audit open |
 | Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Native local account create/edit/CAS conflict/label preservation passed; provider DNS adapters and external workflows still pending |
 | Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Native standalone auth/logout, audit filters/pagination, user and role mutations passed; restricted-role denial, OIDC and Kubernetes capability workflows pending |
 | Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Pending |
@@ -1148,3 +1148,22 @@ before acting on CCI execution files or proposing replacements.
 - Mixed outcomes are deterministic component evidence, not injected native
   transport failures. Sync-action outcome lifetime, enable differences, missing
   resources and Gateway traffic remain separate open audit items.
+
+### RegionRoute sync outcome lifetime
+
+- Reproduced all three non-confirmed sync results disappearing when refresh made
+  the row consistent: accepted, unknown and superseded. The consistency cell
+  previously unmounted SyncOverrideButton together with its result state.
+- Keep the cell and sync component mounted across consistency transitions; hide
+  only the source/apply controls when the documents agree. Retain the operation
+  result without inferring convergence from the later document comparison.
+- Three regression cases failed before the change. Fourteen RegionRoute tests
+  now pass (session 44176); logs /tmp/ws5-center-sync-outcomes-{before,after}.log.
+- Build 64894 and lint 26243 passed. Native run
+  alignment-sync-outcomes-20260928-v1 passed login, failover/restore and selected
+  source sync (3 tests), retained 70 files, and exited zero (session 44015).
+  Logs /tmp/ws5-center-sync-outcomes-{build,lint,native}.log. All sessions terminal.
+- These deterministic component cases verify result presentation; they do not
+  establish transport-failure injection or Gateway traffic behavior. The full
+  type/menu objective remains active, including RegionRoute enable/missing
+  resource boundaries and the other open coverage rows.

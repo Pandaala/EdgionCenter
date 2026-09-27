@@ -89,6 +89,9 @@ and copy its `spec.data` payload to the other online Controllers, through the
 same shared write core. Each target write uses that target's own cached
 `resourceVersion` as its CAS precondition; the source document's metadata is
 never copied. Controller federation RBAC remains the final authority.
+The sync outcome list remains mounted when a refreshed row becomes consistent:
+matching current documents does not upgrade an accepted, unknown, or superseded
+operation to confirmed convergence. Only the now-unnecessary sync controls hide.
 
 ## Validation
 

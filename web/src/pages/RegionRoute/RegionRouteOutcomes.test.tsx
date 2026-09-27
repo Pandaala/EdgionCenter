@@ -6,7 +6,7 @@ import { renderWithQueryClient } from '@/test/render'
 import type { RegionRouteOverrideListResult } from '@/api/regionRoute'
 import RegionRouteOverridePage from './RegionRouteOverridePage'
 
-const api = vi.hoisted(() => ({ listOverrides: vi.fn(), overrideFailover: vi.fn() }))
+const api = vi.hoisted(() => ({ listOverrides: vi.fn(), overrideFailover: vi.fn(), syncOverride: vi.fn() }))
 vi.mock('@/api/regionRoute', () => ({ regionRouteApi: api }))
 vi.mock('@/utils/permissions', () => ({ useCan: () => true }))
 
@@ -31,6 +31,7 @@ function snapshot(first = '', second = ''): RegionRouteOverrideListResult {
 beforeEach(() => {
   api.listOverrides.mockReset().mockResolvedValue(snapshot())
   api.overrideFailover.mockReset()
+  api.syncOverride.mockReset()
 })
 
 it.each([
@@ -64,4 +65,19 @@ it.each([
     expect(screen.getByTestId('region-failover-apply')).toBeDisabled()
   }
   expect(api.overrideFailover).toHaveBeenCalledTimes(1)
+})
+
+
+it.each(['accepted', 'unknown', 'superseded'])('retains sync %s after the row becomes consistent', async (state) => {
+  api.listOverrides.mockResolvedValue(snapshot('west', ''))
+  api.syncOverride.mockImplementation(async () => {
+    api.listOverrides.mockResolvedValue(snapshot('west', 'west'))
+    return { modified: 1, failed: 0, outcomes: [{ controllerId: 'b', state, observed: snapshot('west', 'west').data[0].controllers.b }] }
+  })
+  renderWithQueryClient(<App><I18nProvider><RegionRouteOverridePage /></I18nProvider></App>)
+  fireEvent.click(await screen.findByTestId('region-sync-apply'))
+  await waitFor(() => expect(api.syncOverride).toHaveBeenCalledWith('shop', 'route', 'a', ['b']))
+  await waitFor(() => expect(screen.queryByTestId('region-sync-apply')).not.toBeInTheDocument())
+  expect(screen.getByTestId(`write-outcome-${state}`)).toBeVisible()
+  expect(screen.getByText('Consistent')).toBeVisible()
 })
