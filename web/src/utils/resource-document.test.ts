@@ -9,6 +9,24 @@ import {
 } from './resource-document'
 
 describe('resource document preservation', () => {
+  it.each([
+    ['httproute', 'HTTPRoute', 'create'], ['httproute', 'HTTPRoute', 'update'],
+    ['grpcroute', 'GRPCRoute', 'create'], ['grpcroute', 'GRPCRoute', 'update'],
+  ] as const)('removes Controller ExtensionRef namespaces for %s %s %s', (resourceKind, kind, mode) => {
+    const reference = { group: 'edgion.io', kind: 'EdgionPlugins', name: 'auth', future: false }
+    const filter = { type: 'ExtensionRef', extensionRef: { ...reference, resolvedNamespace: 'delegated-child' }, future: { resolvedNamespace: 'operator-owned' } }
+    const document = {
+      apiVersion: 'gateway.networking.k8s.io/v1', kind,
+      metadata: { name: 'route', namespace: 'edge', resourceVersion: '7' },
+      spec: { rules: [{ filters: [filter], backendRefs: [{ name: 'service', port: 80, filters: [filter] }], future: { resolvedNamespace: 'keep' } }] },
+    }
+    const result = buildMutationDocument(document, { resourceKind, mode })
+    expect(result).toHaveProperty('spec.rules.0.filters.0.extensionRef', reference)
+    expect(result).toHaveProperty('spec.rules.0.backendRefs.0.filters.0.extensionRef', reference)
+    expect(result).toHaveProperty('spec.rules.0.filters.0.future.resolvedNamespace', 'operator-owned')
+    expect(result).toHaveProperty('spec.rules.0.future.resolvedNamespace', 'keep')
+    expect(document.spec.rules[0].filters[0].extensionRef.resolvedNamespace).toBe('delegated-child')
+  })
   it('rejects missing or unsupported API versions before mutation', () => {
     const base = {
       kind: 'HTTPRoute',

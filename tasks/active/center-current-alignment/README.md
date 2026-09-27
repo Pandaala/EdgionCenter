@@ -1,5 +1,9 @@
 # Center alignment with current Edgion
 
+Start with [CURRENT-COVERAGE.md](CURRENT-COVERAGE.md) for the current menu/resource
+index and evidence limits. This file is the chronological work log; older live
+process notes and next steps are historical, not instructions to restart work.
+
 ## Objective and completion criteria
 
 Review and update the entire Center backend and dashboard against the current
@@ -1968,3 +1972,23 @@ before acting on CCI execution files or proposing replacements.
   mutations or a browser-to-provider acceptance claim. Prior 195 hermetic cloud
   backend tests remain applicable because no backend code changed. Overall
   resource/menu audit is active; no goal completion claim.
+
+### Current coverage index and ExtensionRef runtime boundary (2026-09-28)
+
+- Added CURRENT-COVERAGE.md as a compact current-state index: all 22 resource
+  menu rows, Center/shared/cloud/admin menus, evidence levels, environment
+  limitations and remaining audit actions. Compared all 22 menu paths directly
+  with the current catalog (one draft GatewayConfig path was corrected).
+  Inspected retained full-browser, federation, mTLS, frontend and cloud logs;
+  historical green runs are explicitly not relabeled as final-tree verification.
+- Current shared LocalObjectReference serializes Controller-owned
+  resolvedNamespace for delegated rule provenance. HTTP and gRPC mutation
+  catalogs omitted it. Added exact exclusions for rule-filter and backend-filter
+  ExtensionRefs. Operator group/kind/name and unrelated fields with the same
+  terminal name remain intact. No Edgion or transport schema change.
+- Session 96414 exited zero: 43 resource-document/catalog tests, frontend build
+  and lint. Logs `/tmp/ws5-center-ref-namespace-{tests,build,lint}.log`.
+  Four new cases cover both route types and both create/update modes, including
+  input immutability and preservation of unrelated resolvedNamespace fields.
+  This is mutation-boundary evidence, not new delegated-route native traffic
+  evidence. Overall goal remains active.

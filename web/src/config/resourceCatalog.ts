@@ -79,6 +79,8 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'resolvedRules'], ['spec', 'delegationIssues'],
     ['spec', 'rules', '*', 'parsedTimeouts'], ['spec', 'rules', '*', 'parsedRetry'],
     ['spec', 'rules', '*', 'parsedForwardRawPath'],
+    ['spec', 'rules', '*', 'filters', '*', 'extensionRef', 'resolvedNamespace'],
+    ['spec', 'rules', '*', 'backendRefs', '*', 'filters', '*', 'extensionRef', 'resolvedNamespace'],
     ['spec', 'rules', '*', 'parsedAllowNonIdempotentRetry'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'backendTlsPolicy'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
@@ -93,6 +95,8 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'rules', '**', 'requestMirror', 'maxConcurrent'],
   ],
   grpcroute: [
+    ['spec', 'rules', '*', 'filters', '*', 'extensionRef', 'resolvedNamespace'],
+    ['spec', 'rules', '*', 'backendRefs', '*', 'filters', '*', 'extensionRef', 'resolvedNamespace'],
     ['spec', 'currentStatus'],
     ['spec', 'resolvedStatusController'],
     ['spec', 'resolvedHostnames'], ['spec', 'resolvedListeners'], ['spec', 'invalidRuleIndices'],
