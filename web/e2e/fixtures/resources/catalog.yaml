@@ -7,6 +7,8 @@ apiVersion: edgion.io/v1alpha1
 kind: EdgionGatewayConfig
 metadata: {name: "__PREFIX__-config", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
 spec:
+  server: {enableCompression: false, downstreamKeepaliveRequestLimit: 0}
+  linkSys: {webhookMaxResponseBytes: 16384, maxInstancesPerKind: 200}
   requestBody: {defaultMaxBodySize: 32MiB}
   retry: {attempts: 0}
   forwardedHeaders: {remoteIpHeader: X-Client-IP}

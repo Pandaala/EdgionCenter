@@ -27,6 +27,16 @@ describe('resource catalog', () => {
     }
   })
 
+  it('omits Controller attachment proofs and status identity while retaining operator siblings', () => {
+    for (const kind of ['httproute', 'grpcroute', 'tcproute', 'udproute', 'tlsroute', 'edgiontls'] as const) {
+      const entry = getResourceCatalogEntry(kind)
+      const internal = kind === 'edgiontls' ? { resolvedListenerAttachments: [{ gatewayProof: { epoch: 'runtime' } }] }
+        : { resolvedStatusController: 'controller', ...(['tcproute', 'udproute'].includes(kind) ? { resolvedListenerAttachments: [] } : {}) }
+      const resource = { apiVersion: entry.apiVersion, kind: entry.displayName, metadata: { name: 'route', namespace: 'edge' }, spec: { ...internal, future: { resolvedStatusController: 'operator' } } }
+      expect(buildMutationDocument(resource, { resourceKind: kind, mode: 'update' }).spec).toEqual({ future: { resolvedStatusController: 'operator' } })
+    }
+  })
+
   it('accounts for all 22 Controller resource kinds', () => {
     expect(RESOURCE_CATALOG.size).toBe(22)
     expect(listFirstClassResources()).toHaveLength(20)

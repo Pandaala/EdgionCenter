@@ -573,3 +573,32 @@ before acting on CCI execution files or proposing replacements.
   No live handles remain for this checkpoint. This frontend-only batch is ready
   for a Center commit; no additional backend matrix rerun is needed absent any
   backend changes since 0178fe1.
+
+### GatewayConfig nested controls and Controller-only route fields
+
+- Prior retry/forwarding/policy batch committed as **f05277c**, no push.
+- Current GatewayConfig ServerConfig contains only enableCompression and
+  downstreamKeepaliveRequestLimit. Removed obsolete process controls (threads,
+  workStealing, gracePeriodSeconds, gracefulShutdownTimeoutS,
+  upstreamKeepalivePoolSize, errorLog) from the form, types, and create defaults.
+  Removed securityProtect.rejectDuplicateHost control. Existing YAML is preserved
+  losslessly, with clear validation errors identifying these known obsolete fields.
+- Added LinkSys maxInstancesPerKind (1..10000, default 200); preserved webhook
+  response cap and added u32 keepalive limit validation. Updated the live fixture
+  with both active server fields and LinkSys limits.
+- All five route kinds now exclude resolvedStatusController on mutation;
+  TCPRoute, UDPRoute, and EdgionTls also exclude resolvedListenerAttachments.
+  Those fields are schema-hidden Controller-owned identity/proof data. Tests
+  preserve same-named nested operator values and verify the exact exclusions.
+- Targeted tests 93940 passed 35 tests. Build 77859 passed. Lint **48559** and
+  browser **42633** were launched; browser log
+  `/tmp/ws5-center-nested-config-runtime-v1.log`, run ID
+  `alignment-nested-config-20260928-v1`. Browser covers GatewayConfig, TLSRoute,
+  and EdgionTls. Extra LinkSys form regression is running with log
+  `/tmp/ws5-center-nested-config-form-v2.log` (handle below). Poll before restart.
+- Changes remain uncommitted. Continue nested schema/validation audit (RealIp,
+  outbound TLS, access-log policy, preflight) and then remaining System resources.
+- Final results: lint 48559 passed; extra form suite 32800 passed all six tests;
+  browser 42633 passed all four tests (auth plus GatewayConfig/TLSRoute/EdgionTls
+  CRUD). Owned services exited; 70 exact fixture files retained. All handles for
+  this batch are terminal. Ready for the authorized Center commit.

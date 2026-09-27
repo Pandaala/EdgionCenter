@@ -11,9 +11,6 @@ kind: EdgionGatewayConfig
 metadata:
   name: default-config
 spec:
-  server:
-    gracePeriodSeconds: 30
-    gracefulShutdownTimeoutS: 10
   httpTimeout:
     client:
       readTimeout: "60s"
@@ -36,7 +33,6 @@ export function createEmpty(): EdgionGatewayConfig {
     kind: 'EdgionGatewayConfig',
     metadata: { name: 'default-config' },
     spec: {
-      server: { gracePeriodSeconds: 30 },
       httpTimeout: {
         client: { readTimeout: '60s', writeTimeout: '60s' },
         backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s' },
@@ -159,6 +155,14 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
       }
     }
   }
+  for (const field of ['threads', 'workStealing', 'gracePeriodSeconds', 'gracefulShutdownTimeoutS', 'upstreamKeepalivePoolSize', 'errorLog']) {
+    if (spec.server?.[field] !== undefined) errors.push(`spec.server.${field} is no longer a GatewayConfig field`)
+  }
+  if (spec.securityProtect?.rejectDuplicateHost !== undefined) errors.push('spec.securityProtect.rejectDuplicateHost was removed')
+  const maxInstances = spec.linkSys?.maxInstancesPerKind
+  if (maxInstances !== undefined && (!Number.isInteger(maxInstances) || maxInstances < 1 || maxInstances > 10000)) errors.push('spec.linkSys.maxInstancesPerKind must be an integer from 1 to 10000')
+  const keepaliveLimit = spec.server?.downstreamKeepaliveRequestLimit
+  if (keepaliveLimit !== undefined && (!Number.isInteger(keepaliveLimit) || keepaliveLimit < 0 || keepaliveLimit > 4294967295)) errors.push('spec.server.downstreamKeepaliveRequestLimit must be an integer from 0 to 4294967295')
   const durations: Array<[string, unknown]> = [
     ['spec.httpTimeout.client.readTimeout', spec.httpTimeout?.client?.readTimeout],
     ['spec.httpTimeout.client.writeTimeout', spec.httpTimeout?.client?.writeTimeout],

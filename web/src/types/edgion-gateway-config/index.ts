@@ -44,12 +44,6 @@ export interface GatewayConfigAccessLogExtern {
 
 export interface EdgionGatewayConfigSpec {
   server?: {
-    threads?: number
-    workStealing?: boolean
-    gracePeriodSeconds?: number
-    gracefulShutdownTimeoutS?: number
-    upstreamKeepalivePoolSize?: number
-    errorLog?: string
     enableCompression?: boolean
     downstreamKeepaliveRequestLimit?: number
     [key: string]: unknown
@@ -92,13 +86,12 @@ export interface EdgionGatewayConfigSpec {
     fallbackSni?: string
     tlsProxyLogRecord?: boolean
     allowLoopbackUpstream?: boolean
-    rejectDuplicateHost?: boolean
     [key: string]: unknown
   }
   globalPluginsRef?: Array<{ name: string; namespace?: string; [key: string]: unknown }>
   accessLogExtern?: GatewayConfigAccessLogExtern
   preflightPolicy?: { mode?: 'cors-standard' | 'all-options'; statusCode?: number; [key: string]: unknown }
-  linkSys?: { webhookMaxResponseBytes?: number; [key: string]: unknown }
+  linkSys?: { webhookMaxResponseBytes?: number; maxInstancesPerKind?: number; [key: string]: unknown }
   outboundTls?: {
     verify?: boolean
     validation?: {

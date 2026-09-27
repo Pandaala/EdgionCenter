@@ -99,6 +99,18 @@ describe('EdgionGatewayConfigForm', () => {
     expect(onChange.mock.lastCall?.[0].spec).toEqual({ ...data.spec, pluginPolicy: { ...data.spec.pluginPolicy, allow: [] } })
   })
 
+  it('edits the LinkSys admission cap without changing sibling limits', () => {
+    const onChange = vi.fn()
+    const data: any = {
+      apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionGatewayConfig', metadata: { name: 'default' },
+      spec: { linkSys: { maxInstancesPerKind: 321, webhookMaxResponseBytes: 16384, futureLimit: false }, server: { enableCompression: false, downstreamKeepaliveRequestLimit: 0 } },
+    }
+    render(<EdgionGatewayConfigForm data={data} onChange={onChange} />)
+    fireEvent.change(screen.getByDisplayValue('321'), { target: { value: '322' } })
+    expect(onChange.mock.lastCall?.[0].spec).toEqual({ ...data.spec, linkSys: { ...data.spec.linkSys, maxInstancesPerKind: 322 } })
+    expect(screen.queryByText('Threads')).not.toBeInTheDocument()
+  })
+
   it('renders requestBody and omits the removed ReferenceGrant control', () => {
     const data: any = {
       apiVersion: 'edgion.io/v1alpha1',

@@ -15,14 +15,14 @@ const fixture: any = {
   kind: 'EdgionGatewayConfig',
   metadata: { name: 'default', annotations: { note: '' }, resourceVersion: '11' },
   spec: {
-    server: { threads: 4, workStealing: false, gracePeriodSeconds: 30, gracefulShutdownTimeoutS: 10, upstreamKeepalivePoolSize: 128, errorLog: '', enableCompression: true, downstreamKeepaliveRequestLimit: 0 },
+    server: { enableCompression: true, downstreamKeepaliveRequestLimit: 0 },
     httpTimeout: { client: { readTimeout: '60s', writeTimeout: '61s', keepaliveTimeout: '75s' }, backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s', defaultIdleTimeout: '300s' } },
     retry: { attempts: 0 },
     requestBody: { defaultMaxBodySize: '32MiB', futureBody: false },
     tcpTimeout: { idleTimeout: '1h', connectTimeout: '10s' },
     loadBalancing: { degradeThreshold: 50 },
     realIp: { trustedIps: [{ name: 'private', description: '', cidrs: ['10.0.0.0/8'], futureGroup: [] }, { name: 'proxy', cidrs: ['192.0.2.1'] }], realIpHeader: 'X-Forwarded-For', recursive: false, maxTrustedHops: 3 },
-    securityProtect: { xForwardedForLimit: 200, requireSniHostMatch: false, fallbackSni: '', tlsProxyLogRecord: false, allowLoopbackUpstream: true, rejectDuplicateHost: true },
+    securityProtect: { xForwardedForLimit: 200, requireSniHostMatch: false, fallbackSni: '', tlsProxyLogRecord: false, allowLoopbackUpstream: true },
     globalPluginsRef: [{ name: 'one', namespace: 'prod' }, { name: 'two' }],
     accessLogExtern: {
       unmaskedKeys: {
@@ -36,7 +36,7 @@ const fixture: any = {
       futurePolicy: false,
     },
     preflightPolicy: { mode: 'all-options', statusCode: 204 },
-    linkSys: { webhookMaxResponseBytes: 32768 },
+    linkSys: { webhookMaxResponseBytes: 32768, maxInstancesPerKind: 200 },
     outboundTls: { verify: false, validation: { caCertificateRefs: [{ group: '', kind: 'Secret', namespace: 'certs', name: 'ca' }], wellKnownCACertificates: 'System', hostname: 'api.example.com', subjectAltNames: [{ type: 'Hostname', hostname: 'api.example.com' }, { type: 'URI', uri: 'spiffe://cluster/id' }] }, clientCertificateRef: { kind: 'Secret', namespace: 'certs', name: 'client' } },
     dnsResolver: { servers: ['1.1.1.1', '8.8.8.8:53'], cacheTtl: '10s' },
     pathNormalization: { legacyUnknownField: false },
@@ -200,6 +200,22 @@ describe('EdgionGatewayConfig lossless adapter', () => {
       resource.spec.pluginPolicy = policy
       expect(validateEdgionGatewayConfig(resource).length).toBeGreaterThan(0)
     }
+  })
+
+  it('rejects obsolete process controls and validates current LinkSys and keepalive limits', () => {
+    for (const maxInstancesPerKind of [1, 200, 10000]) {
+      const resource = structuredClone(fixture)
+      resource.spec.linkSys.maxInstancesPerKind = maxInstancesPerKind
+      expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    }
+    const resource = structuredClone(fixture)
+    resource.spec.linkSys.maxInstancesPerKind = 0
+    resource.spec.server.downstreamKeepaliveRequestLimit = 4294967296
+    resource.spec.server.threads = 4
+    resource.spec.securityProtect.rejectDuplicateHost = true
+    const errors = validateEdgionGatewayConfig(resource).join(' ')
+    for (const field of ['maxInstancesPerKind', 'downstreamKeepaliveRequestLimit', 'threads', 'rejectDuplicateHost']) expect(errors).toContain(field)
+    expect(createEmpty().spec.server).toBeUndefined()
   })
 
   it('does not emit the removed ReferenceGrant field in a newly created document', () => {

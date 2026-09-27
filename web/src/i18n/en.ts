@@ -1029,6 +1029,7 @@ const en = {
   'field.allowLoopbackUpstream': 'Allow Loopback Upstream',
   'field.rejectDuplicateHost': 'Reject Duplicate Host Headers',
   'field.referenceGrantValidation': 'Enable ReferenceGrant Validation',
+  'field.maxInstancesPerKind': 'Maximum LinkSys instances per provider kind',
   'field.webhookMaxResponseBytes': 'Webhook Maximum Response Bytes',
   'field.verify': 'Verify Peer Certificates',
   'field.wellKnownCa': 'Well-Known CA Certificates',

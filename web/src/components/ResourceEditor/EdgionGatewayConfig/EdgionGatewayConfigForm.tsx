@@ -194,37 +194,6 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
 
         {/* Server Config */}
         <Card title={t('section.serverConfig')} size="small">
-          <Form.Item label={t('field.threads')} style={{ marginBottom: 8 }}><InputNumber value={server.threads} onChange={(v) => updateServer({ threads: v ?? undefined })} min={0} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
-          <Form.Item label={t('field.workStealing')} style={{ marginBottom: 8 }}><Switch checked={server.workStealing ?? true} onChange={(workStealing) => updateServer({ workStealing })} disabled={readOnly} /></Form.Item>
-          <Form.Item label={t('field.gracePeriod')} style={{ marginBottom: 8 }}>
-            <InputNumber
-              value={server.gracePeriodSeconds}
-              onChange={(v) => updateServer({ gracePeriodSeconds: v ?? undefined })}
-              placeholder="30"
-              min={0}
-              disabled={readOnly}
-              style={{ width: 160 }}
-            />
-          </Form.Item>
-          <Form.Item label={t('field.shutdownTimeout')} style={{ marginBottom: 8 }}>
-            <InputNumber
-              value={server.gracefulShutdownTimeoutS}
-              onChange={(v) => updateServer({ gracefulShutdownTimeoutS: v ?? undefined })}
-              placeholder="10"
-              min={0}
-              disabled={readOnly}
-              style={{ width: 160 }}
-            />
-          </Form.Item>
-          <Form.Item label={t('field.keepalivePoolSize')} style={{ marginBottom: 8 }}>
-            <InputNumber
-              value={server.upstreamKeepalivePoolSize}
-              onChange={(v) => updateServer({ upstreamKeepalivePoolSize: v ?? undefined })}
-              min={0}
-              disabled={readOnly}
-              style={{ width: 160 }}
-            />
-          </Form.Item>
           <Form.Item label={t('field.enableCompression')} style={{ marginBottom: 0 }}>
             <Switch
               checked={!!server.enableCompression}
@@ -233,7 +202,6 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
             />
           </Form.Item>
           <Form.Item label={t('field.downstreamKeepaliveLimit')} style={{ marginBottom: 8, marginTop: 8 }}><InputNumber value={server.downstreamKeepaliveRequestLimit} onChange={(v) => updateServer({ downstreamKeepaliveRequestLimit: v ?? undefined })} min={0} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
-          <Form.Item label={t('field.errorLog')} style={{ marginBottom: 0 }}><Input value={server.errorLog || ''} onChange={(event) => updateServer({ errorLog: event.target.value || undefined })} disabled={readOnly} /></Form.Item>
         </Card>
 
         {/* HTTP Timeout */}
@@ -381,7 +349,6 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           <Form.Item label={t('field.fallbackSni')} style={{ marginBottom: 8 }}><Input value={security.fallbackSni || ''} disabled={readOnly} onChange={(event) => updateSpecBlock('securityProtect', { fallbackSni: event.target.value || undefined })} /></Form.Item>
           <Form.Item label={t('field.tlsProxyLogRecord')} style={{ marginBottom: 8 }}><Switch checked={security.tlsProxyLogRecord ?? true} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { tlsProxyLogRecord: value })} /></Form.Item>
           <Form.Item label={t('field.allowLoopbackUpstream')} style={{ marginBottom: 8 }}><Switch checked={security.allowLoopbackUpstream ?? false} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { allowLoopbackUpstream: value })} /></Form.Item>
-          <Form.Item label={t('field.rejectDuplicateHost')} style={{ marginBottom: 0 }}><Switch checked={security.rejectDuplicateHost ?? true} disabled={readOnly} onChange={(value) => updateSpecBlock('securityProtect', { rejectDuplicateHost: value })} /></Form.Item>
         </Card>
 
         <Card title={t('section.globalPlugins')} size="small">
@@ -426,7 +393,10 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           </Form.Item>
         </Card>
 
-        <Card title={t('section.linkSys')} size="small"><Form.Item label={t('field.webhookMaxResponseBytes')} style={{ marginBottom: 0 }}><InputNumber value={linkSys.webhookMaxResponseBytes} min={1} disabled={readOnly} onChange={(value) => updateSpecBlock('linkSys', { webhookMaxResponseBytes: value ?? undefined })} /></Form.Item></Card>
+        <Card title={t('section.linkSys')} size="small">
+          <Form.Item label={t('field.webhookMaxResponseBytes')}><InputNumber value={linkSys.webhookMaxResponseBytes} min={0} precision={0} disabled={readOnly} onChange={(value) => updateSpecBlock('linkSys', { webhookMaxResponseBytes: value ?? undefined })} /></Form.Item>
+          <Form.Item label={t('field.maxInstancesPerKind')}><InputNumber value={linkSys.maxInstancesPerKind} min={1} max={10000} precision={0} placeholder="200" disabled={readOnly} onChange={(value) => updateSpecBlock('linkSys', { maxInstancesPerKind: value ?? undefined })} /></Form.Item>
+        </Card>
 
         <Card title={t('section.outboundTls')} size="small">
           <Form.Item label={t('field.verify')} style={{ marginBottom: 8 }}><Switch checked={outboundTls.verify ?? true} disabled={readOnly} onChange={(verify) => updateSpecBlock('outboundTls', { verify })} /></Form.Item>

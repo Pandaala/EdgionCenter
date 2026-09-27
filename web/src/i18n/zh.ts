@@ -1029,6 +1029,7 @@ const zh = {
   'field.allowLoopbackUpstream': '允许回环上游',
   'field.rejectDuplicateHost': '拒绝重复 Host Header',
   'field.referenceGrantValidation': '启用 ReferenceGrant 校验',
+  'field.maxInstancesPerKind': '每种提供方的 LinkSys 实例上限',
   'field.webhookMaxResponseBytes': 'Webhook 最大响应字节数',
   'field.verify': '校验对端证书',
   'field.wellKnownCa': '内置 CA 证书',

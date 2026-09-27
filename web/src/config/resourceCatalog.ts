@@ -72,6 +72,7 @@ const EXCLUDED_MUTATION_PATHS = {
   ],
   httproute: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedStatusController'],
     ['spec', 'resolvedHostnames'], ['spec', 'resolvedListeners'], ['spec', 'invalidRuleIndices'],
     ['spec', 'resolvedRules'], ['spec', 'delegationIssues'],
     ['spec', 'rules', '*', 'parsedTimeouts'], ['spec', 'rules', '*', 'parsedRetry'],
@@ -91,6 +92,7 @@ const EXCLUDED_MUTATION_PATHS = {
   ],
   grpcroute: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedStatusController'],
     ['spec', 'resolvedHostnames'], ['spec', 'resolvedListeners'], ['spec', 'invalidRuleIndices'],
     ['spec', 'resolvedRules'], ['spec', 'delegationIssues'],
     ['spec', 'rules', '*', 'parsedTimeouts'], ['spec', 'rules', '*', 'parsedRetry'],
@@ -100,14 +102,19 @@ const EXCLUDED_MUTATION_PATHS = {
   ],
   tcproute: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedListenerAttachments'],
+    ['spec', 'resolvedStatusController'],
     ['spec', 'resolvedListeners'], ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
   ],
   udproute: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedListenerAttachments'],
+    ['spec', 'resolvedStatusController'],
     ['spec', 'resolvedListeners'], ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
   ],
   tlsroute: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedStatusController'],
     ['spec', 'resolvedListeners'], ['spec', 'effectiveHostnames'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
   ],
@@ -115,6 +122,7 @@ const EXCLUDED_MUTATION_PATHS = {
   endpointslice: [],
   edgiontls: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedListenerAttachments'],
     ['spec', 'clientAuth', 'caSecret'], ['spec', 'secret'], ['spec', 'resolvedListeners'],
     ['spec', 'resolvedLogLabels'],
   ],
