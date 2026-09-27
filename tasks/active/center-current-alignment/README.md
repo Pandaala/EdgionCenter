@@ -959,3 +959,22 @@ before acting on CCI execution files or proposing replacements.
   lint 56854 passed before the final strict-character refinement; final targeted
   tests passed afterward. Logs /tmp/ws5-center-cidr-*.log. No native browser or
   traffic rerun for this adapter-only correction; runtime coverage remains open.
+
+### Provider account edit preservation and revision capture
+
+- Trusted proxy batch committed as 89ced35, no push.
+- Audited cloud architecture/security guides and account API/editor. Cloud DNS
+  is independent of Edgion/federation and provider calls require explicit
+  enabled composition. No external account or DNS was accessed in this pass.
+- Confirmed account editing discarded labels and fetched a fresh ETag only at
+  save time, allowing old form values to overwrite concurrent account changes.
+  Editor now opens from one fetched account/ETag snapshot, preserves its labels,
+  and saves with that captured revision. It does not refresh the precondition
+  at submission. Existing server generation CAS rejects a concurrent writer.
+- Added a form regression distinguishing list/open/save snapshots, asserting
+  preserved labels and one GET only. Cloud suite 21305 passed ten cases; lint
+  12833 passed. Build 37353 caught a Testing Library/Playwright option mismatch
+  in the new test; removed unsupported exact options. Build 10229 then passed.
+  Logs /tmp/ws5-center-cloud-edit-*.log; all sessions terminal.
+- Native account CRUD/conflict proof and provider-specific live DNS workflows
+  remain open. This batch is component and source-level evidence only.

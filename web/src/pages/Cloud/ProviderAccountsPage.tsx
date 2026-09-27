@@ -124,23 +124,35 @@ export default function ProviderAccountsPage() {
   const [form] = Form.useForm<AccountFormValues>()
   const [target, setTarget] = useState<ProviderAccount | null>(null)
   const [open, setOpen] = useState(false)
+  const [revision, setRevision] = useState<string | null>(null)
   const [capabilityAccount, setCapabilityAccount] = useState<ProviderAccount | null>(null)
   const accounts = useQuery({ queryKey: ACCOUNTS_KEY, queryFn: cloudApi.listAccounts })
-  const close = () => { setOpen(false); setTarget(null); form.resetFields() }
+  const close = () => { setOpen(false); setTarget(null); setRevision(null); form.resetFields() }
   const create = useMutation({
     mutationFn: (values: AccountFormValues) => cloudApi.createAccount(values.accountId, desiredFromValues(values)),
     onSuccess: () => { message.success(t('cloud.msg.accountSaved')); queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }); close() },
   })
   const replace = useMutation({
     mutationFn: async (values: AccountFormValues) => {
-      const current = await cloudApi.getAccount(values.accountId)
-      if (!current.etag) throw new Error('missing account revision')
-      return cloudApi.replaceAccount(values.accountId, desiredFromValues(values), current.etag)
+      if (!target || !revision) throw new Error('missing account revision')
+      return cloudApi.replaceAccount(target.accountId, { ...desiredFromValues(values), labels: { ...target.labels } }, revision)
     },
     onSuccess: () => { message.success(t('cloud.msg.accountSaved')); queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }); close() },
   })
   const openCreate = () => { form.setFieldsValue({ provider: 'cloudflare', managementPolicy: 'observe_only', credentialType: 'static_secret' }); setTarget(null); setOpen(true) }
-  const openEdit = (account: ProviderAccount) => { form.setFieldsValue(formValues(account)); setTarget(account); setOpen(true) }
+  const loadEdit = useMutation({
+    mutationFn: async (accountId: string) => {
+      const current = await cloudApi.getAccount(accountId)
+      if (!current.etag || !current.body.data) throw new Error('missing account revision')
+      return { account: current.body.data, etag: current.etag }
+    },
+    onSuccess: ({ account, etag }) => {
+      form.setFieldsValue(formValues(account))
+      setTarget(account)
+      setRevision(etag)
+      setOpen(true)
+    },
+  })
   const submit = async () => {
     const values = await form.validateFields()
     if (target) replace.mutate(values)
@@ -149,14 +161,14 @@ export default function ProviderAccountsPage() {
   const credentialType = Form.useWatch('credentialType', form)
   return (
     <div>
-      <PageHeader title={t('cloud.accounts.title')} subtitle={t('cloud.accounts.subtitle')} actions={<Space><Button icon={<ReloadOutlined />} onClick={() => accounts.refetch()}>{t('btn.refresh')}</Button>{canWrite && <Button data-testid="cloud-account-create" type="primary" onClick={openCreate}>{t('cloud.action.createAccount')}</Button>}</Space>} />
+      <PageHeader title={t('cloud.accounts.title')} subtitle={t('cloud.accounts.subtitle')} actions={<Space><Button icon={<ReloadOutlined />} onClick={() => accounts.refetch()}>{t('btn.refresh')}</Button>{canWrite && <Button data-testid="cloud-account-create" type="primary" disabled={loadEdit.isPending} onClick={openCreate}>{t('cloud.action.createAccount')}</Button>}</Space>} />
       {!canWrite && <Alert type="info" showIcon message={t('cloud.permission.accountReadonly')} style={{ marginBottom: 16 }} />}
       <Table rowKey="accountId" loading={accounts.isLoading} dataSource={accounts.data?.data ?? []} pagination={{ pageSize: 20 }} columns={[
         { title: t('cloud.col.account'), dataIndex: 'accountId' },
         { title: t('cloud.col.provider'), dataIndex: 'provider', render: (value: string) => <Tag>{value}</Tag> },
         { title: t('cloud.col.scope'), render: (_, row: ProviderAccount) => row.scope.accountId },
         { title: t('cloud.col.generation'), dataIndex: 'generation' },
-        { title: t('col.actions'), render: (_, row: ProviderAccount) => <Space><Button size="small" onClick={() => setCapabilityAccount(row)}>{t('cloud.action.capabilities')}</Button>{canWrite && <Button size="small" onClick={() => openEdit(row)}>{t('btn.edit')}</Button>}</Space> },
+        { title: t('col.actions'), render: (_, row: ProviderAccount) => <Space><Button size="small" onClick={() => setCapabilityAccount(row)}>{t('cloud.action.capabilities')}</Button>{canWrite && <Button size="small" disabled={loadEdit.isPending} onClick={() => loadEdit.mutate(row.accountId)}>{t('btn.edit')}</Button>}</Space> },
       ]} />
       <Modal title={t(target ? 'cloud.accounts.editTitle' : 'cloud.accounts.createTitle')} open={open} onCancel={close} onOk={submit} confirmLoading={create.isPending || replace.isPending} destroyOnClose okText={target ? t('btn.save') : t('btn.create')} cancelText={t('btn.cancel')}>
         <Form form={form} layout="vertical" preserve={false}>

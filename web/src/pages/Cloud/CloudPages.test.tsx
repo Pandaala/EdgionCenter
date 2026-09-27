@@ -87,6 +87,22 @@ describe('Provider accounts dashboard boundary', () => {
     await waitFor(() => expect(screen.queryByDisplayValue('mounted/reference-only')).not.toBeInTheDocument())
   })
 
+  it('binds edits to the opened snapshot and preserves labels on replacement', async () => {
+    const account = { ...ACCOUNT, displayName: 'Current name', labels: { team: 'edge' } }
+    state.getAccount.mockResolvedValueOnce({ body: { success: true, data: account }, etag: '"opened"' })
+    state.getAccount.mockResolvedValue({ body: { success: true, data: { ...account, displayName: 'Concurrent name' } }, etag: '"newer"' })
+    state.replaceAccount.mockResolvedValue({ body: { success: true, data: account }, etag: '"saved"' })
+    renderPage(<ProviderAccountsPage />)
+    await screen.findByText('cf-main')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText('Display Name')).toHaveValue('Current name')
+    fireEvent.change(within(dialog).getByLabelText('Display Name'), { target: { value: 'Edited name' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(state.replaceAccount).toHaveBeenCalledWith('cf-main', expect.objectContaining({ displayName: 'Edited name', labels: { team: 'edge' } }), '"opened"'))
+    expect(state.getAccount).toHaveBeenCalledTimes(1)
+  })
+
   it('shows stale capability evidence', async () => {
     renderPage(<ProviderAccountsPage />)
     await screen.findByText('cf-main')
