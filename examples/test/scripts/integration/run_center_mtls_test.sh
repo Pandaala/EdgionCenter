@@ -23,6 +23,7 @@
 # =============================================================================
 
 set -euo pipefail
+umask 077
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +31,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 # The controller binary comes from the sibling Edgion repo (Center was extracted
 # out of that monorepo). Override with EDGION_DIR if it lives elsewhere.
 EDGION_DIR="${EDGION_DIR:-$(cd "$REPO_ROOT/.." && pwd)/Edgion}"
-KILL_ALL="$REPO_ROOT/examples/test/scripts/utils/kill_all.sh"
+source "$SCRIPT_DIR/../utils/owned_runtime.sh"
 CENTER_BIN="$REPO_ROOT/target/debug/edgion-center-standalone"
 CTRL_BIN="$EDGION_DIR/target/debug/edgion-controller"
 CONF_SRC="$REPO_ROOT/examples/test/conf/Center"
@@ -83,22 +84,8 @@ pass() { echo -e "[$(date '+%H:%M:%S')] ${GREEN}PASS${NC}: $1"; ((PASS++)) || tr
 fail() { echo -e "[$(date '+%H:%M:%S')] ${RED}FAIL${NC}: $1 — $2"; ((FAIL++)) || true; }
 warn() { echo -e "[$(date '+%H:%M:%S')] ${YELLOW}WARN${NC}: $1"; }
 
-cleanup() {
-  log "Cleaning up..."
-  # Kill any processes we started
-  for pid_var in CENTER_PID CTRL1_PID CTRL2_PID CTRL_BAD_PID; do
-    pid="${!pid_var:-}"
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-    fi
-  done
-  # Use shared kill_all.sh to ensure no stale processes
-  "$KILL_ALL" 2>/dev/null || true
-  if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
-    rm -rf "$WORK_DIR"
-  fi
-}
-trap cleanup EXIT
+
+trap cleanup_owned_runtime EXIT
 
 # wait_for_http URL TIMEOUT_SECS
 wait_for_http() {
@@ -162,9 +149,11 @@ for bin in "$CENTER_BIN" "$CTRL_BIN"; do
   fi
 done
 
-# ── Kill stale processes ──────────────────────────────────────────────────────
-log "Killing stale processes..."
-"$KILL_ALL" 2>/dev/null || true
+# Refuse occupied endpoints without touching existing processes.
+assert_runtime_ports_free "$CENTER_GRPC_PORT" "$CENTER_HTTP_PORT" "$CENTER_PROBE_PORT" "$CENTER_METRICS_PORT" \
+  "$CTRL1_GRPC_PORT" "$CTRL1_ADMIN_PORT" "$CTRL1_PROBE_PORT" "$CTRL1_METRICS_PORT" \
+  "$CTRL2_GRPC_PORT" "$CTRL2_ADMIN_PORT" "$CTRL2_PROBE_PORT" "$CTRL2_METRICS_PORT" \
+  "$CTRL_BAD_GRPC_PORT" "$CTRL_BAD_ADMIN_PORT" "$CTRL_BAD_PROBE_PORT" "$CTRL_BAD_METRICS_PORT" 50970 5930
 
 # ── Work dir ──────────────────────────────────────────────────────────────────
 WORK_DIR=$(mktemp -d)
@@ -352,6 +341,7 @@ logging:
 
 conf_center:
   type: "file_system"
+  controller_name: "edgion.io/gateway-controller"
   conf_dir: "${dir}/conf"
 
 conf_sync:
@@ -403,6 +393,7 @@ logging:
 
 conf_center:
   type: "file_system"
+  controller_name: "edgion.io/gateway-controller"
   conf_dir: "${WORK_DIR}/ctrl_bad/conf"
 
 conf_sync:
@@ -512,7 +503,7 @@ for i in 1 2; do
 done
 
 # Wait for watch sync on both controllers (timeout 45s to allow mTLS handshake + sync)
-log "Waiting for watch sync to complete (timeout 45s)..."
+log "Waiting for mTLS registration (timeout 45s)..."
 elapsed=0
 while true; do
   out=$(auth_get "$TOKEN" "$CENTER_HTTP/api/v1/controllers" 2>/dev/null || echo "")
@@ -526,11 +517,11 @@ except:
     print(0)
 " 2>/dev/null || echo "0")
   if [[ "$synced" -ge 2 ]]; then
-    log "Both controllers synced after ${elapsed}s"
+    log "Both controllers online after ${elapsed}s"
     break
   fi
   if [[ $elapsed -ge 45 ]]; then
-    echo -e "${RED}ERROR${NC}: Timed out waiting for mTLS watch sync" >&2
+    echo -e "${RED}ERROR${NC}: Timed out waiting for mTLS registration" >&2
     log "Last controllers response: $out"
     log "Center log tail:"
     tail -20 "$WORK_DIR/logs/center.log"
@@ -555,24 +546,21 @@ print(sum(1 for i in items if i.get('online')))
 if [[ "$count" -ge 2 ]]; then
   pass "mtls_happy_path/controllers_online"
 else
-  fail "mtls_happy_path/controllers_online" "expected >= 2 controllers with syncVersion > 0, got $count. Response: $out"
+  fail "mtls_happy_path/controllers_online" "expected >= 2 online controllers, got $count. Response: $out"
 fi
 
 # Assert center metrics show peer identity check ok
 metrics_out=$(curl -sf --max-time 10 "http://127.0.0.1:${CENTER_METRICS_PORT}/metrics" 2>/dev/null || echo "")
 if [[ -n "$metrics_out" ]]; then
   # Look for edgion_fed_peer_identity_check_total{result="ok"} with a positive value
-  ok_val=$(echo "$metrics_out" | grep 'edgion_fed_peer_identity_check_total' | grep 'result="ok"' | awk '{print $NF}' | head -1)
+  ok_val=$(echo "$metrics_out" | grep 'edgion_fed_peer_identity_check_total' | grep 'result="ok"' | awk '{print $NF}' | head -1 || true)
   if [[ -n "$ok_val" ]] && python3 -c "import sys; v=float('$ok_val'); sys.exit(0 if v>0 else 1)" 2>/dev/null; then
     pass "mtls_happy_path/metrics_peer_identity_ok"
   else
-    warn "mtls_happy_path/metrics_peer_identity_ok: metric not found or zero (ok_val='$ok_val'). Metric output snippet: $(echo "$metrics_out" | grep peer_identity || echo '(none)')"
-    # Not counting as FAIL — metric may not yet appear if no mismatch path was triggered
-    pass "mtls_happy_path/metrics_peer_identity_ok"
+    fail "mtls_happy_path/metrics_peer_identity_ok" "successful identity check counter missing or zero"
   fi
 else
-  warn "mtls_happy_path/metrics: /metrics endpoint returned empty"
-  pass "mtls_happy_path/metrics_peer_identity_ok"
+  fail "mtls_happy_path/metrics_peer_identity_ok" "metrics endpoint returned empty"
 fi
 
 # =============================================================================
@@ -581,7 +569,7 @@ fi
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 log "TEST CASE 2: wrong_san_rejected"
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-log "Starting bad controller (claims ctrl-east/east-cluster but cert says attacker)..."
+log "Starting bad controller (claims ctrl-bad/east-cluster but cert says attacker)..."
 
 "$CTRL_BIN" -c "$WORK_DIR/ctrl_bad/controller.yaml" > "$WORK_DIR/logs/ctrl_bad.log" 2>&1 &
 CTRL_BAD_PID=$!
@@ -633,9 +621,7 @@ else
   fi
 fi
 
-# The bad controller may have displaced ctrl1 in the registry (same controller_id).
-# The important assertion is that it never registered successfully (ctrl1 may still
-# be listed because its session was replaced, but we verify the rejection occurred).
+# The bad identity must never join the two legitimate registered Controllers.
 log "controllers list after bad controller attempt: $out"
 
 # Sub-assert C: metrics show mismatch counter > 0
@@ -644,15 +630,7 @@ mismatch_val=$(echo "$metrics_out" | grep 'edgion_fed_peer_identity_check_total'
 if [[ -n "$mismatch_val" ]] && python3 -c "import sys; v=float('$mismatch_val'); sys.exit(0 if v>0 else 1)" 2>/dev/null; then
   pass "wrong_san_rejected/metrics_mismatch_counter"
 else
-  # If metrics endpoint doesn't expose this metric yet (counter not created until first hit),
-  # cross-check with center log
-  log_mismatch=$(grep -E "mismatch|peer identity check failed" "$WORK_DIR/logs/center.log" 2>/dev/null | wc -l || true)
-  log_mismatch="${log_mismatch//[[:space:]]/}"
-  if [[ "${log_mismatch:-0}" -ge 1 ]] 2>/dev/null; then
-    pass "wrong_san_rejected/metrics_mismatch_counter"
-  else
-    fail "wrong_san_rejected/metrics_mismatch_counter" "mismatch counter not found in metrics and no log evidence. mismatch_val='$mismatch_val'. Log: $(grep "peer" "$WORK_DIR/logs/center.log" 2>/dev/null | tail -5 || echo '(none)')"
-  fi
+  fail "wrong_san_rejected/metrics_mismatch_counter" "mismatch counter missing or zero"
 fi
 
 # Kill the bad controller now (no longer needed)

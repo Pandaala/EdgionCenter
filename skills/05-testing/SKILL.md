@@ -30,9 +30,9 @@ External fixtures are opt-in:
   `run_center_mtls_test.sh` covers SPIFFE identity rejection and the plaintext
   fail-close; both scripts document, in their headers, which scenarios are
   deliberately left to unit tests and why.
-  The federation runner refuses occupied ports, stops only its child processes,
-  and retains its private temporary directory for inspection on success or
-  failure. It never calls the broad kill_all utility. File-system Controllers
+  Both federation runners share the occupied-port guard and owned-child cleanup,
+  and retain private temporary directories for inspection on success or
+  failure. Neither calls the broad kill_all utility. File-system Controllers
   set conf_center.controller_name explicitly, as current startup requires.
 
 Never point the Kubernetes matrix at a shared or production namespace. See

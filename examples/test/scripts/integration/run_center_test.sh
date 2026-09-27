@@ -85,6 +85,7 @@ umask 077
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+source "$SCRIPT_DIR/../utils/owned_runtime.sh"
 # The controller binary comes from the sibling Edgion repo (Center was extracted
 # out of that monorepo). Override with EDGION_DIR if it lives elsewhere.
 EDGION_DIR="${EDGION_DIR:-$(cd "$REPO_ROOT/.." && pwd)/Edgion}"
@@ -145,21 +146,8 @@ log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 pass() { echo -e "[$(date '+%H:%M:%S')] ${GREEN}PASS${NC}: $1"; ((PASS++)) || true; }
 fail() { echo -e "[$(date '+%H:%M:%S')] ${RED}FAIL${NC}: $1 — $2"; ((FAIL++)) || true; }
 
-cleanup() {
-  log "Stopping this run's child processes..."
-  local pid attempt
-  for pid in $(jobs -pr); do kill -TERM "$pid" 2>/dev/null || true; done
-  for attempt in 1 2 3 4 5; do
-    [[ -z "$(jobs -pr)" ]] && break
-    sleep 1
-  done
-  for pid in $(jobs -pr); do kill -KILL "$pid" 2>/dev/null || true; done
-  wait 2>/dev/null || true
-  if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
-    log "Run artifacts retained: $WORK_DIR"
-  fi
-}
-trap cleanup EXIT
+
+trap cleanup_owned_runtime EXIT
 
 wait_for_http() {
   local url="$1" timeout="$2" elapsed=0
@@ -256,23 +244,10 @@ for bin in "$CENTER_BIN" "$CTRL_BIN"; do
 done
 
 # Refuse occupied ports rather than stopping another developer's services.
-python3 - "$CENTER_GRPC_PORT" "$CENTER_HTTP_PORT" "$CENTER_PROBE_PORT" "$CENTER_METRICS_PORT" \
+assert_runtime_ports_free "$CENTER_GRPC_PORT" "$CENTER_HTTP_PORT" "$CENTER_PROBE_PORT" "$CENTER_METRICS_PORT" \
   "$CTRL1_GRPC_PORT" "$CTRL1_ADMIN_PORT" "$CTRL1_PROBE_PORT" "$CTRL1_METRICS_PORT" \
   "$CTRL2_GRPC_PORT" "$CTRL2_ADMIN_PORT" "$CTRL2_PROBE_PORT" "$CTRL2_METRICS_PORT" \
-  "$CTRL3_GRPC_PORT" "$CTRL3_ADMIN_PORT" "$CTRL3_PROBE_PORT" "$CTRL3_METRICS_PORT" <<'PYPORTS'
-import socket, sys
-sockets = []
-try:
-    for port in sys.argv[1:]:
-        sock = socket.socket()
-        sockets.append(sock)
-        sock.bind(('0.0.0.0', int(port)))
-except OSError as error:
-    sys.exit(f'Port {port} unavailable; no existing process was stopped: {error}')
-finally:
-    for sock in sockets:
-        sock.close()
-PYPORTS
+  "$CTRL3_GRPC_PORT" "$CTRL3_ADMIN_PORT" "$CTRL3_PROBE_PORT" "$CTRL3_METRICS_PORT"
 
 # ── Work dir ──────────────────────────────────────────────────────────────────
 WORK_DIR=$(mktemp -d)

@@ -1535,3 +1535,32 @@ before acting on CCI execution files or proposing replacements.
 - This adds backend lifecycle/default-policy evidence beyond the browser fixture
   RBAC. It does not establish Kubernetes Lease/fencing, MySQL/OIDC or Gateway
   data-plane behavior. Overall alignment remains active.
+
+
+### Federation mTLS and shared native-runner isolation
+
+- Applied current explicit conf_center.controller_name to both valid and bad-cert
+  mTLS fixture Controllers. Reused owned-process cleanup and occupied-port checks
+  through examples/test/scripts/utils/owned_runtime.sh in both native runners.
+  Both retain private artifacts and never call kill_all or remove run directories.
+- Tightened identity metric assertions: missing/zero counters now fail, instead
+  of warning then passing or substituting log evidence for metric evidence.
+  Renamed misleading watch-sync progress text to registration and corrected the
+  bad Controller identity description to ctrl-bad/east-cluster.
+- Native final mTLS run 44165 terminal zero: 9 passed, zero failed. Covers valid
+  mTLS registration, positive success counter, SPIFFE mismatch rejection with
+  positive mismatch counter and no extra online Controller, and no-TLS startup
+  refusal with the specific reason. /tmp/ws5-center-mtls-native-v3.log.
+- Shared-helper lifecycle rerun 59308 terminal zero: 27 passed, zero failed;
+  /tmp/ws5-center-federation-shared-runtime.log. Runs overlapped on distinct ports
+  without cross-process cleanup. Recorded child PIDs were verified absent after
+  completion. Initial mTLS run 97670 also passed; a subsequent attempt correctly
+  exposed overly strict TIME_WAIT preflight, then terminated before startup.
+- Final port guard permits server-style address reuse but probes loopback too:
+  macOS allows wildcard/specific-address overlap even at listen time. Negative
+  experiments verified both existing loopback and wildcard listeners are refused
+  and remain reachable; all 18 released mTLS endpoints passed final preflight.
+  These final helper-only checks followed the native runs. Shell syntax/diff
+  checks passed. No production Rust or Edgion changes.
+- Kubernetes mTLS/ownership and other remaining mode/provider/data-plane scenarios
+  are still open. Overall alignment remains active.
