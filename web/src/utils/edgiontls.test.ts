@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeEdgionTls, toMutationDocument } from './edgiontls'
+import { normalizeEdgionTls, toMutationDocument, validateEdgionTls, createEmptyEdgionTls } from './edgiontls'
 
 describe('EdgionTls lossless adapter', () => {
   it('uses ciphers, preserves unknown operator fields, and strips resolved/internal fields', () => {
@@ -35,4 +35,20 @@ describe('EdgionTls lossless adapter', () => {
     expect(mutation).not.toHaveProperty('spec.resolvedLogLabels')
     expect(mutation).not.toHaveProperty('status')
   })
+})
+
+it('preserves typed SAN matchers and validates their structural bounds', () => {
+  const resource = createEmptyEdgionTls()
+  resource.spec.clientAuth = { mode: 'Mutual', caSecretRef: { name: 'ca' }, verifyDepth: 2, allowedCns: ['client'], allowedSans: [
+    { type: 'URI', match: 'Prefix', value: 'spiffe://cluster/' },
+    { type: 'OtherName', value: 'client', oid: '1.2.3.4', ignoreCase: true },
+    { type: 'DNS', match: 'RegularExpression', value: '^client[0-9]+$' },
+  ] }
+  expect(validateEdgionTls(resource)).toEqual([])
+  expect(toMutationDocument(normalizeEdgionTls(resource), 'create')).toHaveProperty('spec.clientAuth.allowedSans', resource.spec.clientAuth.allowedSans)
+  resource.spec.clientAuth.allowedSans![1].oid = '1.02.3'
+  expect(validateEdgionTls(resource).join(' ')).toContain('oid')
+  resource.spec.clientAuth.allowedSans = ['old-string'] as any
+  expect(validateEdgionTls(resource).join(' ')).toContain('typed SAN')
+  expect(() => normalizeEdgionTls(resource)).toThrow('typed SAN')
 })

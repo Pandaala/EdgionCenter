@@ -98,7 +98,7 @@ endpoints: [{addresses: ["192.0.2.10"], conditions: {ready: true}}]
 apiVersion: edgion.io/v1
 kind: EdgionTls
 metadata: {name: "__PREFIX__-tls", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
-spec: {hosts: ["e2e.example.test"], secretRef: {name: "__PREFIX__-secret"}}
+spec: {hosts: ["e2e.example.test"], secretRef: {name: "__PREFIX__-secret"}, clientAuth: {mode: OptionalMutual, caSecretRef: {name: "__PREFIX__-secret"}, verifyDepth: 2, allowedSans: [{type: URI, match: Prefix, value: "spiffe://e2e/"}, {type: OtherName, value: client, oid: "1.2.3.4", ignoreCase: true}], allowedCns: [client]}}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: ReferenceGrant

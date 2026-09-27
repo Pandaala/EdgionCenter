@@ -8,20 +8,31 @@ import type { K8sObjectMeta, Hostname } from '@/types/gateway-api/common'
 export interface ObjectRef {
   name: string
   namespace?: string
+  group?: string
+  kind?: string
+  [key: string]: unknown
 }
 
 export type ClientAuthMode = 'Terminate' | 'Mutual' | 'OptionalMutual'
+
+export interface AllowedSan {
+  type: 'DNS' | 'URI' | 'Email' | 'IP' | 'OtherName'
+  match?: 'Exact' | 'Prefix' | 'Suffix' | 'Contains' | 'RegularExpression'
+  value: string
+  ignoreCase?: boolean
+  oid?: string
+}
 
 export interface ClientAuth {
   mode?: ClientAuthMode
   caSecretRef?: ObjectRef
   verifyDepth?: number
-  allowedSans?: string[]
+  allowedSans?: AllowedSan[]
   allowedCns?: string[]
 }
 
 export interface EdgionTlsSpec {
-  parentRefs?: Array<{ name: string; namespace?: string }>
+  parentRefs?: Array<ObjectRef & { sectionName?: string; port?: number }>
   hosts: Hostname[]
   secretRef: ObjectRef
   clientAuth?: ClientAuth

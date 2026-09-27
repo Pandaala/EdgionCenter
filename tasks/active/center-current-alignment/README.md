@@ -800,3 +800,28 @@ before acting on CCI execution files or proposing replacements.
   discovery currently accepts IPv4/IPv6, not FQDN; the generic resource editor's
   FQDN option does not establish routing support. Advanced discovery workflows
   still require validation. Remaining security/routes/fleet/admin menus stay open.
+
+### Security menu and typed mTLS identities
+
+- Service/EndpointSlice batch committed as 36f830c, no push.
+- EdgionTls.allowedSans had the obsolete string[] type and no form controls.
+  Added typed DNS/URI/Email/IP/OtherName entries with Exact/Prefix/Suffix/Contains/
+  RegularExpression matching, ignoreCase and OtherName OID, plus allowedCns.
+  CA reference edits retain group/kind/unknown fields; parent reference types now
+  include sectionName and port. Existing unknown fields remain lossless.
+- Submit-time structural checks cover 16 hosts/32 parents, verification depth,
+  typed SAN shape, nonempty value, match vocabulary, OID, and regex source byte
+  bound. Rust regex compilation and exact SAN semantic admission remain owned by
+  Controller; frontend does not substitute JavaScript regex behavior.
+- Adapter tests 6343 passed two cases; form test 30257 passed. Lint 20212 passed.
+  Initial build 98913 passed before the new optional-field test; final typecheck
+  63841 found that test's missing non-null assertion. Corrected test typing;
+  final build **36636** is running, log /tmp/ws5-center-mtls-build-v2.log.
+- Native security browser run 23148 passed all nine cases: auth; action pages for
+  EdgionTls/BackendTLSPolicy/Secret/ConfigMap; and each resource's real CRUD.
+  TLS fixture includes typed URI/OtherName SANs and CNs, preserved on readback.
+  Log /tmp/ws5-center-security-runtime-v1.log. Owned services stopped, 70 exact
+  fixtures retained. This is configuration/UI evidence, not mTLS handshake proof.
+- Security authorization denial, live certificate verification and cross-namespace
+  attachment behavior remain open; continue route/fleet/admin menu coverage.
+- Final build 36636 passed. All checkpoint handles are terminal.

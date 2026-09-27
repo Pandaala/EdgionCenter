@@ -12,7 +12,7 @@ import ResourceConditions from '@/components/resource/ResourceConditions'
 import EdgionTlsForm from './EdgionTlsForm'
 import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { EdgionTls } from '@/types/edgion-tls'
-import { createEmptyEdgionTls, normalizeEdgionTls, edgionTlsToYaml, yamlToEdgionTls, toMutationDocument } from '@/utils/edgiontls'
+import { createEmptyEdgionTls, normalizeEdgionTls, edgionTlsToYaml, yamlToEdgionTls, toMutationDocument, validateEdgionTls } from '@/utils/edgiontls'
 import { dumpYaml } from '@/utils/yaml-utils'
 import { useT } from '@/i18n'
 import { useEditorTabTransition } from '../useEditorTabTransition'
@@ -66,6 +66,8 @@ const EdgionTlsEditor: React.FC<EdgionTlsEditorProps> = ({ visible, mode, resour
   const handleSubmit = () => {
     try {
       const parsed = editableTab === 'yaml' ? yamlToEdgionTls(yamlContent) : formData
+      const errors = validateEdgionTls(parsed)
+      if (errors.length) throw new Error(errors.join('; '))
       const yamlStr = dumpYaml(toMutationDocument(parsed, mode === 'create' ? 'create' : 'update'))
       const name = parsed.metadata?.name
       const namespace = parsed.metadata?.namespace
