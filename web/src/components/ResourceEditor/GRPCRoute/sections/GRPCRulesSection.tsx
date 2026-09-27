@@ -16,7 +16,7 @@ interface Props {
 }
 
 const defaultRule = (namespace: string): GRPCRouteRule => ({
-  matches: [{ method: { type: 'Exact', service: '', method: '' } }],
+  matches: [{}],
   backendRefs: [{ name: '', namespace, port: 50051, weight: 1 }],
 })
 

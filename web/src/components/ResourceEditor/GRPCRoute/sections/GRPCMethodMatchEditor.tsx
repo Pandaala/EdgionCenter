@@ -1,7 +1,4 @@
-/**
- * gRPC Method 匹配编辑器
- * 编辑 GRPCRouteMatch 中的 method 字段
- */
+/** Edit optional gRPC method predicates and header matches. */
 
 import React from 'react'
 import { Card, Form, Input, Select, Button, Space } from 'antd'
@@ -15,10 +12,7 @@ interface GRPCMethodMatchEditorProps {
   disabled?: boolean
 }
 
-const defaultMatch = (): GRPCRouteMatch => ({
-  method: { type: 'Exact', service: '', method: '' },
-  headers: [],
-})
+const defaultMatch = (): GRPCRouteMatch => ({})
 
 const GRPCMethodMatchEditor: React.FC<GRPCMethodMatchEditorProps> = ({
   value = [],
@@ -34,6 +28,18 @@ const GRPCMethodMatchEditor: React.FC<GRPCMethodMatchEditorProps> = ({
   }
 
   const addMatch = () => onChange?.([...value, defaultMatch()])
+
+  const updateMethodField = (index: number, field: 'service' | 'method', text: string) => {
+    const match = value[index]
+    const method = { ...match.method }
+    if (text === '') delete method[field]
+    else method[field] = text
+    const next: GRPCRouteMatch = { ...match, method }
+    // An absent method predicate matches any method; an empty predicate is invalid.
+    // Retain unknown fields rather than silently dropping them during a narrow edit.
+    if (Object.keys(method).every((key) => key === 'type')) delete next.method
+    updateMatch(index, next)
+  }
 
   const removeMatch = (index: number) => {
     onChange?.(value.filter((_, i) => i !== index))
@@ -66,8 +72,8 @@ const GRPCMethodMatchEditor: React.FC<GRPCMethodMatchEditorProps> = ({
           size="small"
           title={t('grpc.rule', { n: matchIndex + 1 })}
           extra={
-            !disabled && value.length > 1 && (
-              <Button danger size="small" icon={<MinusCircleOutlined />}
+            !disabled && (
+              <Button aria-label={t('btn.delete')} danger size="small" icon={<MinusCircleOutlined />}
                 onClick={() => removeMatch(matchIndex)}>{t('btn.delete')}</Button>
             )
           }
@@ -88,10 +94,9 @@ const GRPCMethodMatchEditor: React.FC<GRPCMethodMatchEditorProps> = ({
           <Form.Item label={t('field.grpcService')} style={{ marginBottom: 8 }}
             help="e.g. mypackage.MyService">
             <Input
+              aria-label={t('field.grpcService')}
               value={match.method?.service || ''}
-              onChange={(e) => updateMatch(matchIndex, {
-                ...match, method: { ...match.method, service: e.target.value }
-              })}
+              onChange={(e) => updateMethodField(matchIndex, 'service', e.target.value)}
               placeholder="mypackage.MyService"
               disabled={disabled}
             />
@@ -99,10 +104,9 @@ const GRPCMethodMatchEditor: React.FC<GRPCMethodMatchEditorProps> = ({
 
           <Form.Item label={t('field.grpcMethod')} style={{ marginBottom: 12 }}>
             <Input
+              aria-label={t('field.grpcMethod')}
               value={match.method?.method || ''}
-              onChange={(e) => updateMatch(matchIndex, {
-                ...match, method: { ...match.method, method: e.target.value }
-              })}
+              onChange={(e) => updateMethodField(matchIndex, 'method', e.target.value)}
               placeholder="GetItem"
               disabled={disabled}
             />
@@ -149,7 +153,7 @@ const GRPCMethodMatchEditor: React.FC<GRPCMethodMatchEditorProps> = ({
       ))}
 
       {!disabled && (
-        <Button type="dashed" onClick={addMatch} block icon={<PlusOutlined />}>
+        <Button aria-label={t('btn.addMatch')} type="dashed" onClick={addMatch} block icon={<PlusOutlined />}>
           {t('btn.addMatch')}
         </Button>
       )}

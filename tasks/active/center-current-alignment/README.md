@@ -1821,3 +1821,30 @@ before acting on CCI execution files or proposing replacements.
   No live build/prewarm remains from the prior checkpoint. Center image version
   smoke command session 31484 exited zero with version 0.1.0 after image build.
   Overall resource/menu alignment remains active.
+
+### gRPC optional method editing (2026-09-28)
+
+- Checked current `GRPCRouteMatch::compile_method` and the routing knowledge
+  page `grpc-method-matching-and-precedence.md`: omitted outer method means
+  unconstrained; Exact service/method may be omitted individually, but explicit
+  empty names are invalid. Center now deletes the field when its input is
+  cleared and removes a type-only method object when both predicates are gone.
+  Headers, sibling matches and unknown fields survive these narrow edits.
+- Removed the last-match deletion restriction. New matches, new rules and empty
+  resource defaults no longer materialize invalid empty service/method strings.
+  Added accessible field/button labels and corrected optional-field documentation.
+- Session 5031 exited zero: 12 component/editor tests, frontend build, lint and
+  E2E typecheck passed. Logs `/tmp/ws5-center-grpc-match-tests-v2.log` and
+  `/tmp/ws5-center-grpc-match-{build,lint,types}.log`. Initial test session 33742
+  exposed an icon-prefixed accessible button name; explicit labels fixed it.
+  Existing jsdom portal and Ant Design deprecation advisories remain.
+- Native standalone `alignment-grpc-match-20260928-v1`, session 14273 exited
+  zero: authentication plus focused browser workflow, 2 passed. Saved and read
+  back service-only, headers-only and empty matches in three consecutive browser
+  edits against a real Controller. Exact test resource removed; 70 original
+  fixture files retained unchanged. Log `/tmp/ws5-center-grpc-match-native-v1.log`.
+  This establishes editor/Controller behavior, not live gRPC forwarding.
+- Route guide still contains unrelated stale statements (pending headings,
+  TCP/UDP v1alpha2 examples, GRPC RequestMirror example, UDP stream-plugin claim).
+  Reconcile those against source during the next route-menu pass. Overall goal
+  remains active; no Kubernetes readiness or data-plane completion claim.

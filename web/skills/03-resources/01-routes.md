@@ -113,8 +113,15 @@ spec:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | string | No | Exact (default) \| RegularExpression |
-| `service` | string | Yes | gRPC service full name (e.g., `billing.v1.BillingService`) |
-| `method` | string | Yes | gRPC method name (e.g., `CreateInvoice`) |
+| `service` | string | No | gRPC service full name (e.g., `billing.v1.BillingService`) |
+| `method` | string | No | gRPC method name (e.g., `CreateInvoice`) |
+
+An explicit method matcher requires at least one non-empty service or method.
+Exact names must be valid; an explicit empty string is not the same as omission.
+The form removes cleared optional fields. Clearing both removes the outer
+method predicate while retaining header conditions and unknown sibling fields.
+An omitted method predicate is unconstrained. The last match can be removed;
+new matches start without invalid empty method names.
 
 ## TCPRoute (Pending Development)
 

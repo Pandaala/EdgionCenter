@@ -41,7 +41,7 @@ export function createEmptyGRPCRoute(): GRPCRoute {
       hostnames: [],
       rules: [
         {
-          matches: [{ method: { type: 'Exact', service: '', method: '' } }],
+          matches: [{}],
           backendRefs: [{ name: '', port: 50051 }],
         },
       ],

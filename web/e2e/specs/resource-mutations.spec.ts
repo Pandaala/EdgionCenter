@@ -373,6 +373,44 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+test('gRPC browser form clears optional method predicates without empty names', async ({ page, request }) => {
+  const catalog = RESOURCE_CATALOG.get('grpcroute')!
+  await waitForControllerCapabilities(request, controller, [{ resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+  const name = `${prefix}-grpc-match`
+  const document = mutationDocument(catalog, name)
+  const headers = [{ type: 'Exact', name: 'x-tenant', value: 'one' }]
+  document.spec.rules[0].matches = [{ method: { type: 'Exact', service: 'demo.Service', method: 'Get' }, headers }]
+  const path = itemPath(catalog, namespace, name)
+  const save = async (matches: unknown[]) => {
+    await page.getByTestId('editor-yaml-tab').click()
+    expect((await yamlEditorDocument(page)).spec.rules[0].matches).toEqual(matches)
+    const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().includes(path))
+    await page.getByTestId('editor-submit').click()
+    const result = await response
+    expect(result.ok(), await result.text()).toBeTruthy()
+    const updated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+    expect(updated.spec.rules[0].matches).toEqual(matches)
+  }
+  try {
+    await openResourcePage(page, catalog)
+    await createThroughYaml(page, catalog, document)
+    await expectApiDocument(request, catalog, namespace, name)
+    await (await resourceRow(page, catalog, name)).getByTestId('grpcroute-row-edit').click()
+    await page.getByRole('textbox', { name: 'gRPC Method', exact: true }).fill('')
+    await save([{ method: { type: 'Exact', service: 'demo.Service' }, headers }])
+    await (await resourceRow(page, catalog, name)).getByTestId('grpcroute-row-edit').click()
+    await page.getByRole('textbox', { name: 'gRPC Service', exact: true }).fill('')
+    await save([{ headers }])
+    await (await resourceRow(page, catalog, name)).getByTestId('grpcroute-row-edit').click()
+    const matchCard = page.locator('.ant-card').filter({ has: page.getByRole('textbox', { name: 'gRPC Method', exact: true }) }).last()
+    await matchCard.getByRole('button', { name: 'Delete', exact: true }).click()
+    await save([])
+  } finally {
+    const cleanup = await request.delete(path)
+    expect(cleanup.ok() || cleanup.status() === 404, 'Exact gRPC match fixture cleanup failed').toBeTruthy()
+  }
+})
+
 test('HTTP retry browser form saves only supported response status codes', async ({ page, request }) => {
   const catalog = RESOURCE_CATALOG.get('httproute')!
   await waitForControllerCapabilities(request, controller, [{ resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
