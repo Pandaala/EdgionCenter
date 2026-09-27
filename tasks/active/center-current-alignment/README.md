@@ -30,7 +30,7 @@ All rows remain open unless explicitly marked complete.
 | Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Native dashboard refresh/topology controls passed; topology semantic completeness and RegionRoute remain pending |
 | Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Pending |
 | Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification passed; RegionRoute audit pending |
-| Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Pending |
+| Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Native local account create/edit/CAS conflict/label preservation passed; provider DNS adapters and external workflows still pending |
 | Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Native standalone auth/logout, audit filters/pagination, user and role mutations passed; restricted-role denial, OIDC and Kubernetes capability workflows pending |
 | Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Pending |
 
@@ -1001,3 +1001,20 @@ before acting on CCI execution files or proposing replacements.
   Provider-specific live DNS workflows remain unverified; this closes only local
   account metadata editing and concurrency evidence.
 - Final component run 79373 passed all 12 cases. All current sessions terminal.
+
+### Provider account browser creation and full frontend regression
+
+- Native conflict/rendering batch committed as 2fc68ab, no push.
+- Extended the real account browser scenario to create through the actual form,
+  validate stored default provider/management/credential fields, then seed labels
+  via the API before the existing edit/CAS conflict checks. After saving an edit,
+  opening Create must show blank account/name/credential reference fields.
+- Native handle 89016 passed auth plus complete create/edit/conflict/reset flow;
+  log /tmp/ws5-center-cloud-create-v1.log. No cloud-provider calls were made.
+  Owned services stopped; account metadata remains only in the run artifact DB.
+- E2E typecheck 46194 passed. Full frontend regression 33364 passed **489 tests
+  across 93 files** in 69.89 s, log /tmp/ws5-center-full-web-latest.log. This is
+  current broad frontend evidence, separate from the earlier backend matrix and
+  from unverified live DNS/Gateway workflows. All tool sessions terminal.
+- Updated Cloud ledger status to reflect verified local account behavior without
+  claiming provider-specific DNS completion.
