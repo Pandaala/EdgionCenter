@@ -58,3 +58,11 @@ installation bypasses Admin API creation. Controller assigns subsequent versions
 Unversioned manually installed files remain ineligible for Center CAS writes.
 The retain check allows changed content with the exact run label and keeps the
 original seed hashes; explicit file deletion still refuses modified fixtures.
+
+
+State-case API checks understand both native conditions and the Kubernetes
+status.controllers envelope, preserving each writer's native condition groups.
+When metadata.generation is present, a condition only satisfies the expected
+state if observedGeneration equals it. Missing or older observation versions
+cannot prove current convergence. Generation-less standalone resources remain
+supported. The pure observation helper has independent fixture tests.

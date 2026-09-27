@@ -1479,3 +1479,34 @@ before acting on CCI execution files or proposing replacements.
   resource semantics. Keep the overall alignment goal active. Next audit should
   address those resource/backend behavior gaps rather than repeat this unchanged
   browser matrix without a new reason.
+
+
+### Kubernetes preflight and generation-aware API state checks
+
+- Read-only OrbStack check: context orbstack, node Ready. Existing namespaces
+  include edgion-system and dragonfly-system; none were modified. The browser
+  harness API preflight failed because center.edgion.io/v1alpha1 is not served.
+  Log /tmp/ws5-center-kube-preflight.log. Do not report Kubernetes runtime proof.
+  Provisioning should preserve existing CRDs/workloads rather than overwrite the
+  shared local installation while pursuing the remaining mode coverage.
+- Found the E2E API oracle only collected flat condition groups and accepted old
+  generations. It now collects each identified controllers[] observation, avoids
+  flat fallback when an envelope is present, and matches observedGeneration to
+  metadata.generation whenever the latter exists. Versionless standalone cases
+  retain their valid condition checks. Pure helper tests are independent of the
+  dashboard component implementation.
+- Five observation tests passed (19626), build 96534, lint 68884 and E2E types
+  74078 passed, all terminal zero. Initially importing the full E2E API module
+  into dashboard tests exposed different TS targets; extracted a pure observation
+  module rather than changing production compilation settings. Logs:
+  /tmp/ws5-center-oracle-generation-{tests-v2,build-v2,lint-v2,types-v2}.log.
+- Native alignment-state-oracle-20260928-v1 passed login plus all six state cases
+  on both Controllers (13 tests; 43593 terminal zero). All 70 seeds retained.
+  /tmp/ws5-center-oracle-generation-native.log. Native run preceded the pure
+  module extraction; final helper/import wiring was checked by unit/build/type
+  gates. Envelope-specific evidence remains fixture-based, not Kubernetes live.
+- Also inspected the backend federation integration runner: it calls a global
+  kill_all utility during cleanup. Before using it for reconnect/eviction/default
+  RBAC proof, isolate cleanup to owned PIDs and preserve run artifacts. No backend
+  integration process was launched through that unsafe cleanup path this turn.
+  Overall alignment remains active.

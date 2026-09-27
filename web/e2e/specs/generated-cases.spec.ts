@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { RESOURCE_CATALOG } from '../../src/config/resourceCatalog.ts'
 import { generateCases } from '../scripts/generate-cases.ts'
-import { pollResource, readControllerProcessedResource, readControllerResource } from '../support/api-oracle.ts'
+import { hasCurrentCondition, pollResource, readControllerProcessedResource, readControllerResource } from '../support/api-oracle.ts'
 import { kubectlJson } from '../support/k8s-oracle.ts'
 import { controllerId, controllerPathId } from '../support/controllers.ts'
 
@@ -63,10 +63,7 @@ for (const expectedCase of expectedCases.filter(({ id }) => !id.includes('-auth-
         conflict: { type: 'Accepted', status: 'False', reason: 'Conflicted' },
       }
       const wanted = expectedCondition[expectedCase.condition]
-      await pollResource(request, readProcessed, ({ conditions }) => conditions.some((condition) => {
-        const item = condition as { type?: string; status?: string; reason?: string }
-        return item.type === wanted.type && item.status === wanted.status && (!wanted.reason || item.reason === wanted.reason)
-      }))
+      await pollResource(request, readProcessed, (snapshot) => hasCurrentCondition(snapshot, wanted))
     }
 
     if (mode === 'kubernetes') {

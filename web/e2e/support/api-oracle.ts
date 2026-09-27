@@ -1,6 +1,8 @@
 import type { APIRequestContext } from '@playwright/test'
+import { collectConditions, type ResourceSnapshot } from './resource-observation.ts'
+export { hasCurrentCondition, type ResourceSnapshot } from './resource-observation.ts'
 
-export interface ResourceSnapshot { generation?: number; resourceVersion?: string; spec: unknown; conditions: unknown[] }
+
 
 function resourcePath(kind: string, scope: 'Namespaced' | 'Cluster', namespace: string | undefined, name: string): string {
   return scope === 'Cluster'
@@ -20,15 +22,6 @@ export async function readControllerResourceDocument(
   const response = await request.get(`/api/v1/proxy/${safeController}/api/v1${resourcePath(kind, scope, namespace, name)}`)
   if (!response.ok()) throw new Error(`API document oracle failed: ${response.status()} ${await response.text()}`)
   return response.json() as Promise<Record<string, any>>
-}
-
-function collectConditions(status: any): unknown[] {
-  return [
-    ...(Array.isArray(status?.conditions) ? status.conditions : []),
-    ...(Array.isArray(status?.parents) ? status.parents.flatMap((parent: any) => Array.isArray(parent?.conditions) ? parent.conditions : []) : []),
-    ...(Array.isArray(status?.listeners) ? status.listeners.flatMap((listener: any) => Array.isArray(listener?.conditions) ? listener.conditions : []) : []),
-    ...(Array.isArray(status?.ancestors) ? status.ancestors.flatMap((ancestor: any) => Array.isArray(ancestor?.conditions) ? ancestor.conditions : []) : []),
-  ]
 }
 
 export async function readControllerResource(request: APIRequestContext, controller: string, kind: string, scope: 'Namespaced' | 'Cluster', namespace: string | undefined, name: string): Promise<ResourceSnapshot> {
