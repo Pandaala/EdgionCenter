@@ -1298,3 +1298,21 @@ before acting on CCI execution files or proposing replacements.
 - No Controller RBAC widening or Edgion edits. Attachment arbitration and live
   resilience execution remain separate from this configuration/UI proof; the
   full alignment objective stays active.
+
+
+### Condition polarity across resource pages
+
+- Audited shared status rendering against Edgion's fixed condition vocabulary.
+  ResourceConditions colored every True value green, including Conflicted and
+  PartiallyInvalid. This could present a conflicting policy or partially invalid
+  route as successful in both lists and detail views.
+- Color by known condition semantics: positive Accepted/ResolvedRefs/Programmed,
+  negative Conflicted, warning PartiallyInvalid. Unknown statuses stay cautionary;
+  future condition types are neutral. Preserve the original condition values,
+  reasons and ancestor/writer context. Topology's existing conflict detection is
+  independent and unchanged.
+- Eight shared component tests passed (39892), covering compact and detailed
+  display, negative conditions and unknown types. Build 69513 and lint 78484
+  passed; logs /tmp/ws5-center-condition-colors-{tests,build,lint}.log. All terminal.
+- This is rendering evidence only. Generation freshness and status propagation
+  through real attachment changes remain open, along with the broader audit.

@@ -77,3 +77,10 @@ Every catalog entry with `hasConditions` uses `ResourceConditions` in its list a
 read-only detail. The component collects resource, parent, ancestor, and listener
 condition locations and displays type, status, reason, message, observed generation,
 transition time, and context. Pages must never synthesize an `Active` status.
+
+
+Condition colors follow their type's polarity: Accepted, ResolvedRefs and
+Programmed are positive conditions; Conflicted=True is an error and
+PartiallyInvalid=True is a warning. False clears those negative conditions.
+Unknown status stays cautionary, and unrecognized condition types remain neutral
+instead of inferring success or failure from their boolean value.

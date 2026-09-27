@@ -86,21 +86,27 @@ export function collectResourceConditions(status: unknown): ContextualCondition[
   })
 }
 
-function conditionColor(status: string): string {
-  if (status === 'True') return 'green'
-  if (status === 'False') return 'red'
-  return 'gold'
+function conditionColor({ type, status }: DisplayCondition): string {
+  if (status !== 'True' && status !== 'False') return 'gold'
+  if (type === 'Conflicted') return status === 'True' ? 'red' : 'green'
+  if (type === 'PartiallyInvalid') return status === 'True' ? 'orange' : 'green'
+  if (['Accepted', 'ResolvedRefs', 'Programmed'].includes(type)) {
+    return status === 'True' ? 'green' : 'red'
+  }
+  // Future condition types may have either polarity. Preserve the value
+  // without assigning success or failure until their semantics are known.
+  return 'default'
 }
 
 function ConditionTag({ condition }: { condition: DisplayCondition }) {
   const content = `${condition.type}=${condition.status}`
   if (condition.type === 'ResolvedRefs' && condition.status === 'True') {
-    return <Tag data-testid="route-ref-granted" color={conditionColor(condition.status)}>{content}</Tag>
+    return <Tag data-testid="route-ref-granted" color={conditionColor(condition)}>{content}</Tag>
   }
   if (condition.type === 'ResolvedRefs' && condition.reason === 'RefNotPermitted') {
-    return <Tag data-testid="route-ref-denied" color={conditionColor(condition.status)}>{content}</Tag>
+    return <Tag data-testid="route-ref-denied" color={conditionColor(condition)}>{content}</Tag>
   }
-  return <Tag color={conditionColor(condition.status)}>{content}</Tag>
+  return <Tag color={conditionColor(condition)}>{content}</Tag>
 }
 
 export default function ResourceConditions({

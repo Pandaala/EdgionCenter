@@ -88,3 +88,24 @@ describe('ResourceConditions', () => {
     expect(screen.queryByTestId('route-ref-denied')).not.toBeInTheDocument()
   })
 })
+
+
+it.each([true, false])('colors condition semantics correctly in compact=%s', (compact) => {
+  const conditions = [
+    { type: 'Accepted', status: 'True', color: 'green' },
+    { type: 'ResolvedRefs', status: 'False', color: 'red' },
+    { type: 'Programmed', status: 'Unknown', color: 'gold' },
+    { type: 'Conflicted', status: 'True', color: 'red' },
+    { type: 'Conflicted', status: 'False', color: 'green' },
+    { type: 'PartiallyInvalid', status: 'True', color: 'orange' },
+    { type: 'PartiallyInvalid', status: 'False', color: 'green' },
+    { type: 'FutureCondition', status: 'True', color: 'default' },
+    { type: 'FutureCondition', status: 'False', color: 'default' },
+  ]
+  render(<ResourceConditions compact={compact} status={{
+    ancestors: [{ ancestorRef: { name: 'gateway' }, controllerName: 'edgion.io/test', conditions }],
+  }} />)
+  for (const { type, status, color } of conditions) {
+    expect(screen.getByText(`${type}=${status}`)).toHaveClass(`ant-tag-${color}`)
+  }
+})
