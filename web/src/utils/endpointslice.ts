@@ -11,7 +11,12 @@ export interface EndpointSliceResource {
 }
 const defaults: EndpointSliceResource = { apiVersion: 'discovery.k8s.io/v1', kind: 'EndpointSlice', metadata: { name: '', namespace: 'default', labels: { 'kubernetes.io/service-name': '' } }, addressType: 'IPv4', ports: [], endpoints: [] }
 export const createEmptyEndpointSlice = () => withCreateDefaults(undefined, defaults)
-export const normalizeEndpointSlice = (raw: unknown) => withCreateDefaults(raw, defaults)
+export function normalizeEndpointSlice(raw: unknown): EndpointSliceResource {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('EndpointSlice must be an object')
+  const value = raw as EndpointSliceResource
+  if (value.kind !== 'EndpointSlice' || !value.metadata || !Array.isArray(value.endpoints)) throw new Error('EndpointSlice requires the correct kind, metadata and endpoints array')
+  return structuredClone(value)
+}
 export function endpointSliceFromYaml(value: string) { const raw = yaml.load(value) as any; if (raw?.kind !== 'EndpointSlice') throw new Error('YAML must contain an EndpointSlice'); return normalizeEndpointSlice(raw) }
 export const endpointSliceToYaml = (value: EndpointSliceResource, mode: 'create' | 'update') => mutationDocumentToYaml(value, 'endpointslice', mode)
 export function validateEndpointSlice(value: EndpointSliceResource) {

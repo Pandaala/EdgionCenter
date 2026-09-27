@@ -776,3 +776,27 @@ before acting on CCI execution files or proposing replacements.
 - Action run 4293 finished successfully: all five tests passed (auth, three
   resource action pages, list retry recovery). All handles terminal; owned
   processes stopped and exact fixtures retained. Ready for Center commit.
+
+### Service and EndpointSlice preservation/menu pass
+
+- Infrastructure batch committed as e07c231, no push.
+- Edgion uses the upstream k8s-openapi Service/EndpointSlice types. Their Center
+  adapters still merged create defaults into existing API/YAML documents, unlike
+  the other updated adapters. Removed that merge on reads; only createEmpty uses
+  defaults. Existing missing namespace/selector/ports/labels are not fabricated.
+  Wrong resource identities and malformed required structures are rejected.
+- Added lossless cases for ExternalName Service and IPv6 EndpointSlice with false
+  readiness, serving/terminating flags and topology hints. Empty and absent values
+  retain their distinction; mutation filtering still removes server metadata.
+- Utility run 35067 passed six cases; build 16390 and lint 60189 passed. Native
+  run 31908 passed six cases: auth, both list action pages, both resource CRUD
+  flows, and actual isolated Service single/batch deletion with API absence
+  checks. Logs /tmp/ws5-center-service-{tests,build,lint}.log and
+  /tmp/ws5-center-service-runtime-v1.log. All handles terminal, owned services
+  stopped, 70 exact fixtures retained.
+- Current EndpointSlice ready count matches Gateway's explicit-ready-only logic
+  (discovery/coordinator.rs and endpoint_slice/discovery_impl.rs use false when
+  absent). Do not change it merely to a generic Kubernetes assumption. Gateway
+  discovery currently accepts IPv4/IPv6, not FQDN; the generic resource editor's
+  FQDN option does not establish routing support. Advanced discovery workflows
+  still require validation. Remaining security/routes/fleet/admin menus stay open.

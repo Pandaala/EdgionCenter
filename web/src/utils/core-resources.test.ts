@@ -33,3 +33,26 @@ describe('core Kubernetes resource adapters', () => {
     expect(configMapToYaml(replacement, 'update')).toContain("resourceVersion: '21'")
   })
 })
+
+
+it('does not inject creation defaults into existing core resources', () => {
+  const service = { apiVersion: 'v1', kind: 'Service', metadata: { name: 'external' }, spec: { type: 'ExternalName', externalName: 'api.example.com', future: false } }
+  const normalizedService = normalizeService(service)
+  expect(normalizedService).toEqual(service)
+  expect(normalizedService).not.toBe(service)
+  expect(normalizedService.spec).not.toHaveProperty('selector')
+  expect(normalizedService.spec).not.toHaveProperty('ports')
+  expect(() => validateService(normalizedService)).toThrow('namespace')
+  const slice = { apiVersion: 'discovery.k8s.io/v1', kind: 'EndpointSlice', metadata: { name: 'unassociated', namespace: 'edge' }, addressType: 'IPv6', endpoints: [{ addresses: ['2001:db8::1'], conditions: { ready: false, serving: true, terminating: true }, hints: { forZones: [{ name: 'one' }] } }] }
+  const normalizedSlice = normalizeEndpointSlice(slice)
+  expect(normalizedSlice).toEqual(slice)
+  expect(normalizedSlice).not.toBe(slice)
+  expect(normalizedSlice.metadata).not.toHaveProperty('labels')
+  expect(normalizedSlice).not.toHaveProperty('ports')
+  expect(yaml.load(endpointSliceToYaml(normalizedSlice, 'update'))).toEqual(slice)
+})
+
+it('rejects wrong identities and malformed core resource shapes without rewriting them', () => {
+  for (const value of [null, [], { kind: 'ConfigMap', metadata: {}, spec: {} }, { kind: 'Service', metadata: {}, spec: [] }]) expect(() => normalizeService(value)).toThrow()
+  for (const value of [null, [], { kind: 'Service', metadata: {}, endpoints: [] }, { kind: 'EndpointSlice', metadata: {}, endpoints: {} }]) expect(() => normalizeEndpointSlice(value)).toThrow()
+})

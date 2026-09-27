@@ -9,7 +9,12 @@ export interface ServiceResource {
 }
 const defaults: ServiceResource = { apiVersion: 'v1', kind: 'Service', metadata: { name: '', namespace: 'default' }, spec: { type: 'ClusterIP', selector: {}, ports: [] } }
 export const createEmptyService = () => withCreateDefaults(undefined, defaults)
-export const normalizeService = (raw: unknown) => withCreateDefaults(raw, defaults)
+export function normalizeService(raw: unknown): ServiceResource {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Service must be an object')
+  const value = raw as ServiceResource
+  if (value.kind !== 'Service' || !value.metadata || !value.spec || typeof value.spec !== 'object' || Array.isArray(value.spec)) throw new Error('Service requires the correct kind, metadata and spec')
+  return structuredClone(value)
+}
 export function serviceFromYaml(value: string) { const raw = yaml.load(value) as any; if (raw?.kind !== 'Service') throw new Error('YAML must contain a Service'); return normalizeService(raw) }
 export const serviceToYaml = (value: ServiceResource, mode: 'create' | 'update') => mutationDocumentToYaml(value, 'service', mode)
 export function validateService(value: ServiceResource) {
