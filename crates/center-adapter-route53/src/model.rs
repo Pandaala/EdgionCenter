@@ -469,7 +469,9 @@ fn catalog_contains(catalog: &str, code: &str) -> bool {
     code.len() == 2
         && catalog
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .any(|candidate| candidate == code.as_bytes())
 }
 

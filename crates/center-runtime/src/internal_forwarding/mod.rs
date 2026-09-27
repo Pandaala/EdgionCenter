@@ -20,6 +20,8 @@ use crate::{
     proxy::{FencedProxyError, ProxyForwarder},
 };
 
+// Generated tonic APIs require tonic::Status as their error type.
+#[allow(clippy::result_large_err)]
 pub mod proto {
     tonic::include_proto!("internal_forwarding");
 }

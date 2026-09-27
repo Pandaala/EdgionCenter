@@ -3,6 +3,7 @@ set -euo pipefail
 mode="${1:-}"
 if [[ "$mode" != standalone && "$mode" != kubernetes ]]; then echo 'usage: run.sh standalone|kubernetes' >&2; exit 2; fi
 cd "$(dirname "$0")/../.."
+edgion_dir="$(cd "${EDGION_DIR:-../../Edgion}" && pwd)"
 export E2E_MODE="$mode"
 export E2E_RUN_ID="${E2E_RUN_ID:-resource-ui-$(date -u +%Y%m%d-%H%M%SZ)-$$}"
 export E2E_ARTIFACT_DIR="${E2E_ARTIFACT_DIR:-$PWD/test-results/$E2E_RUN_ID}"
@@ -63,18 +64,18 @@ e2e/scripts/generate-tls.sh
 if [[ "$mode" == standalone ]]; then
   for port in 12200 12201 12251 13100 13101 13151 13190 13200 13201 13251 13290 15173; do assert_port_free "$port"; done
   cargo build -p edgion-center-standalone --manifest-path ../Cargo.toml
-  cargo build -p edgion-controller --manifest-path ../../Edgion-resource-ui/Cargo.toml
+  cargo build -p edgion-controller --manifest-path "$edgion_dir/Cargo.toml"
   npx tsx e2e/scripts/render-runtime.ts e2e/runtime/standalone.yaml "$E2E_ARTIFACT_DIR/standalone.yaml"
   npx tsx e2e/scripts/render-runtime.ts e2e/runtime/controllers/controller-a.yaml "$E2E_ARTIFACT_DIR/controller-a.yaml"
   npx tsx e2e/scripts/render-runtime.ts e2e/runtime/controllers/controller-b.yaml "$E2E_ARTIFACT_DIR/controller-b.yaml"
   for controller in controller-a controller-b; do
     mkdir -p "$E2E_ARTIFACT_DIR/$controller/config/crd"
-    cp -R ../../Edgion-resource-ui/config/crd/. "$E2E_ARTIFACT_DIR/$controller/config/crd/"
+    cp -R "$edgion_dir/config/crd/." "$E2E_ARTIFACT_DIR/$controller/config/crd/"
   done
   e2e/scripts/seed.sh
   ../target/debug/edgion-center-standalone --config-file "$E2E_ARTIFACT_DIR/standalone.yaml" >"$E2E_ARTIFACT_DIR/center.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/center.log")
-  ../../Edgion-resource-ui/target/debug/edgion-controller --config-file "$E2E_ARTIFACT_DIR/controller-a.yaml" >"$E2E_ARTIFACT_DIR/controller-a.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/controller-a.log")
-  ../../Edgion-resource-ui/target/debug/edgion-controller --config-file "$E2E_ARTIFACT_DIR/controller-b.yaml" >"$E2E_ARTIFACT_DIR/controller-b.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/controller-b.log")
+  "$edgion_dir/target/debug/edgion-controller" --config-file "$E2E_ARTIFACT_DIR/controller-a.yaml" >"$E2E_ARTIFACT_DIR/controller-a.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/controller-a.log")
+  "$edgion_dir/target/debug/edgion-controller" --config-file "$E2E_ARTIFACT_DIR/controller-b.yaml" >"$E2E_ARTIFACT_DIR/controller-b.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/controller-b.log")
   ./node_modules/.bin/vite --host 127.0.0.1 --port 15173 --strictPort >"$E2E_ARTIFACT_DIR/vite.log" 2>&1 & pids+=("$!"); pid_logs+=("$E2E_ARTIFACT_DIR/vite.log")
   wait_url http://127.0.0.1:12201/api/v1/auth/status
   wait_url http://127.0.0.1:13100/ready
@@ -89,7 +90,7 @@ else
   npx tsx e2e/scripts/check-kubernetes-apis.ts
   assert_port_free 14180
   (cd .. && cicd/build-image.sh --mode kubernetes -t "edgion-center-kubernetes:$E2E_RUN_ID")
-  ../../Edgion-resource-ui/cicd/build-image.sh --version "$E2E_RUN_ID"
+  "$edgion_dir/cicd/build-image.sh" --version "$E2E_RUN_ID"
   case "$(uname -m)" in
     arm64|aarch64) image_arch=arm64 ;;
     x86_64|amd64) image_arch=amd64 ;;
