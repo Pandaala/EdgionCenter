@@ -69,8 +69,9 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'resolvedInboundProxyProtocol'],
     ['spec', 'resolvedAttachmentProof'],
     ['spec', 'tls', 'backend', 'resolvedClientCertificate'],
-    ['spec', 'listeners', '*', 'tls', 'secrets'],
-    ['spec', 'listeners', '*', 'tls', 'resolvedFrontendCaSecrets'],
+    ['spec', 'listeners', '*', 'tls', 'resolvedCertificateRefs'],
+    ['spec', 'listeners', '*', 'tls', 'resolvedFrontendCaRefs'],
+    ['spec', 'listeners', '*', 'tls', 'frontendMatcherEligibility'],
   ],
   httproute: [
     ['spec', 'currentStatus'],

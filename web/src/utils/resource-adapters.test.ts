@@ -72,8 +72,8 @@ describe('lossless route and gateway adapters', () => {
               mode: 'AllowInsecureFallback',
               caCertificateRefs: [{ group: '', kind: 'Secret', namespace: 'certs', name: 'client-ca' }],
             },
-            secrets: [{ data: { key: 'redacted' } }],
-            resolvedFrontendCaSecrets: [{ data: { ca: 'redacted' } }],
+            resolvedCertificateRefs: [{ data: { key: 'redacted' } }],
+            resolvedFrontendCaRefs: [{ data: { ca: 'redacted' } }],
           },
         }],
       },
@@ -91,8 +91,8 @@ describe('lossless route and gateway adapters', () => {
     expect(mutation.spec.listeners[0].allowedRoutes).toEqual(fixture.spec.listeners[0].allowedRoutes)
     expect(mutation.spec.tls.frontend).toEqual(fixture.spec.tls.frontend)
     expect(mutation.spec.tls.backend).not.toHaveProperty('resolvedClientCertificate')
-    expect(mutation.spec.listeners[0].tls).not.toHaveProperty('secrets')
-    expect(mutation.spec.listeners[0].tls).not.toHaveProperty('resolvedFrontendCaSecrets')
+    expect(mutation.spec.listeners[0].tls).not.toHaveProperty('resolvedCertificateRefs')
+    expect(mutation.spec.listeners[0].tls).not.toHaveProperty('resolvedFrontendCaRefs')
     expect(mutation).not.toHaveProperty('status')
     expect(mutation.metadata).toHaveProperty('resourceVersion', '17')
   })

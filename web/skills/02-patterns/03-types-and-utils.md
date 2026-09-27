@@ -119,8 +119,10 @@ export function yamlToResource(yamlStr: string): ResourceType {
 
 - **Operator-owned**: editable metadata and non-internal spec fields.
 - **Server-owned**: status, uid, generation, managedFields, creationTimestamp.
-- **Runtime/internal**: `schemars(skip)`, parsed, compiled, resolved, denial,
-  and redacted paths.
+- **Runtime/internal**: documented Controller-derived parsed, compiled, resolved,
+  denial and redacted paths. Verify ownership in the current resource definition;
+  `schemars(skip)` alone is insufficient (Gateway listener `frontendValidation`
+  is operator input despite that annotation).
 
 Adapters preserve unknown operator spec fields for forward compatibility while
 explicitly stripping known internal paths.

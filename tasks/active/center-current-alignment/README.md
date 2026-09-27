@@ -1992,3 +1992,25 @@ before acting on CCI execution files or proposing replacements.
   input immutability and preservation of unrelated resolvedNamespace fields.
   This is mutation-boundary evidence, not new delegated-route native traffic
   evidence. Overall goal remains active.
+
+
+### Gateway listener TLS mutation boundary (2026-09-28)
+
+- Compared the current GatewayTLSConfig in sibling Edgion with the Center
+  mutation catalog. Replaced obsolete certificate-runtime field names with
+  resolvedCertificateRefs and resolvedFrontendCaRefs, and excluded the current
+  frontendMatcherEligibility. No Edgion files changed.
+- Create/update coverage checks both form and YAML paths, multiple listeners,
+  redacted vectors and structured resolution outcomes, resourceVersion behavior,
+  and input immutability. Operator certificateRefs, frontendValidation, global
+  TLS settings and unrelated same-name option keys remain intact.
+- Corrected adapter guidance: schemars(skip) alone does not prove a field is
+  Controller-owned. Gateway frontendValidation is an operator-input exception.
+- Build passed in session 19710; its lint step found three unused test bindings.
+  After correcting those bindings and matching the eligibility fixture to the
+  current Rust enum, session 38661 exited zero: 66 tests and lint passed.
+  Logs: /tmp/ws5-center-gateway-resolution-tests-v2.log,
+  /tmp/ws5-center-gateway-resolution-build.log,
+  /tmp/ws5-center-gateway-resolution-lint-v2.log.
+  This verifies serialization boundaries, not new native TLS traffic coverage.
+  The full resource/menu audit remains active.

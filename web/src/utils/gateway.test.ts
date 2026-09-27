@@ -17,8 +17,8 @@ const fixture: any = {
         certificateRefs: [{ group: '', kind: 'Secret', namespace: 'certs', name: 'one' }, { group: 'edgion.io', kind: 'EdgionTls', name: 'two' }],
         frontendValidation: { mode: 'AllowInsecureFallback', caCertificateRefs: [{ kind: 'ConfigMap', namespace: 'certs', name: 'ca' }] },
         options: { 'edgion.io/cert-provider': 'edgion-tls', futureOption: '' },
-        secrets: '[redacted]',
-        resolvedFrontendCaSecrets: '[redacted]',
+        resolvedCertificateRefs: '[redacted]',
+        resolvedFrontendCaRefs: '[redacted]',
       },
     }],
     tls: { backend: { clientCertificateRef: { name: 'client', namespace: 'certs', kind: 'Secret' } }, frontend: { default: { validation: { mode: 'AllowValidOnly', caCertificateRefs: [{ name: 'default-ca', kind: 'ConfigMap' }] } }, perPort: [{ port: 443, tls: { validation: { mode: 'AllowInsecureFallback', caCertificateRefs: [{ name: 'port-ca', kind: 'Secret' }] } }, futurePort: true }] } },
@@ -40,8 +40,8 @@ describe('Gateway lossless adapter', () => {
     expect(fromForm.metadata.resourceVersion).toBe('8')
     expect(fromForm.spec.listeners).toHaveLength(1)
     expect(fromForm.spec.listeners[0].tls.certificateRefs).toHaveLength(2)
-    expect(fromForm.spec.listeners[0].tls.secrets).toBeUndefined()
-    expect(fromForm.spec.listeners[0].tls.resolvedFrontendCaSecrets).toBeUndefined()
+    expect(fromForm.spec.listeners[0].tls.resolvedCertificateRefs).toBeUndefined()
+    expect(fromForm.spec.listeners[0].tls.resolvedFrontendCaRefs).toBeUndefined()
     expect(fromForm.spec.futureSpec).toEqual({ enabled: false })
   })
 
@@ -102,4 +102,37 @@ it('strips Controller attachment proofs and rejects unsupported fields and overs
   expect(errors).toContain('spec.listeners must contain at most 64')
   expect(errors).toContain('spec.tls.frontend.perPort must contain at most 64')
   expect(errors).toContain('allowedListeners is not supported')
+})
+
+// Admin reads redact resolved certificate vectors; internal views carry arrays.
+it.each(['create', 'update'] as const)('omits current listener TLS resolution fields on %s', (mode) => {
+  const resource = structuredClone(fixture)
+  const runtime = {
+    resolvedCertificateRefs: '[redacted]',
+    resolvedFrontendCaRefs: '[redacted]',
+    frontendMatcherEligibility: 'StrictReject',
+  }
+  Object.assign(resource.spec.listeners[0].tls, runtime)
+  resource.spec.listeners[0].tls.options = { ...runtime, 'example.io/provider': 'external' }
+  const second = structuredClone(resource.spec.listeners[0])
+  second.name = 'https-secondary'
+  second.port = 8443
+  second.tls.resolvedCertificateRefs = [{ index: 0, source: { group: '', kind: 'Secret', namespace: 'certs', name: 'serving' } }]
+  second.tls.resolvedFrontendCaRefs = [{ index: 0, source: { kind: 'ConfigMap', namespace: 'certs', name: 'ca' } }]
+  resource.spec.listeners.push(second, { name: 'http', port: 80, protocol: 'HTTP' })
+  const before = structuredClone(resource)
+  const mutation = yaml.load(gatewayToMutationYaml(resource, mode)) as any
+  const fromYaml = yaml.load(gatewayToMutationYaml(yamlToGateway(gatewayToYaml(resource)), mode))
+  expect(fromYaml).toEqual(mutation)
+  for (const [index, listener] of mutation.spec.listeners.slice(0, 2).entries()) {
+    const operatorTls = structuredClone(resource.spec.listeners[index].tls)
+    delete operatorTls.resolvedCertificateRefs
+    delete operatorTls.resolvedFrontendCaRefs
+    delete operatorTls.frontendMatcherEligibility
+    expect(listener.tls).toEqual(operatorTls)
+  }
+  expect(mutation.spec.listeners[2]).toEqual(resource.spec.listeners[2])
+  expect(mutation.spec.tls).toEqual(resource.spec.tls)
+  expect(mutation.metadata.resourceVersion).toBe(mode === 'update' ? '8' : undefined)
+  expect(resource).toEqual(before)
 })
