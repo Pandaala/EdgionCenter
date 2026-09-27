@@ -197,13 +197,23 @@ CTX="$(mktemp -d)"
 trap 'rm -rf "${CTX}"' EXIT
 
 echo "Staging build context at ${CTX} ..."
-# Exclude build artifacts and dashboard dependencies; both are rebuilt in the
-# image stages.
+# Stage only Dockerfile inputs. Runtime artifacts contain test passwords,
+# private keys and browser sessions; they must never enter the build context.
+# Keep checked-in E2E helpers because frontend typechecking imports some of them.
 rsync -a \
-    --exclude '/target' \
     --exclude '/web/node_modules' \
     --exclude '/web/dist' \
-    --exclude '/.git' \
+    --exclude '/web/test-results' \
+    --exclude '/web/playwright-report' \
+    --exclude '.env' \
+    --exclude '.env.*' \
+    --include '/Cargo.toml' \
+    --include '/Cargo.lock' \
+    --include '/build.rs' \
+    --include '/crates/***' \
+    --include '/bins/***' \
+    --include '/web/***' \
+    --exclude '*' \
     "${CENTER_DIR}/" "${CTX}/"
 
 # Assemble the buildx invocation.

@@ -1587,3 +1587,24 @@ before acting on CCI execution files or proposing replacements.
 - This does not prove deployed runtime RBAC, OIDC login, internal mTLS forwarding,
   browser Kubernetes capabilities or managed-cluster data-plane behavior. Those
   remain open; overall alignment remains active.
+
+### Kubernetes browser preparation and image context isolation
+
+- The read-only browser API preflight now passes on OrbStack: 23 fixture kinds
+  across seven served API versions. This is discovery evidence, not CRD schema
+  equivalence or browser execution. No browser runtime has been deployed yet.
+- Found that build-image.sh copied the whole checkout (except four directories),
+  including approximately 599 MB of retained web/test-results with generated
+  credentials, TLS keys and browser sessions, into the image build context.
+  Stopped the owned first build (session 28836, exit 130) during base-image
+  metadata resolution. Its log does not show a completed context transfer.
+- Restricted staging to Cargo manifests/build script, crates, bins and web;
+  explicitly exclude web test results, Playwright reports, dependencies, dist
+  and .env files. Keep E2E source helpers imported by frontend typechecking.
+  Existing artifacts are preserved. Real-tree staging and synthetic positive/
+  negative fixture checks passed, along with bash syntax and diff checks.
+- Replacement image build is active in session 62359, log
+  /tmp/ws5-center-kube-image-v2.log, local-only tag
+  edgion-center-kubernetes:alignment-kube-20260928-v2. Last confirmed progressing
+  through base-image resolution. Poll this handle before starting another build.
+  Image completion and Kubernetes browser evidence remain unproven.
