@@ -18,7 +18,7 @@ const fixture: any = {
     server: { threads: 4, workStealing: false, gracePeriodSeconds: 30, gracefulShutdownTimeoutS: 10, upstreamKeepalivePoolSize: 128, errorLog: '', enableCompression: true, downstreamKeepaliveRequestLimit: 0 },
     httpTimeout: { client: { readTimeout: '60s', writeTimeout: '61s', keepaliveTimeout: '75s' }, backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s', defaultIdleTimeout: '300s' } },
     maxRetries: 0,
-    maxBodySize: '32MiB',
+    requestBody: { defaultMaxBodySize: '32MiB', futureBody: false },
     tcpTimeout: { idleTimeout: '1h', connectTimeout: '10s' },
     loadBalancing: { degradeThreshold: 50 },
     realIp: { trustedIps: [{ name: 'private', description: '', cidrs: ['10.0.0.0/8'], futureGroup: [] }, { name: 'proxy', cidrs: ['192.0.2.1'] }], realIpHeader: 'X-Forwarded-For', recursive: false, maxTrustedHops: 3 },
@@ -136,15 +136,30 @@ describe('EdgionGatewayConfig lossless adapter', () => {
 
     for (const value of ['0', '0.5b', '', 'abc', '-1m', '1e400']) {
       const invalid = structuredClone(fixture)
-      invalid.spec.maxBodySize = value
+      invalid.spec.requestBody.defaultMaxBodySize = value
       expect(validateEdgionGatewayConfig(invalid)).toContain(
-        "spec.maxBodySize is invalid (expected a positive byte size such as '32MiB')",
+        "spec.requestBody.defaultMaxBodySize is invalid (expected a positive byte size such as '32MiB')",
       )
     }
 
     const minimumPositive = structuredClone(fixture)
-    minimumPositive.spec.maxBodySize = '1b'
+    minimumPositive.spec.requestBody.defaultMaxBodySize = '1b'
+    minimumPositive.spec.requestBody.defaultMemoryBufferSize = '1b'
     expect(validateEdgionGatewayConfig(minimumPositive)).toEqual([])
+  })
+
+  it('resolves request-body overrides and validates the storage deadline', () => {
+    const resource = structuredClone(fixture)
+    resource.spec.requestBody = { enabled: false, maxMemoryBufferSize: '2MiB', maxBodySize: '1MiB' }
+    expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('must not exceed')
+    resource.spec.requestBody.maxBodySize = '4MiB'
+    expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    resource.spec.requestBody.storageOperationTimeout = '0s'
+    expect(validateEdgionGatewayConfig(resource)).toContain('spec.requestBody.storageOperationTimeout must be greater than zero')
+    resource.spec.requestBody.storageOperationTimeout = '1ms'
+    expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    resource.spec.maxBodySize = '32MiB'
+    expect(validateEdgionGatewayConfig(resource)).toContain('spec.maxBodySize was removed; use spec.requestBody.maxBodySize')
   })
 
   it('does not emit the removed ReferenceGrant field in a newly created document', () => {

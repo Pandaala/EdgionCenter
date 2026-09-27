@@ -30,14 +30,14 @@ export interface ConnectionIpRestrictionConfig {
 
 /** Stage-2 uses the HTTP IpRestriction shape because TLS routing has richer context. */
 export interface TlsRouteIpRestrictionConfig extends ConnectionIpRestrictionConfig {
-  ipSource?: 'clientIp' | 'remoteAddr'
+  ipSource?: 'RemoteIp' | 'DirectPeerIp'
   message?: string
   status?: number
 }
 
 export interface StreamPlugin {
   enable?: boolean
-  type: 'IpRestriction' | 'GlobalConnectionIpRestriction' | 'ConnectionRateLimit' | string
+  type: 'IpRestriction' | 'GlobalConnectionIpRestriction' | 'ConnectionRateLimit' | 'GeoIpLocation' | string
   config?: ConnectionIpRestrictionConfig | Record<string, unknown>
   [key: string]: unknown
 }

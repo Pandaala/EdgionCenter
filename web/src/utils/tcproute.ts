@@ -1,12 +1,12 @@
 /**
- * TCPRoute 工具函数
+ * TCPRoute document adapters
  */
 
 import * as yaml from 'js-yaml'
 import type { TCPRoute } from '@/types/gateway-api/tcproute'
 import { mutationDocumentToYaml } from './resource-document'
 
-export const DEFAULT_TCPROUTE_YAML = `apiVersion: gateway.networking.k8s.io/v1alpha2
+export const DEFAULT_TCPROUTE_YAML = `apiVersion: gateway.networking.k8s.io/v1
 kind: TCPRoute
 metadata:
   name: example-tcp-route
@@ -23,7 +23,7 @@ spec:
 
 export function createEmptyTCPRoute(): TCPRoute {
   return {
-    apiVersion: 'gateway.networking.k8s.io/v1alpha2',
+    apiVersion: 'gateway.networking.k8s.io/v1',
     kind: 'TCPRoute',
     metadata: {
       name: '',

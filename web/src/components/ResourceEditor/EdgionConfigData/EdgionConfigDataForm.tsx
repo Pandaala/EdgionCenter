@@ -7,7 +7,7 @@ import type {
   ConfigDataType,
   EdgionConfigDataResource,
 } from '@/utils/edgionConfigData'
-import { replaceConfigDataType } from '@/utils/edgionConfigData'
+import { CONFIG_DATA_TYPES, replaceConfigDataType } from '@/utils/edgionConfigData'
 import { useT } from '@/i18n'
 
 interface EdgionConfigDataFormProps {
@@ -18,20 +18,24 @@ interface EdgionConfigDataFormProps {
   onValidityChange?: (valid: boolean) => void
 }
 
-const DATA_TYPES: ConfigDataType[] = [
-  'KeyList',
-  'IpList',
-  'Selector',
-  'RegionRouteOverride',
-  'Misc',
-]
-
 const CONFIG_FIELDS: Record<ConfigDataType, readonly PluginField[]> = {
   KeyList: [
     { name: 'matchMode', kind: 'string', options: ['exact', 'regex'] },
     { name: 'items', kind: 'array' },
   ],
   IpList: [{ name: 'items', kind: 'array' }],
+  RequestAccessUrlAllowList: [{ name: 'items', kind: 'array' }],
+  ProxyProtocolTrust: [
+    { name: 'mode', kind: 'string', options: ['trustedSources', 'required'] },
+    { name: 'trustedCidrs', kind: 'array' },
+  ],
+  WafRuleBundle: [
+    { name: 'version', kind: 'string' }, { name: 'profile', kind: 'string' },
+    { name: 'provenance', kind: 'string' }, { name: 'digest', kind: 'string' },
+    { name: 'roots', kind: 'array' }, { name: 'rules', kind: 'array' },
+    { name: 'phraseAssets', kind: 'array' },
+  ],
+  WafPolicy: [{ name: 'defaultProfile', kind: 'string' }, { name: 'profiles', kind: 'object' }],
   Selector: [{ name: 'active', kind: 'string' }, { name: 'description', kind: 'string' }],
   RegionRouteOverride: [
     { name: 'enable', kind: 'boolean' }, { name: 'active', kind: 'string' },
@@ -98,7 +102,7 @@ const EdgionConfigDataForm: React.FC<EdgionConfigDataFormProps> = ({
               value={data.spec.data.type}
               onChange={(type) => onChange(replaceConfigDataType(data, type))}
               disabled={readOnly}
-              options={DATA_TYPES.map((type) => ({ value: type, label: type }))}
+              options={CONFIG_DATA_TYPES.map((type) => ({ value: type, label: type }))}
             />
           </Form.Item>
           <StructuredConfigEditor

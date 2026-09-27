@@ -25,8 +25,9 @@ The live global kind is `EdgionConfigData`. `HTTPRoute`, `GRPCRoute`, `EdgionPlu
 `ReferenceGrant` remain Controller-local resources: Center enters them through a selected
 Controller instead of holding a cross-cluster inventory mirror.
 
-The GlobalResources dashboard exposes `IpList`, `KeyList`, `Selector`, and `Misc` as direct
-children, each backed by an exact `EdgionConfigData` type filter. `RegionRouteOverride`
+The GlobalResources dashboard exposes `IpList`, `KeyList`, `Selector`,
+`RequestAccessUrlAllowList`, `ProxyProtocolTrust`, `WafRuleBundle`, `WafPolicy`,
+and `Misc` as direct children, each backed by an exact `EdgionConfigData` type filter. `RegionRouteOverride`
 remains an EdgionConfigData variant but is operated through the dedicated RegionRoute views.
 
 ## Read model
@@ -65,6 +66,17 @@ Controller answers the watch with `Forbidden`, Center treats it as terminal and 
 cache stale, and this API then reports that Controller as `offline` with `syncState: "stale"`
 and `complete: false`. What is invisible is **per-object** filtering — a single resource the
 Controller declines to stream is simply absent from the cache with no signal.
+
+### ConfigData payload visibility
+
+The global read model passes through IpList, KeyList, Selector,
+RegionRouteOverride, ProxyProtocolTrust, and WafPolicy configurations. WafRuleBundle
+contains private rule/phrase content, RequestAccessUrlAllowList can contain
+sensitive condition values, and Misc is arbitrary; their config payloads are
+removed from global responses. Unknown type strings also redact by default.
+These rows still expose identity/type and Controller membership. Payload inspection
+uses the authorized Controller-local storage resource API. Global comparisons
+must not infer content equality from two redacted documents.
 
 ## Responsibility boundary
 

@@ -7,7 +7,7 @@ apiVersion: edgion.io/v1alpha1
 kind: EdgionGatewayConfig
 metadata: {name: "__PREFIX__-config", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
 spec:
-  maxBodySize: 32MiB
+  requestBody: {defaultMaxBodySize: 32MiB}
   httpTimeout:
     client: {readTimeout: 30s, writeTimeout: 30s, keepaliveTimeout: 60s}
     backend: {defaultConnectTimeout: 5s, defaultRequestTimeout: 30s, defaultIdleTimeout: 60s}
@@ -58,12 +58,12 @@ kind: GRPCRoute
 metadata: {name: "__PREFIX__-grpc", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
 spec: {parentRefs: [{name: "__PREFIX__-gateway", sectionName: grpc}], rules: [{backendRefs: [{name: "__PREFIX__-service", port: 8080}]}]}
 ---
-apiVersion: gateway.networking.k8s.io/v1alpha2
+apiVersion: gateway.networking.k8s.io/v1
 kind: TCPRoute
 metadata: {name: "__PREFIX__-tcp", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
 spec: {parentRefs: [{name: "__PREFIX__-gateway", sectionName: tcp}], rules: [{backendRefs: [{name: "__PREFIX__-service", port: 8080}]}]}
 ---
-apiVersion: gateway.networking.k8s.io/v1alpha2
+apiVersion: gateway.networking.k8s.io/v1
 kind: UDPRoute
 metadata: {name: "__PREFIX__-udp", namespace: "__NS_A__", labels: {edgion.io/e2e-run: "__RUN_ID__"}}
 spec: {parentRefs: [{name: "__PREFIX__-gateway", sectionName: udp}], rules: [{backendRefs: [{name: "__PREFIX__-service", port: 8080}]}]}

@@ -36,7 +36,7 @@ describe('EdgionGatewayConfigForm', () => {
       kind: 'EdgionGatewayConfig',
       metadata: { name: 'default' },
       spec: {
-        maxBodySize: '32MiB',
+        requestBody: { defaultMaxBodySize: '32MiB', futureBody: false },
         accessLogExtern: {
           unmaskedKeys: {
             header: ['x-request-id'],
@@ -74,12 +74,25 @@ describe('EdgionGatewayConfigForm', () => {
     expect(added.spec.accessLogExtern.futurePolicy).toEqual({ enabled: false })
   })
 
-  it('renders maxBodySize and omits the removed ReferenceGrant control', () => {
+  it('edits request-body policy without losing defaults or unknown fields', () => {
+    const onChange = vi.fn()
+    const data: any = {
+      apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionGatewayConfig', metadata: { name: 'default' },
+      spec: { requestBody: { enabled: false, defaultMaxBodySize: '32MiB', maxMemoryBufferSize: '256KiB', futureBody: false }, futureSpec: [] },
+    }
+    render(<EdgionGatewayConfigForm data={data} onChange={onChange} />)
+    fireEvent.change(screen.getByDisplayValue('256KiB'), { target: { value: '512KiB' } })
+    expect(onChange.mock.lastCall?.[0]).toEqual({
+      ...data, spec: { ...data.spec, requestBody: { ...data.spec.requestBody, maxMemoryBufferSize: '512KiB' } },
+    })
+  })
+
+  it('renders requestBody and omits the removed ReferenceGrant control', () => {
     const data: any = {
       apiVersion: 'edgion.io/v1alpha1',
       kind: 'EdgionGatewayConfig',
       metadata: { name: 'default' },
-      spec: { maxBodySize: '32MiB' },
+      spec: { requestBody: { defaultMaxBodySize: '32MiB', futureBody: false } },
     }
 
     render(<EdgionGatewayConfigForm data={data} onChange={vi.fn()} />)

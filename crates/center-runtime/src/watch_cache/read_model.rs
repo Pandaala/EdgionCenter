@@ -26,7 +26,14 @@ use super::{ConfigTyped, WatchedConfigData};
 /// `"Misc"`, case variants, typos, and missing/unknown types — is redacted
 /// by default (see module docs: fail-closed allowlist, not a `Misc`-only
 /// denylist).
-const CONFIG_PASSTHROUGH_TYPES: &[&str] = &["IpList", "KeyList", "Selector", "RegionRouteOverride"];
+const CONFIG_PASSTHROUGH_TYPES: &[&str] = &[
+    "IpList",
+    "KeyList",
+    "Selector",
+    "RegionRouteOverride",
+    "ProxyProtocolTrust",
+    "WafPolicy",
+];
 
 /// One ConfigData row in the global read model. `doc` is the stored document
 /// with `/spec/data/config` removed unless `config_type` is in
@@ -39,10 +46,10 @@ pub struct ConfigDataEntry {
     pub namespace: String,
     pub name: String,
     /// The raw `/spec/data/type` wire string, verbatim — NOT validated
-    /// against the five known ConfigData type strings — or "Unknown" when
+    /// against the known ConfigData type strings — or "Unknown" when
     /// absent/not a string. Whether `doc` is redacted is governed solely by
     /// `CONFIG_PASSTHROUGH_TYPES`, not by any assumption that this field
-    /// holds one of the five canonical values.
+    /// holds a canonical value.
     pub config_type: String,
     pub doc: serde_json::Value,
 }
@@ -218,6 +225,54 @@ mod tests {
         serde_json::json!({
             "spec": {"data": {"type": config_type, "config": {}}}
         })
+    }
+
+    #[test]
+    fn current_variants_preserve_safe_config_and_redact_sensitive_payloads() {
+        let cache = new_cache("ctrl-1");
+        let proxy = serde_json::json!({"mode": "trustedSources", "trustedCidrs": ["192.0.2.0/24"]});
+        let policy = serde_json::json!({"defaultProfile": "main", "profiles": {"main": {"bundleRefs": [{"name": "rules"}]}}});
+        let documents = [
+            ("ProxyProtocolTrust", proxy),
+            ("WafPolicy", policy),
+            (
+                "WafRuleBundle",
+                serde_json::json!({"rules": [{"content": "private-rule-content"}]}),
+            ),
+            (
+                "RequestAccessUrlAllowList",
+                serde_json::json!({"items": [{"conditions": {"allOf": [{"resolvedValues": ["private-match-value"]}]}}]}),
+            ),
+        ];
+        let entries = documents
+            .iter()
+            .map(|(kind, config)| {
+                (
+                    format!("ns/{kind}"),
+                    serde_json::json!({"spec": {"data": {"type": kind, "config": config}}}),
+                )
+            })
+            .collect();
+        assert_eq!(
+            cache.replace_all(entries, 1, "server-1".into()),
+            ApplyResult::Applied
+        );
+        for (kind, config) in documents {
+            let rows = cache.list_entries("ctrl-1", Some(kind));
+            assert_eq!(rows.len(), 1);
+            if matches!(kind, "ProxyProtocolTrust" | "WafPolicy") {
+                assert_eq!(rows[0].doc.pointer("/spec/data/config"), Some(&config));
+            } else {
+                assert!(rows[0].doc.pointer("/spec/data/config").is_none());
+            }
+            assert_eq!(
+                cache
+                    .raw_entry(&format!("ns/{kind}"))
+                    .unwrap()
+                    .pointer("/spec/data/config"),
+                Some(&config)
+            );
+        }
     }
 
     #[test]

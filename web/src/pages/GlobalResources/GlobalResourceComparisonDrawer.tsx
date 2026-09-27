@@ -11,6 +11,7 @@ import { globalResourcesApi } from '@/api/globalResources'
 import YamlEditor from '@/components/YamlEditor'
 import { useT } from '@/i18n'
 import dayjs from '@/lib/dayjs'
+import { isGlobalConfigPayloadHidden } from './globalResourceConsistency'
 import { SYNC_STATE_TAG_COLOR } from './globalResourceSyncState'
 
 interface Props {
@@ -152,6 +153,9 @@ export default function GlobalResourceComparisonDrawer({ apiSlug, group, onClose
                     </>
                   }
                 />
+              ) : null}
+              {object && isGlobalConfigPayloadHidden(object) ? (
+                <Alert type="info" showIcon message={t('globalResources.drawer.payloadHidden')} />
               ) : null}
               {object ? (
                 <YamlEditor value={yamlValue} readOnly height="560px" />

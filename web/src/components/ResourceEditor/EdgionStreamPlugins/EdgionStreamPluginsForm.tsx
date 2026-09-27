@@ -2,7 +2,7 @@ import { Button, Card, Collapse, Form, Select, Space, Switch } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import MetadataSection from '../common/MetadataSection'
 import StructuredConfigEditor from '../EdgionPlugins/StructuredConfigEditor'
-import type { PluginField } from '../EdgionPlugins/pluginCatalog'
+import { PLUGIN_DEFINITION_BY_TYPE, type PluginField } from '../EdgionPlugins/pluginCatalog'
 import type { EdgionStreamPlugins, StreamPlugin } from '@/types/edgion-stream-plugins'
 import { useT } from '@/i18n'
 
@@ -13,7 +13,7 @@ interface Props {
   isCreate?: boolean
 }
 
-const STAGE_ONE_TYPES = ['IpRestriction', 'GlobalConnectionIpRestriction', 'ConnectionRateLimit'] as const
+const STAGE_ONE_TYPES = ['IpRestriction', 'GlobalConnectionIpRestriction', 'ConnectionRateLimit', 'GeoIpLocation'] as const
 const TLS_ROUTE_TYPES = ['IpRestriction'] as const
 
 const FIELDS: Record<string, readonly PluginField[]> = {
@@ -24,7 +24,7 @@ const FIELDS: Record<string, readonly PluginField[]> = {
   ],
   TlsRouteIpRestriction: [
     { name: 'allow', kind: 'array' }, { name: 'deny', kind: 'array' },
-    { name: 'ipSource', kind: 'string', options: ['clientIp', 'remoteAddr'] },
+    { name: 'ipSource', kind: 'string', options: ['RemoteIp', 'DirectPeerIp'] },
     { name: 'message', kind: 'string' }, { name: 'status', kind: 'number' },
     { name: 'defaultAction', kind: 'string', options: ['allow', 'deny'] },
     { name: 'allowRefs', kind: 'array' }, { name: 'denyRefs', kind: 'array' },
@@ -34,6 +34,7 @@ const FIELDS: Record<string, readonly PluginField[]> = {
     { name: 'profiles', kind: 'object' }, { name: 'description', kind: 'string' },
     { name: 'activeProfileRef', kind: 'object' },
   ],
+  GeoIpLocation: PLUGIN_DEFINITION_BY_TYPE.get('GeoIpLocation')!.fields,
   ConnectionRateLimit: [
     { name: 'redisRef', kind: 'string' },
     { name: 'algorithm', kind: 'string', options: ['SlidingWindow', 'FixedWindow', 'TokenBucket'] },
@@ -70,6 +71,7 @@ function StreamStageEditor({ title, entries, types, tlsRoute, readOnly, onChange
                 }} />
               </Form.Item>
             </Space>
+            {!tlsRoute && entry.type === 'GeoIpLocation' && <div>{t('plugins.connectionGeoIpHelp')}</div>}
             <StructuredConfigEditor
               fields={FIELDS[tlsRoute && entry.type === 'IpRestriction' ? 'TlsRouteIpRestriction' : entry.type] ?? []}
               value={(entry.config ?? {}) as Record<string, unknown>}

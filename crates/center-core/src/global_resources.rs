@@ -25,6 +25,10 @@ impl GlobalResourceInventoryKind {
 pub enum EdgionConfigDataType {
     KeyList,
     IpList,
+    RequestAccessUrlAllowList,
+    ProxyProtocolTrust,
+    WafRuleBundle,
+    WafPolicy,
     Selector,
     RegionRouteOverride,
     Misc,
@@ -60,6 +64,10 @@ pub const GLOBAL_RESOURCE_KINDS: [GlobalResourceCatalogEntry; 5] = [
         config_data_types: &[
             EdgionConfigDataType::KeyList,
             EdgionConfigDataType::IpList,
+            EdgionConfigDataType::RequestAccessUrlAllowList,
+            EdgionConfigDataType::ProxyProtocolTrust,
+            EdgionConfigDataType::WafRuleBundle,
+            EdgionConfigDataType::WafPolicy,
             EdgionConfigDataType::Selector,
             EdgionConfigDataType::RegionRouteOverride,
             EdgionConfigDataType::Misc,
@@ -96,6 +104,10 @@ mod tests {
             [
                 EdgionConfigDataType::KeyList,
                 EdgionConfigDataType::IpList,
+                EdgionConfigDataType::RequestAccessUrlAllowList,
+                EdgionConfigDataType::ProxyProtocolTrust,
+                EdgionConfigDataType::WafRuleBundle,
+                EdgionConfigDataType::WafPolicy,
                 EdgionConfigDataType::Selector,
                 EdgionConfigDataType::RegionRouteOverride,
                 EdgionConfigDataType::Misc

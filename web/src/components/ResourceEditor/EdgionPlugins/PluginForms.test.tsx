@@ -8,6 +8,25 @@ vi.mock('@/components/ResourceEditor/HTTPRoute/sections/MetadataSection', () => 
 vi.mock('../common/MetadataSection', () => ({ default: () => null }))
 
 describe('structured plugin forms', () => {
+  it('edits connection GeoIP rules without changing TLSRoute stage entries', () => {
+    const onChange = vi.fn()
+    const resource: any = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionStreamPlugins', metadata: { name: 'geo', namespace: 'edge' },
+      spec: {
+        plugins: [{ type: 'GeoIpLocation', config: { defaultAction: 'allow', failOpen: false, future: [] } }],
+        tlsRoutePlugins: [{ type: 'IpRestriction', config: { ipSource: 'DirectPeerIp', future: true } }],
+      },
+    }
+    render(<EdgionStreamPluginsForm data={resource} onChange={onChange} />)
+    expect(screen.getByText(/GeoIP rules must use DirectPeerIp/)).toBeInTheDocument()
+    const item = screen.getByText('failOpen').closest('.ant-form-item')!
+    fireEvent.click(item.querySelector('[role="switch"]')!)
+    expect(onChange).toHaveBeenCalledWith({
+      ...resource,
+      spec: { ...resource.spec, plugins: [{ ...resource.spec.plugins[0], config: { ...resource.spec.plugins[0].config, failOpen: true } }] },
+    })
+  })
+
   it('narrowly edits an HTTP plugin config without truncating entries or stages', () => {
     const onChange = vi.fn()
     const resource: any = {
@@ -81,6 +100,27 @@ describe('structured plugin forms', () => {
         plugins: [{ ...resource.spec.plugins[0], config: { redisRef: 'edge/redis-new', future: 0 } }],
       },
     })
+  })
+
+  it.each([
+    ['RequestAccessUrlAllowList', { items: [{ name: 'health', paths: [{ type: 'Exact', value: '/health' }] }] }, '/health', '/ready'],
+    ['ProxyProtocolTrust', { mode: 'trustedSources', trustedCidrs: ['192.0.2.0/24'] }, '192.0.2.0/24', '198.51.100.0/24'],
+    ['WafRuleBundle', { version: 'one', profile: 'local', provenance: 'operator', roots: ['main.conf'], rules: [{ name: 'main.conf', content: 'SecRuleEngine On' }] }, 'operator', 'repository'],
+    ['WafPolicy', { defaultProfile: 'base', profiles: { base: { bundleRefs: [{ name: 'rules', optional: false }] } } }, 'rules', 'updated-rules'],
+  ] as const)('edits %s while retaining the complete envelope', (type, config, before, after) => {
+    const onChange = vi.fn()
+    const resource: any = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionConfigData',
+      metadata: { name: 'typed', namespace: 'edge', resourceVersion: '42' },
+      spec: { enable: true, visibility: 'Namespace', data: { type, config, futureEnvelope: false } },
+    }
+    render(<EdgionConfigDataForm data={resource} onChange={onChange} />)
+    fireEvent.change(screen.getByDisplayValue(before), { target: { value: after } })
+    const next = onChange.mock.lastCall?.[0]
+    expect(next.metadata).toEqual(resource.metadata)
+    expect(next.spec.data.type).toBe(type)
+    expect(next.spec.data.futureEnvelope).toBe(false)
+    expect(JSON.stringify(next.spec.data.config)).toBe(JSON.stringify(config).replace(before, after))
   })
 
   it('edits typed ConfigData fields without a YAML/JSON textarea', () => {

@@ -63,8 +63,13 @@ npm run e2e:inventory
 e2e/scripts/generate-tls.sh
 if [[ "$mode" == standalone ]]; then
   for port in 12200 12201 12251 13100 13101 13151 13190 13200 13201 13251 13290 15173; do assert_port_free "$port"; done
-  cargo build -p edgion-center-standalone --manifest-path ../Cargo.toml
-  cargo build -p edgion-controller --manifest-path "$edgion_dir/Cargo.toml"
+  if [[ "${E2E_SKIP_BUILD:-0}" != "1" ]]; then
+    cargo build -p edgion-center-standalone --manifest-path ../Cargo.toml
+    cargo build -p edgion-controller --manifest-path "$edgion_dir/Cargo.toml"
+  fi
+  for binary in ../target/debug/edgion-center-standalone "$edgion_dir/target/debug/edgion-controller"; do
+    if [[ ! -x "$binary" ]]; then echo "required runtime binary is unavailable: $binary" >&2; exit 1; fi
+  done
   npx tsx e2e/scripts/render-runtime.ts e2e/runtime/standalone.yaml "$E2E_ARTIFACT_DIR/standalone.yaml"
   npx tsx e2e/scripts/render-runtime.ts e2e/runtime/controllers/controller-a.yaml "$E2E_ARTIFACT_DIR/controller-a.yaml"
   npx tsx e2e/scripts/render-runtime.ts e2e/runtime/controllers/controller-b.yaml "$E2E_ARTIFACT_DIR/controller-b.yaml"

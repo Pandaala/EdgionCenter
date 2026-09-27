@@ -1,7 +1,7 @@
 import type { JsonValue } from '@/api/globalResources'
 import type { GlobalResourceComparisonGroup } from '@/api/globalResources'
 
-export type GlobalResourceConsistency = 'single' | 'consistent' | 'inconsistent'
+export type GlobalResourceConsistency = 'single' | 'consistent' | 'inconsistent' | 'unavailable'
 
 const VOLATILE_METADATA_FIELDS = new Set([
   'resourceVersion',
@@ -10,6 +10,16 @@ const VOLATILE_METADATA_FIELDS = new Set([
   'creationTimestamp',
   'managedFields',
 ])
+
+/** Global read redaction removes config while retaining the typed envelope. */
+export function isGlobalConfigPayloadHidden(value: JsonValue): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const spec = value.spec
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return false
+  const data = spec.data
+  return !!data && typeof data === 'object' && !Array.isArray(data)
+    && typeof data.type === 'string' && !Object.prototype.hasOwnProperty.call(data, 'config')
+}
 
 function normalizeValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) {
@@ -59,6 +69,8 @@ export function getGlobalResourceConsistency(
   if (group.members.length < 2) {
     return 'single'
   }
+
+  if (group.members.some((member) => isGlobalConfigPayloadHidden(member.object))) return 'unavailable'
 
   const baseline = JSON.stringify(normalizeGlobalResource(group.members[0].object))
   const consistent = group.members

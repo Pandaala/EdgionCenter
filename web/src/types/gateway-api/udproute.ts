@@ -1,6 +1,6 @@
 /**
- * UDPRoute 类型定义
- * apiVersion: gateway.networking.k8s.io/v1alpha2
+ * UDPRoute resource types
+ * apiVersion: gateway.networking.k8s.io/v1
  */
 
 import type { ParentReference, BackendRef } from './backend'

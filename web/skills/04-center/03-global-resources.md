@@ -17,6 +17,10 @@ GlobalResources
 ├── IpList
 ├── KeyList
 ├── Selector
+├── RequestAccessUrlAllowList
+├── ProxyProtocolTrust
+├── WafRuleBundle
+├── WafPolicy
 └── Misc
 ```
 
@@ -35,7 +39,12 @@ remain available only in the selected Controller context.
 - Keep cluster state in the cluster filter and request failure handling; do not render a
   separate cluster-coverage summary card above every inventory table.
 - Per-cluster editing reuses the existing lossless resource adapters and sends mutations through Center's Controller proxy.
-- The four visible `EdgionConfigData` filters are `IpList`, `KeyList`, `Selector`, and `Misc`.
+- Every current ConfigData type except RegionRouteOverride has a direct inventory leaf.
+- WafRuleBundle, RequestAccessUrlAllowList, and Misc payloads are hidden in the global
+  view. The comparison table reports content comparison unavailable when any
+  member has a hidden payload; the drawer explains how to inspect the resource
+  through its Controller. ProxyProtocolTrust and WafPolicy contain only trust
+  configuration and bundle references and pass through the global read model.
 - Do not expose a separate desired-state and synchronization page. A future manual sync starts
   from one inventory row, compares that object across all clusters, then presents target
   selection, a fresh plan, and explicit apply confirmation in a modal.

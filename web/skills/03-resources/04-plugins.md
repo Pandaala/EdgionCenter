@@ -39,53 +39,45 @@ Plugin stage eligibility is authoritative in Edgion's
 response handling is configured by its request-stage entry; it is not a directly
 configurable upstreamResponsePlugins entry.
 
-## EdgionStreamPlugins (Pending Development)
+## EdgionStreamPlugins
+
+The connection stage (`spec.plugins`) offers IpRestriction,
+GlobalConnectionIpRestriction, ConnectionRateLimit, and GeoIpLocation.
+The TLS route stage (`spec.tlsRoutePlugins`) offers IpRestriction only.
+The current enums live in the sibling Edgion resource crate's
+`edgion_stream_plugins/stream_plugins.rs` and `tls_route_plugins.rs`.
+
+Connection IpRestriction uses named IP groups and optional ConfigData references;
+it has no HTTP message/status or ipSource fields. TLS-route IpRestriction reuses
+the HTTP config, including RemoteIp/DirectPeerIp. Connection GeoIpLocation shares
+the HTTP field schema but only permits DirectPeerIp-sourced rules. The form
+reuses its HTTP field definition and displays this stage restriction.
 
 ```yaml
 apiVersion: edgion.io/v1
 kind: EdgionStreamPlugins
 metadata:
-  name: my-stream-plugins
+  name: private-connections
   namespace: default
 spec:
   plugins:
     - type: IpRestriction
       config:
-        ipSource: remoteAddr              # IP source: remoteAddr (connection IP)
-        allow:                            # IP allowlist (CIDR format)
-          - "10.0.0.0/8"
-          - "172.16.0.0/12"
-        deny:                             # IP blocklist (higher priority than allow)
-          - "10.0.0.100/32"
-        defaultAction: allow              # Default action: allow | deny
-        message: "Access denied"          # Message on denial
+        allow:
+          - name: private-networks
+            cidrs: ["10.0.0.0/8", "172.16.0.0/12"]
+        defaultAction: deny
+  tlsRoutePlugins:
+    - type: IpRestriction
+      config:
+        ipSource: DirectPeerIp
+        defaultAction: allow
 ```
 
-**IP filter logic**: deny list match → reject → allow list match → allow → defaultAction
-
-**Route binding** (via annotation):
-```yaml
-# Same namespace
-annotations:
-  edgion.io/edgion-stream-plugins: "my-stream-plugins"
-
-# Cross-namespace
-annotations:
-  edgion.io/edgion-stream-plugins: "other-namespace/my-stream-plugins"
-```
-
-**Supported protocols**: Gateway listener-level connection filtering, TCPRoute, TLSRoute
-
-**Development Notes**:
-- Namespaced resource, kind must be added to ResourceKind: `edgionstreamplugins`
-- Simpler than EdgionPlugins — **no four-phase pipeline**, just a single plugins list
-- Currently only one plugin type: IpRestriction
-- Form: metadata + plugins list editing
-  - type selection (currently only IpRestriction)
-  - config editing (ipSource, allow, deny, defaultAction, message)
-- List page displays: name, namespace, plugin count, plugin type list
-- IP check runs at connection establishment time, with minimal performance impact
-- Plugin configuration supports hot reload
+Both arrays and unknown entry/config fields survive Form/YAML edits. Mutation
+filtering removes Controller-owned status and compiled matcher fields. Inspect
+current Gateway/listener and route annotation rules in Edgion before changing
+attachment behavior; this page does not define a separate attachment contract.
 
 ## EdgionConfigData ✅ Completed
 

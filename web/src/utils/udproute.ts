@@ -1,12 +1,12 @@
 /**
- * UDPRoute 工具函数
+ * UDPRoute document adapters
  */
 
 import * as yaml from 'js-yaml'
 import type { UDPRoute } from '@/types/gateway-api/udproute'
 import { mutationDocumentToYaml } from './resource-document'
 
-export const DEFAULT_UDPROUTE_YAML = `apiVersion: gateway.networking.k8s.io/v1alpha2
+export const DEFAULT_UDPROUTE_YAML = `apiVersion: gateway.networking.k8s.io/v1
 kind: UDPRoute
 metadata:
   name: example-udp-route
@@ -23,7 +23,7 @@ spec:
 
 export function createEmptyUDPRoute(): UDPRoute {
   return {
-    apiVersion: 'gateway.networking.k8s.io/v1alpha2',
+    apiVersion: 'gateway.networking.k8s.io/v1',
     kind: 'UDPRoute',
     metadata: {
       name: '',

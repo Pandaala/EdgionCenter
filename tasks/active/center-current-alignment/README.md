@@ -21,15 +21,15 @@ All rows remain open unless explicitly marked complete.
 | --- | --- | --- |
 | Shared infrastructure | Resource catalog, mutation envelopes, conditions, permissions, Controller switching, pagination | In progress: deployment status display and currentStatus filtering |
 | Infrastructure | GatewayClass, Gateway, ReferenceGrant | Pending |
-| Routes | HTTPRoute, GRPCRoute, TCPRoute, UDPRoute, TLSRoute | Pending |
+| Routes | HTTPRoute, GRPCRoute, TCPRoute, UDPRoute, TLSRoute | Generic native CRUD passed; TCP/UDP v1 aligned; advanced route/attachment semantics pending |
 | Services | Service, EndpointSlice, EdgionBackendTrafficPolicy | Pending |
 | AI backends | EdgionBackend, HTTPRoute references, AiProxy, policy attachments | Catalog/access map, menu, editor, route/plugin/policy wiring added; native browser CRUD passed; advanced attachment and failure workflows pending |
 | Security | EdgionTls, BackendTLSPolicy, Secret/ConfigMap restricted dependencies | Pending |
-| Plugins | EdgionPlugins, EdgionStreamPlugins, EdgionConfigData | Pending; inspect each plugin configuration against current schema |
-| System | EdgionGatewayConfig, LinkSys, EdgionAcme | Pending |
+| Plugins | EdgionPlugins, EdgionStreamPlugins, EdgionConfigData | Current HTTP/stream catalogs aligned; nine ConfigData types editable, four new variants passed native browser CRUD; deeper validation and plugin workflows pending |
+| System | EdgionGatewayConfig, LinkSys, EdgionAcme | GatewayConfig requestBody aligned and browser verified; retry/forwardedHeaders/pluginPolicy and remaining systems pending |
 | Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Pending |
 | Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Pending |
-| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Pending |
+| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification running; RegionRoute audit pending |
 | Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Pending |
 | Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Pending |
 | Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Pending |
@@ -341,3 +341,200 @@ before acting on CCI execution files or proposing replacements.
 - All-resource CRUD harness 21734 remains live waiting on the sibling build-dir
   lock. Next known source drift: stream IpRestriction still offers clientIp and
   remoteAddr; inspect stream-stage source separately before changing it.
+
+### Latest checkpoint: stream menus and running full browser CRUD
+
+- Committed prior dashboard batch as **11d3735** (59 files). No push. Existing
+  `.claude/` and `tasks/todo/waf-support-diagnostics-center-integration.md` remain
+  unrelated and untracked.
+- Added connection-stage GeoIpLocation using the shared HTTP field definition;
+  TLS-route IP source choices/types now use RemoteIp/DirectPeerIp. Added stage
+  guidance for DirectPeerIp-only GeoIP and preserved both stage arrays in tests.
+  Updated the stale stream skill example. Targeted tests passed (6 tests), and
+  build 95049/lint 70831 passed. These changes remain uncommitted.
+- Added documented standalone `E2E_SKIP_BUILD=1` with executable checks. Both
+  binaries had already built and passed real AI CRUD; repeated builds were
+  contending with another agent's build lock. Intentionally stopped ONLY our
+  waiting cargo child PID 84203 after checking parent 83582 and exact command;
+  old harness 21734 exited 143. Other cargo processes were untouched. This was
+  a deliberate runner change, not an observation-timeout restart.
+- New all-resource harness **68177** uses E2E_SKIP_BUILD=1, run ID
+  `alignment-crud-20260927-v2`, log `/tmp/ws5-center-all-crud-runtime-v2.log`.
+  It is now running 23 tests (login plus all 22 catalog resource CRUD cases).
+  So far login, GatewayClass, Gateway, HTTPRoute, and GRPCRoute passed.
+- EdgionGatewayConfig CRUD failed because the Controller drops the obsolete
+  root `spec.maxBodySize`. Current schema moved to `spec.requestBody`, including
+  defaultMaxBodySize/maxBodySize and other body settings. This is a real editor/
+  fixture drift, not an assertion to weaken. Next priority: read RequestBodyConfig
+  in current edgion_gateway_config.rs, update form/types/validation/fixtures, then
+  rerun the failed browser case. Failure artifacts live under this run's
+  playwright/specs-resource-mutations-r-72a34-ary-for-EdgionGatewayConfig-standalone/.
+- Another pending audit: ConfigData frontend only admits five types while current
+  source also contains RequestAccessUrlAllowList, ProxyProtocolTrust, WafRuleBundle,
+  WafPolicy. Audit Center backend/global-read boundaries too before adding them.
+
+### Request body and stream-route runtime corrections
+
+- Harness 68177 finished: 20 passed, three failed (GatewayConfig, TCPRoute,
+  UDPRoute). The two stream routes returned v1 from the Controller, while the
+  mutation catalog admitted only v1alpha2, preventing the browser PUT entirely.
+- Migrated GatewayConfig types, create YAML, form, validation, and fixture to
+  requestBody with its six current fields. Validation checks positive sizes,
+  effective memory/body bounds, positive storage deadlines, and obsolete root
+  maxBodySize. Form edits retain sibling and unknown fields.
+- Added current TCP/UDP v1 envelopes to the catalog and a regression exercising
+  editor submission of Controller-returned resources. Targeted tests: 39 passed
+  (`/tmp/ws5-center-body-route-tests.log`); build 2802 and lint 15478 passed.
+- Real native rerun 54388 passed all four tests (authentication and all three
+  formerly failing resources); log `/tmp/ws5-center-body-stream-runtime-v3.log`,
+  artifacts `web/test-results/alignment-body-stream-20260927-v3`. Owned processes
+  exited and 70 exact fixture files were retained by the harness.
+- The vendored standard Gateway API v1.6.2 CRDs also declare TCPRoute/UDPRoute v1
+  (not only the Rust resource envelope). Updated create templates, catalog
+  canonical versions, type comments, and E2E fixtures to v1, retaining the
+  previously exercised v1alpha2 mutation envelope as an accepted alternate.
+- Final v1 template targeted unit run: session 65318,
+  `/tmp/ws5-center-route-v1-tests.log`. Real native v1 fixture rerun is active;
+  log `/tmp/ws5-center-route-v1-runtime-v4.log`, run ID
+  `alignment-route-v1-20260927-v4`. Poll its session before any restart.
+- All current changes remain uncommitted. The full resource/menu audit is still
+  open; generic CRUD does not establish advanced feature correctness. Next:
+  finish ConfigData typed variant and backend/global-read boundary audit.
+- v1 unit session 65318 passed all 42 tests. Active browser handle is **25427**.
+
+### ConfigData current variant audit
+
+- Final TCP/UDP v1 fixture browser run 25427 passed all three tests; log
+  `/tmp/ws5-center-route-v1-runtime-v4.log`. Its owned services terminated.
+- Current ConfigEntry contains nine operator variants. Added missing
+  RequestAccessUrlAllowList, ProxyProtocolTrust, WafRuleBundle, and WafPolicy to
+  the local editor/parser and structured fields. Added all-variant round trips
+  and real rendered nested field edits. The Controller storage GET/list path
+  (api/types.rs center_get_resource/center_list_resources_namespaced) returns
+  stored documents; only processed cache serialization uses AdminRedactGuard.
+  Local mutation editors therefore remain on storage reads, not global snapshots.
+- URL condition mutation serialization now strips resolvedValues,
+  resolvedCredentials, resolvedIps and refDenied inside candidate conditions,
+  scoped strictly to RequestAccessUrlAllowList so Misc payloads remain lossless.
+- Added all four types to the backend catalog, exact global API filter parsing,
+  and frontend global wire type. Global menu expansion and read-model payload
+  projection are STILL PENDING. Existing fail-closed redaction allowlist remains
+  unchanged: new payloads are currently redacted in global responses. WAF bundle
+  content must stay redacted; URL condition Secret/HMAC internal fields require
+  explicit projection before any allowlist expansion. ProxyProtocolTrust and
+  WafPolicy contain CIDRs and references, respectively; audit/test their projection.
+- Verification: local ConfigData/form tests passed 22 tests (67077,
+  `/tmp/ws5-center-configdata-forms-v2.log`), then mutation boundary suite passed
+  14 tests (9018, `/tmp/ws5-center-configdata-boundary.log`). The boundary fixture
+  subsequently corrected condition casing/envelope to current source; rerun it.
+  Build 29152 passed before the final boundary addition. Core catalog test 27208
+  passed. App global API test session **68285** still compiling; log
+  `/tmp/ws5-center-configdata-api.log`. Frontend lint launched after final edits;
+  log `/tmp/ws5-center-configdata-lint.log` (capture/poll its handle).
+- No commits/push this checkpoint. Next: finish global types/menu/redaction,
+  add real per-variant CRUD/browser evidence, run final build/lint/matrix, and
+  commit the verified Center batch. Preserve unrelated untracked files.
+- Lint handle: **9205**. Corrected boundary-fixture rerun log:
+  `/tmp/ws5-center-configdata-boundary-v2.log` (new handle below).
+- App global API session 68285 finished successfully: 11 tests passed. Lint 9205
+  passed. Corrected boundary fixture rerun 73068 passed all 14 tests. No running
+  handles remain from this checkpoint except already-finished output collection.
+
+### Global ConfigData menus and content visibility
+
+- Added direct inventory/menu routes for RequestAccessUrlAllowList,
+  ProxyProtocolTrust, WafRuleBundle, and WafPolicy, behind existing capability and
+  permission gates. RegionRouteOverride retains its dedicated view.
+- Audited current schemas: ProxyProtocolTrust has mode/CIDRs; WafPolicy has named
+  bundle references. Both now pass through the global read model. WafRuleBundle
+  rule/phrase contents and URL allow-list condition payloads remain globally
+  redacted, alongside Misc. URL conditions can carry private values/credentials;
+  metadata-only global visibility is deliberate, not an unfinished allowlist.
+  The authorized Controller-local editor still reads complete storage documents.
+- Global comparisons no longer infer equality from two hidden payloads. Added
+  unavailable comparison state and a drawer explanation. Updated both relevant
+  global-resource skill docs with current menu and payload visibility boundaries.
+- Added real browser typed ConfigData cases for the four new variants: YAML
+  creation, structured nested field edit, exact storage readback, and UI deletion
+  with exact-ID fallback cleanup. E2E typecheck/inventory passed, but runtime
+  execution awaits the rebuilt Center binary.
+- Checks: global menu/API tests passed 14; global view suite passed 17; runtime
+  read-model suite 65285 passed 9. Full frontend run 38396 passed **437 tests**
+  across 85 files (`/tmp/ws5-center-configdata-full-web.log`). Build 11603 and
+  lint 12548 passed; E2E inventory/typecheck also passed. Existing Vite chunk and
+  JSDOM/AntD warnings remain non-failing.
+- Native Center build **32403** still active, log
+  `/tmp/ws5-center-configdata-native-build.log`; it is linking the standalone
+  binary. Backend hermetic matrix **56421** is waiting on its Cargo lock; log
+  `/tmp/ws5-center-configdata-matrix.log`. This invocation uses EDGION_SKIP_WEB=1
+  because current full web/build/lint/E2E static checks were run separately, and
+  npm ci must not remove node_modules during the planned live browser run.
+  Poll these handles; do not restart on an observation timeout.
+- Next: run grep `typed ConfigData browser CRUD` with E2E_SKIP_BUILD=1 after 32403
+  completes, inspect failures, finish the matrix, and commit the verified batch.
+  The full per-resource/per-menu program remains open beyond this batch.
+- Native build 32403 completed successfully (2m22s). New typed ConfigData browser
+  run launched: run ID `alignment-configdata-20260927-v1`, log
+  `/tmp/ws5-center-configdata-runtime-v1.log`. Uses the rebuilt Center and current
+  previously built Controller with E2E_SKIP_BUILD=1. Backend matrix 56421 now
+  runs Clippy after acquiring the released lock.
+- Active typed browser handle: **92676**. Preserve this process and poll it on
+  continuation. The live native binary matches the current backend changes.
+
+### Typed browser CRUD and remaining GatewayConfig schema gaps
+
+- Typed ConfigData browser run 92676 passed all five tests (auth plus four new
+  variants), including raw WAF rule content preservation. Exact 70 fixtures
+  retained; owned processes exited. Log `/tmp/ws5-center-configdata-runtime-v1.log`.
+- Extended those cases to verify watch-fed global type filters, safe body
+  visibility versus redacted bodies, and actual inventory page rendering before
+  returning to the Controller page for deletion. Typecheck passed. New run ID
+  `alignment-configdata-global-20260927-v2`, log
+  `/tmp/ws5-center-configdata-global-runtime-v2.log`; poll its new handle below.
+- Backend matrix 56421 passed workspace/all-target Clippy and is compiling the
+  all-target Rust test binaries. No terminal result yet.
+- Current-source follow-up found additional GatewayConfig gaps: root maxRetries
+  was replaced by retry.attempts (u32 bounded to i32::MAX); forwardedHeaders has
+  remoteIpHeader with shared header-name validation; pluginPolicy has allow/deny,
+  defaultAction, deniedAction, and blockStatus with per-entry overrides. These
+  are NOT implemented by the current Center form yet. Next batch must audit
+  and add them, with special care for absent versus empty pluginPolicy.allow.
+- EdgionTls now also carries resolvedListenerAttachments; audit its mutation
+  exclusion together with the broader TLSRoute attachment changes. Current
+  Edgion worktree includes unrelated conformance/shutdown work; preserve it.
+
+- Active global browser handle: **66449**; backend matrix remains **56421**.
+- Global browser run 66449 finished with two passes and three failures. Trace
+  evidence: storage and global watch both held updated config and resourceVersion
+  71 for ProxyProtocolTrust, but metadata.annotations was absent. The shared
+  round-trip helper conditionally skips metadata edits when its immediate count
+  occurs before lazy form mounting; the new global poll incorrectly assumed that
+  optional edit always happened. Added explicit annotation-control visibility
+  before the typed helper and an immediate storage annotation assertion. Existing
+  propagation/body assertions remain. New run v3 is launched, log
+  `/tmp/ws5-center-configdata-global-runtime-v3.log` (handle below).
+- Matrix 56421 passed workspace Rust tests and is compiling the app's
+  no-default-features tests. No terminal result yet.
+- Active rerun handle: **35644**. Matrix remains **56421**. Do not launch another
+  browser or matrix until these report terminal state. Pending commit must wait
+  for these results; current index is clean and all tracked task edits remain
+  unstaged. Unrelated `.claude/` and `tasks/todo/` stay untouched.
+
+### Verified batch checkpoint
+
+- Global browser rerun **35644 passed all five tests**. Each new ConfigData type
+  passed local CRUD, post-write watch-cache propagation, payload visibility
+  assertions, its actual global inventory page, and exact deletion. Log:
+  `/tmp/ws5-center-configdata-global-runtime-v3.log`. Owned services exited; 70
+  exact fixture files retained. No active browser handles remain.
+- Backend matrix **56421 finished exit 1 only at the English-only guard**:
+  the pre-existing tracked `fix-issue-workflow-generic.zh.md` violates that guard.
+  Preserved the unrelated file. Before that guard, formatting, all-target Clippy,
+  all workspace/all-target tests, app no-default-features (242 tests), dependency
+  boundaries and manifest validation passed. External Kubernetes/MySQL were not
+  enabled. Full web 437 tests/build/lint and E2E static checks passed separately.
+  The remaining no-legacy-PM guard and diff whitespace check passed separately.
+- This batch is ready for the user-authorized Center commit, with the existing
+  English-only baseline failure explicitly recorded. No push. Next implementation
+  remains GatewayConfig retry/forwardedHeaders/pluginPolicy and the other open
+  coverage rows; the entire alignment goal is NOT complete.

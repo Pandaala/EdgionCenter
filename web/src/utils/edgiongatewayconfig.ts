@@ -20,7 +20,8 @@ spec:
       defaultConnectTimeout: "5s"
       defaultRequestTimeout: "60s"
   maxRetries: 3
-  maxBodySize: 32MiB
+  requestBody:
+    defaultMaxBodySize: 32MiB
   preflightPolicy:
     mode: cors-standard
     statusCode: 204
@@ -38,7 +39,7 @@ export function createEmpty(): EdgionGatewayConfig {
         backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s' },
       },
       maxRetries: 3,
-      maxBodySize: '32MiB',
+      requestBody: { defaultMaxBodySize: '32MiB' },
       preflightPolicy: { mode: 'cors-standard', statusCode: 204 },
     },
   }
@@ -118,17 +119,33 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
     ['spec.tcpTimeout.idleTimeout', spec.tcpTimeout?.idleTimeout],
     ['spec.tcpTimeout.connectTimeout', spec.tcpTimeout?.connectTimeout],
     ['spec.dnsResolver.cacheTtl', spec.dnsResolver?.cacheTtl],
+    ['spec.requestBody.storageOperationTimeout', spec.requestBody?.storageOperationTimeout],
   ]
   durations.forEach(([path, value]) => {
     if (value !== undefined && (typeof value !== 'string' || !isValidGep2257Duration(value))) {
       errors.push(`${path} is not a valid GEP-2257 duration`)
     }
   })
-  const maxBodySizeBytes = typeof spec.maxBodySize === 'string'
-    ? parseEdgionByteSize(spec.maxBodySize)
-    : null
-  if (spec.maxBodySize !== undefined && (maxBodySizeBytes === null || maxBodySizeBytes <= 0)) {
-    errors.push("spec.maxBodySize is invalid (expected a positive byte size such as '32MiB')")
+  if (spec.maxBodySize !== undefined) errors.push('spec.maxBodySize was removed; use spec.requestBody.maxBodySize')
+  const body = spec.requestBody ?? {}
+  const sizes = ['defaultMemoryBufferSize', 'maxMemoryBufferSize', 'defaultMaxBodySize', 'maxBodySize'] as const
+  for (const field of sizes) {
+    const value = body[field]
+    if (value !== undefined && (typeof value !== 'string' || (parseEdgionByteSize(value) ?? 0) <= 0)) {
+      errors.push(`spec.requestBody.${field} is invalid (expected a positive byte size such as '32MiB')`)
+    }
+  }
+  const memoryValue = body.maxMemoryBufferSize ?? body.defaultMemoryBufferSize ?? '128KiB'
+  const bodyValue = body.maxBodySize ?? body.defaultMaxBodySize ?? '32MiB'
+  const memorySize = typeof memoryValue === 'string' ? parseEdgionByteSize(memoryValue) : null
+  const bodySize = typeof bodyValue === 'string' ? parseEdgionByteSize(bodyValue) : null
+  if (memorySize !== null && bodySize !== null && memorySize > bodySize) {
+    errors.push('Effective requestBody memory buffer size must not exceed the effective max body size')
+  }
+  if (body.enabled !== undefined && typeof body.enabled !== 'boolean') errors.push('spec.requestBody.enabled must be a boolean')
+  if (typeof body.storageOperationTimeout === 'string' && isValidGep2257Duration(body.storageOperationTimeout)
+    && !body.storageOperationTimeout.match(/\d+/g)?.some((part) => Number(part) > 0)) {
+    errors.push('spec.requestBody.storageOperationTimeout must be greater than zero')
   }
   const degradeThreshold = spec.loadBalancing?.degradeThreshold
   if (degradeThreshold !== undefined && (!Number.isInteger(degradeThreshold) || degradeThreshold < 0 || degradeThreshold > 100)) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as yaml from 'js-yaml'
 import {
+  CONFIG_DATA_TYPES,
   fromYaml,
   normalize,
   replaceConfigDataType,
@@ -50,7 +51,23 @@ const variantFixtures: EdgionConfigDataResource[] = [
   },
 ]
 
+const newVariants = [
+  { type: 'RequestAccessUrlAllowList', config: { items: [{ name: 'public', paths: [{ type: 'Exact', value: '/health' }] }] } },
+  { type: 'ProxyProtocolTrust', config: { mode: 'trustedSources', trustedCidrs: ['192.0.2.0/24'] } },
+  { type: 'WafRuleBundle', config: { version: '1', profile: 'local', provenance: 'operator', roots: ['main.conf'], rules: [{ name: 'main.conf', content: 'SecRuleEngine On' }], phraseAssets: [] } },
+  { type: 'WafPolicy', config: { defaultProfile: 'main', profiles: { main: { bundleRefs: [{ name: 'rules', optional: false }] } } } },
+] as const
+for (const data of newVariants) {
+  variantFixtures.push({ ...variantFixtures[0], spec: { ...variantFixtures[0].spec, data: structuredClone(data) } })
+}
+
 describe('EdgionConfigData resource adapter', () => {
+  it('covers every current Controller variant in lossless round trips', () => {
+    expect(variantFixtures.map((fixture) => fixture.spec.data.type).sort()).toEqual([...CONFIG_DATA_TYPES].sort())
+    for (const fixture of variantFixtures) {
+      expect(toMutationDocument(fromYaml(toYaml(fixture)), 'update').spec).toEqual(fixture.spec)
+    }
+  })
   it.each(variantFixtures.map((fixture) => [fixture.spec.data.type, fixture] as const))(
     'round-trips the complete %s fixture',
     (_type, fixture) => {
@@ -78,6 +95,20 @@ describe('EdgionConfigData resource adapter', () => {
       metadata: { name: 'misc', namespace: 'edge', labels: { empty: '' }, resourceVersion: '12' },
       spec: raw.spec,
     })
+  })
+
+  it('omits resolved URL condition data without stripping arbitrary Misc fields', () => {
+    const resource = structuredClone(variantFixtures.find((value) => value.spec.data.type === 'RequestAccessUrlAllowList')!)
+    resource.spec.data.config = { items: [{ name: 'signed', paths: [{ type: 'Exact', value: '/' }], conditions: { allOf: [
+      { type: 'secretMatch', key: { type: 'header', name: 'Authorization' }, secretRef: { name: 'auth' }, secretKey: 'token', resolvedValues: ['runtime-value'] },
+      { type: 'hmacAuth', resolvedCredentials: { user: { secret: [1, 2] } }, secretGroups: [] },
+    ] } }] }
+    const output = toMutationDocument(resource, 'update')
+    expect(JSON.stringify(output)).not.toContain('resolvedValues')
+    expect(JSON.stringify(output)).not.toContain('resolvedCredentials')
+    expect(JSON.stringify(output)).toContain('secretRef')
+    resource.spec.data.type = 'Misc'
+    expect(toMutationDocument(resource, 'update').spec).toEqual(resource.spec)
   })
 
   it('changes only the tagged entry when selecting another variant', () => {

@@ -76,6 +76,10 @@ describe('resource catalog', () => {
     expect(getResourceCatalogEntry('backendtlspolicy').acceptedApiVersions).toEqual([
       'gateway.networking.k8s.io/v1alpha3',
     ])
+    for (const kind of ['tcproute', 'udproute'] as const) {
+      expect(getResourceCatalogEntry(kind).apiVersion).toBe('gateway.networking.k8s.io/v1')
+      expect(getResourceCatalogEntry(kind).acceptedApiVersions).toEqual(['gateway.networking.k8s.io/v1alpha2'])
+    }
     expect(getResourceCatalogEntry('httproute').acceptedApiVersions).toBeUndefined()
   })
 

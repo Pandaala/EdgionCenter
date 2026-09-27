@@ -167,6 +167,7 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
   const security = data.spec?.securityProtect || {}
   const tcpTimeout = data.spec?.tcpTimeout || {}
   const loadBalancing = data.spec?.loadBalancing || {}
+  const requestBody = data.spec?.requestBody || {}
   const linkSys = data.spec?.linkSys || {}
   const outboundTls = data.spec?.outboundTls || {}
   const outboundValidation = outboundTls.validation || {}
@@ -307,22 +308,24 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           <Form.Item label={t('field.tcpIdleTimeout')} style={{ marginBottom: 8, marginTop: 8 }}><Input value={tcpTimeout.idleTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { idleTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
           <Form.Item label={t('field.tcpConnectTimeout')} style={{ marginBottom: 8 }}><Input value={tcpTimeout.connectTimeout || ''} onChange={(event) => updateSpecBlock('tcpTimeout', { connectTimeout: event.target.value || undefined })} disabled={readOnly} style={{ width: 160 }} /></Form.Item>
           <Form.Item label={t('field.degradeThreshold')} style={{ marginBottom: 0 }}><InputNumber value={loadBalancing.degradeThreshold} min={0} max={100} onChange={(value) => updateSpecBlock('loadBalancing', { degradeThreshold: value ?? undefined })} disabled={readOnly} /></Form.Item>
-          <Form.Item
-            label={t('field.gatewayMaxBodySize')}
-            help={t('field.gatewayMaxBodySizeHelp')}
-            style={{ marginBottom: 0, marginTop: 8 }}
-          >
-            <Input
-              value={data.spec?.maxBodySize || ''}
-              onChange={(event) => onChange({
-                ...data,
-                spec: { ...data.spec, maxBodySize: event.target.value || undefined },
-              })}
-              placeholder="32MiB"
-              disabled={readOnly}
-              style={{ width: 160 }}
-            />
+        </Card>
+
+        <Card title={t('section.requestBody')} size="small">
+          <Form.Item label={t('field.enabled')}>
+            <Switch checked={requestBody.enabled !== false} disabled={readOnly} onChange={(enabled) => updateSpecBlock('requestBody', { enabled })} />
           </Form.Item>
+          {([
+            ['defaultMemoryBufferSize', 'field.defaultMemoryBufferSize', '128KiB'],
+            ['maxMemoryBufferSize', 'field.maxMemoryBufferSize', ''],
+            ['defaultMaxBodySize', 'field.defaultMaxBodySize', '32MiB'],
+            ['maxBodySize', 'field.gatewayMaxBodySize', ''],
+            ['storageOperationTimeout', 'field.storageOperationTimeout', '5s'],
+          ] as const).map(([field, label, placeholder]) => (
+            <Form.Item key={field} label={t(label)}>
+              <Input value={requestBody[field] ?? ''} placeholder={placeholder} disabled={readOnly}
+                onChange={(event) => updateSpecBlock('requestBody', { [field]: event.target.value || undefined })} />
+            </Form.Item>
+          ))}
         </Card>
 
         {/* Real IP */}

@@ -84,6 +84,18 @@ describe('route Editor mutation paths', () => {
     expect(payload.spec.futureSpec).toBe(label)
   })
 
+  it.each(['TCPRoute', 'UDPRoute'] as const)('saves %s returned with the Controller v1 envelope', async (kind) => {
+    const resource: any = {
+      apiVersion: 'gateway.networking.k8s.io/v1', kind,
+      metadata: { name: 'stream', namespace: 'edge', resourceVersion: '42' },
+      spec: { parentRefs: [{ name: 'gw' }], rules: [{ backendRefs: [{ name: 'backend', port: 9000 }] }] },
+    }
+    mount(<StreamRouteEditor visible mode="edit" kind={kind} resource={resource} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(update).toHaveBeenCalledOnce())
+    expect(mutationPayload()).toEqual(resource)
+  })
+
   it('submits Stream YAML edits through the mutation boundary', async () => {
     const resource: any = { apiVersion: 'gateway.networking.k8s.io/v1', kind: 'TLSRoute', metadata: { name: 'tls', namespace: 'edge' }, spec: { parentRefs: [{ name: 'gw' }], rules: [] } }
     mount(<StreamRouteEditor visible mode="edit" kind="TLSRoute" resource={resource} onClose={vi.fn()} />)

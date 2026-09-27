@@ -180,6 +180,10 @@ fn parse_list_query(pairs: Vec<(String, String)>) -> Result<ListQuery, ()> {
 enum ConfigDataFilter {
     KeyList,
     IpList,
+    RequestAccessUrlAllowList,
+    ProxyProtocolTrust,
+    WafRuleBundle,
+    WafPolicy,
     Selector,
     RegionRouteOverride,
     Misc,
@@ -191,6 +195,10 @@ fn parse_config_data_filter(value: Option<&str>) -> Result<Option<ConfigDataFilt
         .map(|value| match value {
             "KeyList" => Ok(ConfigDataFilter::KeyList),
             "IpList" => Ok(ConfigDataFilter::IpList),
+            "WafPolicy" => Ok(ConfigDataFilter::WafPolicy),
+            "WafRuleBundle" => Ok(ConfigDataFilter::WafRuleBundle),
+            "ProxyProtocolTrust" => Ok(ConfigDataFilter::ProxyProtocolTrust),
+            "RequestAccessUrlAllowList" => Ok(ConfigDataFilter::RequestAccessUrlAllowList),
             "Selector" => Ok(ConfigDataFilter::Selector),
             "RegionRouteOverride" => Ok(ConfigDataFilter::RegionRouteOverride),
             "Misc" => Ok(ConfigDataFilter::Misc),
@@ -439,6 +447,10 @@ fn watch_type_filter(filter: ConfigDataFilter) -> &'static str {
     match filter {
         ConfigDataFilter::KeyList => "KeyList",
         ConfigDataFilter::IpList => "IpList",
+        ConfigDataFilter::WafPolicy => "WafPolicy",
+        ConfigDataFilter::WafRuleBundle => "WafRuleBundle",
+        ConfigDataFilter::ProxyProtocolTrust => "ProxyProtocolTrust",
+        ConfigDataFilter::RequestAccessUrlAllowList => "RequestAccessUrlAllowList",
         ConfigDataFilter::Selector => "Selector",
         ConfigDataFilter::RegionRouteOverride => "RegionRouteOverride",
         ConfigDataFilter::Misc => "Misc",
@@ -843,6 +855,15 @@ mod tests {
             parse_config_data_filter(Some("Unknown")),
             Ok(Some(ConfigDataFilter::Unknown))
         );
+        for name in [
+            "RequestAccessUrlAllowList",
+            "ProxyProtocolTrust",
+            "WafRuleBundle",
+            "WafPolicy",
+        ] {
+            let filter = parse_config_data_filter(Some(name)).unwrap().unwrap();
+            assert_eq!(watch_type_filter(filter), name);
+        }
         assert!(parse_config_data_filter(Some("iplist")).is_err());
     }
 

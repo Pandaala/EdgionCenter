@@ -21,6 +21,10 @@ the exact run label and UID of every ledger object and leave the environment int
 Both modes use the current sibling `Edgion/` checkout. Set `EDGION_DIR` to an absolute
 checkout path to use another Controller source. The standalone runner builds and starts
 that checkout's Controller binary and copies its current CRDs into each fixture directory.
+For repeated frontend-only runs after building both native programs, set
+`E2E_SKIP_BUILD=1` in standalone mode to reuse those binaries without acquiring Cargo
+build locks. Rebuild whenever either program's source changes. The runner checks that
+both executables exist before creating runtime configuration.
 
 Cleanup is always explicit:
 

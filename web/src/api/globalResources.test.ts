@@ -110,13 +110,17 @@ describe('Global Resources Center API', () => {
 })
 
 describe('Global Resource descriptors', () => {
-  it('exposes only the four requested EdgionConfigData inventory types', () => {
-    expect(GLOBAL_RESOURCE_DESCRIPTORS).toHaveLength(4)
-    expect(new Set(GLOBAL_RESOURCE_DESCRIPTORS.map(({ route }) => route)).size).toBe(4)
+  it('exposes current ConfigData variants outside the dedicated RegionRoute view', () => {
+    expect(GLOBAL_RESOURCE_DESCRIPTORS).toHaveLength(8)
+    expect(new Set(GLOBAL_RESOURCE_DESCRIPTORS.map(({ route }) => route)).size).toBe(8)
     expect(GLOBAL_RESOURCE_DESCRIPTORS.map(({ configDataType }) => configDataType)).toEqual([
       'IpList',
       'KeyList',
       'Selector',
+      'RequestAccessUrlAllowList',
+      'ProxyProtocolTrust',
+      'WafRuleBundle',
+      'WafPolicy',
       'Misc',
     ])
     expect(GLOBAL_RESOURCE_DESCRIPTORS.every(

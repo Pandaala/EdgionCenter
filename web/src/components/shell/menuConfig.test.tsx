@@ -166,12 +166,20 @@ describe('Center navigation structure', () => {
       'center-global-config-data-ip-list',
       'center-global-config-data-key-list',
       'center-global-config-data-selector',
+      'center-global-config-data-request-access-url-allow-list',
+      'center-global-config-data-proxy-protocol-trust',
+      'center-global-config-data-waf-rule-bundle',
+      'center-global-config-data-waf-policy',
       'center-global-config-data-misc',
     ])
     expect(flattenLeaves(globalResources.children).map((item) => item.path)).toEqual([
       '/global-resources/edgion-config-data/ip-list',
       '/global-resources/edgion-config-data/key-list',
       '/global-resources/edgion-config-data/selector',
+      '/global-resources/edgion-config-data/request-access-url-allow-list',
+      '/global-resources/edgion-config-data/proxy-protocol-trust',
+      '/global-resources/edgion-config-data/waf-rule-bundle',
+      '/global-resources/edgion-config-data/waf-policy',
       '/global-resources/edgion-config-data/misc',
     ])
 

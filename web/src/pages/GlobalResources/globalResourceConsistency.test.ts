@@ -94,6 +94,14 @@ describe('global resource consistency', () => {
     expect(getGlobalResourceConsistency(groupWith(first, second))).toBe('inconsistent')
   })
 
+  it.each(['Misc', 'WafRuleBundle', 'RequestAccessUrlAllowList'])('does not infer equality from hidden %s content', (type) => {
+    const hidden = { kind: 'EdgionConfigData', spec: { data: { type } } }
+    const full = { kind: 'EdgionConfigData', spec: { data: { type, config: {} } } }
+    expect(getGlobalResourceConsistency(groupWith(hidden, hidden))).toBe('unavailable')
+    expect(getGlobalResourceConsistency(groupWith(full, hidden))).toBe('unavailable')
+    expect(getGlobalResourceConsistency(groupWith(full, full))).toBe('consistent')
+  })
+
   it('classifies fewer than two members as single', () => {
     expect(getGlobalResourceConsistency(groupWith({ spec: {} }))).toBe('single')
     expect(getGlobalResourceConsistency(groupWith())).toBe('single')

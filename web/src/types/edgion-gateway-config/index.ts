@@ -59,7 +59,15 @@ export interface EdgionGatewayConfigSpec {
     backend?: { defaultConnectTimeout?: string; defaultRequestTimeout?: string; defaultIdleTimeout?: string }
   }
   maxRetries?: number
-  maxBodySize?: string
+  requestBody?: {
+    enabled?: boolean
+    defaultMemoryBufferSize?: string
+    maxMemoryBufferSize?: string
+    defaultMaxBodySize?: string
+    maxBodySize?: string
+    storageOperationTimeout?: string
+    [key: string]: unknown
+  }
   tcpTimeout?: { idleTimeout?: string; connectTimeout?: string; [key: string]: unknown }
   loadBalancing?: { degradeThreshold?: number; [key: string]: unknown }
   realIp?: {

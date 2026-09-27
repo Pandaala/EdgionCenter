@@ -1,9 +1,13 @@
 import * as yaml from 'js-yaml'
-import { buildMutationDocument, withCreateDefaults } from './resource-document'
+import { buildMutationDocument, withCreateDefaults, withoutDocumentPaths } from './resource-document'
 import { dumpYaml } from './yaml-utils'
 
 export type ConfigDataVisibility = 'Namespace' | 'Cluster'
-export type ConfigDataType = 'KeyList' | 'IpList' | 'Selector' | 'RegionRouteOverride' | 'Misc'
+export const CONFIG_DATA_TYPES = [
+  'KeyList', 'IpList', 'RequestAccessUrlAllowList', 'ProxyProtocolTrust',
+  'Selector', 'RegionRouteOverride', 'WafRuleBundle', 'WafPolicy', 'Misc',
+] as const
+export type ConfigDataType = (typeof CONFIG_DATA_TYPES)[number]
 export type JsonObject = Record<string, unknown>
 
 export interface ConfigDataEntry {
@@ -58,7 +62,7 @@ export function normalize(raw: unknown): EdgionConfigDataResource {
     throw new Error('YAML must contain an EdgionConfigData resource with metadata and spec')
   }
   if (!isObject(raw.spec.data)
-    || !['KeyList', 'IpList', 'Selector', 'RegionRouteOverride', 'Misc'].includes(String(raw.spec.data.type))
+    || !(CONFIG_DATA_TYPES as readonly string[]).includes(String(raw.spec.data.type))
     || !isObject(raw.spec.data.config)) {
     throw new Error('EdgionConfigData spec.data must contain type and config')
   }
@@ -69,7 +73,11 @@ export function toMutationDocument(
   resource: EdgionConfigDataResource,
   mode: 'create' | 'update',
 ): Record<string, unknown> {
-  return buildMutationDocument(resource, { resourceKind: 'edgionconfigdata', mode })
+  const document = buildMutationDocument(resource, { resourceKind: 'edgionconfigdata', mode })
+  if (resource.spec.data.type !== 'RequestAccessUrlAllowList') return document
+  return withoutDocumentPaths(document, ['resolvedValues', 'resolvedCredentials', 'resolvedIps', 'refDenied'].map(
+    (field) => ['spec', 'data', 'config', 'items', '*', 'conditions', '**', field],
+  ))
 }
 
 /** Serialize the complete API view for the YAML tab. */
@@ -109,7 +117,8 @@ export function replaceConfigDataType(
         ...resource.spec.data,
         type,
         config: type === 'KeyList' ? { matchMode: 'exact', items: [] }
-          : type === 'IpList' ? { items: [] }
+          : type === 'IpList' || type === 'RequestAccessUrlAllowList' ? { items: [] }
+          : type === 'ProxyProtocolTrust' ? { mode: 'trustedSources', trustedCidrs: [] }
           : {},
       },
     },

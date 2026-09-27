@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import * as yaml from 'js-yaml'
+import { GLOBAL_RESOURCE_DESCRIPTORS } from '../../src/pages/GlobalResources/globalResourceDescriptors.ts'
 import { RESOURCE_CATALOG, type ResourceCatalogEntry } from '../../src/config/resourceCatalog.ts'
 import { readControllerResourceDocument } from '../support/api-oracle.ts'
 import { controllerPathId } from '../support/controllers.ts'
@@ -369,6 +370,71 @@ for (const catalog of RESOURCE_CATALOG.values()) {
     }
     if (workflowError) throw workflowError
     if (cleanupError) throw cleanupError
+  })
+}
+
+const typedConfigDataCases = [
+  { type: 'RequestAccessUrlAllowList', config: { items: [{ name: 'health', hosts: ['example.com'], paths: [{ type: 'Exact', value: '/health' }] }] }, before: '/health', after: '/ready' },
+  { type: 'ProxyProtocolTrust', config: { mode: 'trustedSources', trustedCidrs: ['192.0.2.0/24'] }, before: '192.0.2.0/24', after: '198.51.100.0/24' },
+  { type: 'WafRuleBundle', config: { version: 'one', profile: 'local', provenance: 'operator', roots: ['main.conf'], rules: [{ name: 'main.conf', content: 'SecRuleEngine On' }], phraseAssets: [] }, before: 'operator', after: 'repository' },
+  { type: 'WafPolicy', config: { defaultProfile: 'main', profiles: { main: { bundleRefs: [{ name: 'rules', optional: false }] } } }, before: 'rules', after: 'updated-rules' },
+]
+
+for (const variant of typedConfigDataCases) {
+  test(`typed ConfigData browser CRUD preserves ${variant.type}`, async ({ page, request }) => {
+    const catalog = RESOURCE_CATALOG.get('edgionconfigdata')!
+    await waitForControllerCapabilities(request, controller, [{ resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+    const name = `${prefix}-${variant.type.toLowerCase()}`
+    const document = mutationDocument(catalog, name)
+    document.spec.data = { type: variant.type, config: variant.config }
+    const path = itemPath(catalog, namespace, name)
+    try {
+      await openResourcePage(page, catalog)
+      await createThroughYaml(page, catalog, document)
+      await expectApiDocument(request, catalog, namespace, name)
+      const row = await resourceRow(page, catalog, name)
+      await row.getByTestId('edgionconfigdata-row-edit').click()
+      await expect(page.getByTestId('metadata-annotation-add')).toBeVisible()
+      await exerciseEditorRoundTrip(page, catalog.kind, document, 'typed-update')
+      const field = page.getByRole('textbox').filter({ visible: true })
+      const input = field.locator(`xpath=self::*[@value="${variant.before}"]`)
+      await expect(input).toHaveCount(1)
+      await input.fill(variant.after)
+      const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().includes(path))
+      await page.getByTestId('editor-submit').click()
+      expect((await response).ok()).toBeTruthy()
+      const updated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+      expect(updated.metadata.annotations?.['edgion.io/e2e-form']).toBe('typed-update')
+      expect(updated.spec.data.type).toBe(variant.type)
+      expect(updated.spec.data.config).toEqual(JSON.parse(JSON.stringify(variant.config).replace(variant.before, variant.after)))
+      let globalObject: Record<string, any> | undefined
+      await expect.poll(async () => {
+        const inventory = await request.get('/api/v1/center/global-resources/resources/edgion-config-data', { params: { configDataType: variant.type } })
+        expect(inventory.ok(), await inventory.text()).toBeTruthy()
+        const body = await inventory.json()
+        const group = body.groups.find((entry: any) => entry.key.namespace === namespace && entry.key.name === name)
+        globalObject = group?.members.find((member: any) => member.cluster === 'e2e-a')?.object
+        return globalObject?.metadata?.annotations?.['edgion.io/e2e-form']
+      }, { timeout: 15_000 }).toBe('typed-update')
+      if (variant.type === 'ProxyProtocolTrust' || variant.type === 'WafPolicy') {
+        expect(globalObject?.spec.data.config).toMatchObject(updated.spec.data.config)
+      } else {
+        expect(globalObject?.spec.data).not.toHaveProperty('config')
+      }
+      const descriptor = GLOBAL_RESOURCE_DESCRIPTORS.find((entry) => entry.configDataType === variant.type)!
+      await page.goto(descriptor.route)
+      await expect(page.getByRole('heading', { name: variant.type, exact: true })).toBeVisible()
+      await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible()
+      await openResourcePage(page, catalog)
+      await (await resourceRow(page, catalog, name)).getByTestId('edgionconfigdata-row-delete').click()
+      const deleted = page.waitForResponse((value) => value.request().method() === 'DELETE' && value.url().includes(path))
+      await page.getByTestId('resource-delete-confirm').click()
+      expect((await deleted).ok()).toBeTruthy()
+      await expectApiAbsent(request, path)
+    } finally {
+      const cleanup = await request.delete(path)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact ConfigData cleanup failed').toBeTruthy()
+    }
   })
 }
 
