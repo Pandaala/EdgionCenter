@@ -2215,3 +2215,18 @@ before acting on CCI execution files or proposing replacements.
   implied by this count increase.
 - Updated CURRENT-COVERAGE.md with these findings. This is not a completion claim:
   source/menu completeness does not prove all original runtime flow criteria.
+
+### Real OIDC browser login and logout finding (2026-09-28)
+
+- Ran native Center with isolated SQLite and OIDC-only authentication, current
+  Vite dashboard, and the Kubernetes fixture's pinned Dex/oauth2-proxy versions.
+  Discovery/JWKS TLS verification stayed enabled; Chromium used only the test
+  certificate SPKI exception. No existing cluster or user environment changed.
+- Browser session 61015 passed six redirect/callback, identity, deep-link,
+  refresh and missing-session checks. Session 27987 separately reproduced an
+  OIDC logout defect: the local endpoint returns 404, the client ignores it,
+  and the proxy cookie still grants API access after refresh.
+- Full setup, artifacts, current owned runtime handles and repair criteria are
+  in [OIDC-BROWSER-EVIDENCE.md](OIDC-BROWSER-EVIDENCE.md). The validated runtime is
+  retained for the logout repair. No production code changed in this evidence
+  batch; Kubernetes and remaining resource runtime gaps stay open.

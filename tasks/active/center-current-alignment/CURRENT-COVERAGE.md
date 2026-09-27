@@ -78,7 +78,7 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native create/edit, label retention, exact-generation conflict | Kubernetes dashboard capability/identity workflow |
 | Cloudflare DNS and Route53 DNS | API DTO/form tests; sanitized read failure/recovery; lost-response uncertainty; 195 hermetic backend tests | New browser error states have component evidence, not native provider mutation evidence |
-| Login, audit, users, roles | Native standalone password auth/logout, audit controls, administration, restricted permissions | OIDC and deployed Kubernetes capability workflows |
+| Login, audit, users, roles | Native standalone password auth/logout, audit controls, administration, restricted permissions; real Dex OAuth browser login/callback and session checks | OIDC logout defect; deployed Kubernetes capability workflows |
 
 Native federation evidence: 27 lifecycle checks in
 `/tmp/ws5-center-federation-native-v2.log` and 9 mTLS checks in
@@ -147,12 +147,15 @@ operation. The original work log also retains open cross-resource traffic,
 attachment, probe and failure scenarios. Consequently this reconciliation proves
 catalog/menu completeness but does not close the overall task.
 
-Next concrete authentication evidence: exercise the existing OAuth browser path.
-`web/e2e/auth/kubernetes.setup.ts` currently depends on the dedicated Kubernetes
-OAuth proxy/Dex runtime. Investigate whether that same login path can be tested
-with an isolated local OIDC composition while preserving its trust boundaries;
-otherwise recover the owned cluster. Do not count password login or unit token
-validation as equivalent browser evidence.
+The real OAuth browser path now passes against an isolated native Center plus
+the same pinned Dex and oauth2-proxy versions used by the Kubernetes fixture.
+Six checks cover unauthenticated denial, IdP redirect, callback/identity,
+protected deep-link restoration, refresh and missing-session reauthentication.
+This does not establish Kubernetes SAR or replica behavior. A separate browser
+check found a real OIDC logout defect: the dashboard silently ignores a 404 from
+the local logout endpoint; refreshing restores access through the surviving
+proxy session. See [OIDC browser evidence](OIDC-BROWSER-EVIDENCE.md). Fix that
+flow next, including explicit external-session ownership and failure handling.
 
 ## Next audit actions
 
