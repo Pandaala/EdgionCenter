@@ -476,6 +476,9 @@ async fn maintain_ownership(
             break;
         }
     }
+    // Normal session cancellation also revokes cached ownership before the
+    // Lease can be released and acquired by another replica.
+    ownership_valid.store(false, Ordering::SeqCst);
     release_ownership(&coordinator, &leadership).await;
 }
 
@@ -2016,6 +2019,7 @@ mod tests {
         let cancellation = tokio_util::sync::CancellationToken::new();
         cancellation.cancel();
         let tracker = OwnershipTaskTracker::default();
+        let ownership_valid = Arc::new(AtomicBool::new(true));
         tracker.spawn(maintain_ownership(
             coordinator.clone(),
             Leadership {
@@ -2027,9 +2031,13 @@ mod tests {
             },
             cancellation,
             tokio_util::sync::CancellationToken::new(),
-            Arc::new(AtomicBool::new(true)),
+            ownership_valid.clone(),
         ));
         release_started.await;
+        assert!(
+            !ownership_valid.load(Ordering::SeqCst),
+            "cached session ownership must be invalid before releasing the Lease"
+        );
         assert!(
             tokio::time::timeout(Duration::from_millis(10), tracker.wait())
                 .await

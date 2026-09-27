@@ -75,12 +75,12 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Menu group | Verified behavior | Remaining evidence boundary |
 |---|---|---|
 | Controller dashboard, operations, topology | Native controls; AI nodes; freshness, polarity, stale/partial/conflict states; grant boundaries | Cross-resource runtime changes beyond the recorded scenarios |
-| Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync; component read-failure/recovery states | Deployed Kubernetes ownership/forwarding and additional freshness transitions |
+| Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync; component read-failure/recovery states; deployed Kubernetes owner/non-owner reads, writes, CAS, connection migration and old-fence revocation | Pod crash takeover, post-dispatch transport faults and additional freshness transitions |
 | RegionRoute | Failover/restore, source-data sync, enable preservation, missing-target recovery; explicit write outcomes | Actual routed traffic and wider concurrent outcome scenarios |
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native create/edit, label retention, exact-generation conflict | Kubernetes dashboard capability/identity workflow |
 | Cloudflare DNS and Route53 DNS | API DTO/form tests; sanitized read failure/recovery; lost-response uncertainty; 195 hermetic backend tests | New browser error states have component evidence, not native provider mutation evidence |
-| Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback; deployed Kubernetes SAR, disabled administration routes and proxy logout | Cross-replica ownership/forwarding and dependency namespace workflow |
+| Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback; deployed Kubernetes SAR, disabled administration routes and proxy logout | Dependency namespace workflow and further permission transitions |
 
 Native federation evidence: 27 lifecycle checks in
 `/tmp/ws5-center-federation-native-v2.log` and 9 mTLS checks in
@@ -170,14 +170,21 @@ English-only guard; the later no-legacy guard passes when run separately.
 
 Current deployed Kubernetes authentication proof is recorded in
 [KUBERNETES-AUTH-EVIDENCE.md](KUBERNETES-AUTH-EVIDENCE.md). Two OrbStack Center
-replicas run the current v4 image with canonical OAuth sidecars and a private Dex
+replicas were validated with v4, then upgraded to v5, with canonical OAuth sidecars and a private Dex
 fixture. Nine live RBAC checks, five browser scenarios, and all three selected
 repository E2E cases passed. The discovered disabled-route blank page is fixed;
 635 frontend tests, build, lint and E2E type checks pass. The isolated kind API
 remains unavailable; existing shared Gateway CRDs were not changed.
-This deployment does not yet prove cross-replica federation forwarding. Continue
-that flow using the retained owned namespace and current Controller, without
-replacing the user's shared Gateway schemas.
+[Replica forwarding evidence](KUBERNETES-FORWARDING-EVIDENCE.md) now proves real
+owner/non-owner reads and CAS writes, default Controller RBAC across the hop,
+connection migration and old-fence revocation. It exposed and fixed normal
+session cancellation retaining a valid ownership flag after Lease release.
+The v5 deployment passes 22 proxy/fencing checks, two permission-restoration
+checks and all three selected browser cases. Backend validation passed 873
+workspace tests, 244 no-default-feature app tests, format/Clippy/check and
+adapter/manifest gates; the existing English-only baseline failure remains.
+The temporary proxy grants were removed. Pod crash takeover and transport
+failures after dispatch are not established by connection migration alone.
 
 1. Continue the exact operator/runtime-field audit against all current resource
    structs. Catalog coverage alone is insufficient: the current pass found the

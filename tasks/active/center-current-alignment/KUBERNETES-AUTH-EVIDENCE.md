@@ -79,6 +79,9 @@ session 77091 serves Dex on 5556. The previous Center forward was stopped after
 its selected Pod was replaced. Revalidate handles before reuse. Native OIDC
 fixtures on ports 12201/15173/14180 remain separate and retained.
 
-Next: attach the current Controller and prove actual owner/non-owner forwarding
-and fencing. Dependency namespace browser coverage, cross-resource traffic and
-other remaining original runtime criteria are still open.
+Subsequent work attached the Controller, upgraded to v5 and verified real
+owner/non-owner forwarding and fence revocation; see
+[KUBERNETES-FORWARDING-EVIDENCE.md](KUBERNETES-FORWARDING-EVIDENCE.md).
+Its `v5/topology.json` supersedes the Center port-forward handles above.
+Dependency namespace browser coverage, cross-resource traffic and other remaining
+original runtime criteria are still open.

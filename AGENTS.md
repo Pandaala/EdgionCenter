@@ -4,7 +4,7 @@
 
 EdgionCenter is the multi-cluster federation management center for Edgion. Controllers
 dial its mTLS-only `FederationSync` gRPC service, publish cluster metadata, and answer
-reverse watch, command, and proxy requests. The workspace intentionally provides two
+reverse watch and proxy requests. The workspace intentionally provides two
 deployable compositions:
 
 | Binary | State and platform integration |

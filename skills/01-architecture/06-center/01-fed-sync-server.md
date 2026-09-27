@@ -13,7 +13,9 @@ or registry capacity exhaustion fail before the session becomes usable.
 Standalone keeps one live-session owner in process. Kubernetes obtains a per-Controller
 Lease through `KubernetesLeaseCoordinator` before registering the session. The Lease holder
 contains replica Pod name and UID; its fencing token and monotonic epoch are attached to the
-session. Lease loss marks ownership invalid before stream cancellation.
+session. Lease loss marks ownership invalid before stream cancellation. Normal
+session cancellation also invalidates cached ownership before releasing the Lease,
+so a retained offline session cannot accept its previous ownership fence.
 
 Proxy calls first attempt a valid local owned session. Otherwise Kubernetes resolves the
 authoritative Lease and Pod UID with `KubernetesControllerOwnerLocator`, then uses

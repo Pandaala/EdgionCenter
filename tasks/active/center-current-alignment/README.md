@@ -2296,3 +2296,28 @@ before acting on CCI execution files or proposing replacements.
 - See [KUBERNETES-AUTH-EVIDENCE.md](KUBERNETES-AUTH-EVIDENCE.md) for retained
   runtime, artifact locations, image identity and explicit coverage limits.
   No push; the overall alignment goal remains active.
+
+### Real replica forwarding and ownership release repair (2026-09-28)
+
+- Connected a native Controller to one of the two deployed Kubernetes Center
+  Pods and proved owner/non-owner reads, actual CAS mutation, stale-version 409
+  and default Controller RBAC across the dedicated internal mTLS hop.
+- Migrated the connection to the other Pod, observed the Lease holder/epoch
+  transition and verified the original owner now forwards remotely. Direct
+  gRPC checks enforce the holder, fence and one-hop boundary.
+- Reproduced an old-owner lifecycle defect: normal cancellation released its
+  Lease without invalidating the cached ownership flag, returning ambiguous
+  Unavailable for an old fence. Added invalidation before release and a
+  regression assertion that failed before the fix. No stale write executed.
+- Built and rolled out v5; all 22 proxy/fencing checks passed, including the
+  previous valid fence returning FailedPrecondition on the old owner. Removed
+  temporary proxy grants and verified restored permissions on both replicas.
+  All three selected Kubernetes browser cases passed again.
+- Backend matrix: 873 workspace tests and 244 no-default-feature app tests
+  passed; format, Clippy, dependency purity and manifests passed. Its final
+  exit remains the unrelated tracked English-only guard violation. Separate
+  cargo check and no-legacy checks passed. Source/API/wire contracts in Edgion
+  were not modified; unrelated working-tree changes were preserved.
+- Detailed evidence, the bounded migration observation timeout and retained
+  runtime pointers: [KUBERNETES-FORWARDING-EVIDENCE.md](KUBERNETES-FORWARDING-EVIDENCE.md).
+  The overall goal remains active; no push.
