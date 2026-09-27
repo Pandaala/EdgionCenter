@@ -10,17 +10,28 @@ description: Edgion Center API layer design — Axios client, resourceApi/cluste
 | Method | Path | Description |
 |------|------|------|
 | `authApi.login(req)` | POST `auth/login` | Login; backend sets httpOnly Cookie |
-| `authApi.logout()` | POST `auth/logout` | Logout; clears Cookie |
-| `authApi.me()` | GET `auth/me` | Get current user info |
+| `authApi.logout()` | POST `auth/logout` | Password-session cookie logout; propagates errors |
+| `authApi.me()` | GET `auth/me` | Identity, permissions and provider-specific logout metadata |
 
 ### Cookie Authentication Pattern
 
 The frontend does not store the token (no localStorage). After login, the backend sets `Set-Cookie: edgion_token=<jwt>; HttpOnly; SameSite=Strict`; the browser attaches it automatically.
 
-- `src/utils/auth.ts` — `sessionStorage` login state flag (`setLoggedIn`/`clearLoggedIn`/`isLoggedIn`)
+- `src/utils/auth.ts` — `localStorage` login state flag (`setLoggedIn`/`clearLoggedIn`/`isLoggedIn`)
 - `src/api/auth.ts` — authApi (login/logout/me)
 - `src/pages/Login/LoginPage.tsx` — login page
 - `src/App.tsx` — `RequireAuth` route guard
+
+Center's top bar reads fresh `authProvider` from `/auth/me` before logout. Local
+sessions use the password endpoint. OIDC sessions navigate to the configured
+same-origin `logoutPath`, first clearing the Center cookie when
+`localLogoutAvailable` is true. Missing external configuration and failed API
+requests are surfaced without pretending that local flag removal ends the
+external session. External navigation does not assert IdP-wide token revocation.
+The login page checks an existing authenticated session before showing password
+fields, including when both OIDC and password login are enabled. This accepts
+an already authenticated proxy session and prevents the initial identity check
+from racing a password submission.
 
 ## Dual API Clients
 

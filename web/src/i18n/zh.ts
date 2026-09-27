@@ -786,6 +786,8 @@ const zh = {
   'login.submit': '登录',
   'login.failed': '用户名或密码错误',
   'login.logout': '退出登录',
+  'login.logoutFailed': '未能完成退出登录，会话可能仍然有效。请重试。',
+  'login.external.logoutUnavailable': '退出登录由外部认证服务管理，请联系管理员配置退出链接。',
   'login.required': '请输入{field}',
 
   // Topology page

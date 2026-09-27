@@ -787,10 +787,13 @@ mod tests {
 
     #[tokio::test]
     async fn auth_me_exposes_native_controller_permission_for_ui_gates() {
-        let inner = Router::new().route(
-            "/api/v1/auth/me",
-            get(crate::common::auth::session::me_handler),
-        );
+        use crate::common::unified_auth::UnifiedAuthState;
+        let inner = Router::new()
+            .route(
+                "/api/v1/auth/me",
+                get(crate::common::auth::session::me_handler),
+            )
+            .with_state(UnifiedAuthState::from_configs(None, None, true, "test").unwrap());
         let app = app_with(Arc::new(ControllerDiscoveryAuthz), inner);
         let response = app
             .oneshot(

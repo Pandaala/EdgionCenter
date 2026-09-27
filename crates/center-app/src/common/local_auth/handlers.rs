@@ -261,6 +261,7 @@ mod handler_tests {
 
         let app = axum::Router::new()
             .route("/api/v1/auth/me", get(me_handler))
+            .with_state(UnifiedAuthState::from_configs(None, None, true, "test").unwrap())
             .layer(axum::middleware::from_fn(
                 |mut req: Request<Body>, next: axum::middleware::Next| async move {
                     req.extensions_mut().insert(UnifiedAuthClaims {
@@ -314,6 +315,7 @@ mod handler_tests {
 
         let app = axum::Router::new()
             .route("/api/v1/auth/me", get(me_handler))
+            .with_state(UnifiedAuthState::from_configs(None, None, true, "test").unwrap())
             .layer(axum::middleware::from_fn(
                 |mut req: Request<Body>, next: axum::middleware::Next| async move {
                     req.extensions_mut().insert(UnifiedAuthClaims {

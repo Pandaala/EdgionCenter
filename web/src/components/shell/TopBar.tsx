@@ -1,5 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { Button, Space, Dropdown } from 'antd'
+import { useRef, useState } from 'react'
+import { Button, Space, Dropdown, message } from 'antd'
 import {
   ReloadOutlined,
   GlobalOutlined,
@@ -27,11 +28,44 @@ export const TopBar = ({ collapsed, onToggleCollapse }: TopBarProps) => {
   const { controllerId: rawId } = useParams<{ controllerId?: string }>()
   const activeControllerId = rawId?.replace(/~/g, '/') ?? null
   const isCenterMode = getAppMode() === 'center'
+  const logoutInFlight = useRef(false)
+  const [loggingOut, setLoggingOut] = useState(false)
 
   const handleLogout = async () => {
-    await authApi.logout()
-    clearLoggedIn()
-    navigate('/login')
+    if (logoutInFlight.current) return
+    logoutInFlight.current = true
+    setLoggingOut(true)
+    try {
+      if (isCenterMode) {
+        const identity = await authApi.me()
+        if (!identity.success || !identity.data) throw new Error('Session unavailable')
+        if (identity.data.authProvider === 'oidc') {
+          const path = identity.data.logoutPath
+          if (!path) {
+            message.warning(t('login.external.logoutUnavailable'))
+            return
+          }
+          if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\') ||
+            Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {
+            throw new Error('Invalid logout path')
+          }
+          // The external proxy owns its HttpOnly session. Navigation hands
+          // logout to that proxy; do not claim success before it runs.
+          if (identity.data.localLogoutAvailable) await authApi.logout()
+          window.location.assign(path)
+          return
+        }
+        if (identity.data.authProvider !== 'local') throw new Error('Unknown session provider')
+      }
+      await authApi.logout()
+      clearLoggedIn()
+      navigate('/login')
+    } catch {
+      message.error(t('login.logoutFailed'))
+    } finally {
+      logoutInFlight.current = false
+      setLoggingOut(false)
+    }
   }
 
   return (
@@ -114,7 +148,7 @@ export const TopBar = ({ collapsed, onToggleCollapse }: TopBarProps) => {
             ],
           }}
         >
-          <Button data-testid="user-menu" type="text" icon={<LogoutOutlined />} />
+          <Button data-testid="user-menu" type="text" loading={loggingOut} icon={<LogoutOutlined />} />
         </Dropdown>
       </Space>
     </header>

@@ -69,9 +69,22 @@ admin + db_auth can all be on at once.
 | `discovery` | — | OIDC discovery URL (required when enabled). |
 | `audiences` | `[]` | Expected `aud` values; empty = skip audience check. |
 | `issuers` | `[]` | Expected `iss` values; empty = validate against the discovery `issuer`. |
+| `logout_path` | unset | Same-origin browser path owned by the authentication proxy, for example `/oauth2/sign_out`. Rejects external URLs, network-path references, backslashes and control characters. |
 
 (`auth:` also carries algorithm/JWKS/skew/body-limit tuning — see `AdminAuthConfig`.)
 OIDC coexists with `rbac` and `db_auth`; there is no force-disable.
+
+The authenticated `/api/v1/auth/me` response reports `authProvider`, optional
+`logoutPath` (OIDC sessions only), and `localLogoutAvailable`. Dashboard logout
+uses the provider that validated this request, not the list of enabled providers.
+For OIDC, the browser navigates to the configured proxy sign-out path; if password
+auth is also ready, it first clears any coexisting Center password cookie. Without
+a configured path, the dashboard explains that external logout is unavailable.
+Failed identity/password-logout requests retain session state and show an error.
+The proxy endpoint must remain reachable while signing out. This terminates the
+proxy session, not issued bearer tokens or an IdP's global SSO session; configure
+IdP logout in the proxy when that stronger behavior is required. The generic
+dashboard does not assume a provider-specific endpoint or redirect protocol.
 
 ### `local_auth:` (single shared admin authentication)
 | Key | Default | Meaning |

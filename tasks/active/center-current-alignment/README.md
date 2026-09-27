@@ -2230,3 +2230,20 @@ before acting on CCI execution files or proposing replacements.
   in [OIDC-BROWSER-EVIDENCE.md](OIDC-BROWSER-EVIDENCE.md). The validated runtime is
   retained for the logout repair. No production code changed in this evidence
   batch; Kubernetes and remaining resource runtime gaps stay open.
+
+### Provider-aware logout and mixed-authentication login (2026-09-28)
+
+- Repaired OIDC logout through an operator-configured same-origin proxy path;
+  authenticated identity selects the logout flow. Local cookie logout failures
+  now propagate to visible, sanitized feedback. Mixed authentication clears a
+  coexisting password cookie before external logout. Login bootstrap accepts
+  existing sessions before presenting password fields.
+- Real browser checks verify deletion of the proxy session and 401 after logout,
+  including direct Center denial after clearing the coexisting password cookie.
+  Final repository auth/shell cases passed for password and OIDC entry points.
+  See [OIDC-BROWSER-EVIDENCE.md](OIDC-BROWSER-EVIDENCE.md) for artifacts and scope.
+- Current frontend full suite: 102 files, 635 tests; build/lint and E2E checks
+  passed. Backend workspace/default/no-default tests and matrix build gates
+  passed; the unrelated English-only guard baseline remains explicitly open.
+- No Edgion code changed. Dedicated native authentication runtime is retained;
+  deployed Kubernetes and original cross-resource runtime gaps remain open.

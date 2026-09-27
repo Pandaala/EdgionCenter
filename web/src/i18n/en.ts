@@ -786,6 +786,8 @@ const en = {
   'login.submit': 'Sign In',
   'login.failed': 'Invalid username or password',
   'login.logout': 'Logout',
+  'login.logoutFailed': 'Could not complete logout. Your session may still be active. Try again.',
+  'login.external.logoutUnavailable': 'Logout is managed by your sign-in provider. Ask your administrator to configure the sign-out link.',
   'login.required': 'Please enter {field}',
 
   // Topology page

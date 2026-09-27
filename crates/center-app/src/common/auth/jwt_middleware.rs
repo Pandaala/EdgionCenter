@@ -11,6 +11,7 @@ use super::oidc::OidcProvider;
 pub struct AuthMiddlewareState {
     pub provider: Arc<OidcProvider>,
     pub groups_claim: String,
+    pub logout_path: Option<String>,
 }
 
 impl AuthMiddlewareState {
@@ -21,6 +22,7 @@ impl AuthMiddlewareState {
         Ok(Arc::new(Self {
             provider,
             groups_claim: config.groups_claim.clone(),
+            logout_path: config.logout_path.clone(),
         }))
     }
 }

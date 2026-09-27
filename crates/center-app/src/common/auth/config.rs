@@ -13,6 +13,10 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+#[path = "../../../tests/unit/common/auth/config_logout_test.rs"]
+mod logout_path_tests;
+
 /// Admin API authentication configuration.
 ///
 /// Omit the entire `auth` section to disable authentication (backward compatible).
@@ -26,6 +30,10 @@ pub struct AdminAuthConfig {
     /// OIDC discovery URL (required when enabled).
     /// Example: `https://keycloak.example.com/realms/edgion/.well-known/openid-configuration`
     pub discovery: String,
+
+    /// Same-origin browser path that terminates the external authentication
+    /// proxy session. This is not token revocation or global IdP logout.
+    pub logout_path: Option<String>,
 
     /// Expected audiences in the JWT `aud` claim.
     /// If empty, audience validation is skipped.
@@ -93,6 +101,7 @@ impl Default for AdminAuthConfig {
         Self {
             enabled: true,
             discovery: String::new(),
+            logout_path: None,
             audiences: Vec::new(),
             issuers: Vec::new(),
             allowed_algorithms: Vec::new(),
@@ -117,6 +126,14 @@ impl AdminAuthConfig {
         }
         if self.discovery.is_empty() {
             return Some("auth.discovery is required when auth is enabled");
+        }
+        if self.logout_path.as_ref().is_some_and(|path| {
+            !path.starts_with('/')
+                || path.starts_with("//")
+                || path.contains('\\')
+                || path.chars().any(char::is_control)
+        }) {
+            return Some("auth.logout_path must be a same-origin absolute path without backslashes or control characters");
         }
         if !self.discovery.starts_with("https://") && !self.discovery.starts_with("http://") {
             return Some("auth.discovery must start with http:// or https://");

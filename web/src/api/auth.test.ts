@@ -15,6 +15,10 @@ vi.mock('./client', () => ({
 import { authApi } from './auth'
 
 describe('Center authentication API routing', () => {
+  it('propagates logout failures instead of reporting completion', async () => {
+    postMock.mockRejectedValueOnce(new Error('network failure'))
+    await expect(authApi.logout()).rejects.toThrow('network failure')
+  })
   beforeEach(() => {
     getMock.mockReset()
     postMock.mockReset()

@@ -73,7 +73,7 @@ pub fn compose_admin_routes(
     authz: Arc<dyn Authorizer>,
 ) -> Router {
     let with_auth_routes = add_local_auth_routes(business, auth_state.clone(), local_auth_intent);
-    let with_identity = add_auth_identity_route(with_auth_routes);
+    let with_identity = add_auth_identity_route(with_auth_routes, auth_state.clone());
     let with_status = add_auth_status_route(with_identity, auth_state.clone());
     // authz wraps the auth routes + business (INSIDE unified_auth, applied next):
     // it reads the claims unified_auth injects and resolves/enforces permissions.

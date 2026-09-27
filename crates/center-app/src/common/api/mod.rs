@@ -54,10 +54,17 @@ pub(crate) fn add_auth_status_route(
 
 /// Mount the provider-neutral authenticated identity endpoint. It is always
 /// present, including in OIDC-only/no-password builds.
-pub(crate) fn add_auth_identity_route(router: Router) -> Router {
-    router.route(
-        "/api/v1/auth/me",
-        axum::routing::get(crate::common::auth::session::me_handler),
+pub(crate) fn add_auth_identity_route(
+    router: Router,
+    state: std::sync::Arc<crate::common::unified_auth::UnifiedAuthState>,
+) -> Router {
+    router.merge(
+        Router::new()
+            .route(
+                "/api/v1/auth/me",
+                axum::routing::get(crate::common::auth::session::me_handler),
+            )
+            .with_state(state),
     )
 }
 
@@ -75,7 +82,7 @@ pub(crate) fn add_auth_identity_route(router: Router) -> Router {
 /// let state = UnifiedAuthState::from_configs(...)?;
 /// let app = base_router;
 /// let app = add_local_auth_routes(app, state.clone(), intent); // /auth/login, /auth/logout
-/// let app = add_auth_identity_route(app);                       // provider-neutral /auth/me
+/// let app = add_auth_identity_route(app, state.clone());        // provider-neutral /auth/me
 /// let app = app.merge(status_router);                           // /auth/status (reads state)
 /// let app = wrap_with_unified_auth_layer(app, state.clone());   // now layer protects everything
 /// ```

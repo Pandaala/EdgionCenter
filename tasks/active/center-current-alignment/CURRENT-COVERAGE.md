@@ -20,7 +20,7 @@ Center cloud integration is independent of Controller federation.
 - **Focused flow**: resource-specific browser or backend scenario described below.
 - **Open**: missing or narrower evidence; never count it as completion.
 
-The current full standalone run `alignment-full-current-20260928-v3` passed
+The latest complete resource run `alignment-full-current-20260928-v3` passed
 155 tests with two Kubernetes-only skips (capabilities and dependency namespace
 scope). Session 20509 exited zero; all 112 annotated ledger cases passed,
 including all 22 generic resource CRUD cases, plus the focused routes/WAF/
@@ -30,6 +30,8 @@ this run completed only changed backend test code and evidence documentation).
 Log: `/tmp/ws5-center-full-current-native-v3.log`.
 Artifacts: `web/test-results/alignment-full-current-20260928-v3/`.
 The older 147-test run remains historical evidence, superseded by this run.
+The subsequent authentication repair has separate current browser/component
+evidence below; the full resource run predates that repair.
 
 ## Controller resource menus
 
@@ -78,7 +80,7 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native create/edit, label retention, exact-generation conflict | Kubernetes dashboard capability/identity workflow |
 | Cloudflare DNS and Route53 DNS | API DTO/form tests; sanitized read failure/recovery; lost-response uncertainty; 195 hermetic backend tests | New browser error states have component evidence, not native provider mutation evidence |
-| Login, audit, users, roles | Native standalone password auth/logout, audit controls, administration, restricted permissions; real Dex OAuth browser login/callback and session checks | OIDC logout defect; deployed Kubernetes capability workflows |
+| Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback | Deployed Kubernetes capability workflows |
 
 Native federation evidence: 27 lifecycle checks in
 `/tmp/ws5-center-federation-native-v2.log` and 9 mTLS checks in
@@ -149,13 +151,20 @@ catalog/menu completeness but does not close the overall task.
 
 The real OAuth browser path now passes against an isolated native Center plus
 the same pinned Dex and oauth2-proxy versions used by the Kubernetes fixture.
-Six checks cover unauthenticated denial, IdP redirect, callback/identity,
-protected deep-link restoration, refresh and missing-session reauthentication.
-This does not establish Kubernetes SAR or replica behavior. A separate browser
-check found a real OIDC logout defect: the dashboard silently ignores a 404 from
-the local logout endpoint; refreshing restores access through the surviving
-proxy session. See [OIDC browser evidence](OIDC-BROWSER-EVIDENCE.md). Fix that
-flow next, including explicit external-session ownership and failure handling.
+The original six login/session checks led to a reproduced logout defect, now
+fixed with configured same-origin proxy logout and explicit failure handling.
+Current browser checks prove proxy-cookie deletion and 401 after logout, plus
+cleanup of a coexisting Center password cookie. The existing repository shell
+test passes through both password and OIDC entry points. Login bootstrap also
+accepts an existing OIDC session when password login is enabled. These native
+checks do not establish Kubernetes SAR or replica behavior. See
+[OIDC browser evidence](OIDC-BROWSER-EVIDENCE.md).
+
+Authentication repair gates: 635 frontend tests in 102 files; focused auth tests,
+build/lint, E2E types/inventory; backend workspace and no-default-feature tests,
+Clippy, formatting, dependency purity and manifest rendering. The full backend
+matrix still exits at the unrelated tracked `fix-issue-workflow-generic.zh.md`
+English-only guard; the later no-legacy guard passes when run separately.
 
 ## Next audit actions
 

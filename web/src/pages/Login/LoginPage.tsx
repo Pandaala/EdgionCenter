@@ -13,7 +13,7 @@ const LoginPage = ({ passwordLogin = true }: { passwordLogin?: boolean }) => {
   const t = useT()
   const [loading, setLoading] = useState(false)
   const [authError, setAuthError] = useState(false)
-  const [externalChecking, setExternalChecking] = useState(!passwordLogin)
+  const [checkingSession, setCheckingSession] = useState(true)
   const [savedRequestedPath] = useState(() => takeLoginReturnPath())
   const isCenter = getAppMode() === 'center'
   const statePath = (location.state as { from?: unknown } | null)?.from
@@ -26,18 +26,18 @@ const LoginPage = ({ passwordLogin = true }: { passwordLogin?: boolean }) => {
       navigate(requestedPath, { replace: true })
       return
     }
-    if (!passwordLogin) {
-      authApi
-        .me()
-        .then((response) => {
-          if (response.success) {
-            setLoggedIn()
-            navigate(requestedPath, { replace: true })
-          }
-        })
-        .catch(() => undefined)
-        .finally(() => setExternalChecking(false))
-    }
+    // A proxy may have already authenticated this request even when the
+    // deployment also offers password login.
+    authApi
+      .me()
+      .then((response) => {
+        if (response.success) {
+          setLoggedIn()
+          navigate(requestedPath, { replace: true })
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => setCheckingSession(false))
   }, [navigate, passwordLogin, requestedPath])
 
   const handleSubmit = async (values: { username: string; password: string }) => {
@@ -101,20 +101,18 @@ const LoginPage = ({ passwordLogin = true }: { passwordLogin?: boolean }) => {
         >
           {t(isCenter ? 'login.subtitle.center' : 'login.subtitle')}
         </div>
-        {!passwordLogin ? (
-          externalChecking ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
-              <Spin />
-            </div>
-          ) : (
-            <Alert
-              type="info"
-              showIcon
-              message={t('login.external.title')}
-              description={t('login.external.description')}
-              action={<Button onClick={() => window.location.reload()}>{t('btn.refresh')}</Button>}
-            />
-          )
+        {checkingSession ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+            <Spin />
+          </div>
+        ) : !passwordLogin ? (
+          <Alert
+            type="info"
+            showIcon
+            message={t('login.external.title')}
+            description={t('login.external.description')}
+            action={<Button onClick={() => window.location.reload()}>{t('btn.refresh')}</Button>}
+          />
         ) : <Form name="login" onFinish={handleSubmit} autoComplete="off" size="large">
           {authError && <Alert data-testid="login-error" type="error" showIcon message={t('login.failed')} style={{ marginBottom: 16 }} />}
           <Form.Item

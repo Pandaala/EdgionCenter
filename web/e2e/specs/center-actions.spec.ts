@@ -102,11 +102,22 @@ test.describe('Center and shell actions', () => {
     ])
     await expect(page.getByTestId('nav-toggle')).toBeVisible()
 
+    const identity = await (await page.request.get('/api/v1/auth/me')).json() as {
+      data: { authProvider: 'local' | 'oidc'; logoutPath?: string }
+    }
     await page.getByTestId('user-menu').click()
     await Promise.all([
-      page.waitForURL(/\/login$/),
+      page.waitForURL(identity.data.authProvider === 'oidc' ? /\/dex\/auth/ : /\/login$/),
       page.getByTestId('logout').click(),
     ])
+    if (identity.data.authProvider === 'oidc') {
+      expect(identity.data.logoutPath).toBe('/oauth2/sign_out')
+      expect((await page.request.get('/oauth2/auth')).status()).toBe(401)
+      expect((await page.context().cookies()).some(cookie => cookie.name === '_oauth2_proxy')).toBe(false)
+    } else {
+      expect((await page.request.get('/api/v1/auth/me')).status()).toBe(401)
+      expect(await page.evaluate(() => localStorage.getItem('edgion-logged-in'))).toBeNull()
+    }
   })
 
   test('Controllers page refreshes, filters, reloads, and enters a controller', async ({ page, request }) => {

@@ -169,7 +169,7 @@ metadata: {name: "__PREFIX__-runtime-config", namespace: "__PREFIX__-system", la
 data:
   center.yaml: |
     server: {grpc_addr: "0.0.0.0:12251", http_addr: "0.0.0.0:12201", probe_addr: "0.0.0.0:12200", metrics_addr: "0.0.0.0:12290"}
-    auth: {enabled: true, discovery: "https://__PREFIX__-dex.__PREFIX__-system.svc.cluster.local:5556/dex/.well-known/openid-configuration", audiences: [edgion-e2e], ca_file: /tls/oidc/ca.crt}
+    auth: {enabled: true, discovery: "https://__PREFIX__-dex.__PREFIX__-system.svc.cluster.local:5556/dex/.well-known/openid-configuration", audiences: [edgion-e2e], ca_file: /tls/oidc/ca.crt, logout_path: /oauth2/sign_out}
     grpc_security: {active: fed, certs: [{name: fed, cert: /tls/federation/server.crt, key: /tls/federation/server.key, ca: /tls/federation/ca.crt}]}
     trust_domain: edgion.io
     internal_forwarding:

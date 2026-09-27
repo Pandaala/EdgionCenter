@@ -19,9 +19,9 @@ describe('LoginPage capabilities', () => {
     meMock.mockResolvedValue({ success: false })
   })
 
-  it('renders password fields only when password login is supported', () => {
+  it('renders password fields only when password login is supported', async () => {
     render(<MemoryRouter><LoginPage passwordLogin /></MemoryRouter>)
-    expect(screen.getByPlaceholderText('Username')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('Username')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Password')).toBeInTheDocument()
   })
 
@@ -43,6 +43,20 @@ describe('LoginPage capabilities', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByText('Controller topology')).toBeInTheDocument()
+    expect(localStorage.getItem('edgion-logged-in')).toBe('1')
+  })
+
+  it('accepts an existing OIDC session when password login is also available', async () => {
+    meMock.mockResolvedValue({ success: true, data: { username: 'oidc-user', authProvider: 'oidc' } })
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/login', state: { from: '/controllers' } }]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage passwordLogin />} />
+          <Route path="/controllers" element={<div>Authenticated fleet</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('Authenticated fleet')).toBeInTheDocument()
     expect(localStorage.getItem('edgion-logged-in')).toBe('1')
   })
 

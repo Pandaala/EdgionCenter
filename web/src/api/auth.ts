@@ -13,6 +13,9 @@ export interface LoginResponse {
 
 export interface MeResponse {
   username: string
+  authProvider?: 'local' | 'oidc'
+  logoutPath?: string
+  localLogoutAvailable?: boolean
   /** Permission keys granted to the caller. In the LITE tier this is the full
    *  catalog (login = admin). Optional for backward compatibility with older
    *  servers that did not report permissions. */
@@ -31,7 +34,7 @@ export const authApi = {
     await apiClient.post('auth/logout', null, {
       _silent: true,
       _skipControllerProxy: true,
-    } as any).catch(() => {})
+    } as any)
   },
   me: async (): Promise<ApiResponse<MeResponse>> => {
     const { data } = await apiClient.get('auth/me', {
