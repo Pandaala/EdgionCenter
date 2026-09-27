@@ -4,12 +4,15 @@ import type {
   EtcdConfig,
   HttpDnsConfig,
   KafkaConfig,
+  OtlpConfig,
+  SecretObjectReference,
   LinkSys,
   LinkSysConfig,
   LinkSysType,
   RedisConfig,
   WebhookConfig,
 } from '@/types/link-sys'
+import { isValidDNS1123Label, isValidDNS1123Subdomain } from './validation'
 import { dumpYaml } from './yaml-utils'
 import { mutationDocumentToYaml } from './resource-document'
 
@@ -19,6 +22,7 @@ export const LINKSYS_RUST_FIELD_MATRIX = {
   elasticsearch: ['endpoints','auth','tls','timeout','pool','bulk','index'],
   etcd: ['endpoints','auth','tls','timeout','keepAlive','namespace','autoSyncInterval','maxCallSendSize','maxCallRecvSize','userAgent','rejectOldCluster','observability'],
   webhook: ['target','tls','timeoutMs','timeoutMsTemplate','retry','rateLimit','healthCheck','maxResponseBytes','success','statusOnError','request'],
+  otlp: ['endpoint','timeoutMs','auth','tls'],
   kafka: ['brokers','sasl','tls','channelSize','lingerMs'],
   httpdns: ['preset','urlTemplate','response','fallback','connection'],
 } as const
@@ -48,6 +52,8 @@ export function createConfig(type: LinkSysType): LinkSysConfig {
       return { endpoints: [] }
     case 'webhook':
       return { target: { url: '' }, request: { method: { template: 'POST' } }, timeoutMs: 5000 }
+    case 'otlp':
+      return { endpoint: '', timeoutMs: 10000 }
     case 'kafka':
       return { brokers: [] }
     case 'httpdns':
@@ -114,6 +120,35 @@ export function withWebhookMethod(config: WebhookConfig, template: string): Webh
   }
 }
 
+/** Match the Controller origin grammar before URL parsing can normalize input. */
+export function isValidOtlpEndpoint(value: string): boolean {
+  if (typeof value !== 'string' || value.length > 512 || /[^\x21-\x7e]|[\\%@?#]/.test(value)) return false
+  const match = /^https?:\/\/([^/]+)\/?$/.exec(value)
+  if (!match) return false
+  const authority = match[1]
+  const parts = authority.startsWith('[')
+    ? /^\[([^\]]+)\](?::([0-9]+))?$/.exec(authority)
+    : /^([^:]+)(?::([0-9]+))?$/.exec(authority)
+  if (!parts) return false
+  if (parts[2] !== undefined && (Number(parts[2]) < 1 || Number(parts[2]) > 65535)) return false
+  if (authority.startsWith('[')) {
+    try { return new URL(value).hostname.startsWith('[') } catch { return false }
+  }
+  const host = parts[1]
+  if (/^[0-9.]+$/.test(host.replace(/\.$/, ''))) {
+    return host.split('.').length === 4 && host.split('.').every((part) => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)
+  }
+  const dns = host.replace(/\.$/, '')
+  return dns.length <= 253 && dns.split('.').every((label) => label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))
+}
+
+function validOtlpSecretRef(ref: SecretObjectReference | undefined): boolean {
+  return !!ref && (ref.group == null || ref.group === '' || ref.group === 'core')
+    && (ref.kind == null || ref.kind === 'Secret')
+    && typeof ref.name === 'string' && ref.name.length <= 253 && isValidDNS1123Subdomain(ref.name)
+    && (ref.namespace == null || (ref.namespace.length <= 63 && isValidDNS1123Label(ref.namespace)))
+}
+
 export function validateLinkSys(resource: LinkSys): void {
   const fail = (message: string): never => { throw new Error(message) }
   const config = resource.spec.config
@@ -174,6 +209,24 @@ export function validateLinkSys(resource: LinkSys): void {
         if (!predicate.pointer) fail('Webhook success body predicate pointer is required')
         const count = ['equals','notEquals','exists','in'].filter((key) => predicate[key] !== undefined).length
         if (count !== 1) fail('Webhook success body predicate requires exactly one operator')
+      }
+      break
+    }
+    case 'otlp': {
+      const otlp = config as OtlpConfig
+      if (!isValidOtlpEndpoint(otlp.endpoint)) fail('OTLP endpoint must be an HTTP(S) origin without credentials, path, query, or fragment')
+      const timeout = otlp.timeoutMs ?? 10000
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 300000) fail('OTLP timeoutMs must be an integer from 1 to 300000')
+      if (otlp.auth && !validOtlpSecretRef(otlp.auth.secretRef)) fail('OTLP auth requires a valid core Secret reference')
+      if (otlp.tls?.enabled) {
+        if (!otlp.endpoint.startsWith('https://')) fail('OTLP HTTP endpoint cannot enable TLS policy')
+        if (otlp.tls.verify === false) fail('OTLP TLS verification cannot be disabled')
+        const validation = otlp.tls.validation
+        if (validation?.hostname != null || validation?.subjectAltNames?.length) fail('OTLP TLS hostname and subjectAltNames overrides are unsupported')
+        if (otlp.tls.clientCertificateRef && !validOtlpSecretRef(otlp.tls.clientCertificateRef)) fail('OTLP client certificate requires a valid core Secret reference')
+        for (const ref of validation?.caCertificateRefs ?? []) {
+          if (!validOtlpSecretRef(ref) || ref.kind !== 'Secret') fail('OTLP CA certificates require core Secret references')
+        }
       }
       break
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_YAML,
+  isValidOtlpEndpoint,
   createEmpty,
   fromYaml,
   toYaml,
@@ -180,5 +181,32 @@ spec:
     expect(output).not.toContain('allowDegradation')
     expect(output).toContain('healthCheck:')
     expect(output).not.toContain('resolvedSecrets:')
+  })
+})
+
+describe('OTLP LinkSys', () => {
+  it('validates origins before URL normalization', () => {
+    for (const endpoint of ['https://collector.example:4317', 'http://127.0.0.1:4317/', 'https://[::1]:4317', 'https://Collector.EXAMPLE.']) expect(isValidOtlpEndpoint(endpoint), endpoint).toBe(true)
+    for (const endpoint of ['https://user:pass@host', 'https://host/path', 'https://host?x=1', 'https://host#x', 'HTTPS://host', 'http://host:0', 'http://host:65536', 'http://127.1', 'http://0127.0.0.1', 'http://999.1.1.1', 'http://host%20', 'http://host:']) expect(isValidOtlpEndpoint(endpoint), endpoint).toBe(false)
+  })
+
+  it('validates enabled TLS policy and strips resolved secrets on mutation', () => {
+    const resource = createEmpty()
+    const config: any = { endpoint: 'https://collector.example:4317', timeoutMs: 10000, auth: { secretRef: { name: 'bearer', namespace: 'edge' }, secret: '[redacted]' }, tls: { enabled: true, verify: true, validation: { caCertificateRefs: [{ kind: 'Secret', name: 'ca' }] }, resolvedCaCertificates: ['[redacted]'], resolvedClientCertificate: '[redacted]' } }
+    resource.spec = { type: 'otlp', config }
+    expect(() => validateLinkSys(resource)).not.toThrow()
+    const mutation = fromYaml(toMutationYaml(resource, 'create'))
+    expect(mutation.spec.config).not.toHaveProperty('auth.secret')
+    expect(mutation.spec.config).not.toHaveProperty('tls.resolvedCaCertificates')
+    expect(mutation.spec.config).not.toHaveProperty('tls.resolvedClientCertificate')
+    config.tls.verify = false
+    expect(() => validateLinkSys(resource)).toThrow('cannot be disabled')
+    config.tls.enabled = false
+    expect(() => validateLinkSys(resource)).not.toThrow()
+    config.timeoutMs = 300001
+    expect(() => validateLinkSys(resource)).toThrow('timeoutMs')
+    config.timeoutMs = 1
+    config.auth.secretRef.kind = 'ConfigMap'
+    expect(() => validateLinkSys(resource)).toThrow('core Secret')
   })
 })

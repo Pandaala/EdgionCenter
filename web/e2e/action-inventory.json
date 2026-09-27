@@ -15,6 +15,7 @@
     "controller-cluster-filter"
   ],
   "auxiliary": [
+    "linksys-otlp-endpoint",
     "login-error",
     "ebtp-list",
     "edgionbackend-list",

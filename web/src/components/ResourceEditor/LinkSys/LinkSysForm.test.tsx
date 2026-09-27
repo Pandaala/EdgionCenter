@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import LinkSysForm from './LinkSysForm'
 import { createEmpty } from '@/utils/linksys'
 import type { LinkSys } from '@/types/link-sys'
@@ -24,5 +24,19 @@ describe('LinkSysForm variant drafts',()=>{
     fireEvent.click((await screen.findAllByText('Webhook')).at(-1)!)
     expect(screen.queryByText('Allow degradation')).not.toBeInTheDocument()
     expect(screen.queryByText('Degradation template')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('OTLP form', () => {
+  it('preserves TLS and Secret identity fields during narrow edits', () => {
+    const resource = createEmpty()
+    resource.spec = { type: 'otlp', config: { endpoint: 'https://collector.example:4317', timeoutMs: 5000, auth: { secretRef: { name: 'token', namespace: 'edge', kind: 'Secret', group: 'core' } }, tls: { enabled: false, verify: true } } }
+    const onChange = vi.fn()
+    render(<LinkSysForm data={resource} onChange={onChange} />)
+    fireEvent.change(screen.getByTestId('linksys-otlp-endpoint'), { target: { value: 'https://new.example:4317' } })
+    expect(onChange.mock.calls.at(-1)?.[0].spec.config).toEqual({ ...resource.spec.config, endpoint: 'https://new.example:4317' })
+    fireEvent.change(screen.getByDisplayValue('token'), { target: { value: 'rotated-token' } })
+    expect(onChange.mock.calls.at(-1)?.[0].spec.config.auth.secretRef).toEqual({ name: 'rotated-token', namespace: 'edge', kind: 'Secret', group: 'core' })
   })
 })

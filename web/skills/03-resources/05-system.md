@@ -79,33 +79,24 @@ spec:
   - **Preflight** — mode selector + statusCode
   - **ReferenceGrant** — toggle
 
-## LinkSys (Pending Development)
+## LinkSys
 
-```yaml
-apiVersion: edgion.io/v1
-kind: LinkSys
-metadata:
-  name: redis-cluster
-  namespace: default
-spec:
-  type: redis                   # redis | elasticsearch | etcd | webhook
-  redis:
-    addresses:
-      - "127.0.0.1:6379"
-    password: "secret"
-    database: 0
-    clusterMode: false
-    tls:
-      enable: false
-```
-
-**Development Notes**:
-- Namespaced resource, kind: `linksys`
-- type determines the specific spec structure (conditional rendering)
-- Four types: redis, elasticsearch, etcd, webhook
-- **Security sensitive**: password field uses a password input
-- Form switches between different configuration sections based on type
-- List page displays: name, namespace, type, connection address
+- Namespaced `edgion.io/v1`, catalog key `linksys`; uses the flat tagged envelope
+  `spec: {type: redis, config: {...}}`. The type's fields live under config,
+  never under a repeated provider name.
+- Current upstream also includes OTLP/gRPC and credentialSource. The dashboard
+  implements redis, elasticsearch, etcd, webhook, kafka, httpdns, and otlp;
+  credentialSource remains pending in the active alignment ledger.
+- OTLP config fields: endpoint, timeoutMs (1..300000, default 10000), optional
+  auth.secretRef, and optional tls. Endpoints are HTTP(S) origins; no URI
+  credentials, path, query, or fragment. TLS enabled gates local policy; HTTPS
+  still selects encrypted transport when local policy is disabled.
+- Enabled OTLP TLS requires HTTPS, verification, and core Secret CA/client
+  references; hostname and nonempty subjectAltNames overrides are unsupported.
+- Auth and TLS fields reference Secrets. Resolved credential/certificate material
+  is Controller-owned and excluded from mutation payloads by the shared catalog.
+- Preserve inactive TLS configuration and provider drafts while editing; only
+  validate enabled local TLS policy. List summaries include OTLP endpoint.
 
 ## EdgionAcme
 

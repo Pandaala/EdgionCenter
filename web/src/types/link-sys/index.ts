@@ -1,8 +1,10 @@
 import type { K8sObjectMeta } from '@/types/gateway-api/common'
 
-export type LinkSysType = 'redis' | 'elasticsearch' | 'etcd' | 'webhook' | 'kafka' | 'httpdns'
+export type LinkSysType = 'redis' | 'elasticsearch' | 'etcd' | 'webhook' | 'kafka' | 'httpdns' | 'otlp'
 
 export interface SecretObjectReference {
+  group?: string
+  kind?: string
   name: string
   namespace?: string
 }
@@ -14,7 +16,7 @@ export interface SecretAuth {
 export interface LinkTlsConfig {
   enabled?: boolean
   verify?: boolean
-  validation?: { caCertificateRefs?: Array<{ name: string; namespace?: string }>; wellKnownCACertificates?: 'System' }
+  validation?: { caCertificateRefs?: Array<SecretObjectReference>; wellKnownCACertificates?: 'System'; hostname?: string; subjectAltNames?: Array<{ type: 'Hostname' | 'URI'; hostname?: string; uri?: string }> }
   clientCertificateRef?: SecretObjectReference
 }
 
@@ -101,6 +103,13 @@ export interface KafkaConfig {
   lingerMs?: number
 }
 
+export interface OtlpConfig {
+  endpoint: string
+  timeoutMs?: number
+  auth?: SecretAuth
+  tls?: LinkTlsConfig
+}
+
 export interface HttpDnsConfig {
   preset?: 'aliyun' | 'tencent'
   urlTemplate?: string
@@ -121,6 +130,7 @@ export type LinkSysConfig =
   | WebhookConfig
   | KafkaConfig
   | HttpDnsConfig
+  | OtlpConfig
 
 export interface LinkSysSpec {
   type: LinkSysType

@@ -645,3 +645,28 @@ before acting on CCI execution files or proposing replacements.
 - Outbound TLS source confirms custom CA refs take precedence when configured;
   do not incorrectly import BackendTLSPolicy's mutually exclusive CA rule into
   GatewayConfig. Remaining TLS/access-log and full menu coverage stay open.
+
+### LinkSys OTLP provider
+
+- ACME HTTP-01 batch committed as 4e39f31, no push.
+- Added current otlp envelope, endpoint/timeout/auth/TLS types, defaults, form
+  selection/controls, and list endpoint summary. Preserved Secret reference group
+  and kind on narrow edits. Shared mutation exclusions already remove OTLP auth
+  SecretSlot material and resolved TLS certificates; added explicit coverage.
+- Mirrored OTLP origin grammar and timeout bounds, core Secret identity checks,
+  and enabled-only TLS rules (HTTPS, verify=true, no hostname/SAN override,
+  Secret-only CA refs). Disabled TLS data is preserved and not validated as active.
+- Four LinkSys suites passed 15 tests (39586). After the reference-preservation
+  change, two affected suites passed 13 tests (41404). Build 65741, lint 53735,
+  E2E typecheck 89389 passed. Logs: /tmp/ws5-center-otlp-tests.log,
+  /tmp/ws5-center-otlp-tests-v2.log, /tmp/ws5-center-otlp-build.log.
+- Browser v1 stopped before service launch on a missing action-inventory entry;
+  registered the new input. Browser v2 (2083) passed authentication plus OTLP
+  create/form-edit/YAML-roundtrip/API-readback/delete. Log:
+  /tmp/ws5-center-otlp-runtime-v2.log; run ID alignment-otlp-20260928-v2.
+  Owned services stopped; 70 seeded fixture files retained. This proves management
+  CRUD, not collector connectivity/export (fixture endpoint is deliberately inert).
+- LinkSys is still open: current source has eight variants, including the missing
+  credentialSource provider. Audit its OAuth2 acquisition/rotation/publication
+  schema and nested credential boundaries next. Other provider field drift and
+  broader menu workflows still need verification.

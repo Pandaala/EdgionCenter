@@ -524,3 +524,38 @@ test('single and batch delete confirmations remove only isolated Services', asyn
   if (workflowError) throw workflowError
   if (cleanupError) throw cleanupError
 })
+
+
+test('OTLP LinkSys browser CRUD preserves the typed configuration', async ({ page, request }) => {
+  const catalog = RESOURCE_CATALOG.get('linksys')!
+  await waitForControllerCapabilities(request, controller, [{ resourceKind: 'linksys', verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+  const name = `${prefix}-otlp-ui`
+  const document = mutationDocument(catalog, name)
+  document.spec = { type: 'otlp', config: { endpoint: 'https://collector.example.test:4317', timeoutMs: 15000, tls: { enabled: false } } }
+  const path = itemPath(catalog, namespace, name)
+  try {
+    await openResourcePage(page, catalog)
+    await createThroughYaml(page, catalog, document)
+    await expectApiDocument(request, catalog, namespace, name)
+    await (await resourceRow(page, catalog, name)).getByTestId('linksys-row-edit').click()
+    await expect(page.getByTestId('linksys-otlp-endpoint')).toBeVisible()
+    await page.getByTestId('linksys-otlp-endpoint').fill('https://updated.example.test:4317')
+    await page.getByTestId('editor-yaml-tab').click()
+    expect((await yamlEditorDocument(page)).spec.config).toEqual({ ...document.spec.config, endpoint: 'https://updated.example.test:4317' })
+    await page.getByTestId('editor-form-tab').click()
+    const saved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes(path))
+    await page.getByTestId('editor-submit').click()
+    expect((await saved).ok()).toBeTruthy()
+    const stored = await readControllerResourceDocument(request, controller, 'linksys', 'Namespaced', namespace, name)
+    expect(stored.spec.type).toBe('otlp')
+    expect(stored.spec.config).toMatchObject({ ...document.spec.config, endpoint: 'https://updated.example.test:4317' })
+    await (await resourceRow(page, catalog, name)).getByTestId('linksys-row-delete').click()
+    const deleted = page.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().includes(path))
+    await page.getByTestId('resource-delete-confirm').click()
+    expect((await deleted).ok()).toBeTruthy()
+    await expectApiAbsent(request, path)
+  } finally {
+    const cleanup = await request.delete(path)
+    expect(cleanup.ok() || cleanup.status() === 404, 'Exact OTLP fixture cleanup failed').toBeTruthy()
+  }
+})

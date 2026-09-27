@@ -7,6 +7,7 @@ import type {
   EtcdConfig,
   HttpDnsConfig,
   KafkaConfig,
+  OtlpConfig,
   LinkSys,
   LinkSysConfig,
   LinkSysType,
@@ -34,10 +35,10 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
     onChange({ ...data, spec: { ...data.spec, config: { ...config, ...partial } as LinkSysConfig } })
 
   const updateSecretRef = (auth: SecretAuth | undefined, partial: { name?: string; namespace?: string }) => {
-    const name = partial.name ?? auth?.secretRef.name ?? ''
-    const namespace = partial.namespace ?? auth?.secretRef.namespace
+    const name = partial.name ?? auth?.secretRef?.name ?? ''
+    const namespace = partial.namespace ?? auth?.secretRef?.namespace
     if (!name) return undefined
-    return { secretRef: { name, namespace: namespace || undefined } }
+    return { ...auth, secretRef: { ...auth?.secretRef, name, namespace: namespace || undefined } }
   }
 
   const handleTypeChange = (newType: LinkSysType) => {
@@ -53,14 +54,14 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
     <Space.Compact block>
       <Input
         aria-label={t('field.secretName')}
-        value={auth?.secretRef.name || ''}
+        value={auth?.secretRef?.name || ''}
         onChange={(e) => onAuthChange(updateSecretRef(auth, { name: e.target.value }))}
         disabled={readOnly}
         placeholder={t('field.secretName')}
       />
       <Input
         aria-label={t('field.secretNs')}
-        value={auth?.secretRef.namespace || ''}
+        value={auth?.secretRef?.namespace || ''}
         onChange={(e) => onAuthChange(updateSecretRef(auth, { namespace: e.target.value }))}
         disabled={readOnly}
         placeholder={t('field.secretNs')}
@@ -87,6 +88,7 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
               <Select.Option value="webhook">Webhook</Select.Option>
               <Select.Option value="kafka">Kafka</Select.Option>
               <Select.Option value="httpdns">HTTP DNS</Select.Option>
+              <Select.Option value="otlp">OTLP/gRPC</Select.Option>
             </Select>
           </Form.Item>
         </Card>
@@ -266,6 +268,19 @@ const LinkSysForm: React.FC<LinkSysFormProps> = ({ data, onChange, readOnly = fa
               <Form.Item label="SASL password Secret">{renderSecretRef(kafka.sasl?.password,(password)=>updateConfig({sasl:{...kafka.sasl,password}} as Partial<KafkaConfig>))}</Form.Item>
               <Form.Item label="TLS"><Switch checked={kafka.tls?.enabled} disabled={readOnly} onChange={(enabled)=>updateConfig({tls:{...kafka.tls,enabled}} as Partial<KafkaConfig>)}/></Form.Item>
               <Card size="small" title="Advanced SASL and TLS certificates"><JsonValueField readOnly={readOnly} value={{sasl:kafka.sasl||{},tls:kafka.tls||{}}} onChange={(advanced)=>updateConfig(advanced as Partial<KafkaConfig>)}/></Card>
+            </Card>
+          )
+        })()}
+
+        {type === 'otlp' && (() => {
+          const otlp = config as OtlpConfig
+          return (
+            <Card title="OTLP/gRPC" size="small">
+              <Form.Item label="Endpoint" required><Input data-testid="linksys-otlp-endpoint" value={otlp.endpoint} placeholder="https://collector.example.com:4317" disabled={readOnly} onChange={(event) => updateConfig({ endpoint: event.target.value })} /></Form.Item>
+              <Form.Item label="Timeout (ms)"><InputNumber value={otlp.timeoutMs} placeholder="10000" min={1} max={300000} precision={0} disabled={readOnly} onChange={(timeoutMs) => updateConfig({ timeoutMs: timeoutMs ?? undefined })} /></Form.Item>
+              <Form.Item label="Bearer token Secret">{renderSecretRef(otlp.auth, (auth) => updateConfig({ auth }))}</Form.Item>
+              <Form.Item label="Custom TLS policy"><Switch checked={otlp.tls?.enabled ?? false} disabled={readOnly} onChange={(enabled) => updateConfig({ tls: { ...otlp.tls, enabled } })} /></Form.Item>
+              <Card title="TLS certificates" size="small"><JsonValueField readOnly={readOnly} value={otlp.tls ?? {}} onChange={(tls) => updateConfig({ tls })} /></Card>
             </Card>
           )
         })()}
