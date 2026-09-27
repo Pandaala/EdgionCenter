@@ -34,12 +34,19 @@ function configFor(kind: string) {
 }
 
 function statusBadge(node: TopoNode) {
-  if (node.data.unresolved) return <Tag color="red">unresolved</Tag>
-  if (node.data.unavailable) return <Tag>unavailable</Tag>
-  if (node.data.conflict) return <Tag color="orange">conflict</Tag>
-  if (node.data.rejected) return <Tag color="red">rejected</Tag>
-  if (node.data.unhealthy) return <Tag color="orange">not ready</Tag>
-  return null
+  const data = node.data
+  if (![data.unresolved, data.unavailable, data.conflict, data.rejected,
+    data.unresolvedConditions, data.partiallyInvalid, data.stale, data.unhealthy].some(Boolean)) return null
+  return <>
+    {node.data.unresolved && <Tag color="red">unresolved</Tag>}
+    {node.data.unavailable && <Tag>unavailable</Tag>}
+    {node.data.conflict && <Tag color="orange">conflict</Tag>}
+    {node.data.rejected && <Tag color="red">rejected</Tag>}
+    {node.data.unresolvedConditions && <Tag color="red">unresolved references</Tag>}
+    {node.data.partiallyInvalid && <Tag color="orange">partially invalid</Tag>}
+    {node.data.stale && <Tag color="gold">stale status</Tag>}
+    {node.data.unhealthy && <Tag color="orange">not ready</Tag>}
+  </>
 }
 
 export default function TopologyCanvas({ nodes, edges, onNodeClick }: Props) {

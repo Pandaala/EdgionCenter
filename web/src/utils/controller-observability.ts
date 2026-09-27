@@ -1,11 +1,16 @@
 import type { K8sResource } from '@/api/types'
-import { collectResourceConditions } from '@/components/resource/ResourceConditions'
+import { collectResourceConditions, isConditionStale } from '@/components/resource/ResourceConditions'
 
-export type ResourceIssue = 'unresolved' | 'rejected' | 'conflict'
+export type ResourceIssue = 'unresolved' | 'rejected' | 'conflict' | 'stale' | 'partiallyInvalid'
 
 export function resourceIssues(resource: K8sResource): ResourceIssue[] {
   const issues = new Set<ResourceIssue>()
   collectResourceConditions(resource.status).forEach(({ condition }) => {
+    if (isConditionStale(condition, resource.metadata.generation)) {
+      issues.add('stale')
+      return
+    }
+    if (condition.type === 'PartiallyInvalid' && condition.status === 'True') issues.add('partiallyInvalid')
     const text = `${condition.type} ${condition.reason ?? ''} ${condition.message ?? ''}`
     const reason = condition.reason ?? ''
     const conflictReason = /conflict/i.test(reason) && !/^NoConflict/i.test(reason) && !/Resolved/i.test(reason)

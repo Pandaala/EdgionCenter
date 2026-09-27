@@ -16,6 +16,9 @@ export interface TopoNode {
     resource: K8sResource
     layer: number
     unresolved?: boolean
+    stale?: boolean
+    partiallyInvalid?: boolean
+    unresolvedConditions?: boolean
     rejected?: boolean
     conflict?: boolean
     synthetic?: boolean
@@ -92,7 +95,12 @@ function resourceFlags(resource: K8sResource) {
   const issues = resourceIssues(resource)
   const rejected = issues.includes('rejected')
   const conflict = issues.includes('conflict')
-  return { rejected, conflict }
+  return {
+    rejected, conflict,
+    stale: issues.includes('stale'),
+    partiallyInvalid: issues.includes('partiallyInvalid'),
+    unresolvedConditions: issues.includes('unresolved'),
+  }
 }
 
 interface Reference {

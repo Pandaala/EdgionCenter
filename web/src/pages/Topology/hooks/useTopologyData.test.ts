@@ -138,3 +138,23 @@ describe('buildTopologyGraph', () => {
     expect(graph.nodes.map((node) => node.id)).not.toContain('service/other/other')
   })
 })
+
+
+it('retains references for a partially invalid route and separates stale conflict', () => {
+  const value = resource('HTTPRoute', 'web', 'demo', {
+    rules: [{ backendRefs: [{ name: 'svc' }, { name: 'missing' }] }],
+  }, { parents: [{ parentRef: { name: 'edge' }, conditions: [
+    { type: 'Conflicted', status: 'True', observedGeneration: 1 },
+    { type: 'PartiallyInvalid', status: 'True', observedGeneration: 2 },
+    { type: 'ResolvedRefs', status: 'False', observedGeneration: 2 },
+  ] }] })
+  value.metadata.generation = 2
+  const graph = buildTopologyGraph({
+    httproute: [value], service: [resource('Service', 'svc', 'demo')],
+  }, null, new Set(), true)
+  expect(graph.nodes.find((node) => node.id === 'httproute/demo/web')?.data).toMatchObject({
+    conflict: false, partiallyInvalid: true, stale: true, unresolvedConditions: true,
+  })
+  expect(graph.edges.find((edge) => edge.target === 'service/demo/svc')?.state).toBe('resolved')
+  expect(graph.edges.find((edge) => edge.target === 'service/demo/missing')?.state).toBe('unresolved')
+})

@@ -39,3 +39,28 @@ describe('controller observability', () => {
     ] }))).toEqual(expect.arrayContaining(['conflict', 'unresolved']))
   })
 })
+
+
+it('keeps current writer diagnostics while excluding obsolete rejection/conflict', () => {
+  const value = route('web', 'svc', { controllers: [
+    { controllerName: 'old', status: { conditions: [
+      { type: 'Accepted', status: 'False', observedGeneration: 2 },
+      { type: 'Conflicted', status: 'True', observedGeneration: 2 },
+    ] } },
+    { controllerName: 'current', status: { conditions: [
+      { type: 'Accepted', status: 'True', observedGeneration: 3 },
+      { type: 'PartiallyInvalid', status: 'True', observedGeneration: 3 },
+      { type: 'ResolvedRefs', status: 'False', observedGeneration: 3 },
+    ] } },
+  ] })
+  value.metadata.generation = 3
+  expect(resourceIssues(value)).toEqual(['stale', 'partiallyInvalid', 'unresolved'])
+})
+
+it('does not infer partial invalidity from False or Unknown', () => {
+  for (const status of ['False', 'Unknown']) {
+    expect(resourceIssues(route('web', 'svc', { conditions: [
+      { type: 'PartiallyInvalid', status },
+    ] }))).toEqual([])
+  }
+})

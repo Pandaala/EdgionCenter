@@ -91,5 +91,10 @@ resource generation into every list/detail caller, including Gateway listeners.
 The detail shows both generations; compact tooltips explain the mismatch.
 Each deployment observation is checked separately. Missing generation information
 does not establish staleness. Stale reference conditions do not carry the current
-reference-granted/denied test selectors. This rendering rule does not yet change
-resourceIssues or the topology summary classification.
+reference-granted/denied test selectors. The topology uses the same freshness rule:
+older observations add a stale-status badge and do not contribute current rejection,
+conflict or unresolved-reference flags. Current observations from other writers
+remain visible. PartiallyInvalid=True has its own warning, and node badges coexist
+rather than hiding each other by priority. A condition reporting unresolved refs is
+separate from a missing-resource placeholder, so it never suppresses graph edges.
+A resolved edge establishes reference existence, not runtime readiness.

@@ -1340,3 +1340,23 @@ before acting on CCI execution files or proposing replacements.
   classification (resourceIssues), real attachment transitions, Kubernetes writer
   behavior and the remaining resource/menu audit are still open. Do not infer
   runtime propagation or full alignment completion from component rendering tests.
+
+
+### Topology condition summaries
+
+- Reuse the same condition-generation predicate in resourceIssues. An old
+  observation contributes stale status, not a current rejection, unresolved-ref
+  or conflict diagnostic. Other writers' current conditions still contribute.
+- Surface PartiallyInvalid and condition-reported unresolved references on nodes.
+  Keep these separate from missing-object placeholders so graph construction
+  still follows every concrete reference. Badges coexist rather than hiding
+  additional diagnostics. Reference-existence edges do not prove readiness.
+- Twenty-eight relevant tests passed (37706 terminal zero): shared Conditions,
+  issue classification, graph construction and rendered canvas badges. Lint
+  86721 passed. Build first caught a test cleanup callback return-type error;
+  fixed its void return, then build 19637 passed. Logs:
+  /tmp/ws5-center-topology-status-{tests,lint,build-v2}.log.
+- No runtime propagation claim or native browser run in this batch. The audit
+  also found EdgionBackend absent from TOPOLOGY_KINDS/KIND_ALIASES/node styles;
+  AI backend references and policy targets require the next source-backed pass.
+  Full menu/resource alignment remains active.

@@ -98,14 +98,14 @@ function conditionColor({ type, status }: DisplayCondition): string {
   return 'default'
 }
 
-function isStale(condition: DisplayCondition, generation?: number): boolean {
+export function isConditionStale(condition: DisplayCondition, generation?: number): boolean {
   return Number.isSafeInteger(generation) && generation! >= 0
     && Number.isSafeInteger(condition.observedGeneration) && condition.observedGeneration! >= 0
     && condition.observedGeneration! < generation!
 }
 
 function ConditionTag({ condition, generation }: { condition: DisplayCondition; generation?: number }) {
-  const stale = isStale(condition, generation)
+  const stale = isConditionStale(condition, generation)
   const content = `${condition.type}=${condition.status}${stale ? ' (stale)' : ''}`
   const color = stale ? 'gold' : conditionColor(condition)
   if (!stale && condition.type === 'ResolvedRefs' && condition.status === 'True') {
@@ -135,7 +135,7 @@ export default function ResourceConditions({
     return (
       <Space size={[4, 4]} wrap>
         {items.map(({ context, condition }, index) => (
-          <Tooltip key={`${context}-${condition.type}-${index}`} title={[context, isStale(condition, generation) ? `Observed generation ${condition.observedGeneration}; current generation ${generation}` : undefined, condition.reason, condition.message].filter(Boolean).join(' — ')}>
+          <Tooltip key={`${context}-${condition.type}-${index}`} title={[context, isConditionStale(condition, generation) ? `Observed generation ${condition.observedGeneration}; current generation ${generation}` : undefined, condition.reason, condition.message].filter(Boolean).join(' — ')}>
             <ConditionTag condition={condition} generation={generation} />
           </Tooltip>
         ))}
