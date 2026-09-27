@@ -93,10 +93,10 @@ data:
 - View mode: display certificate info (expiry, CN, etc.), **hide** key content
 - Association display: EdgionTls/Gateway that reference this Secret
 
-## BackendTLSPolicy (Pending Development)
+## BackendTLSPolicy
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1alpha3
+apiVersion: gateway.networking.k8s.io/v1
 kind: BackendTLSPolicy
 metadata:
   name: backend-tls
@@ -112,11 +112,20 @@ spec:
         group: ""
         kind: Secret
     hostname: "backend.internal"
-    wellKnownCACertificates: ""        # System CA (optional)
 ```
 
 **Development Notes**:
 - Namespaced resource, kind: `backendtlspolicy`
 - Defines the gateway → backend mTLS policy
-- Simple form: targetRef (Service selector) + validation (CA reference + hostname)
-- Primarily YAML editing + basic form
+- One target: core Service (optional sectionName) or edgion.io EdgionBackend
+  (no sectionName). The form prevents adding a second target.
+- Choose same-namespace Secret/ConfigMap CA references or wellKnownCACertificates:
+  System, never both. Client certificate option accepts a bare Secret name.
+- validation.hostname is a precise, lowercase hostname, at most 253 characters.
+- Optional subjectAltNames contains 1–5 typed Hostname or URI entries. Hostname
+  permits a leading wildcard; URI must be absolute and at most 253 UTF-8 bytes.
+  Each entry carries only the field matching its type. Removing the final form
+  entry omits subjectAltNames instead of submitting an invalid empty array.
+- Form and YAML submissions share validation and runtime-field stripping.
+  Controller validation remains authoritative; CRUD evidence is not handshake
+  evidence.

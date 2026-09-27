@@ -825,3 +825,22 @@ before acting on CCI execution files or proposing replacements.
 - Security authorization denial, live certificate verification and cross-namespace
   attachment behavior remain open; continue route/fleet/admin menu coverage.
 - Final build 36636 passed. All checkpoint handles are terminal.
+
+
+### BackendTLSPolicy identity admission follow-up
+
+- Previous typed mTLS batch committed as ae36a4a, no push.
+- Compared current backend_tls_identity_validation_errors and gwapi_types with
+  the Center submission validator. Added precise SNI hostname checks, the 1–5
+  SAN bound, typed-field exclusivity, wildcard Hostname syntax, and absolute URI
+  shape/253-byte bound. Browser URL parsing is a preflight; Controller Rust URL
+  parsing remains authoritative.
+- Form limits targetRefs to one and SANs to five; removing the last SAN omits the
+  field. Editing a SAN value preserves unknown sibling fields.
+- Updated BackendTLSPolicy resource guide from obsolete v1alpha3/basic-only notes.
+- Build 3930 and lint 64247 passed. Initial parameterized test table incorrectly
+  spread array rows; fixed the test table. Final test handle 83182 passed all
+  17 adapter/editor submission cases. Logs /tmp/ws5-center-btp-identity-*.log.
+- No native browser or handshake rerun in this follow-up; prior security CRUD
+  coverage is recorded above. Security runtime, routes, fleet and administration
+  coverage remain open. All current tool sessions terminal.

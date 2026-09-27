@@ -89,7 +89,12 @@ export function validateBackendTLSPolicy(policy: BackendTLSPolicy): void {
   const aiBackend = target.group === 'edgion.io' && target.kind === 'EdgionBackend'
   if (!service && !aiBackend) throw new Error('Target must be a core Service or edgion.io EdgionBackend')
   if (aiBackend && target.sectionName !== undefined) throw new Error('sectionName is not supported for EdgionBackend targets')
-  if (!policy.spec.validation.hostname) throw new Error('Validation hostname is required')
+  // Keep these patterns aligned with edgion-resources gwapi_types.
+  const hostnamePattern = /^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/
+  const hostname = policy.spec.validation.hostname
+  if (typeof hostname !== 'string' || hostname.length > 253 || hostname.startsWith('*.') || !hostnamePattern.test(hostname) || hostname.includes('\n')) {
+    throw new Error('Validation hostname must be a valid precise hostname')
+  }
   const refs = policy.spec.validation.caCertificateRefs ?? []
   if (!refs.length && policy.spec.validation.wellKnownCACertificates !== 'System') throw new Error('Choose CA references or the System CA bundle')
   if (refs.length && policy.spec.validation.wellKnownCACertificates !== undefined) throw new Error('CA references and the System CA bundle are mutually exclusive')
@@ -105,10 +110,21 @@ export function validateBackendTLSPolicy(policy: BackendTLSPolicy): void {
   if (clientCert && (clientCert.includes('/') || !/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(clientCert))) {
     throw new Error('Client certificate reference must be a bare Secret name in the policy namespace')
   }
-  const subjectAltNames = policy.spec.validation.subjectAltNames ?? []
+  const subjectAltNames = policy.spec.validation.subjectAltNames
+  if (subjectAltNames === undefined) return
+  if (!Array.isArray(subjectAltNames) || subjectAltNames.length < 1 || subjectAltNames.length > 5) {
+    throw new Error('Subject alternative names must contain between one and five entries')
+  }
   subjectAltNames.forEach((san) => {
-    if (san.type === 'Hostname' && !san.hostname) throw new Error('Hostname SAN requires a hostname')
-    if (san.type === 'URI' && !san.uri) throw new Error('URI SAN requires a URI')
+    if (!san || (san.type !== 'Hostname' && san.type !== 'URI')) throw new Error('SAN type must be Hostname or URI')
+    if (san.type === 'Hostname') {
+      if (san.uri !== undefined || typeof san.hostname !== 'string' || san.hostname.length > 253 || !hostnamePattern.test(san.hostname) || san.hostname.includes('\n')) {
+        throw new Error('Hostname SAN requires only a valid hostname')
+      }
+    } else {
+      if (san.hostname !== undefined || typeof san.uri !== 'string' || new TextEncoder().encode(san.uri).length > 253) throw new Error('URI SAN requires only a valid absolute URI')
+      try { new URL(san.uri) } catch { throw new Error('URI SAN requires only a valid absolute URI') }
+    }
   })
 }
 

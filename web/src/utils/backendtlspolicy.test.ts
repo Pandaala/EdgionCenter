@@ -46,3 +46,28 @@ describe('BackendTLSPolicy validation', () => {
     expect(() => validateBackendTLSPolicy(normalize(base))).toThrow('Secret or ConfigMap')
   })
 })
+
+
+describe('BackendTLSPolicy identity admission', () => {
+  const makePolicy = () => normalize({ apiVersion: 'gateway.networking.k8s.io/v1', kind: 'BackendTLSPolicy', metadata: { name: 'api', namespace: 'prod' }, spec: { targetRefs: [{ group: '', kind: 'Service', name: 'api' }], validation: { hostname: 'api.internal', wellKnownCACertificates: 'System' } } })
+
+  it.each(['*.internal', 'UPPER.internal', 'api.internal\n', 'a'.repeat(254)])('rejects invalid SNI %j', (hostname) => {
+    const policy = makePolicy()
+    policy.spec.validation.hostname = hostname
+    expect(() => validateBackendTLSPolicy(policy)).toThrow('precise hostname')
+  })
+
+  it.each([[], Array(6).fill({ type: 'Hostname', hostname: 'api.internal' }), [{ type: 'DNS', hostname: 'api.internal' }], [{ type: 'Hostname', hostname: 'api.internal', uri: 'spiffe://prod/api' }], [{ type: 'URI', uri: '/relative' }], [{ type: 'URI', uri: 'urn:' + 'x'.repeat(250) }]].map(sans => ({ sans })))('rejects malformed SAN lists $sans', ({ sans }) => {
+    const policy = makePolicy()
+    policy.spec.validation.subjectAltNames = sans as any
+    expect(() => validateBackendTLSPolicy(policy)).toThrow()
+  })
+
+  it('accepts wildcard DNS and absolute non-HTTP URI SANs', () => {
+    const policy = makePolicy()
+    policy.spec.validation.subjectAltNames = [{ type: 'Hostname', hostname: '*.internal' }, { type: 'URI', uri: 'urn:example:client' }]
+    expect(() => validateBackendTLSPolicy(policy)).not.toThrow()
+    delete policy.spec.validation.subjectAltNames
+    expect(() => validateBackendTLSPolicy(policy)).not.toThrow()
+  })
+})

@@ -112,7 +112,7 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
             </Card>
           ))}
           {!readOnly && (
-            <Button data-testid="backendtlspolicy-target-add" type="dashed" icon={<PlusOutlined />} onClick={addTargetRef} block>
+            <Button data-testid="backendtlspolicy-target-add" type="dashed" icon={<PlusOutlined />} onClick={addTargetRef} disabled={(data.spec?.targetRefs || []).length >= 1} block>
               {t('btn.addTargetRef')}
             </Button>
           )}
@@ -189,10 +189,10 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
           <Card title="Subject alternative names" size="small" style={{ marginTop: 12 }}>
             {(data.spec.validation.subjectAltNames || []).map((san, index) => <Space key={index} style={{ display: 'flex', marginBottom: 8 }}>
               <Select value={san.type} disabled={readOnly} style={{ width: 130 }} options={['Hostname','URI'].map(value => ({ value }))} onChange={(type) => { const next=[...(data.spec.validation.subjectAltNames||[])]; next[index]={ type, ...(type==='Hostname'?{hostname:''}:{uri:''}) } as any; onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:next}}}) }} />
-              <Input disabled={readOnly} value={san.type === 'Hostname' ? san.hostname : san.uri} placeholder={san.type === 'Hostname' ? 'api.internal' : 'spiffe://cluster/service'} onChange={(e) => { const next=[...(data.spec.validation.subjectAltNames||[])]; next[index]=san.type==='Hostname'?{type:'Hostname',hostname:e.target.value}:{type:'URI',uri:e.target.value}; onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:next}}}) }} />
-              {!readOnly && <Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:(data.spec.validation.subjectAltNames||[]).filter((_,i)=>i!==index)}}})} />}
+              <Input disabled={readOnly} value={san.type === 'Hostname' ? san.hostname : san.uri} placeholder={san.type === 'Hostname' ? 'api.internal' : 'spiffe://cluster/service'} onChange={(e) => { const next=[...(data.spec.validation.subjectAltNames||[])]; next[index]=san.type==='Hostname'?{...san,hostname:e.target.value}:{...san,uri:e.target.value}; onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:next}}}) }} />
+              {!readOnly && <Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:data.spec.validation.subjectAltNames!.length === 1 ? undefined : data.spec.validation.subjectAltNames!.filter((_,i)=>i!==index)}}})} />}
             </Space>)}
-            {!readOnly && <Button type="dashed" icon={<PlusOutlined />} onClick={() => onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:[...(data.spec.validation.subjectAltNames||[]),{type:'Hostname',hostname:''}]}}})}>Add SAN</Button>}
+            {!readOnly && <Button type="dashed" disabled={(data.spec.validation.subjectAltNames || []).length >= 5} icon={<PlusOutlined />} onClick={() => onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:[...(data.spec.validation.subjectAltNames||[]),{type:'Hostname',hostname:''}]}}})}>Add SAN</Button>}
           </Card>
           <Form.Item label="Client certificate Secret name" extra="Same namespace only. Enter a bare Secret name, never namespace/name." style={{ marginTop: 12 }}>
             <Input disabled={readOnly} value={data.spec.options?.['edgion.io/client-certificate-ref'] || ''} onChange={(e) => onChange({...data,spec:{...data.spec,options:{...data.spec.options,'edgion.io/client-certificate-ref':e.target.value}}})} />
