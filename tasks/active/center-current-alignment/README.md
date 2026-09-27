@@ -912,3 +912,17 @@ before acting on CCI execution files or proposing replacements.
   /tmp/ws5-center-denial-v3.log. E2E typecheck 70949 passed. Owned runtime stopped,
   70 exact seeds retained. All sessions terminal. Existing-token revocation,
   browser restricted-menu behavior, OIDC and Kubernetes remain open.
+
+### Restricted-user browser navigation
+
+- Database/RBAC harness committed as cbd2029, no push.
+- Extended the restricted-user lifecycle with a fresh browser context and real
+  login using the changed password. Verified Users/Roles/Audit Log navigation
+  buttons are absent, and direct /users, /roles and /audit visits redirect to
+  the root without rendering their management controls. Existing API denials
+  and password/status lifecycle assertions still run in the same scenario.
+- Native RBAC handle 3413 passed auth plus the complete scenario (18.1 s), log
+  /tmp/ws5-center-browser-denial-v1.log. E2E typecheck 34409 passed. Owned runtime
+  stopped, 70 exact seeds retained, all sessions terminal. No production change
+  was necessary. This covers the roleless-user case; individual permission
+  combinations, existing-session revocation, OIDC and Kubernetes remain open.

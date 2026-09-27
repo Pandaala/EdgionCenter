@@ -20,7 +20,7 @@ test('restricted dependency metadata stays inside configured namespaces', async 
   }
 })
 
-test('standalone restricted user denies administration and honors password and status changes', async ({ request, playwright, baseURL }) => {
+test('standalone restricted user denies administration and honors password and status changes', async ({ request, playwright, browser, baseURL }) => {
   test.skip(process.env.E2E_MODE !== 'standalone' || process.env.E2E_RBAC !== '1', 'Requires standalone with E2E_RBAC=1 and database admin bootstrap')
   test.setTimeout(60_000)
   const suffix = createHash('sha256').update(process.env.E2E_RUN_ID ?? '').digest('hex').slice(0, 8)
@@ -32,6 +32,7 @@ test('standalone restricted user denies administration and honors password and s
   const { data: userId } = await created.json() as { data: number }
   expect(typeof userId).toBe('number')
   const anonymous = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } })
+  const restrictedContext = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } })
   try {
     const login = await anonymous.post('/api/v1/auth/login', { data: { username, password: oldPassword } })
     expect(login.status()).toBe(200)
@@ -44,11 +45,29 @@ test('standalone restricted user denies administration and honors password and s
     expect((await request.patch(`/api/v1/center/admin/users/${userId}`, { data: { password: newPassword } })).ok()).toBeTruthy()
     expect((await anonymous.post('/api/v1/auth/login', { data: { username, password: oldPassword } })).status()).toBe(401)
     expect((await anonymous.post('/api/v1/auth/login', { data: { username, password: newPassword } })).status()).toBe(200)
+    const page = await restrictedContext.newPage()
+    await page.goto('/login')
+    await page.getByTestId('login-username').fill(username)
+    await page.getByTestId('login-password').fill(newPassword)
+    await page.getByTestId('login-submit').click()
+    await expect(page).not.toHaveURL(/\/login/)
+    await expect(page.getByTestId('user-menu')).toBeVisible()
+    for (const name of ['Users', 'Roles', 'Audit Log']) {
+      await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0)
+    }
+    for (const path of ['/users', '/roles', '/audit']) {
+      await page.goto(path)
+      await expect(page).toHaveURL(new URL('/', baseURL!).href)
+      await expect(page.getByTestId('user-create')).toHaveCount(0)
+      await expect(page.getByTestId('role-create')).toHaveCount(0)
+      await expect(page.getByTestId('audit-refresh')).toHaveCount(0)
+    }
     expect((await request.patch(`/api/v1/center/admin/users/${userId}`, { data: { status: 'disabled' } })).ok()).toBeTruthy()
     expect((await anonymous.post('/api/v1/auth/login', { data: { username, password: newPassword } })).status()).toBe(401)
     expect((await request.patch(`/api/v1/center/admin/users/${userId}`, { data: { status: 'active' } })).ok()).toBeTruthy()
     expect((await anonymous.post('/api/v1/auth/login', { data: { username, password: newPassword } })).status()).toBe(200)
   } finally {
+    await restrictedContext.close()
     await anonymous.dispose()
     expect((await request.delete(`/api/v1/center/admin/users/${userId}`)).ok()).toBeTruthy()
   }
