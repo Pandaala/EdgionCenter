@@ -1,3 +1,4 @@
+import { isIpOrCidr } from './ip-address'
 import * as yaml from 'js-yaml'
 import type { EdgionGatewayConfig } from '@/types/edgion-gateway-config'
 import { dumpYaml } from './yaml-utils'
@@ -95,14 +96,6 @@ export function parseEdgionByteSize(value: string): number | null {
   const numericValue = Number(numericPart)
   if (!Number.isFinite(numericValue) || numericValue < 0) return null
   return Math.min(Math.trunc(numericValue * (unit?.[1] ?? 1)), U64_MAX)
-}
-
-function validIpOrCidr(value: string): boolean {
-  const [address, prefix] = value.split('/')
-  if (!address) return false
-  if (address.includes(':')) return prefix === undefined || (/^\d+$/.test(prefix) && Number(prefix) <= 128)
-  const octets = address.split('.')
-  return octets.length === 4 && octets.every((octet) => /^\d+$/.test(octet) && Number(octet) <= 255) && (prefix === undefined || (/^\d+$/.test(prefix) && Number(prefix) <= 32))
 }
 
 export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): string[] {
@@ -219,11 +212,12 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
   const trustedGroups = Array.isArray(realIp?.trustedIps) ? realIp.trustedIps : []
   trustedGroups.forEach((group, index) => {
     const path = `spec.realIp.trustedIps[${index}]`
+    if (!group || typeof group !== 'object' || Array.isArray(group)) { errors.push(`${path} must be an object`); return }
     if (!IP_GROUP_NAME_PATTERN.test(group.name || '')) errors.push(`${path}.name is invalid`)
     else if (groupNames.has(group.name)) errors.push(`${path}.name must be unique`)
     else groupNames.add(group.name)
-    if (!group.cidrs?.length) errors.push(`${path}.cidrs requires at least one entry`)
-    group.cidrs?.forEach((cidr, cidrIndex) => { if (!validIpOrCidr(cidr)) errors.push(`${path}.cidrs[${cidrIndex}] is invalid`) })
+    if (!Array.isArray(group.cidrs) || !group.cidrs.length) errors.push(`${path}.cidrs requires at least one entry`)
+    if (Array.isArray(group.cidrs)) group.cidrs.forEach((cidr, cidrIndex) => { if (!isIpOrCidr(cidr)) errors.push(`${path}.cidrs[${cidrIndex}] is invalid`) })
   })
   spec.globalPluginsRef?.forEach((ref, index) => { if (!ref.name?.trim()) errors.push(`spec.globalPluginsRef[${index}].name is required`) })
   const outbound = spec.outboundTls

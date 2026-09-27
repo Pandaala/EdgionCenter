@@ -268,3 +268,13 @@ describe('EdgionGatewayConfig lossless adapter', () => {
 function fromYamlDocument() {
   return fromYaml(toYaml(fixture))
 }
+
+describe('GatewayConfig malformed trusted proxy inputs', () => {
+  it('reports malformed YAML values without throwing or accepting fake IPv6', () => {
+    for (const group of [null, 'invalid', { name: 'proxy', cidrs: '::1' }, { name: 'proxy', cidrs: [null] }, { name: 'proxy', cidrs: ['not:an:ip'] }, { name: 'proxy', cidrs: ['10.0.0.0/8/extra'] }]) {
+      const resource = createEmpty()
+      resource.spec.realIp = { trustedIps: [group] } as any
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('trustedIps[0]')
+    }
+  })
+})

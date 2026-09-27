@@ -942,3 +942,20 @@ before acting on CCI execution files or proposing replacements.
   Reviewed the documentation diff and checked whitespace. No executable code
   changed, so no application tests rerun. Other older guide sections and the
   remaining menu/runtime ledger still require their own audits.
+
+### Trusted proxy IP/CIDR validation
+
+- Guide reconciliation committed as b11bade, no push.
+- GatewayConfig treated any colon-containing address as IPv6 and ignored extra
+  slash segments. Replaced this with shared literal IP helpers extracted from
+  the existing DNS endpoint validator, strict characters and exact CIDR shape.
+  IPv4/IPv6 prefix bounds follow current radix_ip/types.rs; host bits and Rust's
+  optional plus on prefix integers remain accepted. No operator normalization.
+- Malformed YAML groups/CIDR collections now yield validation errors instead of
+  throwing on null or non-array values. Tests include bogus IPv6, extra slash,
+  newline, zone/socket syntax, mapped IPv6, zero prefixes and null values.
+- Initial and final targeted runs passed 19 cases (final handle 42543), covering
+  IP syntax, DNS/LinkSys regression and GatewayConfig admission. Build 49595 and
+  lint 56854 passed before the final strict-character refinement; final targeted
+  tests passed afterward. Logs /tmp/ws5-center-cidr-*.log. No native browser or
+  traffic rerun for this adapter-only correction; runtime coverage remains open.
