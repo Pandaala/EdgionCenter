@@ -54,6 +54,14 @@ Every editor must prove:
 
 ## Browser E2E
 
+The metadata-only provider account CRUD/CAS browser case runs against both
+standalone and Kubernetes stores. Kubernetes requires all three Center CRDs,
+namespace-scoped provider persistence permissions for its ServiceAccount, and
+both account-write and credential-use permissions for the test user. The
+runtime fixture and API preflight include these requirements without Secret
+access or provider network calls. Retain the run-owned account after the case;
+ProviderAccount deletion is intentionally not exposed.
+
 The OIDC setup defaults to callback `http://127.0.0.1:14180/oauth2/callback`.
 For an isolated runtime using a different loopback port, set
 `E2E_OAUTH_CALLBACK_URL` to the exact registered callback and use the matching

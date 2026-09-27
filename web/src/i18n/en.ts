@@ -1161,6 +1161,8 @@ const en = {
   'cloud.capabilities.title': 'Capability Evidence',
   'cloud.capabilities.notDiscovered': 'No capability snapshot has been discovered for this account. The dashboard will not infer availability.',
   'cloud.capabilities.stale': 'This capability snapshot belongs to an older account generation. Refresh or reconfigure before using it.',
+  'cloud.capabilities.readFailed': 'Could not load capability evidence. Displayed evidence may be stale. Refresh to retry.',
+  'cloud.accounts.readFailed': 'Could not load provider accounts. Displayed accounts may be stale or incomplete. Refresh to retry.',
   'cloud.permission.accountReadonly': 'You can view provider accounts, but account mutation also requires credential-use permission.',
   'cloud.permission.capabilityDenied': 'You do not have permission to read provider capability evidence.',
   'cloud.permission.dnsDenied': 'You do not have permission to read Cloudflare DNS inventory.',

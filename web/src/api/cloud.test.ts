@@ -7,6 +7,27 @@ import { route53DnsApi } from './route53Dns'
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('Center cloud API routing', () => {
+  it('loads every provider account page for account tables and DNS selectors', async () => {
+    const get = vi.spyOn(apiClient, 'get')
+      .mockResolvedValueOnce({ data: { success: true, data: [{ accountId: 'first' }], continue_token: 'opaque+/=' } } as never)
+      .mockResolvedValueOnce({ data: { success: true, data: [{ accountId: 'last' }] } } as never)
+    expect(await cloudApi.listAccounts()).toEqual({ success: true, data: [{ accountId: 'first' }, { accountId: 'last' }], count: 2 })
+    expect(get).toHaveBeenNthCalledWith(2, '/api/v1/center/cloud/provider-accounts', expect.objectContaining({ _skipControllerProxy: true, params: { cursor: 'opaque+/=' } }))
+  })
+
+  it('rejects a failed later page instead of returning a partial account list', async () => {
+    vi.spyOn(apiClient, 'get')
+      .mockResolvedValueOnce({ data: { success: true, data: [{ accountId: 'first' }], continue_token: 'next' } } as never)
+      .mockRejectedValueOnce(new Error('page unavailable'))
+    await expect(cloudApi.listAccounts()).rejects.toThrow('page unavailable')
+  })
+
+  it('stops when the provider account cursor repeats', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { success: true, data: [], continue_token: 'same' } } as never)
+    await expect(cloudApi.listAccounts()).rejects.toThrow('pagination did not advance')
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+
   it('uses explicit Center paths and never enables the controller proxy', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { success: true, data: [] } } as never)
     await cloudApi.listAccounts()

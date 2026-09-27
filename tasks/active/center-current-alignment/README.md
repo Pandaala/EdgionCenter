@@ -2321,3 +2321,28 @@ before acting on CCI execution files or proposing replacements.
 - Detailed evidence, the bounded migration observation timeout and retained
   runtime pointers: [KUBERNETES-FORWARDING-EVIDENCE.md](KUBERNETES-FORWARDING-EVIDENCE.md).
   The overall goal remains active; no push.
+
+### Provider account menu pagination and Kubernetes workflows (2026-09-28)
+
+- Fixed the shared account client dropping continuation tokens after the API's
+  first 50 rows, affecting both the account table and DNS account selectors.
+  Later-page failures reject the read and repeated cursors terminate safely.
+- Added explicit account-read and capability-read failures with cached-data
+  warnings. Loading/failure no longer masquerades as a successful missing
+  capability snapshot. Added seven meaningful API/component regression cases.
+- Ran the existing CRUD/CAS browser case against the real Kubernetes store:
+  creation, labels, concurrent 412, preserved draft and fresh edit all passed.
+  Staged SAR grants proved that account-write alone cannot use credentials.
+- Seeded 52 metadata-only CRDs and verified the last account on table page 3.
+  Actual permission revocation/restoration proved visible failure and recovery
+  for list and capability reads. Credential-value injection returned 400 and
+  left no record. All temporary provider grants were removed afterwards.
+- Updated Kubernetes E2E permissions/preflight so the common CRUD/CAS case no
+  longer needs a standalone-only skip. No Secret permission or provider network
+  calls were added. The updated preflight passed discovery and then rejected
+  the same six stale shared Edgion CRD schemas; none were overwritten. This
+  remains distinct from the passing isolated Center-only runtime proof.
+- Current frontend gates: 642 tests, build/lint, E2E types/inventory and shell
+  syntax. Current Vite source was tested; the retained v5 image was not rebuilt.
+  See [PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md](PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md).
+  No Edgion changes; goal remains active, no push.

@@ -96,11 +96,14 @@ function CapabilityDrawer({ account, onClose }: { account: ProviderAccount | nul
             {canInspect && <Button data-testid="cloud-credential-inspect" onClick={() => inspectionMutation.mutate()} loading={inspectionMutation.isPending}>{t('cloud.action.inspectCredential')}</Button>}
           </Space>
           {inspection !== null && <Alert type={inspection === 'valid' ? 'success' : 'warning'} showIcon message={t(`cloud.credential.${inspection}`)} />}
-          {!data || data.snapshotState === 'not_discovered' ? <Alert type="info" showIcon message={t('cloud.capabilities.notDiscovered')} /> : null}
+          {capability.isPending && <Alert type="info" showIcon message={t('msg.loading')} />}
+          {capability.isError && <Alert type="error" showIcon message={t('cloud.capabilities.readFailed')} />}
+          {!capability.isError && data?.snapshotState === 'not_discovered' && <Alert type="info" showIcon message={t('cloud.capabilities.notDiscovered')} />}
           {snapshot && !snapshot.accountGenerationMatches && <Alert type="warning" showIcon message={t('cloud.capabilities.stale')} />}
           {snapshot?.issues.map((issue, index) => <Alert key={index} type={issue.severity === 'blocking' ? 'error' : 'warning'} showIcon message={t(`cloud.reason.${issue.reason}`)} />)}
           <Table
             size="small"
+            loading={capability.isFetching}
             rowKey={(item) => `${item.capability.family}/${item.capability.name}`}
             pagination={false}
             dataSource={snapshot?.observations ?? []}
@@ -163,8 +166,9 @@ export default function ProviderAccountsPage() {
   const credentialType = Form.useWatch('credentialType', form)
   return (
     <div>
-      <PageHeader title={t('cloud.accounts.title')} subtitle={t('cloud.accounts.subtitle')} actions={<Space><Button icon={<ReloadOutlined />} onClick={() => accounts.refetch()}>{t('btn.refresh')}</Button>{canWrite && <Button data-testid="cloud-account-create" type="primary" disabled={loadEdit.isPending} onClick={openCreate}>{t('cloud.action.createAccount')}</Button>}</Space>} />
+      <PageHeader title={t('cloud.accounts.title')} subtitle={t('cloud.accounts.subtitle')} actions={<Space><Button icon={<ReloadOutlined />} loading={accounts.isFetching} onClick={() => accounts.refetch()}>{t('btn.refresh')}</Button>{canWrite && <Button data-testid="cloud-account-create" type="primary" disabled={loadEdit.isPending} onClick={openCreate}>{t('cloud.action.createAccount')}</Button>}</Space>} />
       {!canWrite && <Alert type="info" showIcon message={t('cloud.permission.accountReadonly')} style={{ marginBottom: 16 }} />}
+      {accounts.isError && <Alert type="error" showIcon message={t('cloud.accounts.readFailed')} style={{ marginBottom: 16 }} />}
       {loadEdit.isError && <Alert type="error" showIcon message={t('msg.operationFailed')} style={{ marginBottom: 16 }} />}
       <Table rowKey="accountId" loading={accounts.isLoading} dataSource={accounts.data?.data ?? []} pagination={{ pageSize: 20 }} columns={[
         { title: t('cloud.col.account'), dataIndex: 'accountId' },

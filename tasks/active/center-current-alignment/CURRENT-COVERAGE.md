@@ -78,7 +78,7 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync; component read-failure/recovery states; deployed Kubernetes owner/non-owner reads, writes, CAS, connection migration and old-fence revocation | Pod crash takeover, post-dispatch transport faults and additional freshness transitions |
 | RegionRoute | Failover/restore, source-data sync, enable preservation, missing-target recovery; explicit write outcomes | Actual routed traffic and wider concurrent outcome scenarios |
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
-| Provider accounts | Native create/edit, label retention, exact-generation conflict | Kubernetes dashboard capability/identity workflow |
+| Provider accounts | Native and real Kubernetes browser create/edit, label retention and exact-generation conflict; 52-account pagination; staged SAR permissions, denied-read recovery and credential-value rejection | Metadata-only proof; external credential inspection is separate |
 | Cloudflare DNS and Route53 DNS | API DTO/form tests; sanitized read failure/recovery; lost-response uncertainty; 195 hermetic backend tests | New browser error states have component evidence, not native provider mutation evidence |
 | Login, audit, users, roles | Native password auth/logout, administration/restricted permissions; real Dex login/logout; mixed-provider password-cookie cleanup; explicit logout failure/unavailable feedback; deployed Kubernetes SAR, disabled administration routes and proxy logout | Dependency namespace workflow and further permission transitions |
 
@@ -165,6 +165,14 @@ build/lint, E2E types/inventory; backend workspace and no-default-feature tests,
 Clippy, formatting, dependency purity and manifest rendering. The full backend
 matrix still exits at the unrelated tracked `fix-issue-workflow-generic.zh.md`
 English-only guard; the later no-legacy guard passes when run separately.
+
+Current provider-account menu evidence is in
+[PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md](PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md).
+The current Vite dashboard against the deployed v5 backend passed real Kubernetes
+CRUD/CAS, pagination beyond 50 accounts, and permission-revocation recovery.
+Frontend checks now pass 642 tests, build/lint, E2E types and inventory. All
+provider grants were removed after verification; 52 metadata-only CRDs remain
+in the owned namespace. The embedded v5 image predates these frontend changes.
 
 ## Next audit actions
 

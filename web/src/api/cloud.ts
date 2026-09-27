@@ -89,8 +89,21 @@ export interface ProviderAccountResponse<T> {
 
 export const cloudApi = {
   listAccounts: async (): Promise<ListResponse<ProviderAccount>> => {
-    const { data } = await apiClient.get(centerPath('cloud/provider-accounts'), centerRequest)
-    return data
+    const accounts: ProviderAccount[] = []
+    const seen = new Set<string>()
+    let cursor: string | undefined
+    do {
+      const { data } = await apiClient.get<ListResponse<ProviderAccount>>(centerPath('cloud/provider-accounts'), {
+        ...centerRequest,
+        params: { cursor },
+      })
+      if (!data.success) throw new Error('Could not load provider accounts')
+      accounts.push(...(data.data ?? []))
+      cursor = data.continue_token || undefined
+      if (cursor && seen.has(cursor)) throw new Error('Provider account pagination did not advance')
+      if (cursor) seen.add(cursor)
+    } while (cursor)
+    return { success: true, data: accounts, count: accounts.length }
   },
   getAccount: async (accountId: string): Promise<ProviderAccountResponse<ProviderAccount>> => {
     const response = await apiClient.get(centerPath(`cloud/provider-accounts/${encodeURIComponent(accountId)}`), centerRequest)

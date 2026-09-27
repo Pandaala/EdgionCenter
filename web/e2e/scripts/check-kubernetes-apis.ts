@@ -16,7 +16,14 @@ for (const item of inventory.catalogResources as DeclaredResource[]) declared.se
 for (const item of [...inventory.states, ...inventory.supportResources]) {
   if (!declared.has(item.kind)) throw new Error(`Fixture kind ${item.kind} has no catalog API declaration`)
 }
-declared.set('EdgionController', { apiVersion: 'center.edgion.io/v1alpha1', kind: 'EdgionController', scope: 'Namespaced' })
+const centerResources: Record<string, string> = {
+  EdgionController: 'edgioncontrollers.center.edgion.io',
+  EdgionProviderAccount: 'edgionprovideraccounts.center.edgion.io',
+  EdgionProviderCapabilitySnapshot: 'edgionprovidercapabilitysnapshots.center.edgion.io',
+}
+for (const kind of Object.keys(centerResources)) {
+  declared.set(kind, { apiVersion: 'center.edgion.io/v1alpha1', kind, scope: 'Namespaced' })
+}
 
 const discoveries = new Map<string, Discovery>()
 for (const item of declared.values()) {
@@ -30,7 +37,7 @@ for (const item of declared.values()) {
     if (discovery.groupVersion !== item.apiVersion) throw new Error(`Discovery groupVersion mismatch for ${endpoint}: ${discovery.groupVersion ?? '<missing>'}`)
     discoveries.set(endpoint, discovery)
   }
-  const mapped = item.kind === 'EdgionController' ? 'edgioncontrollers.center.edgion.io' : cleanupKindMap[item.kind as keyof typeof cleanupKindMap]
+  const mapped = centerResources[item.kind] ?? cleanupKindMap[item.kind as keyof typeof cleanupKindMap]
   if (!mapped) throw new Error(`No resource mapping for fixture kind ${item.kind}`)
   const resourceName = mapped.split('.', 1)[0]
   const resource = discovery.resources?.find(({ name }) => name === resourceName)

@@ -5,6 +5,15 @@ description: Edgion Center API layer design — Axios client, resourceApi/cluste
 
 # API Layer Design
 
+## Provider accounts
+
+`cloudApi.listAccounts()` follows every opaque `continue_token` before returning
+the list consumed by the account table and DNS account selectors. A failed later
+page rejects the whole read; a repeated cursor fails instead of looping.
+Account reads and capability reads surface sanitized failures while retaining
+cached data with an explicit warning. Loading or failed capability reads must
+never be presented as a successfully observed `not_discovered` state.
+
 ## authApi (Authentication)
 
 | Method | Path | Description |

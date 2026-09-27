@@ -114,6 +114,8 @@ else
   assert_can_i yes "$center_actor" create subjectaccessreviews.authorization.k8s.io
   assert_can_i yes "$center_actor" create leases.coordination.k8s.io -n "$namespace"
   assert_can_i yes "$center_actor" get pods -n "$namespace"
+  assert_can_i yes "$center_actor" create edgionprovideraccounts.center.edgion.io -n "$namespace"
+  assert_can_i no "$center_actor" create edgionprovideraccounts.center.edgion.io -n default
   assert_can_i no "$center_actor" create leases.coordination.k8s.io -n default
   assert_can_i no "$center_actor" get pods -n default
   assert_can_i no "$center_actor" create edgioncontrollers.center.edgion.io -n default

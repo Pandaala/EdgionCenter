@@ -74,6 +74,58 @@ beforeEach(() => {
 })
 
 describe('Provider accounts dashboard boundary', () => {
+  it('shows a sanitized account read failure and recovers on refresh', async () => {
+    state.listAccounts.mockRejectedValue(new Error('private credential diagnostics'))
+    renderPage(<ProviderAccountsPage />)
+    expect(await screen.findByText(/Could not load provider accounts\./)).toBeInTheDocument()
+    expect(screen.queryByText('private credential diagnostics')).not.toBeInTheDocument()
+    state.listAccounts.mockResolvedValue({ success: true, data: [ACCOUNT], count: 1 })
+    const refresh = screen.getByRole('button', { name: /Refresh/ })
+    await waitFor(() => expect(refresh).not.toHaveClass('ant-btn-loading'))
+    fireEvent.click(refresh)
+    expect(await screen.findByText('cf-main')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/Could not load provider accounts\./)).not.toBeInTheDocument())
+  })
+
+  it('does not report missing evidence while the initial capability read is pending', async () => {
+    state.getCapabilities.mockReturnValue(new Promise(() => {}))
+    renderPage(<ProviderAccountsPage />)
+    await screen.findByText('cf-main')
+    fireEvent.click(screen.getByRole('button', { name: 'Capability Evidence' }))
+    expect(await screen.findByText('Loading...')).toBeInTheDocument()
+    expect(screen.queryByText(/No capability snapshot has been discovered/)).not.toBeInTheDocument()
+  })
+
+  it('distinguishes failed capability reads from an absent snapshot and recovers', async () => {
+    state.getCapabilities.mockRejectedValue(new Error('private capability diagnostics'))
+    renderPage(<ProviderAccountsPage />)
+    await screen.findByText('cf-main')
+    fireEvent.click(screen.getByRole('button', { name: 'Capability Evidence' }))
+    expect(await screen.findByText(/Could not load capability evidence/)).toBeInTheDocument()
+    expect(screen.queryByText('private capability diagnostics')).not.toBeInTheDocument()
+    expect(screen.queryByText(/No capability snapshot has been discovered/)).not.toBeInTheDocument()
+    state.getCapabilities.mockResolvedValue({ success: true, data: { snapshotState: 'not_discovered' } })
+    const refresh = screen.getByTestId('cloud-capabilities-refresh')
+    await waitFor(() => expect(refresh).not.toHaveClass('ant-btn-loading'))
+    fireEvent.click(refresh)
+    expect(await screen.findByText(/No capability snapshot has been discovered/)).toBeInTheDocument()
+    expect(screen.queryByText(/Could not load capability evidence/)).not.toBeInTheDocument()
+  })
+
+  it('marks retained capability evidence as potentially stale after refresh fails', async () => {
+    renderPage(<ProviderAccountsPage />)
+    await screen.findByText('cf-main')
+    fireEvent.click(screen.getByRole('button', { name: 'Capability Evidence' }))
+    await screen.findByText(/older account generation/)
+    state.getCapabilities.mockRejectedValue(new Error('private capability diagnostics'))
+    const refresh = screen.getByTestId('cloud-capabilities-refresh')
+    await waitFor(() => expect(refresh).not.toHaveClass('ant-btn-loading'))
+    fireEvent.click(refresh)
+    expect(await screen.findByText(/Could not load capability evidence/)).toBeInTheDocument()
+    expect(screen.getByText(/older account generation/)).toBeInTheDocument()
+    expect(screen.queryByText(/No capability snapshot has been discovered/)).not.toBeInTheDocument()
+  })
+
   it('submits a credential reference then destroys the input instead of rerendering it', async () => {
     renderPage(<ProviderAccountsPage />)
     await screen.findByText('cf-main')

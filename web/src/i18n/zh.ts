@@ -1160,6 +1160,8 @@ const zh = {
   'cloud.credentialType.assume_identity': '假定身份',
   'cloud.capabilities.title': '能力证据',
   'cloud.capabilities.notDiscovered': '此账户尚未发现能力快照。仪表盘不会推断能力是否可用。',
+  'cloud.capabilities.readFailed': '无法加载能力证据。已显示的证据可能过期，请刷新重试。',
+  'cloud.accounts.readFailed': '无法加载云凭据账户。已显示的账户可能过期或不完整，请刷新重试。',
   'cloud.capabilities.stale': '此能力快照属于较旧的账户代次。使用前请刷新或重新配置。',
   'cloud.permission.accountReadonly': '你可以查看云提供商账户，但修改账户还需要凭据使用权限。',
   'cloud.permission.capabilityDenied': '你没有读取提供商能力证据的权限。',

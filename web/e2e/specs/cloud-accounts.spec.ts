@@ -2,9 +2,8 @@ import { createHash } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 
 test('local provider account edits preserve labels and reject concurrent revisions', async ({ page, request }) => {
-  test.skip(process.env.E2E_MODE !== 'standalone', 'Uses the isolated standalone artifact database')
   // Metadata-only: provider adapters are disabled, and no inspection/DNS call is made.
-  // Account deletion is not exposed; this record remains in the run-owned database.
+  // Account deletion is not exposed; this record remains in the run-owned store.
   const name = `e2e-cloud-${createHash('sha256').update(process.env.E2E_RUN_ID!).digest('hex').slice(0, 8)}`
   const path = `/api/v1/center/cloud/provider-accounts/${name}`
   const desired = { displayName: 'Original', labels: { team: 'edge' }, managementPolicy: 'observe_only', provider: 'cloudflare', scope: { provider: 'cloudflare', accountId: '0123456789abcdef0123456789abcdef' }, credentialSource: { type: 'static_secret', credentialRef: 'e2e/unresolved-reference' } }

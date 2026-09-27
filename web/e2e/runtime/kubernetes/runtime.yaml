@@ -38,6 +38,9 @@ metadata: {name: "__PREFIX__-center-runtime-role", namespace: "__PREFIX__-system
 rules:
   - {apiGroups: [center.edgion.io], resources: [edgioncontrollers], verbs: [get, list, create, update]}
   - {apiGroups: [center.edgion.io], resources: [edgioncontrollers/status], verbs: [get, update]}
+  - {apiGroups: [center.edgion.io], resources: [edgionprovideraccounts], verbs: [get, list, create, update]}
+  - {apiGroups: [center.edgion.io], resources: [edgionprovidercapabilitysnapshots], verbs: [get, list, create]}
+  - {apiGroups: [center.edgion.io], resources: [edgionprovidercapabilitysnapshots/status], verbs: [get, update]}
   - {apiGroups: [coordination.k8s.io], resources: [leases], verbs: [get, create, update]}
   - {apiGroups: [""], resources: [pods], verbs: [get]}
 ---
@@ -155,6 +158,8 @@ rules:
   - {nonResourceURLs: ["/edgion-center-authz/api/v1/server-info"], verbs: [get]}
   - {nonResourceURLs: ["/edgion-center-authz/api/v1/proxy/__E2E_CONTROLLER_PATH_A__/*", "/edgion-center-authz/api/v1/proxy/__E2E_CONTROLLER_PATH_B__/*"], verbs: [get, post, put, patch, delete]}
   - {nonResourceURLs: ["/edgion-center-authz/api/v1/center/region-route-overrides", "/edgion-center-authz/api/v1/center/region-route-overrides/*"], verbs: [get, post, put, patch, delete]}
+  - {nonResourceURLs: ["/edgion-center-authz/api/v1/center/cloud/provider-accounts", "/edgion-center-authz/api/v1/center/cloud/provider-accounts/*"], verbs: [get, post, put]}
+  - {nonResourceURLs: ["/edgion-center-authz/permissions/provider-accounts:read", "/edgion-center-authz/permissions/provider-accounts:write", "/edgion-center-authz/permissions/provider-credentials:use"], verbs: [get]}
   - {nonResourceURLs: ["/edgion-center-authz/permissions/controllers:read", "/edgion-center-authz/permissions/controllers:write", "/edgion-center-authz/permissions/region-routes:read", "/edgion-center-authz/permissions/region-routes:write", "/edgion-center-authz/permissions/server:read", "/edgion-center-authz/permissions/proxy:read", "/edgion-center-authz/permissions/proxy:write"], verbs: [get]}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
