@@ -1,3 +1,4 @@
+import { validatePluginStages } from './plugin-document'
 /**
  * EdgionPlugins 工具函数
  */
@@ -59,17 +60,7 @@ export function normalizeEdgionPlugins(resource: EdgionPlugins | Record<string, 
   if (!resource.metadata || typeof resource.metadata !== 'object' || Array.isArray(resource.metadata) || !resource.spec || typeof resource.spec !== 'object' || Array.isArray(resource.spec)) {
     throw new Error('EdgionPlugins metadata and spec are required')
   }
-  const spec = resource.spec as Record<string, unknown>
-  for (const stage of ['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins', 'upstreamResponsePlugins']) {
-    const entries = spec[stage]
-    if (entries == null) continue
-    if (!Array.isArray(entries)) throw new Error(`${stage} must be an array`)
-    entries.forEach((entry, index) => {
-      const path = `${stage}[${index}]`
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.type !== 'string') throw new Error(`${path} must be a typed plugin object`)
-      if (entry.config != null && (typeof entry.config !== 'object' || Array.isArray(entry.config))) throw new Error(`${path}.config must be an object`)
-    })
-  }
+  validatePluginStages(resource.spec as Record<string, unknown>, ['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins', 'upstreamResponsePlugins'])
   return structuredClone(resource) as EdgionPlugins
 }
 

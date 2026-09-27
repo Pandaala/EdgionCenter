@@ -1059,3 +1059,20 @@ before acting on CCI execution files or proposing replacements.
   /tmp/ws5-center-plugin-shape-{tests,build,lint}.log. No native rerun for this
   structural guard; prior generic plugin CRUD remains separate evidence. All
   sessions terminal; nested plugin semantics and runtime coverage remain open.
+
+### Stream plugin structural boundary
+
+- HTTP YAML guard committed as 1fbeee4, no push.
+- Checked current stream schema: plugins and tlsRoutePlugins are independently
+  optional lists. Center normalization had accepted scalar/array metadata/spec
+  and malformed entries that the form could not render. Applied the same list
+  boundary as HTTP plugins using one shared validatePluginStages helper rather
+  than maintaining duplicate checks.
+- Both stream stages retain null/absent values, unknown plugin names and unknown
+  config fields. Wrong container/entry/config shapes fail before form rendering.
+  This does not replace Controller semantic validation or widen supported types.
+- Nineteen HTTP/stream adapter tests passed, covering both stages and lossless
+  mutations; build 6620 and lint 35329 passed. Logs
+  /tmp/ws5-center-stream-shape-{tests,build,lint}.log. All sessions terminal.
+  No new browser/data-plane evidence claimed; remaining nested schema and menu
+  runtime audit stays active.

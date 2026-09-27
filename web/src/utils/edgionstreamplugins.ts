@@ -1,3 +1,4 @@
+import { validatePluginStages } from './plugin-document'
 import * as yaml from 'js-yaml'
 import type { EdgionStreamPlugins } from '@/types/edgion-stream-plugins'
 import { dumpYaml } from './yaml-utils'
@@ -45,7 +46,8 @@ export function normalize(raw: unknown): EdgionStreamPlugins {
   if (!raw || typeof raw !== 'object') throw new Error('EdgionStreamPlugins must be an object')
   const resource = raw as EdgionStreamPlugins
   if (resource.kind !== 'EdgionStreamPlugins') throw new Error('Expected EdgionStreamPlugins kind')
-  if (!resource.metadata || !resource.spec) throw new Error('EdgionStreamPlugins metadata and spec are required')
+  if (!resource.metadata || typeof resource.metadata !== 'object' || Array.isArray(resource.metadata) || !resource.spec || typeof resource.spec !== 'object' || Array.isArray(resource.spec)) throw new Error('EdgionStreamPlugins metadata and spec are required')
+  validatePluginStages(resource.spec as unknown as Record<string, unknown>, ['plugins', 'tlsRoutePlugins'])
   return clone(resource)
 }
 

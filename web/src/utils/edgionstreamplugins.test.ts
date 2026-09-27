@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalize, toMutationDocument } from './edgionstreamplugins'
+import { fromYaml, normalize, toMutationDocument } from './edgionstreamplugins'
 
 describe('EdgionStreamPlugins lossless adapter', () => {
   it('preserves both stages, all current variants, unknown fields, and explicit empties', () => {
@@ -35,5 +35,22 @@ describe('EdgionStreamPlugins lossless adapter', () => {
     expect(mutation).not.toHaveProperty('spec.tlsRoutePlugins.0.config.ipMatcher')
     expect(mutation).not.toHaveProperty('status')
     expect(mutation).toHaveProperty('metadata.resourceVersion', '7')
+  })
+})
+
+
+describe('stream plugin YAML structure', () => {
+  it.each(['plugins', 'tlsRoutePlugins'])('validates %s while retaining unknown plugin config', (stage) => {
+    const document = { kind: 'EdgionStreamPlugins', metadata: { name: 'stream' }, spec: { [stage]: [{ type: 'FuturePlugin', config: { future: false } }] } }
+    expect(fromYaml(JSON.stringify(document))).toEqual(document)
+    for (const entries of [{}, [null], ['IpRestriction'], [{ type: 'IpRestriction', config: [] }]]) {
+      expect(() => fromYaml(JSON.stringify({ ...document, spec: { [stage]: entries } }))).toThrow(stage)
+    }
+    expect(fromYaml(JSON.stringify({ ...document, spec: { [stage]: null } })).spec).toEqual({ [stage]: null })
+  })
+
+  it('rejects array metadata and spec before rendering', () => {
+    expect(() => normalize({ kind: 'EdgionStreamPlugins', metadata: [], spec: {} })).toThrow('metadata and spec')
+    expect(() => normalize({ kind: 'EdgionStreamPlugins', metadata: {}, spec: [] })).toThrow('metadata and spec')
   })
 })
