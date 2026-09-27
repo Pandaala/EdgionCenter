@@ -2553,3 +2553,18 @@ before acting on CCI execution files or proposing replacements.
   changed, no Edgion changes committed, and no push. See the HTTPS follow-up in
   [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md).
   mTLS and GRPC/GRPCS remain open; the overall goal remains active.
+
+
+### 2026-09-28: Center mTLS and gRPC health probes
+
+- Four HTTPS mTLS and ten gRPC/GRPCS form scenarios passed through deployed
+  Center, retained Controller and actual Gateway traffic. Absent/untrusted
+  client identity, incorrect server hostname and NOT_SERVING responses remove
+  the backend; corrected configurations recover it. mTLS servers confirm the
+  actual trusted client CN, and healthy checks require fresh probe requests.
+- The pre-run HTTPS policy and exact Controller configuration were restored;
+  all three permission/traffic restoration assertions passed. No production
+  code changes or Edgion commits; no push. The overall goal remains active.
+- See [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md) for
+  the 14-case matrix, synthetic fixture limits, artifacts and retained processes.
+  TCP-only probes and other resilience behavior remain open.

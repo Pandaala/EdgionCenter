@@ -122,6 +122,58 @@ The active policy now uses HTTPS with the correct hostname.
 The exact Controller configuration was restored and reloaded; remote policy
 update permission is absent, Gateway traffic remains 200, and removal of the
 Center grant makes proxy read return 403. All three restoration checks passed.
-This extends the HTTP proof to HTTPS identity validation; mTLS, GRPC/GRPCS and
-other resilience behaviors remain open. The frontend unit/build/lint baseline
+This checkpoint extends the HTTP proof to HTTPS identity validation. The next
+section records the subsequent mTLS and GRPC/GRPCS proof. The frontend unit/build/lint baseline
 was not rerun for this runtime-and-documentation-only follow-up.
+
+
+## mTLS and gRPC follow-up
+
+The same current Center form and retained data plane passed 14 further edits.
+The HTTP application remains on 18091. Separate private-interface probe servers
+require HTTPS mTLS on 18093, plaintext gRPC on 18094, GRPCS on 18095, and GRPCS
+mTLS on 18096. The gRPC fixture implements the standard unary
+`/grpc.health.v1.Health/Check` exchange over HTTP/2, with protobuf SERVING or
+NOT_SERVING responses and gRPC status trailers. It is a synthetic protocol
+fixture, not a production application server.
+
+| Probe | Form changes | Actual Gateway traffic |
+|---|---|---|
+| HTTPS mTLS | No client reference; trusted client; untrusted client; trusted client | 503, 200, 503, 200 |
+| gRPC | `alignment` service; `not-serving`; `alignment` | 200, 503, 200 |
+| GRPCS | Correct hostname; incorrect hostname; correct hostname | 200, 503, 200 |
+| GRPCS mTLS | No client reference; trusted client; untrusted client; trusted client | 503, 200, 503, 200 |
+
+The trusted client is signed by the probe server's trusted CA; the untrusted
+client is a valid identity signed by a separate CA. Both live in run-owned TLS
+Secrets, seeded directly through the private Controller admin API. Center's
+permission remains only the concrete policy update and necessary read paths;
+no Secret read permission was added.
+
+Every browser edit received a successful proxied PUT and advanced Controller
+resourceVersion. Readback verifies protocol, port and service name; the HTTPS
+mTLS run additionally checks the exact client reference. Healthy checks require
+more than two additional successful requests at the selected probe server, so
+old healthy state alone cannot pass. Both mTLS servers recorded an authorized
+peer with CN `center-health-trusted`. Final counters were seven HTTPS mTLS
+requests, nine plaintext gRPC requests, eight GRPCS requests and seven GRPCS
+mTLS requests. The inspected final screenshot shows the GRPCS menu badge.
+
+Artifacts are `/tmp/ws5-center-mtls-health-20260928/`: `browser-proof.cjs`,
+`browser-result.json` (four checks), `grpc-proof.cjs`, `grpc-result.json`
+(ten checks), probe counters, `grpc-recovered.png`, and `restored.json`.
+Private certificate keys and Controller configuration are not committed.
+Retained probe processes are sessions 69800 (HTTPS mTLS) and 23035 (gRPC
+variants); revalidate them before reuse.
+
+Afterward, the policy's entire active-health configuration was restored to its
+pre-run HTTPS configuration on 18092. Exact Controller configuration bytes were
+restored and reloaded. Remote update permission disappeared, Gateway traffic
+remained 200, and removing the temporary Center grant returned proxy read to
+403. All three restoration assertions passed.
+
+No production source changes were needed. These runs establish the Center form
+integration with HTTP, HTTPS, gRPC and GRPCS probes, including basic identity
+failure and recovery. They do not establish TCP-only probes, every TLS option,
+certificate rotation, outlier ejection, retry budgets, circuit-breaking or
+load-balancer algorithms. The overall alignment goal remains active.
