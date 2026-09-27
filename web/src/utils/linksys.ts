@@ -13,6 +13,7 @@ import type {
   WebhookConfig,
 } from '@/types/link-sys'
 import { isValidDNS1123Label, isValidDNS1123Subdomain } from './validation'
+import { isValidDnsServer } from './dns-server'
 import { validateRedis } from './linksys-redis'
 import { validateCredentialSource } from './linksys-credential-source'
 import { dumpYaml } from './yaml-utils'
@@ -203,6 +204,7 @@ export function validateLinkSys(resource: LinkSys): void {
       if (request?.args?.forwardAll || request?.cookies?.forwardAll) fail('Webhook forwardAll is only supported for headers')
       const success = webhook.success as any
       if (success?.statusCodes && !success.statusCodes.length) fail('Webhook success.statusCodes must not be empty')
+      if (success?.body?.length && (webhook.maxResponseBytes ?? 1048576) < 4096) fail('Webhook maxResponseBytes must be at least 4096 when success.body predicates are set')
       for (const predicate of success?.body ?? []) {
         if (!predicate.pointer) fail('Webhook success body predicate pointer is required')
         const count = ['equals','notEquals','exists','in'].filter((key) => predicate[key] !== undefined).length
@@ -243,6 +245,7 @@ export function validateLinkSys(resource: LinkSys): void {
     case 'httpdns': {
       const httpDns = config as HttpDnsConfig
       if (!httpDns.preset && !httpDns.urlTemplate) fail('HTTP DNS requires a preset or URL template')
+      if (httpDns.fallback?.type === 'dns' && (!httpDns.fallback.servers?.length || !httpDns.fallback.servers.every(isValidDnsServer))) fail('HTTP DNS fallback requires a nonempty list of IP or IP:port servers')
       if (httpDns.urlTemplate && !httpDns.urlTemplate.includes('{domain}')) {
         fail('HTTP DNS URL template must contain {domain}')
       }

@@ -26,10 +26,10 @@ All rows remain open unless explicitly marked complete.
 | AI backends | EdgionBackend, HTTPRoute references, AiProxy, policy attachments | Catalog/access map, menu, editor, route/plugin/policy wiring added; native browser CRUD passed; advanced attachment and failure workflows pending |
 | Security | EdgionTls, BackendTLSPolicy, Secret/ConfigMap restricted dependencies | Pending |
 | Plugins | EdgionPlugins, EdgionStreamPlugins, EdgionConfigData | Current HTTP/stream catalogs aligned; nine ConfigData types editable, four new variants passed native browser CRUD; deeper validation and plugin workflows pending |
-| System | EdgionGatewayConfig, LinkSys, EdgionAcme | GatewayConfig requestBody aligned and browser verified; retry/forwardedHeaders/pluginPolicy and remaining systems pending |
+| System | EdgionGatewayConfig, LinkSys, EdgionAcme | GatewayConfig controls/policy aligned; ACME HTTP-01 aligned; all eight LinkSys variants have typed browser CRUD evidence; advanced behavior and remaining validation open |
 | Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Pending |
 | Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Pending |
-| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification running; RegionRoute audit pending |
+| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification passed; RegionRoute audit pending |
 | Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Pending |
 | Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Pending |
 | Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Pending |
@@ -725,3 +725,28 @@ before acting on CCI execution files or proposing replacements.
   connectivity claim is made by this management test.
 - Next: remaining LinkSys provider schemas (Elasticsearch, etcd, HTTP DNS,
   Webhook), advanced provider workflows, then remaining resource/menu ledger.
+
+### Remaining LinkSys variants and validation
+
+- Redis/Kafka batch committed as add464b, no push.
+- Current Elasticsearch and etcd schema fields are present in Center types and
+  structured/advanced editors. Added typed native CRUD cases exercising timeout,
+  pool/bulk/index and keepalive/namespace/message-size configuration respectively.
+- HTTP DNS was missing fallback DNS server validation. Added literal IPv4/IPv6
+  and socket parsing (including bracketed IPv6 and port zero, matching Rust).
+  Switching fallback away from dns clears its variant-owned servers field.
+- Webhook success.body now enforces the Controller's 4096-byte response cap floor.
+  Added typed HTTP DNS and Webhook cases with response/fallback/TLS and body/retry
+  options; narrow edits preserve all supplied siblings in YAML and API readback.
+- Utility suites 44406 passed 13 tests. First build 16741 found two test-only
+  union-property typing errors; explicit concrete config types fixed them.
+  Build 31270 passed; lint 25870 and E2E typecheck 56260 passed.
+- Native run 97115 passed all five cases (auth plus Elasticsearch, etcd, HTTP DNS,
+  Webhook). Log /tmp/ws5-center-remaining-link-runtime-v1.log; owned processes
+  stopped, 70 fixtures retained. Unit/build logs:
+  /tmp/ws5-center-remaining-link-tests.log and
+  /tmp/ws5-center-remaining-link-build-v2.log. No live handles remain.
+- All eight current LinkSys variants now have typed CRUD evidence across these
+  batches, but this does not prove live backend service integration or every
+  advanced permission/status/error workflow. Continue the full resource/menu
+  ledger; next infrastructure pass is GatewayClass, Gateway, ReferenceGrant.
