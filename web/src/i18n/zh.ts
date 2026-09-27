@@ -556,6 +556,8 @@ const zh = {
   'center.offline': '离线',
   'center.resourceCount': '资源数',
   'center.lastSync': '最后同步',
+  'center.controllers.readFailed': '无法刷新 Controller 信息',
+  'center.controllers.readFailedDescription': '显示的 Controller 状态和历史信息可能已过期或不完整，请刷新重试。',
   'center.never': '从未',
   'center.secsAgo': '{n} 秒前',
   'center.minsAgo': '{n} 分钟前',

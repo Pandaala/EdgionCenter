@@ -16,6 +16,7 @@ export default function CenterDashboard() {
     staleTime: 30_000,
     enabled: canReadControllers,
   })
+  const inventoryUnavailable = controllers.isError && !controllers.data
   const controllerRows = controllers.data?.data ?? []
   const onlineControllers = controllerRows.filter((controller) => controller.online).length
   const clusters = new Set(controllerRows.map((controller) => controller.cluster)).size
@@ -31,7 +32,7 @@ export default function CenterDashboard() {
           type="error"
           showIcon
           message={t('center.common.loadError')}
-          description={(controllers.error as Error).message}
+          description={t('center.controllers.readFailedDescription')}
           style={{ marginBottom: 16 }}
         />
       )}
@@ -43,15 +44,15 @@ export default function CenterDashboard() {
               <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
                 <Col xs={24} sm={8}>
                   <Card size="small">
-                    <Statistic title={t('center.dashboard.controllers')} value={controllerRows.length} />
+                    <Statistic title={t('center.dashboard.controllers')} value={inventoryUnavailable ? '—' : controllerRows.length} />
                   </Card>
                 </Col>
                 <Col xs={24} sm={8}>
                   <Card size="small">
                     <Statistic
                       title={t('center.dashboard.online')}
-                      value={onlineControllers}
-                      suffix={`/ ${controllerRows.length}`}
+                      value={inventoryUnavailable ? '—' : onlineControllers}
+                      suffix={inventoryUnavailable ? undefined : `/ ${controllerRows.length}`}
                       valueStyle={controllerRows.length > 0
                         ? { color: onlineControllers === controllerRows.length ? '#389e0d' : '#d46b08' }
                         : undefined}
@@ -60,11 +61,11 @@ export default function CenterDashboard() {
                 </Col>
                 <Col xs={24} sm={8}>
                   <Card size="small">
-                    <Statistic title={t('center.dashboard.clusters')} value={clusters} />
+                    <Statistic title={t('center.dashboard.clusters')} value={inventoryUnavailable ? '—' : clusters} />
                   </Card>
                 </Col>
               </Row>
-              <ResourceOverviewPanel controllers={controllerRows} />
+              {!inventoryUnavailable && <ResourceOverviewPanel controllers={controllerRows} />}
             </>
           )
       )}

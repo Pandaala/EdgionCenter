@@ -2080,3 +2080,23 @@ before acting on CCI execution files or proposing replacements.
   Earlier session 23703 also exited zero before the unresolved-reference and
   additional form cases. No new native request-body traffic claim; no Edgion
   changes. Overall resource/menu audit remains active.
+
+
+### Controller inventory read-state UI (2026-09-28)
+
+- ControllersPage previously rendered an ordinary empty table on first read
+  failure and silently retained cached online rows after failed refreshes.
+  Inventory and enabled history query errors now produce a persistent localized
+  stale/incomplete warning. The initial table failure no longer says No data.
+- CenterDashboard now uses a sanitized description rather than raw error text.
+  Without any snapshot, failed reads show unknown membership/online/cluster
+  counts and suppress the resource overview instead of reporting an empty fleet.
+  Cached snapshots remain available with the warning.
+- Component cases cover initial inventory failure, cached list/history failure,
+  refresh recovery to changed rows, suppression of private error strings, and
+  unknown dashboard totals. Existing reload and capability tests still pass.
+- Session 19885 exited zero: 12 page tests, build and lint on the final code.
+  Logs: /tmp/ws5-center-controller-read-{tests,build,lint}-v3.log.
+  Earlier focused runs 52957 and 93337 also completed successfully before the
+  final no-snapshot overview guard. This is component evidence, not a new native
+  federation outage run. No Edgion files changed; overall audit remains active.

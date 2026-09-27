@@ -151,3 +151,35 @@ describe('ControllersPage', () => {
     expect(screen.queryAllByText('center.reloadOutcome.title')).toHaveLength(0)
   })
 })
+
+
+it.each(['list', 'history'] as const)('reports %s refresh failures, preserves cached rows and clears the error on recovery', async (source) => {
+  mocks.useServerInfo.mockReturnValue({ data: { data: { capabilities: { controllerHistory: true } } } })
+  mocks.useCan.mockReturnValue(true)
+  mocks.listControllers.mockResolvedValue({ success: true, data: controllers })
+  mocks.listAdminControllers.mockResolvedValue({ success: true, data: [] })
+  renderPage()
+  expect(await screen.findByText('east/controller-a')).toBeInTheDocument()
+  const failing = source === 'list' ? mocks.listControllers : mocks.listAdminControllers
+  failing.mockRejectedValue(new Error('private upstream diagnostics'))
+  fireEvent.click(screen.getByTestId('controllers-refresh'))
+  expect(await screen.findByText('center.controllers.readFailedDescription')).toBeInTheDocument()
+  expect(screen.getByText('east/controller-a')).toBeInTheDocument()
+  expect(screen.queryByText('private upstream diagnostics')).not.toBeInTheDocument()
+  mocks.listControllers.mockResolvedValue({ success: true, data: [controllers[1]] })
+  mocks.listAdminControllers.mockResolvedValue({ success: true, data: [] })
+  fireEvent.click(screen.getByTestId('controllers-refresh'))
+  await waitFor(() => expect(screen.queryByText('center.controllers.readFailedDescription')).not.toBeInTheDocument())
+  expect(screen.queryByText('east/controller-a')).not.toBeInTheDocument()
+  expect(screen.getByText('west/controller-b')).toBeInTheDocument()
+})
+
+it('distinguishes an initial inventory failure from an empty Controller inventory', async () => {
+  mocks.useServerInfo.mockReturnValue({ data: { data: { capabilities: { controllerHistory: false } } } })
+  mocks.useCan.mockReturnValue(false)
+  mocks.listControllers.mockRejectedValue(new Error('private upstream diagnostics'))
+  renderPage()
+  expect(await screen.findByText('center.controllers.readFailedDescription')).toBeInTheDocument()
+  expect(screen.queryByText('No data')).not.toBeInTheDocument()
+  expect(screen.queryByText('private upstream diagnostics')).not.toBeInTheDocument()
+})

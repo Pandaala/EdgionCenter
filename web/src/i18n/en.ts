@@ -556,6 +556,8 @@ const en = {
   'center.offline': 'Offline',
   'center.resourceCount': 'Resources',
   'center.lastSync': 'Last Sync',
+  'center.controllers.readFailed': 'Could not refresh Controller information',
+  'center.controllers.readFailedDescription': 'Displayed Controller status and history may be stale or incomplete. Refresh to retry.',
   'center.never': 'Never',
   'center.secsAgo': '{n}s ago',
   'center.minsAgo': '{n}m ago',

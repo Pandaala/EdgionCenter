@@ -68,7 +68,7 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Menu group | Verified behavior | Remaining evidence boundary |
 |---|---|---|
 | Controller dashboard, operations, topology | Native controls; AI nodes; freshness, polarity, stale/partial/conflict states; grant boundaries | Cross-resource runtime changes beyond the recorded scenarios |
-| Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync | Deployed Kubernetes ownership/forwarding and additional freshness transitions |
+| Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync; component read-failure/recovery states | Deployed Kubernetes ownership/forwarding and additional freshness transitions |
 | RegionRoute | Failover/restore, source-data sync, enable preservation, missing-target recovery; explicit write outcomes | Actual routed traffic and wider concurrent outcome scenarios |
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native create/edit, label retention, exact-generation conflict | Kubernetes dashboard capability/identity workflow |

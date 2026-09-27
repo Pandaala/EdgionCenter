@@ -51,3 +51,14 @@ describe('CenterDashboard', () => {
     expect(mocks.listControllers).not.toHaveBeenCalled()
   })
 })
+
+
+it('shows unavailable counts and a sanitized message when the initial inventory read fails', async () => {
+  mocks.useCan.mockReturnValue(true)
+  mocks.listControllers.mockRejectedValue(new Error('private upstream diagnostics'))
+  renderPage()
+  expect(await screen.findByText('center.controllers.readFailedDescription')).toBeInTheDocument()
+  expect(screen.queryByText('private upstream diagnostics')).not.toBeInTheDocument()
+  expect(screen.getAllByText('—')).toHaveLength(3)
+  expect(screen.queryByTestId('resource-overview')).not.toBeInTheDocument()
+})

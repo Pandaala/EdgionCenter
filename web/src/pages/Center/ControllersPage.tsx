@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Badge, Button, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Badge, Button, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { ArrowRightOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import { centerApi, type AdminControllerDto, type ControllerSummary } from '@/api/center'
 import { useServerInfo } from '@/hooks/useServerInfo'
@@ -150,6 +150,15 @@ export default function ControllersPage() {
           </Button>
         )}
       />
+      {(list.isError || (hasHistory && canRead && history.isError)) && (
+        <Alert
+          type="error"
+          showIcon
+          message={t('center.controllers.readFailed')}
+          description={t('center.controllers.readFailedDescription')}
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Space wrap style={{ marginBottom: 16 }}>
         <Input.Search
           data-testid="controller-search"
@@ -172,6 +181,7 @@ export default function ControllersPage() {
         rowKey="controller_id"
         loading={list.isLoading || history.isLoading}
         dataSource={filtered}
+        locale={list.isError ? { emptyText: t('center.controllers.readFailed') } : undefined}
         pagination={{ pageSize: 20, showTotal: (n) => t('table.totalItems', { n }) }}
         scroll={{ x: 'max-content' }}
         columns={[

@@ -22,6 +22,13 @@ Failures are partial: one denied or old resource endpoint is recorded as unavail
 for that Controller/kind and must not hide successful snapshots. Secret and ConfigMap
 contents are not loaded by fleet observability.
 
+Controller inventory/history read failures remain visible as a sanitized page
+alert, including when cached rows survive a failed refresh. A first inventory
+failure is not an empty fleet: the Dashboard shows unknown membership counts and
+withholds the resource overview until an inventory snapshot exists. Cached
+snapshots remain visible with a stale/incomplete warning; retry recovery clears
+that warning.
+
 ## Dashboard resource overview
 
 The Center Dashboard is an inventory summary, not a diagnostics console. `ResourceOverviewPanel`
