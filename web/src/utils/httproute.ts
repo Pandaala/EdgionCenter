@@ -205,8 +205,8 @@ export function validateHTTPRouteForMutation(route: HTTPRoute): void {
       }
     }
     for (const code of rule.retry?.codes || []) {
-      if (!Number.isInteger(code) || code < 100 || code > 599) {
-        throw new Error(`rules[${ruleIndex}].retry.codes must contain HTTP status codes from 100 through 599`);
+      if (!Number.isInteger(code) || code < 400 || code > 599) {
+        throw new Error(`rules[${ruleIndex}].retry.codes must contain HTTP status codes from 400 through 599`);
       }
     }
   }

@@ -146,7 +146,7 @@ export const httpRouteRuleSchema = z.object({
   retry: z.object({
     attempts: z.number().int().optional(),
     backoff: z.string().optional(),
-    codes: z.array(z.number().int().min(100).max(599)).optional(),
+    codes: z.array(z.number().int().min(400).max(599)).optional(),
   }).passthrough().optional(),
   sessionPersistence: z.object({
     sessionName: z.string().optional(),

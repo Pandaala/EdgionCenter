@@ -439,7 +439,7 @@ const zh = {
   'routePolicy.attempts': '重试次数',
   'routePolicy.backoff': '退避时间',
   'routePolicy.codes': '重试状态码',
-  'routePolicy.httpCodes': 'HTTP 重试状态码（100-599）',
+  'routePolicy.httpCodes': 'HTTP 重试状态码（400-599）',
   'routePolicy.grpcCodes': 'gRPC 重试状态码（0-16）',
   'routePolicy.session': '会话保持',
   'routePolicy.sessionName': '会话名称',

@@ -38,6 +38,10 @@ Key fields:
 - `spec.rules[].backendRefs` — backend references (name/port/weight, supports backendRef-level filter)
 - `spec.rules[].timeouts` — request/backendRequest timeout
 - `spec.rules[].retry` — attempts/backoff/codes retry policy
+- HTTP retry codes are integers from 400 through 599. The form, schema and
+  mutation boundary share this range; informational, successful and redirect
+  responses cannot be configured as retry triggers. gRPC uses its separate
+  0–16 status-code range.
 - `spec.rules[].sessionPersistence` — session affinity (Cookie/Header)
 
 **Edgion Extension Fields**:

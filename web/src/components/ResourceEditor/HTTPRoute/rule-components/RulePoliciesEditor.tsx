@@ -27,8 +27,8 @@ const RulePoliciesEditor: React.FC<Props> = ({ value, onChange, disabled = false
       <Space wrap>
         <Form.Item label={t('routePolicy.attempts')} style={{ marginBottom: 0 }}><InputNumber min={0} value={retry.attempts} onChange={(attempts) => onChange({ ...value, retry: { ...retry, attempts: attempts ?? undefined } })} disabled={disabled} /></Form.Item>
         <Form.Item label={t('routePolicy.backoff')} style={{ marginBottom: 0 }}><Input value={retry.backoff || ''} onChange={(e) => onChange({ ...value, retry: { ...retry, backoff: e.target.value } })} disabled={disabled} placeholder="1s" /></Form.Item>
-        <Form.Item label={protocol === 'grpc' ? t('routePolicy.grpcCodes') : t('routePolicy.httpCodes')} style={{ marginBottom: 0 }}><Select mode="tags" value={(retry.codes || []).map(String)} onChange={(codes) => {
-          const min = protocol === 'grpc' ? 0 : 100
+        <Form.Item label={protocol === 'grpc' ? t('routePolicy.grpcCodes') : t('routePolicy.httpCodes')} style={{ marginBottom: 0 }}><Select aria-label={protocol === 'grpc' ? t('routePolicy.grpcCodes') : t('routePolicy.httpCodes')} mode="tags" value={(retry.codes || []).map(String)} onChange={(codes) => {
+          const min = protocol === 'grpc' ? 0 : 400
           const max = protocol === 'grpc' ? 16 : 599
           onChange({ ...value, retry: { ...retry, codes: codes.map(Number).filter((code) => Number.isInteger(code) && code >= min && code <= max) } })
         }} disabled={disabled} style={{ minWidth: 240 }} /></Form.Item>

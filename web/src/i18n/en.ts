@@ -439,7 +439,7 @@ const en = {
   'routePolicy.attempts': 'Attempts',
   'routePolicy.backoff': 'Backoff',
   'routePolicy.codes': 'Retry Status Codes',
-  'routePolicy.httpCodes': 'HTTP Retry Status Codes (100-599)',
+  'routePolicy.httpCodes': 'HTTP Retry Status Codes (400-599)',
   'routePolicy.grpcCodes': 'gRPC Retry Status Codes (0-16)',
   'routePolicy.session': 'Session Persistence',
   'routePolicy.sessionName': 'Session Name',

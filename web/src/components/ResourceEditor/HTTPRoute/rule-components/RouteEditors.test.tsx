@@ -4,6 +4,20 @@ import RouteFiltersEditor, { switchRouteFilterType } from './RouteFiltersEditor'
 import RulePoliciesEditor from './RulePoliciesEditor'
 
 describe('structured route editors', () => {
+  it.each([
+    ['http', 'HTTP Retry Status Codes (400-599)', '200', [503]],
+    ['http', 'HTTP Retry Status Codes (400-599)', '429', [503, 429]],
+    ['grpc', 'gRPC Retry Status Codes (0-16)', '14', [14]],
+  ] as const)('limits %s retry choices when entering %s / %s', (protocol, label, entered, expected) => {
+    const onChange = vi.fn()
+    const rule = { retry: { codes: protocol === 'http' ? [503] : [], attempts: 2 }, future: false }
+    render(<RulePoliciesEditor value={rule} onChange={onChange} protocol={protocol} />)
+    const input = screen.getByRole('combobox', { name: label })
+    fireEvent.mouseDown(input)
+    fireEvent.change(input, { target: { value: entered } })
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 })
+    expect(onChange).toHaveBeenLastCalledWith({ ...rule, retry: { ...rule.retry, codes: [...expected] } })
+  })
   it('narrowly edits a header filter while preserving unknown fields and sibling rows', () => {
     const onChange = vi.fn()
     render(<RouteFiltersEditor value={[{

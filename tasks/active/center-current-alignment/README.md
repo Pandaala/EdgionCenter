@@ -1792,3 +1792,32 @@ before acting on CCI execution files or proposing replacements.
 - This image's staged frontend predates the latest WAF work; rebuild current
   sources before using an image as proof for that UI. Kubernetes browser
   validation still requires a ready isolated cluster and Controller image.
+
+### HTTP retry status-code boundary (2026-09-28)
+
+- Current Edgion `http_route_preparse.rs::parse_retry` restricts response retry
+  codes to 400..=599; the routing review guard for informational response state
+  pollution confirms why 1xx must never trigger retries. Center still advertised
+  and accepted 100..=599 in its shared policy editor, HTTP Zod rule schema and
+  mutation validator. Aligned all three boundaries and both locale labels.
+  gRPC remains 0..=16. No backend or Edgion source changes.
+- Regression tests cover 1xx, 2xx, 3xx, out-of-range and fractional rejection,
+  accepted boundary codes, lossless sibling preservation, form entry and the
+  independent gRPC range. Session 49084 exited zero: 22 focused tests, frontend
+  build and lint passed. Logs: `/tmp/ws5-center-http-retry-{tests,build,lint}.log`.
+  E2E typecheck session 37013 also exited zero.
+- Native run `alignment-http-retry-20260928-v1`, session 9034 exit zero:
+  authentication plus focused HTTP retry browser test, 2 passed. Creates an
+  isolated HTTPRoute, enters rejected 200 then supported 429 through the form,
+  verifies Form/YAML output retains 503 plus 429, saves, checks the Controller
+  resource and cleans the exact resource. Seventy original fixture files remain
+  unchanged. Log: `/tmp/ws5-center-http-retry-native-v1.log`.
+- Next concrete route gap: GRPCMethodMatchEditor writes an empty string when
+  clearing optional service/method fields and prohibits removing the last match.
+  Current `GRPCRouteMatch::compile_method` accepts an omitted method block for
+  match-all and rejects invalid Exact names; service-only delegation also needs
+  method.method omitted. Correct these editor transitions and verify them next.
+- Isolated kind API readiness check still returned EOF at this turn's start.
+  No live build/prewarm remains from the prior checkpoint. Center image version
+  smoke command session 31484 exited zero with version 0.1.0 after image build.
+  Overall resource/menu alignment remains active.

@@ -373,6 +373,37 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+test('HTTP retry browser form saves only supported response status codes', async ({ page, request }) => {
+  const catalog = RESOURCE_CATALOG.get('httproute')!
+  await waitForControllerCapabilities(request, controller, [{ resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+  const name = `${prefix}-http-retry`
+  const document = mutationDocument(catalog, name)
+  document.spec.rules[0].retry = { attempts: 2, codes: [503] }
+  const path = itemPath(catalog, namespace, name)
+  try {
+    await openResourcePage(page, catalog)
+    await createThroughYaml(page, catalog, document)
+    await expectApiDocument(request, catalog, namespace, name)
+    await (await resourceRow(page, catalog, name)).getByTestId('httproute-row-edit').click()
+    const codes = page.getByRole('combobox', { name: 'HTTP Retry Status Codes (400-599)' })
+    await codes.fill('200')
+    await codes.press('Enter')
+    await codes.fill('429')
+    await codes.press('Enter')
+    await page.getByTestId('editor-yaml-tab').click()
+    expect((await yamlEditorDocument(page)).spec.rules[0].retry).toEqual({ attempts: 2, codes: [503, 429] })
+    const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().includes(path))
+    await page.getByTestId('editor-submit').click()
+    const result = await response
+    expect(result.ok(), await result.text()).toBeTruthy()
+    const updated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+    expect(updated.spec.rules[0].retry).toEqual({ attempts: 2, codes: [503, 429] })
+  } finally {
+    const cleanup = await request.delete(path)
+    expect(cleanup.ok() || cleanup.status() === 404, 'Exact HTTP retry fixture cleanup failed').toBeTruthy()
+  }
+})
+
 test('logical WAF browser form preserves policy references and counts one plugin', async ({ page, request }) => {
   const catalog = RESOURCE_CATALOG.get('edgionplugins')!
   const dataCatalog = RESOURCE_CATALOG.get('edgionconfigdata')!

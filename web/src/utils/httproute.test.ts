@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { httpRouteRuleSchema } from '@/schemas/gateway-api/httproute'
 import {
   normalizeHTTPRoute,
   toHTTPRouteMutationDocument,
@@ -7,6 +8,19 @@ import {
 } from './httproute'
 
 describe('HTTPRoute lossless adapter', () => {
+  it.each([100, 199, 200, 302, 399, 600, 503.5])('rejects retry status %s through schema and mutation boundaries', (code) => {
+    const rule = { retry: { codes: [code] } }
+    expect(httpRouteRuleSchema.safeParse(rule).success).toBe(false)
+    const route = normalizeHTTPRoute({ apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute', metadata: { name: 'retry' }, spec: { rules: [rule] } })
+    expect(() => toHTTPRouteMutationDocument(route, 'create')).toThrow(/400 through 599/)
+  })
+
+  it('preserves supported retry codes and unknown siblings through mutation', () => {
+    const rule = { retry: { codes: [400, 429, 503, 599], attempts: 2, future: false }, name: 'retry' }
+    expect(httpRouteRuleSchema.safeParse(rule).success).toBe(true)
+    const route = normalizeHTTPRoute({ apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute', metadata: { name: 'retry' }, spec: { rules: [rule] } })
+    expect(toHTTPRouteMutationDocument(route, 'create')).toHaveProperty('spec.rules.0', rule)
+  })
   it('retains typed AI backend candidates and rejects an operator-supplied port', () => {
     const route = normalizeHTTPRoute({
       apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute',
@@ -83,7 +97,7 @@ describe('HTTPRoute lossless adapter', () => {
     delete route.spec.rules[0].backendRefs[0].port
     expect(() => validateHTTPRouteForMutation(route)).toThrow(/PathPrefix/)
     route.spec.rules[0].matches[0].path.type = 'PathPrefix'
-    expect(() => validateHTTPRouteForMutation(route)).toThrow(/100 through 599/)
+    expect(() => validateHTTPRouteForMutation(route)).toThrow(/400 through 599/)
   })
 
   it('patches one mirror annotation without losing unrelated annotations', () => {
