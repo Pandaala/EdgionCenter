@@ -327,11 +327,13 @@ export function buildTopologyGraph(resources: TopologyResources, namespaceFilter
 
   const edges: TopoEdge[] = []
   const edgeIds = new Set<string>()
+  const attachmentEdges = new Set<string>()
   const addEdge = (source: string, target: string, label: string, state: TopologyEdgeState) => {
     const id = `${source}->${target}:${label}`
-    if (edgeIds.has(id)) return
+    if (edgeIds.has(id)) return id
     edgeIds.add(id)
     edges.push({ id, source, target, label, state, dashed: state !== 'resolved' })
+    return id
   }
   const ensureTarget = (ref: Reference, owner: TopoNode): TopoNode => {
     const id = nodeId(ref.kind, ref.kind !== 'unknown' && CLUSTER_KINDS.has(ref.kind) ? undefined : ref.namespace ?? owner.data.namespace, ref.name)
@@ -363,7 +365,10 @@ export function buildTopologyGraph(resources: TopologyResources, namespaceFilter
       const state: TopologyEdgeState = target.data.unavailable ? 'unavailable' : target.data.kind === 'unknown' ? 'unknown' : target.data.unresolved
         ? 'unresolved'
         : owner.data.conflict || target.data.conflict ? 'conflict' : 'resolved'
-      addEdge(ref.reverse ? target.id : owner.id, ref.reverse ? owner.id : target.id, ref.label, state)
+      const edgeId = addEdge(ref.reverse ? target.id : owner.id, ref.reverse ? owner.id : target.id, ref.label, state)
+      // Parent and policy attachment arrows run opposite to their references.
+      // They are not outbound references authorized by ReferenceGrant.
+      if (ref.reverse) attachmentEdges.add(edgeId)
     }
   }
 
@@ -377,12 +382,13 @@ export function buildTopologyGraph(resources: TopologyResources, namespaceFilter
       ? 'gateway.networking.k8s.io' : kind.startsWith('edgion') || kind === 'linksys' ? 'edgion.io' : ''
   const displayKind = (kind: string) => KIND_ALIASES[kind]?.replace(/^./, (value) => value.toUpperCase()) ?? kind
   for (const edge of [...edges]) {
+    if (attachmentEdges.has(edge.id)) continue
     const source = nodeMap.get(edge.source); const target = nodeMap.get(edge.target)
     if (!source?.data.namespace || !target?.data.namespace || source.data.namespace === target.data.namespace
       || source.data.kind === 'referencegrant' || target.data.kind === 'referencegrant'
       || source.data.unavailable || target.data.unavailable || source.data.kind === 'unknown' || target.data.kind === 'unknown') continue
     if (referenceGrantValidation === false) continue
-    if (referenceGrantValidation === 'unknown') {
+    if (referenceGrantValidation === 'unknown' || unavailableKinds.has('referencegrant')) {
       const name = `grant-check-unavailable:${target.data.kind}/${target.data.name}`
       const checkId = nodeId('referencegrant', target.data.namespace, name)
       if (!nodeMap.has(checkId)) {

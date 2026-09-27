@@ -198,3 +198,44 @@ it('distinguishes unavailable AI backend inventory from a missing backend', () =
   expect(buildTopologyGraph(resources, null).edges[0].state).toBe('unresolved')
   expect(buildTopologyGraph(resources, null, new Set(['edgionbackend'])).edges[0].state).toBe('unavailable')
 })
+
+
+it.each([true, 'unknown'] as const)('does not apply ReferenceGrant to cross-namespace parent attachment (%s)', (validation) => {
+  const graph = buildTopologyGraph({
+    httproute: [resource('HTTPRoute', 'web', 'apps', {
+      parentRefs: [{ name: 'edge', namespace: 'infra' }],
+    })],
+    gateway: [resource('Gateway', 'edge', 'infra', { listeners: [
+      { name: 'http', port: 80, protocol: 'HTTP', allowedRoutes: { namespaces: { from: 'All' } } },
+    ] })],
+  }, null, new Set(), validation)
+  expect(graph.edges).toHaveLength(1)
+  expect(graph.edges[0]).toMatchObject({ source: 'gateway/infra/edge', target: 'httproute/apps/web', label: 'parent' })
+  expect(graph.nodes.some((node) => node.data.kind === 'referencegrant')).toBe(false)
+})
+
+it('does not claim denial when ReferenceGrant inventory is unavailable', () => {
+  const graph = buildTopologyGraph({
+    edgionbackend: [resource('EdgionBackend', 'provider', 'apps', { ai: {
+      credentialPool: { credentials: [{ name: 'primary', secretRef: { name: 'key', namespace: 'credentials' } }] },
+    } })],
+    secret: [resource('Secret', 'key', 'credentials')],
+  }, null, new Set(['referencegrant']), true)
+  expect(graph.nodes.some((node) => node.data.name.startsWith('denied:'))).toBe(false)
+  expect(graph.edges.some((edge) => edge.state === 'unknown' && edge.label === 'grant check unavailable')).toBe(true)
+})
+
+it('matches an AI credential grant in the credential namespace', () => {
+  const graph = buildTopologyGraph({
+    edgionbackend: [resource('EdgionBackend', 'provider', 'apps', { ai: {
+      credentialPool: { credentials: [{ name: 'primary', secretRef: { name: 'key', namespace: 'credentials' } }] },
+    } })],
+    secret: [resource('Secret', 'key', 'credentials')],
+    referencegrant: [resource('ReferenceGrant', 'ai-key', 'credentials', {
+      from: [{ group: 'edgion.io', kind: 'EdgionBackend', namespace: 'apps' }],
+      to: [{ group: '', kind: 'Secret', name: 'key' }],
+    })],
+  }, null, new Set(), true)
+  expect(graph.edges.some((edge) => edge.source === 'edgionbackend/apps/provider'
+    && edge.target === 'referencegrant/credentials/ai-key' && edge.label === 'granted')).toBe(true)
+})

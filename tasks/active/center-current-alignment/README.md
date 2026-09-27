@@ -1381,3 +1381,24 @@ before acting on CCI execution files or proposing replacements.
 - Browser evidence proves inventory/display and metadata-only dependency views;
   route/policy/Redis relationship variants have graph tests, not live AI traffic
   evidence. No provider requests or real credential use. The full audit continues.
+
+
+### Topology cross-namespace authorization boundaries
+
+- Current Controller route_utils::listener_allows_route_namespace confirms that
+  Gateway parent attachment uses allowedRoutes (Same/All/Selector). The graph
+  previously applied ReferenceGrant projection to all cross-namespace arrows,
+  including reversed Gateway-to-Route attachment arrows with the wrong owner.
+  Track attachment edge identities and exclude them from grant projection.
+- A failed ReferenceGrant inventory fetch now produces an unknown check, even
+  when validation is known enabled; an incomplete inventory cannot prove denial.
+  Added AI credential grant matching and unavailable-inventory tests, alongside
+  enabled/unknown parent-attachment cases.
+- Fifteen topology tests passed (88343 terminal zero), build 90485 and lint 36966
+  passed. Logs /tmp/ws5-center-topology-grants-{tests,build,lint}.log. No native
+  browser run in this batch. Runtime hook still correctly treats Controller
+  ReferenceGrant validation configuration as unknown; graph-only enabled cases
+  do not claim that configuration is exposed by the API.
+- Parent attachment acceptance remains Controller-condition evidence, not graph
+  existence. Kubernetes selector evaluation and real traffic remain unverified;
+  the overall resource/menu audit continues.

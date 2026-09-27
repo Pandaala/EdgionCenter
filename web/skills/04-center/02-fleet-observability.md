@@ -106,3 +106,11 @@ remain visible. PartiallyInvalid=True has its own warning, and node badges coexi
 rather than hiding each other by priority. A condition reporting unresolved refs is
 separate from a missing-resource placeholder, so it never suppresses graph edges.
 A resolved edge establishes reference existence, not runtime readiness.
+
+
+ReferenceGrant projections apply to outbound cross-namespace references, not
+reverse parent/policy attachment arrows. Route-to-Gateway attachment follows the
+Controller's listener allowedRoutes policy; the graph does not independently
+reimplement selector evaluation. When ReferenceGrant validation configuration or
+the grant inventory is unavailable, show an unknown check rather than a denial.
+A resolved structural edge is never an authorization or attachment-success claim.
