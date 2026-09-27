@@ -373,6 +373,48 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+for (const kind of ['httproute', 'grpcroute'] as const) {
+  test(`route policy browser clearing restores optional fields for ${kind}`, async ({ page, request }) => {
+    const catalog = RESOURCE_CATALOG.get(kind)!
+    await waitForControllerCapabilities(request, controller, [{ resourceKind: kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+    const name = `${prefix}-${kind}-policy-clear`
+    const document = mutationDocument(catalog, name)
+    Object.assign(document.spec.rules[0], {
+      timeouts: { request: '30s', backendRequest: '10s' },
+      retry: { attempts: kind === 'httproute' ? 1 : 0, backoff: '1s' },
+      sessionPersistence: { type: 'Cookie', sessionName: 'SESSION', absoluteTimeout: '1h', ...(mode === 'standalone' ? { strict: false } : {}) },
+    })
+    const path = itemPath(catalog, namespace, name)
+    try {
+      await openResourcePage(page, catalog)
+      await createThroughYaml(page, catalog, document)
+      await expectApiDocument(request, catalog, namespace, name)
+      await (await resourceRow(page, catalog, name)).getByTestId(`${kind}-row-edit`).click()
+      await expect(page.getByText(/Strict session persistence is supported with FileSystem/)).toBeVisible()
+      await expect(page.getByText('Idle Timeout', { exact: true })).toHaveCount(0)
+      for (const field of ['Request Timeout', 'Backend Request Timeout', 'Backoff', 'Session Name', 'Absolute Timeout']) {
+        await page.getByRole('textbox', { name: field, exact: true }).fill('')
+      }
+      await page.getByTestId('editor-yaml-tab').click()
+      const edited = await yamlEditorDocument(page)
+      const expected = { timeouts: {}, retry: { attempts: kind === 'httproute' ? 1 : 0 }, sessionPersistence: { type: 'Cookie', ...(mode === 'standalone' ? { strict: false } : {}) } }
+      expect(edited.spec.rules[0]).toMatchObject(expected)
+      for (const section of Object.keys(expected)) expect(edited.spec.rules[0][section]).toEqual(expected[section as keyof typeof expected])
+      const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().includes(path))
+      await page.getByTestId('editor-submit').click()
+      const result = await response
+      expect(result.ok(), await result.text()).toBeTruthy()
+      const updated = await readControllerResourceDocument(request, controller, kind, 'Namespaced', namespace, name)
+      expect(updated.spec.rules[0].timeouts).toEqual({})
+      expect(updated.spec.rules[0].retry).toEqual(expected.retry)
+      expect(updated.spec.rules[0].sessionPersistence).toEqual(expected.sessionPersistence)
+    } finally {
+      const cleanup = await request.delete(path)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact route policy fixture cleanup failed').toBeTruthy()
+    }
+  })
+}
+
 for (const kind of ['tcproute', 'udproute', 'tlsroute'] as const) {
   test(`stream annotation browser edits preserve current ${kind} controls`, async ({ page, request }) => {
     const catalog = RESOURCE_CATALOG.get(kind)!

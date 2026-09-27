@@ -144,14 +144,13 @@ export const httpRouteRuleSchema = z.object({
   backendRefs: z.array(backendRefSchema).optional(),
   timeouts: httpRouteTimeoutsSchema.optional(),
   retry: z.object({
-    attempts: z.number().int().optional(),
+    attempts: z.number().int().min(1).optional(),
     backoff: z.string().optional(),
-    codes: z.array(z.number().int().min(400).max(599)).optional(),
+    codes: z.array(z.number().int().min(400).max(599)).refine((codes) => new Set(codes).size === codes.length, 'Retry codes must be unique').optional(),
   }).passthrough().optional(),
   sessionPersistence: z.object({
     sessionName: z.string().optional(),
     absoluteTimeout: z.string().optional(),
-    idleTimeout: z.string().optional(),
     type: z.enum(['Cookie', 'Header']).optional(),
     cookieConfig: z.object({ lifetimeType: z.enum(['Permanent', 'Session']).optional() }).passthrough().optional(),
     strict: z.boolean().optional(),

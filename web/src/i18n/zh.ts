@@ -447,6 +447,8 @@ const zh = {
   'routePolicy.type': '保持类型',
   'routePolicy.absoluteTimeout': '绝对超时',
   'routePolicy.idleTimeout': '空闲超时',
+  'routePolicy.idleUnsupported': '当前网关未实现会话 idleTimeout。现有字段会保留，直到你手动清除。',
+  'routePolicy.strictScope': '严格会话保持支持 FileSystem 和 etcd 配置；标准 Kubernetes Gateway API schema 会裁剪此字段。',
   'routePolicy.lifetimeType': 'Cookie 生命周期',
   'routePolicy.strict': '严格后端亲和',
   'field.tcpKeepaliveTime': 'TCP Keepalive 空闲时间（秒）',

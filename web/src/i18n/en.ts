@@ -447,6 +447,8 @@ const en = {
   'routePolicy.type': 'Persistence Type',
   'routePolicy.absoluteTimeout': 'Absolute Timeout',
   'routePolicy.idleTimeout': 'Idle Timeout',
+  'routePolicy.idleUnsupported': 'The current Gateway does not implement session idleTimeout. This existing field is preserved until you clear it.',
+  'routePolicy.strictScope': 'Strict session persistence is supported with FileSystem and etcd configuration. Standard Kubernetes Gateway API schemas prune this field.',
   'routePolicy.lifetimeType': 'Cookie Lifetime',
   'routePolicy.strict': 'Strict Backend Affinity',
   'field.tcpKeepaliveTime': 'TCP Keepalive Idle Time (seconds)',

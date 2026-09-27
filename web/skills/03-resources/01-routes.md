@@ -42,6 +42,9 @@ Key fields:
   mutation boundary share this range; informational, successful and redirect
   responses cannot be configured as retry triggers. gRPC uses its separate
   0–16 status-code range.
+- HTTP retry attempts must be an integer of at least one, and response codes
+  must be unique. Omission uses the inherited/default policy; attempts zero is
+  not a supported HTTPRoute setting.
 - `spec.rules[].sessionPersistence` — session affinity (Cookie/Header)
 
 **Edgion Extension Fields**:
@@ -50,6 +53,15 @@ Key fields:
   `edgion.io/mirror-connect-timeout-ms`, `edgion.io/mirror-write-timeout-ms`,
   `edgion.io/mirror-max-buffered-chunks`, `edgion.io/mirror-log`, and
   `edgion.io/mirror-max-concurrent`; these are not inline RequestMirror fields.
+
+The shared HTTP/gRPC policy editor removes optional text fields when cleared,
+including request/backend timeouts, retry backoff, session name and absolute
+timeout. It retains the surrounding configured block: removing the entire
+block would change delegation inheritance. Current Edgion does not implement
+session `idleTimeout`; the form offers only explicit removal of an existing
+value, preserving it during unrelated edits. Strict affinity is FileSystem/etcd
+only; standard Kubernetes Gateway API schemas prune `strict`. A Permanent
+cookie still requires an absolute timeout according to Controller validation.
 
 ## GRPCRoute
 

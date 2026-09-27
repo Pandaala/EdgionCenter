@@ -55,7 +55,6 @@ export interface GRPCRouteRetry {
 export interface GRPCSessionPersistence {
   sessionName?: string
   absoluteTimeout?: Duration
-  idleTimeout?: Duration
   type?: 'Cookie' | 'Header'
   cookieConfig?: { lifetimeType?: 'Permanent' | 'Session' }
   strict?: boolean

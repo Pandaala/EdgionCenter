@@ -204,7 +204,15 @@ export function validateHTTPRouteForMutation(route: HTTPRoute): void {
         }
       }
     }
-    for (const code of rule.retry?.codes || []) {
+    const attempts = rule.retry?.attempts;
+    if (attempts !== undefined && (!Number.isInteger(attempts) || attempts < 1)) {
+      throw new Error(`rules[${ruleIndex}].retry.attempts must be an integer of at least 1`);
+    }
+    const retryCodes = rule.retry?.codes || [];
+    if (new Set(retryCodes).size !== retryCodes.length) {
+      throw new Error(`rules[${ruleIndex}].retry.codes must contain unique status codes`);
+    }
+    for (const code of retryCodes) {
       if (!Number.isInteger(code) || code < 400 || code > 599) {
         throw new Error(`rules[${ruleIndex}].retry.codes must contain HTTP status codes from 400 through 599`);
       }

@@ -4,6 +4,48 @@ import RouteFiltersEditor, { switchRouteFilterType } from './RouteFiltersEditor'
 import RulePoliciesEditor from './RulePoliciesEditor'
 
 describe('structured route editors', () => {
+  it.each(['http', 'grpc'] as const)('omits cleared %s policy fields without erasing configured blocks or siblings', (protocol) => {
+    const onChange = vi.fn()
+    const rule = {
+      timeouts: { request: '30s', backendRequest: '10s', future: false },
+      retry: { attempts: 0, backoff: '1s', codes: protocol === 'http' ? [503] : [14] },
+      sessionPersistence: { type: 'Cookie' as const, sessionName: 'SESSION', absoluteTimeout: '1h', strict: false },
+      futureRule: [],
+    }
+    render(<RulePoliciesEditor value={rule} onChange={onChange} protocol={protocol} />)
+    for (const [label, section, key] of [
+      ['Request Timeout', 'timeouts', 'request'],
+      ['Backend Request Timeout', 'timeouts', 'backendRequest'],
+      ['Backoff', 'retry', 'backoff'],
+      ['Session Name', 'sessionPersistence', 'sessionName'],
+      ['Absolute Timeout', 'sessionPersistence', 'absoluteTimeout'],
+    ] as const) {
+      fireEvent.change(screen.getByRole('textbox', { name: label }), { target: { value: '' } })
+      const expected: Record<string, unknown> = { ...rule[section] }
+      delete expected[key]
+      expect(onChange).toHaveBeenLastCalledWith({ ...rule, [section]: expected })
+    }
+    expect(screen.queryByText('Idle Timeout', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByText(/Strict session persistence is supported with FileSystem/)).toBeInTheDocument()
+  })
+
+  it('preserves an unsupported idleTimeout until explicitly removed and respects read-only mode', () => {
+    const onChange = vi.fn()
+    const rule = { sessionPersistence: { idleTimeout: '20s', strict: false, future: [] } }
+    const { rerender } = render(<RulePoliciesEditor value={rule} onChange={onChange} />)
+    expect(screen.getByText(/does not implement session idleTimeout/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(onChange).toHaveBeenCalledWith({ sessionPersistence: { strict: false, future: [] } })
+    rerender(<RulePoliciesEditor value={rule} onChange={onChange} disabled />)
+    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument()
+  })
+
+  it('keeps an explicit empty override block when its last field is cleared', () => {
+    const onChange = vi.fn()
+    render(<RulePoliciesEditor value={{ timeouts: { request: '30s' } }} onChange={onChange} />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Request Timeout' }), { target: { value: '' } })
+    expect(onChange).toHaveBeenCalledWith({ timeouts: {} })
+  })
   it.each([
     ['http', 'HTTP Retry Status Codes (400-599)', '200', [503]],
     ['http', 'HTTP Retry Status Codes (400-599)', '429', [503, 429]],

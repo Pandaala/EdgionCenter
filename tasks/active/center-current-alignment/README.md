@@ -1882,3 +1882,35 @@ before acting on CCI execution files or proposing replacements.
 - Next route edit boundary to inspect: shared RulePoliciesEditor still stores
   empty strings when clearing optional timeout/backoff/session fields. Compare
   omission semantics and validation before changing them. Overall audit active.
+
+### Optional route policy fields and current retry validation (2026-09-28)
+
+- RulePoliciesEditor now removes cleared request/backend timeout, backoff,
+  session name and absolute-timeout fields. It keeps explicit configured blocks
+  and unknown/sibling values, preserving the current two-state delegation
+  inheritance contract rather than silently switching an override to inherit.
+- Current shared SessionPersistence has no idleTimeout field. Removed it from
+  supported types/schema and fresh form inputs. Existing values remain visible
+  as an unsupported-field warning with explicit removal; unrelated edits retain
+  them and read-only views cannot remove them. Added the FileSystem/etcd-only
+  scope of strict (standard Kubernetes schemas prune it). No CRD changes.
+- Native verification exposed another current Controller boundary: HTTP retry
+  attempts must be at least one (GRPC can retain zero). Updated the protocol-
+  aware input, HTTP schema and mutation validator. HTTP duplicate retry codes
+  are also rejected, matching HTTPRouteRetry::validation_error. All unrelated
+  GatewayConfig retry semantics remain untouched.
+- Final sequential session 89039 exited zero: 30 focused tests, frontend build,
+  lint and E2E typecheck. Logs `/tmp/ws5-center-route-policy-clear-tests-v3.log`
+  and `-build-v3.log`, `-lint-v3.log`, `-types-v3.log`. Earlier build 21793 failed
+  on Testing Library's unsupported `exact` option in a new test; removed it.
+  Intermediate reruns 98215 and 54480 passed before the added HTTP retry bounds.
+- First native session 24297 exited one: auth and GRPC passed, HTTP creation
+  was rejected with retry.attempts zero. The corrected protocol-specific
+  fixture and frontend boundaries were rerun in session 1456, exit zero:
+  authentication plus HTTP and GRPC clearing cases, 3 passed. Each case clears
+  five fields, inspects YAML, saves and verifies the exact Controller sections.
+  Standalone false strict remains; the Kubernetes branch does not expect a
+  pruned strict field. Kubernetes execution is still unverified.
+  Logs `/tmp/ws5-center-route-policy-clear-native-v1.log` and `-v2.log`.
+  Seventy original fixtures retained unchanged; exact mutation fixtures removed
+  and runner-owned services stopped. Overall audit remains active.

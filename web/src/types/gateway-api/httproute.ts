@@ -279,7 +279,6 @@ export interface HTTPRouteRetry {
 export interface SessionPersistence {
   sessionName?: string;
   absoluteTimeout?: Duration;
-  idleTimeout?: Duration;
   type?: 'Cookie' | 'Header';
   cookieConfig?: { lifetimeType?: 'Permanent' | 'Session'; [key: string]: unknown };
   strict?: boolean;

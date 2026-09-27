@@ -8,6 +8,12 @@ import {
 } from './httproute'
 
 describe('HTTPRoute lossless adapter', () => {
+  it.each([{ attempts: 0 }, { attempts: -1 }, { attempts: 1.5 }, { codes: [503, 503] }])('rejects unsupported retry configuration %j', (retry) => {
+    const rule = { retry }
+    expect(httpRouteRuleSchema.safeParse(rule).success).toBe(false)
+    const route = normalizeHTTPRoute({ apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute', metadata: { name: 'retry' }, spec: { rules: [rule] } })
+    expect(() => toHTTPRouteMutationDocument(route, 'create')).toThrow(/retry\.(attempts|codes)/)
+  })
   it.each([100, 199, 200, 302, 399, 600, 503.5])('rejects retry status %s through schema and mutation boundaries', (code) => {
     const rule = { retry: { codes: [code] } }
     expect(httpRouteRuleSchema.safeParse(rule).success).toBe(false)
