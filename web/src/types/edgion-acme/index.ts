@@ -1,7 +1,6 @@
 import type { K8sObjectMeta } from '@/types/gateway-api/common'
 
 export type AcmeKeyType = 'ecdsa-p256' | 'ecdsa-p384'
-export type ChallengeType = 'http-01' | 'dns-01'
 
 export interface ObjectReference {
   name: string
@@ -22,16 +21,7 @@ export interface Http01Challenge {
   [key: string]: unknown
 }
 
-export interface Dns01Challenge {
-  type: 'dns-01'
-  provider: string
-  credentialRef: ObjectReference
-  propagationTimeout?: string
-  propagationCheckInterval?: string
-  [key: string]: unknown
-}
-
-export type AcmeChallenge = Http01Challenge | Dns01Challenge
+export type AcmeChallenge = Http01Challenge
 
 export interface EdgionAcmeSpec {
   server?: string

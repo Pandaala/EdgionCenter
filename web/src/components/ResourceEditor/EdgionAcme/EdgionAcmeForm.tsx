@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react'
 import * as yaml from 'js-yaml'
 import { Form, Input, Select, Switch, Card, Space, Divider, message } from 'antd'
 import MetadataSection from '../common/MetadataSection'
-import type { Dns01Challenge, EdgionAcme, Http01Challenge } from '@/types/edgion-acme'
-import { replaceChallengeType } from '@/utils/edgionacme'
+import type { EdgionAcme, Http01Challenge } from '@/types/edgion-acme'
 import { useT } from '@/i18n'
 
 interface EdgionAcmeFormProps {
@@ -163,15 +162,7 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
         {/* Challenge Config */}
         <Card title={t('section.challenge')} size="small">
           <Form.Item label={t('field.challengeType')} required style={{ marginBottom: 8 }}>
-            <Select
-              value={challenge.type || 'http-01'}
-              onChange={(val) => updateSpec({ challenge: replaceChallengeType(challenge, val) })}
-              disabled={readOnly}
-              style={{ width: 160 }}
-            >
-              <Select.Option value="http-01">http-01</Select.Option>
-              <Select.Option value="dns-01">dns-01</Select.Option>
-            </Select>
+            <Input value="http-01" readOnly />
           </Form.Item>
 
           {challenge.type === 'http-01' && (() => {
@@ -199,60 +190,6 @@ const EdgionAcmeForm: React.FC<EdgionAcmeFormProps> = ({ data, onChange, readOnl
             )
           })()}
 
-          {challenge.type === 'dns-01' && (() => {
-            const dns01 = challenge as Dns01Challenge
-            return (
-            <>
-              <Form.Item label={t('field.dnsProvider')} style={{ marginBottom: 8 }}>
-                <Input
-                  value={dns01.provider || ''}
-                  onChange={(e) => updateChallenge({ provider: e.target.value })}
-                  placeholder="cloudflare"
-                  disabled={readOnly}
-                />
-              </Form.Item>
-              <Form.Item label={t('field.credRefName')} style={{ marginBottom: 8 }}>
-                <Input
-                  value={dns01.credentialRef?.name || ''}
-                  onChange={(e) => updateChallenge({ credentialRef: { ...dns01.credentialRef, name: e.target.value } })}
-                  placeholder="cloudflare-api-token"
-                  disabled={readOnly}
-                />
-              </Form.Item>
-              <Form.Item label={t('field.credRefNs')} style={{ marginBottom: 8 }}>
-                <Input
-                  value={dns01.credentialRef?.namespace || ''}
-                  onChange={(e) => updateChallenge({ credentialRef: { ...dns01.credentialRef, name: dns01.credentialRef?.name || '', namespace: e.target.value || undefined } })}
-                  placeholder="default"
-                  disabled={readOnly}
-                  style={{ width: 300 }}
-                />
-              </Form.Item>
-              <Form.Item label={t('field.propagationTimeout')} style={{ marginBottom: 8 }}>
-                <Input
-                  value={dns01.propagationTimeout ?? ''}
-                  onChange={(event) => updateChallenge({
-                    propagationTimeout: event.target.value || undefined,
-                  })}
-                  placeholder="120s"
-                  disabled={readOnly}
-                  style={{ width: 160 }}
-                />
-              </Form.Item>
-              <Form.Item label={t('field.propagationInterval')} style={{ marginBottom: 0 }}>
-                <Input
-                  value={dns01.propagationCheckInterval ?? ''}
-                  onChange={(event) => updateChallenge({
-                    propagationCheckInterval: event.target.value || undefined,
-                  })}
-                  placeholder="5s"
-                  disabled={readOnly}
-                  style={{ width: 160 }}
-                />
-              </Form.Item>
-            </>
-            )
-          })()}
         </Card>
 
         <Card title={t('section.externalAccountBinding')} size="small">

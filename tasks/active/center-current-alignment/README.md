@@ -621,3 +621,27 @@ before acting on CCI execution files or proposing replacements.
   CA/client certificate data. Outbound TLS validation, access-log behavior, and
   remaining System resources still require further audit; overall goal remains
   open. No Edgion files changed and no push performed.
+
+### ACME HTTP-01 scope alignment
+
+- RealIp/preflight batch committed as 8ad1572, no push.
+- Current AcmeChallenge contains HTTP-01 only; removed DNS-01 types, switching,
+  provider/credential/propagation controls. YAML and form submissions now reject
+  unsupported challenges and wildcard domains, plus missing email/domain lists.
+- Separated editable-draft serialization from submit validation, so empty create
+  forms and unfinished YAML transitions remain usable. Kept EAB Secret references,
+  renewal durations, storage and auto-TLS data. Filtered resolvedListenerAttachments
+  and notifyAfterPublish at the shared mutation boundary. Updated ACME skill notes.
+- Adapter/form tests passed 15 cases (17690); production build 68686 and lint
+  68901 passed. Logs: /tmp/ws5-center-acme-tests-v2.log,
+  /tmp/ws5-center-acme-build.log, /tmp/ws5-center-acme-lint.log.
+- Native browser run 42653 passed auth and EdgionAcme CRUD, including optimistic
+  conflict handling and form/YAML round trips. Log:
+  /tmp/ws5-center-acme-runtime-v1.log; run ID alignment-acme-20260928-v1.
+  Owned processes stopped; 70 fixture files retained. This verifies resource
+  management, not external ACME issuance; the fixture uses a local invalid issuer.
+- Next concrete gap: LinkSys SystemConfig now includes Otlp, but Center lists only
+  six kinds. Audit its wire envelope and credential/TLS fields before adding UI.
+- Outbound TLS source confirms custom CA refs take precedence when configured;
+  do not incorrectly import BackendTLSPolicy's mutually exclusive CA rule into
+  GatewayConfig. Remaining TLS/access-log and full menu coverage stay open.

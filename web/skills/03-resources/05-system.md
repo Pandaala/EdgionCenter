@@ -107,73 +107,23 @@ spec:
 - Form switches between different configuration sections based on type
 - List page displays: name, namespace, type, connection address
 
-## EdgionAcme (Pending Development)
+## EdgionAcme
 
-```yaml
-apiVersion: edgion.io/v1
-kind: EdgionAcme
-metadata:
-  name: lets-encrypt
-  namespace: default
-spec:
-  email: "admin@example.com"                    # Required: ACME account email
-  domains:                                       # Required: certificate domains
-    - "example.com"
-    - "*.example.com"                            # DNS-01 supports wildcards
-  server: "https://acme-v02.api.letsencrypt.org/directory"  # Optional
-  keyType: "ecdsa-p256"                          # Optional: ecdsa-p256 (default) | ecdsa-p384
-
-  challenge:                                     # Required
-    type: http-01                                # http-01 | dns-01
-    http01:
-      gatewayRef:                                # Required for http-01
-        name: my-gateway
-        namespace: default
-    dns01:                                       # Required for dns-01
-      provider: cloudflare                       # cloudflare | alidns
-      credentialRef:                             # DNS API credential Secret
-        name: cloudflare-api-token
-        namespace: default
-      propagationTimeout: 120                    # DNS propagation timeout (seconds)
-      propagationCheckInterval: 5                # DNS check interval (seconds)
-
-  storage:                                       # Required: certificate storage
-    secretName: "acme-cert"
-    secretNamespace: default
-
-  renewal:                                       # Optional: renewal configuration
-    renewBeforeDays: 30                          # Days before expiry to renew
-    checkInterval: 86400                         # Check interval (seconds)
-    failBackoff: 300                             # Failure retry delay (seconds)
-
-  autoEdgionTls:                                 # Optional: auto-create EdgionTls
-    enabled: true
-    name: "acme-lets-encrypt"                    # EdgionTls name
-    parentRefs:                                  # Bind Gateway
-      - name: my-gateway
-
-status:                                          # Read-only
-  phase: Ready                                   # Pending|Issuing|Ready|Renewing|Failed
-  certificateSerial: "xxx"
-  certificateNotAfter: "2026-07-10T00:00:00Z"
-  lastFailureReason: ""
-  secretName: "acme-cert"
-  edgionTlsName: "acme-lets-encrypt"
-```
-
-**Development Notes**:
-- Namespaced resource, kind must be added to ResourceKind: `edgionacme`
-- Form sections:
-  - Basic info (email, server, keyType)
-  - Domain list editing
-  - Challenge configuration (http-01/dns-01 conditional rendering)
-    - http-01: gatewayRef selection
-    - dns-01: provider + credentialRef + propagation configuration
-  - Storage configuration
-  - Renewal configuration
-  - AutoEdgionTls configuration (toggle + name + parentRefs)
-- Status read-only display: phase status badge, certificate expiry time, failure reason
-- **Security sensitive**: DNS API credentials
-- Supports manual certificate issuance trigger: `POST /api/v1/services/acme/{namespace}/{name}/trigger`
-- List page displays: name, namespace, phase (Tag), domains, challenge type, expiry time
-- Needs to add a menu item in the sidebar
+- Namespaced `edgion.io/v1`, catalog key `edgionacme`, System → ACME.
+- Current schema: sibling `Edgion/edgion-resources/src/resources/edgion_acme.rs`.
+  Built-in issuance supports HTTP-01 only. DNS-01 and wildcard certificates require
+  an external issuer whose TLS Secret is referenced by EdgionTls.
+- Challenge shape is flat: `challenge: {type: http-01, gatewayRef: {name: gateway}}`.
+  Preserve Gateway reference namespace, sectionName, port, group, and kind.
+- Account credentials use privateKeySecretRef; optional externalAccountBinding uses
+  keyId plus keySecretRef. Never expose resolved account or HMAC key material.
+- Renewal uses GEP-2257 strings: renewBefore (720h), checkInterval (24h),
+  failBackoff (5m). Do not materialize defaults while editing existing resources.
+- Keep storage secretName/secretNamespace and autoEdgionTls enabled/name/parentRefs.
+- Draft serialization must allow incomplete forms; submission validates email,
+  domains, HTTP-01 scope, and renewal durations before sending through the tunnel.
+- Strip status, currentStatus, resolvedListenerAttachments, notifyAfterPublish, and
+  server-owned metadata on mutation. Preserve resourceVersion for update CAS.
+- List displays phase, domains, challenge type, certificate expiry, and conditions.
+  Manual issuance uses the Controller service endpoint through Center's proxy:
+  `POST /api/v1/services/acme/{namespace}/{name}/trigger`.

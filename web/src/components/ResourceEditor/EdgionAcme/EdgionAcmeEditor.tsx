@@ -12,7 +12,7 @@ import ResourceConditions from '@/components/resource/ResourceConditions'
 import EdgionAcmeForm from './EdgionAcmeForm'
 import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { EdgionAcme } from '@/types/edgion-acme'
-import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/edgionacme'
+import { createEmpty, normalize, toYaml, toEditableYaml, fromYaml } from '@/utils/edgionacme'
 import { useT } from '@/i18n'
 import { useEditorTabTransition } from '../useEditorTabTransition'
 
@@ -32,7 +32,7 @@ const EdgionAcmeEditor: React.FC<EdgionAcmeEditorProps> = ({ visible, mode, reso
   const queryClient = useQueryClient()
   const { activeTab, editableTab, resetEditorTab, handleTabChange } = useEditorTabTransition({
     formData, yamlContent,
-    serialize: (value) => toYaml(value, mode === 'create' ? 'create' : 'update'),
+    serialize: toEditableYaml,
     parse: fromYaml, setFormData, setYamlContent,
     onError: (error) => message.error(t('msg.tabSwitchFailed', { err: error.message })),
   })
@@ -44,11 +44,11 @@ const EdgionAcmeEditor: React.FC<EdgionAcmeEditorProps> = ({ visible, mode, reso
     if (mode === 'create') {
       const empty = createEmpty()
       setFormData(empty)
-      setYamlContent(toYaml(empty, 'create'))
+      setYamlContent(toEditableYaml(empty))
     } else if (resource) {
       const normalized = normalize(resource)
       setFormData(normalized)
-      setYamlContent(toYaml(normalized, 'update'))
+      setYamlContent(toEditableYaml(normalized))
     }
   }, [visible, mode, resource, resetEditorTab])
 

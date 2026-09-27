@@ -154,6 +154,8 @@ const EXCLUDED_MUTATION_PATHS = {
   edgionconfigdata: [['spec', 'currentStatus']],
   edgionacme: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedListenerAttachments'],
+    ['spec', 'notifyAfterPublish'],
     ['spec', 'renewal', 'renewBeforeDays'],
   ],
   linksys: [

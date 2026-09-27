@@ -1,5 +1,5 @@
 import * as yaml from 'js-yaml'
-import type { AcmeChallenge, ChallengeType, EdgionAcme } from '@/types/edgion-acme'
+import type { EdgionAcme } from '@/types/edgion-acme'
 import { buildMutationDocument, withCreateDefaults } from './resource-document'
 import { isValidGep2257Duration } from './validation'
 import { dumpYaml } from './yaml-utils'
@@ -60,30 +60,23 @@ export function normalize(raw: unknown): EdgionAcme {
   if (!isObject(raw) || raw.kind !== 'EdgionAcme' || !isObject(raw.metadata) || !isObject(raw.spec)) {
     throw new Error('YAML must contain an EdgionAcme resource with metadata and spec')
   }
-  if (!isObject(raw.spec.challenge) || !['http-01', 'dns-01'].includes(String(raw.spec.challenge.type))) {
-    throw new Error('EdgionAcme challenge.type must be http-01 or dns-01')
+  if (!isObject(raw.spec.challenge) || raw.spec.challenge.type !== 'http-01') {
+    throw new Error('EdgionAcme supports HTTP-01 only; use an externally issued TLS Secret for DNS-01')
   }
   if (raw.spec.challenge.type === 'http-01' && !isObject(raw.spec.challenge.gatewayRef)) {
     throw new Error('EdgionAcme HTTP-01 challenge requires flat challenge.gatewayRef')
-  }
-  if (raw.spec.challenge.type === 'dns-01'
-    && (typeof raw.spec.challenge.provider !== 'string' || !isObject(raw.spec.challenge.credentialRef))) {
-    throw new Error('EdgionAcme DNS-01 challenge requires flat provider and credentialRef')
   }
   return raw as unknown as EdgionAcme
 }
 
 export function validateEdgionAcme(resource: EdgionAcme): string[] {
   const errors: string[] = []
+  const spec = resource.spec
+  if (spec.challenge?.type !== 'http-01') errors.push('EdgionAcme supports HTTP-01 only; use an externally issued TLS Secret for DNS-01')
+  if (!spec.email?.trim()) errors.push('email is required')
+  if (!spec.domains?.length) errors.push('at least one domain is required')
+  if (spec.domains?.some((domain) => domain.startsWith('*.'))) errors.push('HTTP-01 does not support wildcard domains; use an externally issued TLS Secret')
   const durations: Array<[string, unknown]> = [
-    ['challenge.propagationTimeout',
-      resource.spec.challenge.type === 'dns-01'
-        ? resource.spec.challenge.propagationTimeout
-        : undefined],
-    ['challenge.propagationCheckInterval',
-      resource.spec.challenge.type === 'dns-01'
-        ? resource.spec.challenge.propagationCheckInterval
-        : undefined],
     ['renewal.renewBefore', resource.spec.renewal?.renewBefore],
     ['renewal.checkInterval', resource.spec.renewal?.checkInterval],
     ['renewal.failBackoff', resource.spec.renewal?.failBackoff],
@@ -116,25 +109,7 @@ export function fromYaml(yamlStr: string): EdgionAcme {
   return normalize(yaml.load(yamlStr))
 }
 
-/** Switch the tagged union, removing only fields owned by the previous variant. */
-export function replaceChallengeType(challenge: AcmeChallenge, type: ChallengeType): AcmeChallenge {
-  if (challenge.type === type) return challenge
-  if (type === 'http-01') {
-    const unknown: Record<string, unknown> = { ...challenge }
-    delete unknown.provider
-    delete unknown.credentialRef
-    delete unknown.propagationTimeout
-    delete unknown.propagationCheckInterval
-    return { ...unknown, type, gatewayRef: { name: '' } }
-  }
-  const unknown: Record<string, unknown> = { ...challenge }
-  delete unknown.gatewayRef
-  return {
-    ...unknown,
-    type,
-    provider: '',
-    credentialRef: { name: '' },
-    propagationTimeout: '120s',
-    propagationCheckInterval: '5s',
-  }
+/** Serialize an editable draft without applying submit-time admission checks. */
+export function toEditableYaml(resource: EdgionAcme): string {
+  return dumpYaml(buildMutationDocument(resource, { resourceKind: 'edgionacme', mode: 'update' }))
 }
