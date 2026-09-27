@@ -750,3 +750,29 @@ before acting on CCI execution files or proposing replacements.
   batches, but this does not prove live backend service integration or every
   advanced permission/status/error workflow. Continue the full resource/menu
   ledger; next infrastructure pass is GatewayClass, Gateway, ReferenceGrant.
+
+### Infrastructure resource boundary pass
+
+- Remaining LinkSys batch committed as db5c8c5, no push.
+- ReferenceGrant normalization no longer rewrites kind or injects namespace into
+  existing YAML/API documents. It requires correct identity and preserves the
+  original operator document. Submission validates 1..16 from/to entries, group,
+  kind, and source namespace against the current vendored CRD. Core empty groups
+  and extension resource kinds remain permitted; no resource-kind whitelist.
+- Gateway mutation filtering now removes Controller-owned inbound PROXY policy
+  and attachment proof. Added 64-entry listener/per-port TLS bounds and explicit
+  errors for current unsupported allowedListeners/infrastructure/defaultScope.
+  Same-named nested operator values remain intact.
+- Three adapter suites 54245 passed 12 tests; build 39131 and lint 7292 passed.
+  Native CRUD 46514 passed auth plus GatewayClass/Gateway/ReferenceGrant, including
+  form/YAML round trips and Controller readback. Log:
+  /tmp/ws5-center-infra-runtime-v1.log. Owned services stopped, seeds retained.
+- Infrastructure action/retry browser run **4293** is active; log
+  /tmp/ws5-center-infra-actions-v1.log. Poll before restarting. Covers list search,
+  refresh, view/edit/new dialogs, delete/batch confirmation cancellation, and a
+  bounded list API failure recovery. It does not itself execute batch deletion.
+- Cross-namespace grant activation/revocation, listener attachment behavior,
+  Kubernetes status propagation, and the rest of the menu ledger remain open.
+- Action run 4293 finished successfully: all five tests passed (auth, three
+  resource action pages, list retry recovery). All handles terminal; owned
+  processes stopped and exact fixtures retained. Ready for Center commit.

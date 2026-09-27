@@ -82,6 +82,10 @@ export function validateGateway(resource: Gateway): string[] {
   const errors: string[] = []
   if (!resource.spec?.gatewayClassName?.trim()) errors.push('spec.gatewayClassName is required')
   if (!Array.isArray(resource.spec?.listeners) || resource.spec.listeners.length === 0) errors.push('spec.listeners requires at least one listener')
+  if ((resource.spec?.listeners?.length ?? 0) > 64) errors.push('spec.listeners must contain at most 64 entries')
+  for (const field of ['allowedListeners', 'infrastructure', 'defaultScope'] as const) {
+    if (resource.spec?.[field] != null) errors.push(`spec.${field} is not supported by the current Controller`)
+  }
   const names = new Set<string>()
   ;(resource.spec?.listeners || []).forEach((listener, index) => {
     const path = `spec.listeners[${index}]`
@@ -120,6 +124,7 @@ export function validateGateway(resource: Gateway): string[] {
   const globalTls = resource.spec?.tls
   if (globalTls?.backend?.clientCertificateRef) validateReference(globalTls.backend.clientCertificateRef, 'spec.tls.backend.clientCertificateRef', errors)
   validateFrontendValidation(globalTls?.frontend?.default?.validation, 'spec.tls.frontend.default.validation', errors)
+  if ((globalTls?.frontend?.perPort?.length ?? 0) > 64) errors.push('spec.tls.frontend.perPort must contain at most 64 entries')
   const ports = new Set<number>()
   globalTls?.frontend?.perPort?.forEach((entry, index) => {
     const path = `spec.tls.frontend.perPort[${index}]`

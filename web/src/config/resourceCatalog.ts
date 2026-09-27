@@ -66,6 +66,8 @@ const EXCLUDED_MUTATION_PATHS = {
   ],
   gateway: [
     ['spec', 'currentStatus'],
+    ['spec', 'resolvedInboundProxyProtocol'],
+    ['spec', 'resolvedAttachmentProof'],
     ['spec', 'tls', 'backend', 'resolvedClientCertificate'],
     ['spec', 'listeners', '*', 'tls', 'secrets'],
     ['spec', 'listeners', '*', 'tls', 'resolvedFrontendCaSecrets'],

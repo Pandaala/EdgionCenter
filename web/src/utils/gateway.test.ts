@@ -85,3 +85,21 @@ describe('Gateway lossless adapter', () => {
     expect(errors).toContain('hostname must not be specified for UDP')
   })
 })
+
+it('strips Controller attachment proofs and rejects unsupported fields and oversized lists', () => {
+  const resource = structuredClone(fixture)
+  resource.spec.resolvedInboundProxyProtocol = { mode: 'trustedSources' }
+  resource.spec.resolvedAttachmentProof = { instance: 'internal' }
+  resource.spec.futureSpec.resolvedAttachmentProof = 'operator-value'
+  const mutation = yaml.load(gatewayToMutationYaml(resource, 'update')) as any
+  expect(mutation.spec).not.toHaveProperty('resolvedInboundProxyProtocol')
+  expect(mutation.spec).not.toHaveProperty('resolvedAttachmentProof')
+  expect(mutation.spec.futureSpec.resolvedAttachmentProof).toBe('operator-value')
+  resource.spec.listeners = Array.from({ length: 65 }, (_, index) => ({ name: `http-${index}`, protocol: 'HTTP', port: 8000 + index }))
+  resource.spec.tls.frontend.perPort = Array.from({ length: 65 }, (_, index) => ({ port: 8000 + index }))
+  resource.spec.allowedListeners = {}
+  const errors = validateGateway(resource).join(' ')
+  expect(errors).toContain('spec.listeners must contain at most 64')
+  expect(errors).toContain('spec.tls.frontend.perPort must contain at most 64')
+  expect(errors).toContain('allowedListeners is not supported')
+})

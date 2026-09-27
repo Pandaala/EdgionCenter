@@ -11,7 +11,7 @@ import YamlEditor from '@/components/YamlEditor'
 import ReferenceGrantForm from './ReferenceGrantForm'
 import { editorCancelButtonProps, editorFormTab, editorSubmitButtonProps, editorYamlTab } from '../editorTestIds'
 import type { ReferenceGrant } from '@/utils/referencegrant'
-import { createEmpty, normalize, toYaml, fromYaml } from '@/utils/referencegrant'
+import { createEmpty, normalize, toYaml, fromYaml, validateReferenceGrant } from '@/utils/referencegrant'
 import { useT } from '@/i18n'
 
 interface ReferenceGrantEditorProps {
@@ -68,6 +68,8 @@ const ReferenceGrantEditor: React.FC<ReferenceGrantEditorProps> = ({ visible, mo
   const handleSubmit = () => {
     try {
       const submitted = activeTab === 'form' ? formData : fromYaml(yamlContent)
+      const errors = validateReferenceGrant(submitted)
+      if (errors.length) throw new Error(errors.join('; '))
       const name = submitted.metadata?.name
       const namespace = submitted.metadata?.namespace
       const yamlStr = toYaml(submitted, mode === 'create' ? 'create' : 'update')

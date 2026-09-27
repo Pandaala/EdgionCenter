@@ -1,4 +1,5 @@
 import * as yaml from 'js-yaml'
+import { isValidDNS1123Label, isValidDNS1123Subdomain } from './validation'
 import { mutationDocumentToYaml } from './resource-document'
 
 export interface ReferenceGrantFrom {
@@ -43,21 +44,34 @@ export function createEmpty(): ReferenceGrant {
   }
 }
 
-export function normalize(raw: any): ReferenceGrant {
-  const spec = { ...raw.spec }
-  if (Array.isArray(raw.spec?.from)) spec.from = raw.spec.from.map((entry: any) => ({ ...entry }))
-  if (Array.isArray(raw.spec?.to)) spec.to = raw.spec.to.map((entry: any) => ({ ...entry }))
-  return {
-    ...raw,
-    apiVersion: raw.apiVersion || 'gateway.networking.k8s.io/v1',
-    kind: 'ReferenceGrant',
-    metadata: {
-      ...raw.metadata,
-      name: raw.metadata?.name || '',
-      namespace: raw.metadata?.namespace || 'default',
-    },
-    spec: spec as ReferenceGrant['spec'],
+export function normalize(raw: unknown): ReferenceGrant {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('ReferenceGrant must be an object')
+  const resource = raw as ReferenceGrant
+  if (resource.kind !== 'ReferenceGrant') throw new Error('Expected ReferenceGrant kind')
+  if (!resource.metadata || !resource.spec || typeof resource.spec !== 'object' || Array.isArray(resource.spec)) throw new Error('ReferenceGrant metadata and spec are required')
+  return structuredClone(resource)
+}
+
+export function validateReferenceGrant(resource: ReferenceGrant): string[] {
+  const errors: string[] = []
+  for (const field of ['from', 'to'] as const) {
+    const refs = resource.spec?.[field]
+    if (!Array.isArray(refs) || refs.length < 1 || refs.length > 16) {
+      errors.push(`spec.${field} must contain 1 to 16 references`)
+      continue
+    }
+    refs.forEach((ref, index) => {
+      const path = `spec.${field}[${index}]`
+      if (!ref || typeof ref !== 'object') { errors.push(`${path} must be an object`); return }
+      if (typeof ref.group !== 'string' || ref.group.length > 253 || (ref.group !== '' && !isValidDNS1123Subdomain(ref.group))) errors.push(`${path}.group must be a DNS subdomain or empty for the core group`)
+      if (typeof ref.kind !== 'string' || ref.kind.length > 63 || !/^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$/.test(ref.kind)) errors.push(`${path}.kind is invalid`)
+      if (field === 'from') {
+        const namespace = (ref as ReferenceGrantFrom).namespace
+        if (typeof namespace !== 'string' || namespace.length > 63 || !isValidDNS1123Label(namespace)) errors.push(`${path}.namespace must be a DNS label`)
+      }
+    })
   }
+  return errors
 }
 
 export function toYaml(rg: ReferenceGrant, mode: 'create' | 'update' = 'update'): string {
