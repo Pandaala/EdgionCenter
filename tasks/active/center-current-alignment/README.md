@@ -1211,3 +1211,25 @@ before acting on CCI execution files or proposing replacements.
 - This closes the previously missing native failure/recovery evidence. Gateway
   traffic and Kubernetes ownership remain distinct unverified paths; the full
   Center type/menu alignment goal remains active.
+
+### Backend traffic policy structural boundary
+
+- Continued the per-kind audit with current EdgionBackendTrafficPolicy schema.
+  Its current top-level operator sections already have Center controls; malformed
+  YAML containers/references could nevertheless reach form array/string methods.
+- Added shared normalization/validation structure checks for metadata/spec,
+  target arrays and entries, optional object sections, numeric expected-status
+  lists and authority strings. Invalid drafts now yield validation errors before
+  form rendering. Unknown fields, omitted defaults and optional null sections
+  remain lossless.
+- Corrected AI healthCheck presence validation: null is absent for the current
+  Rust Option, so it must not be mistaken for an enabled unsupported probe.
+  Added malformed-input and null/unknown-field preservation cases.
+- Thirty-eight adapter/form/editor tests passed (81766); build 52549 and lint
+  99724 passed. Native alignment-ebtp-structure-20260928-v1 passed authentication,
+  resource actions and real browser CRUD (3 tests, 73063 terminal zero), retaining
+  70 files. Logs /tmp/ws5-center-ebtp-structure-{tests,build,lint,native}.log.
+- Added the missing dashboard guide/router entry for this policy. This batch
+  establishes editing boundaries, not runtime balancing/probes/ejection/retry
+  semantics or all target attachment cases. Those and the remaining menu/type
+  rows stay open. No Edgion changes or commits.

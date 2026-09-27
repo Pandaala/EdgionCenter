@@ -260,3 +260,36 @@ describe('EdgionBackendTrafficPolicy adapter', () => {
     expect(errors).toContain('retryConstraint.minRetryRate.interval must be in (0s, 1h]')
   })
 })
+
+
+describe('backend policy structural boundary', () => {
+  it.each([
+    { targetRefs: {} },
+    { targetRefs: [null] },
+    { targetRefs: [{ name: {}, kind: 'Service' }] },
+    { loadBalancer: [] },
+    { loadBalancer: { type: 'ConsistentHash', consistentHash: 'header' } },
+    { healthCheck: { active: { expectedStatuses: 200 } } },
+    { healthCheck: { active: { expectedStatuses: ['200'] } } },
+    { retryConstraint: { budget: [] } },
+    { upstreamAuthority: { pattern: 12, template: '*.example.com' } },
+    { upstreamAuthority: { pattern: '*.example.com', template: [] } },
+  ])('rejects malformed editor input without throwing from validation: %j', (patch) => {
+    const document = { ...fullPolicy, spec: { ...fullPolicy.spec, ...patch } }
+    expect(() => edgionBackendTrafficPolicyFromYaml(yaml.dump(document))).toThrow()
+    expect(validateEdgionBackendTrafficPolicy(document as unknown as EdgionBackendTrafficPolicy).length).toBeGreaterThan(0)
+  })
+
+  it.each(['metadata', 'spec'])('rejects array %s', (field) => {
+    expect(() => normalizeEdgionBackendTrafficPolicy({ ...fullPolicy, [field]: [] })).toThrow()
+  })
+
+  it('retains null optional sections and unknown fields without adding defaults', () => {
+    const document = {
+      ...fullPolicy,
+      spec: { targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'ai' }], healthCheck: null, connection: null, retryConstraint: {}, futureSpec: { active: true } },
+    }
+    expect(normalizeEdgionBackendTrafficPolicy(document)).toEqual(document)
+    expect(validateEdgionBackendTrafficPolicy(document as unknown as EdgionBackendTrafficPolicy)).toEqual([])
+  })
+})

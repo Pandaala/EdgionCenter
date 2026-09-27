@@ -65,21 +65,53 @@ export function createEmptyEdgionBackendTrafficPolicy(): EdgionBackendTrafficPol
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function policyStructureError(raw: unknown): string | undefined {
+  if (!isRecord(raw)) return 'EdgionBackendTrafficPolicy document must be an object'
+  if (raw.kind !== 'EdgionBackendTrafficPolicy') return 'Expected an EdgionBackendTrafficPolicy document'
+  if (!isRecord(raw.metadata)) return 'EdgionBackendTrafficPolicy metadata must be an object'
+  if (!isRecord(raw.spec)) return 'EdgionBackendTrafficPolicy spec must be an object'
+  const spec = raw.spec
+  if (!Array.isArray(spec.targetRefs)) return 'targetRefs must be an array'
+  for (const [index, ref] of spec.targetRefs.entries()) {
+    if (!isRecord(ref)) return `targetRefs[${index}] must be an object`
+    for (const key of ['name', 'kind']) {
+      if (typeof ref[key] !== 'string') return `targetRefs[${index}].${key} must be a string`
+    }
+    if (ref.group !== undefined && typeof ref.group !== 'string') return `targetRefs[${index}].group must be a string`
+  }
+  for (const path of [
+    ['loadBalancer'], ['loadBalancer', 'consistentHash'],
+    ['healthCheck'], ['healthCheck', 'active'], ['outlierDetection'],
+    ['retryConstraint'], ['retryConstraint', 'budget'], ['retryConstraint', 'minRetryRate'],
+    ['circuitBreaker'], ['connection'], ['upstreamAuthority'],
+  ]) {
+    let value: unknown = spec
+    for (const key of path) value = isRecord(value) ? value[key] : undefined
+    if (value != null && !isRecord(value)) return `${path.join('.')} must be an object`
+  }
+  const active = isRecord(spec.healthCheck) ? spec.healthCheck.active : undefined
+  if (isRecord(active) && active.expectedStatuses !== undefined
+    && (!Array.isArray(active.expectedStatuses) || active.expectedStatuses.some((value) => typeof value !== 'number'))) {
+    return 'healthCheck.active.expectedStatuses must be an array of numbers'
+  }
+  if (isRecord(spec.upstreamAuthority)) {
+    for (const key of ['pattern', 'template']) {
+      if (typeof spec.upstreamAuthority[key] !== 'string') return `upstreamAuthority.${key} must be a string`
+    }
+    if (spec.upstreamAuthority.healthCheckHost != null && typeof spec.upstreamAuthority.healthCheckHost !== 'string') {
+      return 'upstreamAuthority.healthCheckHost must be a string'
+    }
+  }
+}
+
 export function normalizeEdgionBackendTrafficPolicy(raw: unknown): EdgionBackendTrafficPolicy {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('EdgionBackendTrafficPolicy document must be an object')
-  }
-  const document = raw as Record<string, unknown>
-  if (document.kind !== 'EdgionBackendTrafficPolicy') {
-    throw new Error('Expected an EdgionBackendTrafficPolicy document')
-  }
-  if (!document.metadata || typeof document.metadata !== 'object') {
-    throw new Error('EdgionBackendTrafficPolicy document must contain metadata')
-  }
-  if (!document.spec || typeof document.spec !== 'object') {
-    throw new Error('EdgionBackendTrafficPolicy document must contain spec')
-  }
-  return structuredClone(document) as unknown as EdgionBackendTrafficPolicy
+  const error = policyStructureError(raw)
+  if (error) throw new Error(error)
+  return structuredClone(raw) as EdgionBackendTrafficPolicy
 }
 
 export function edgionBackendTrafficPolicyToYaml(policy: EdgionBackendTrafficPolicy): string {
@@ -113,6 +145,8 @@ function patternSuffix(pattern: string): string | null {
 }
 
 export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficPolicy): string[] {
+  const structureError = policyStructureError(policy)
+  if (structureError) return [structureError]
   const errors: string[] = []
   const refs = policy.spec.targetRefs
   if (!Array.isArray(refs) || refs.length === 0) errors.push('targetRefs must not be empty')
@@ -133,7 +167,7 @@ export function validateEdgionBackendTrafficPolicy(policy: EdgionBackendTrafficP
   if (targetKinds.size === 1 && targetKinds.has('EdgionBackend')) {
     if (refs.length > 16) errors.push('EdgionBackend targetRefs must contain at most 16 entries')
     if (hasDuplicateTarget) errors.push('EdgionBackend targetRefs must not contain duplicate targets')
-    if (policy.spec.healthCheck !== undefined) errors.push('healthCheck is not supported for EdgionBackend targets')
+    if (policy.spec.healthCheck != null) errors.push('healthCheck is not supported for EdgionBackend targets')
   }
 
   const lb = policy.spec.loadBalancer
