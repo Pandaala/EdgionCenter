@@ -56,7 +56,7 @@ const RESTRICTED_KINDS = new Set<ResourceKind>(['secret', 'configmap'])
 export const TOPOLOGY_KINDS: readonly ResourceKind[] = [
   'edgiongatewayconfig', 'gatewayclass', 'gateway',
   'httproute', 'grpcroute', 'tcproute', 'udproute', 'tlsroute',
-  'service', 'endpointslice', 'edgionbackendtrafficpolicy', 'backendtlspolicy',
+  'service', 'edgionbackend', 'endpointslice', 'edgionbackendtrafficpolicy', 'backendtlspolicy',
   'edgionplugins', 'edgionstreamplugins', 'edgionconfigdata',
   'edgiontls', 'edgionacme', 'linksys', 'referencegrant', 'secret', 'configmap',
 ]
@@ -67,6 +67,7 @@ const KIND_ALIASES: Record<string, ResourceKind> = {
   httproute: 'httproute', grpcroute: 'grpcroute', tcproute: 'tcproute',
   udproute: 'udproute', tlsroute: 'tlsroute', service: 'service',
   endpointslice: 'endpointslice', backendtlspolicy: 'backendtlspolicy',
+  edgionbackend: 'edgionbackend',
   edgionbackendtrafficpolicy: 'edgionbackendtrafficpolicy',
   edgionplugins: 'edgionplugins', edgionstreamplugins: 'edgionstreamplugins',
   edgionconfigdata: 'edgionconfigdata', edgiontls: 'edgiontls',
@@ -85,7 +86,7 @@ function nodeId(kind: ResourceKind | 'backend' | 'unknown' | 'referencegrant', n
 function layerFor(kind: ResourceKind | 'backend' | 'unknown' | 'referencegrant'): number {
   if (kind === 'gatewayclass' || kind === 'gateway') return 0
   if (ROUTE_KINDS.has(kind as ResourceKind)) return 1
-  if (kind === 'service' || kind === 'edgionbackendtrafficpolicy' || kind === 'backendtlspolicy') return 2
+  if (kind === 'service' || kind === 'edgionbackend' || kind === 'edgionbackendtrafficpolicy' || kind === 'backendtlspolicy') return 2
   if (kind === 'edgionplugins' || kind === 'edgionstreamplugins') return 3
   if (kind === 'edgiongatewayconfig' || kind === 'edgionconfigdata' || kind === 'linksys' || kind === 'edgiontls' || kind === 'edgionacme') return 4
   return 5
@@ -116,6 +117,7 @@ const EXPECTED_GROUP: Partial<Record<ResourceKind, string>> = {
   gateway: 'gateway.networking.k8s.io', gatewayclass: 'gateway.networking.k8s.io',
   httproute: 'gateway.networking.k8s.io', grpcroute: 'gateway.networking.k8s.io',
   tcproute: 'gateway.networking.k8s.io', udproute: 'gateway.networking.k8s.io', tlsroute: 'gateway.networking.k8s.io',
+  edgionbackend: 'edgion.io',
   edgionplugins: 'edgion.io', edgionstreamplugins: 'edgion.io', edgionconfigdata: 'edgion.io',
   edgiontls: 'edgion.io', linksys: 'edgion.io', edgiongatewayconfig: 'edgion.io',
 }
@@ -230,6 +232,15 @@ function referencesFor(kind: ResourceKind, resource: K8sResource): Reference[] {
           if (ref) refs.push(ref)
         }
       }
+    }
+  }
+  if (kind === 'edgionbackend') {
+    const pool = spec.ai?.credentialPool
+    const redis = refFrom(pool?.redisRef, 'linksys', namespace, 'credential quota Redis')
+    if (redis) refs.push(redis)
+    for (const credential of pool?.credentials ?? []) {
+      const secret = refFrom(credential.secretRef, 'secret', namespace, 'credential Secret')
+      if (secret) refs.push(secret)
     }
   }
   if (kind === 'edgiontls') {

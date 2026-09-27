@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { K8sResource } from '@/api/types'
-import { buildTopologyGraph } from './useTopologyData'
+import { buildTopologyGraph, TOPOLOGY_KINDS } from './useTopologyData'
 import { TOPOLOGY_EDGE_COLORS } from '../components/TopologyCanvas'
 
 function resource(kind: string, name: string, namespace: string | undefined, spec: unknown = {}, status?: unknown): K8sResource {
@@ -157,4 +157,44 @@ it('retains references for a partially invalid route and separates stale conflic
   })
   expect(graph.edges.find((edge) => edge.target === 'service/demo/svc')?.state).toBe('resolved')
   expect(graph.edges.find((edge) => edge.target === 'service/demo/missing')?.state).toBe('unresolved')
+})
+
+
+it('loads AI backends and connects routes, policies, credential Secrets and Redis', () => {
+  expect(TOPOLOGY_KINDS).toContain('edgionbackend')
+  const graph = buildTopologyGraph({
+    httproute: [resource('HTTPRoute', 'ai', 'demo', { rules: [{ backendRefs: [
+      { group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' },
+      { group: 'other.io', kind: 'EdgionBackend', name: 'foreign' },
+    ] }] })],
+    edgionbackend: [resource('EdgionBackend', 'provider', 'demo', { ai: {
+      credentialPool: { redisRef: 'demo/quota', credentials: [
+        { name: 'primary', secretRef: { name: 'key' } },
+        { name: 'backup', secretRef: { name: 'absent' } },
+      ] },
+    } })],
+    edgionbackendtrafficpolicy: [resource('EdgionBackendTrafficPolicy', 'retry', 'demo', {
+      targetRefs: [{ group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' }],
+    })],
+    secret: [resource('Secret', 'key', 'demo')],
+    linksys: [resource('LinkSys', 'quota', 'demo')],
+  }, 'demo')
+  expect(graph.nodes.find((node) => node.id === 'edgionbackend/demo/provider')?.data.layer).toBe(2)
+  const pairs = graph.edges.map((edge) => `${edge.source}->${edge.target}:${edge.state}`)
+  expect(pairs).toEqual(expect.arrayContaining([
+    'httproute/demo/ai->edgionbackend/demo/provider:resolved',
+    'edgionbackend/demo/provider->edgionbackendtrafficpolicy/demo/retry:resolved',
+    'edgionbackend/demo/provider->secret/demo/key:resolved',
+    'edgionbackend/demo/provider->secret/demo/absent:unresolved',
+    'edgionbackend/demo/provider->linksys/demo/quota:resolved',
+    'httproute/demo/ai->unknown/demo/foreign:unknown',
+  ]))
+})
+
+it('distinguishes unavailable AI backend inventory from a missing backend', () => {
+  const resources = { httproute: [resource('HTTPRoute', 'ai', 'demo', { rules: [{ backendRefs: [
+    { group: 'edgion.io', kind: 'EdgionBackend', name: 'provider' },
+  ] }] })] }
+  expect(buildTopologyGraph(resources, null).edges[0].state).toBe('unresolved')
+  expect(buildTopologyGraph(resources, null, new Set(['edgionbackend'])).edges[0].state).toBe('unavailable')
 })

@@ -61,10 +61,18 @@ metadata-only keys for restricted dependencies. It displays these main chains:
 
 ```text
 GatewayClass -> Gateway -> Route -> Service -> EndpointSlice -> Backend address
+HTTPRoute -> EdgionBackend -> credential Secret / quota Redis LinkSys
+EdgionBackend -> EdgionBackendTrafficPolicy
 Route -> EdgionPlugins / EdgionStreamPlugins -> ConfigData / LinkSys / Secret
 Gateway -> EdgionTls / EdgionAcme -> Secret
 Service -> BackendTLSPolicy / EdgionBackendTrafficPolicy
 ```
+
+EdgionBackend is loaded through the normal per-Controller resource endpoint and
+placed alongside Services and policies. AI credential edges use only declared
+secretRef and redisRef fields; Secret inventory remains metadata-only. Explicit
+foreign groups remain unknown, and unavailable inventory stays distinct from a
+missing referenced object. These edges describe configuration, not provider calls.
 
 Reference-like fields are resolved using their declared kind and namespace. A missing
 target becomes a red unresolved placeholder instead of silently dropping the edge.

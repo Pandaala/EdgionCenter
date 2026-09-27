@@ -1360,3 +1360,24 @@ before acting on CCI execution files or proposing replacements.
   also found EdgionBackend absent from TOPOLOGY_KINDS/KIND_ALIASES/node styles;
   AI backend references and policy targets require the next source-backed pass.
   Full menu/resource alignment remains active.
+
+
+### AI backends in topology
+
+- Audited EdgionBackendSpec/AiCredentialPool/AiCredential and flattened SecretSlot
+  against current Edgion source. Added the missing EdgionBackend inventory kind,
+  alias, group identity, layer and legend style. HTTPRoute backendRefs and
+  EdgionBackendTrafficPolicy targetRefs now connect to actual AI backend nodes.
+- Follow only declared credentialPool secretRef and redisRef dependencies.
+  Restricted Secrets stay metadata-only; no resolved credential values are used
+  for relationship discovery. Tests cover foreign groups, missing dependencies,
+  denied/unavailable inventory and preserved policy/route links.
+- Eleven topology tests passed (15249), build 81848 and lint plus E2E typecheck
+  7837 passed, all terminal zero. Native standalone run
+  alignment-topology-ai-20260928-v1 passed 4 browser cases (64108 terminal zero):
+  login, dashboard/topology actions, topology controls and AI backend/credential
+  nodes plus redacted detail. All 70 run-owned seeds retained without changes.
+  Logs /tmp/ws5-center-topology-ai-{tests,build,lint-types,native}.log.
+- Browser evidence proves inventory/display and metadata-only dependency views;
+  route/policy/Redis relationship variants have graph tests, not live AI traffic
+  evidence. No provider requests or real credential use. The full audit continues.
