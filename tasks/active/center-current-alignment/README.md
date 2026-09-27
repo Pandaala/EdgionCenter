@@ -2247,3 +2247,29 @@ before acting on CCI execution files or proposing replacements.
   passed; the unrelated English-only guard baseline remains explicitly open.
 - No Edgion code changed. Dedicated native authentication runtime is retained;
   deployed Kubernetes and original cross-resource runtime gaps remain open.
+
+### Kubernetes logout deployment wiring and runtime preparation (2026-09-28)
+
+- Audited the deployable configurations after the authentication repair. Added
+  the bundled proxy's `auth.logout_path` to the canonical Kubernetes ConfigMap
+  and both cloud example overlays; these replace the embedded config string and
+  therefore need the field independently. Updated the deployment instructions.
+- All three Kustomizations render with `/oauth2/sign_out`. Kubernetes config
+  tests passed (8, session 37540). A current native Kubernetes binary built
+  successfully (session 68090, `/tmp/ws5-center-kube-native-build.log`).
+- Revalidated the owned kind node and restarted only its containerd service.
+  The bounded command returned 124 while systemd was still stopping it; later
+  inspection confirmed a new containerd PID 1651, with containerd and kubelet
+  active. Snapshot unpacking resumed, but the final CRI list still had no
+  control-plane containers and the API returned EOF. This is not cluster-ready
+  evidence, and no unrelated cluster/runtime was restarted.
+- Started the current Linux image build through `cicd/build-image.sh`, tag
+  `edgion-center-kubernetes:alignment-auth-20260928-v3`, session 69460. Log:
+  `/tmp/ws5-center-kube-auth-image-v3.log`. It was still loading build context
+  at the checkpoint; re-poll that handle rather than launching another build.
+- OrbStack remains reachable. Its existing CenterController/ProviderAccount
+  CRDs were observed, while ProviderCapabilitySnapshot is absent. The next
+  practical deployment scope is Center plus Dex/proxy in an owned namespace,
+  validating real SAR/capability behavior without altering shared Gateway CRDs.
+  No resources were installed in OrbStack during this batch. The full goal
+  remains active; native/browser auth proof is not deployed Kubernetes proof.

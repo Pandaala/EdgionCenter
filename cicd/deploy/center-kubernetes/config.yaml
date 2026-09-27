@@ -22,6 +22,8 @@ data:
       # Must equal the OAuth client ID stored in edgion-center-browser-oidc.
       audiences: [edgion-center-dashboard]
       groups_claim: groups
+      # The bundled OAuth2 proxy owns the browser session cookie.
+      logout_path: /oauth2/sign_out
       # Mount a private issuer CA and set ca_file when the IdP is not signed by
       # a public WebPKI root.
       # ca_file: /var/run/edgion-center/oidc/ca.crt

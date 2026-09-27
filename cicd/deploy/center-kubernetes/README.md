@@ -18,6 +18,10 @@ Before applying the Kustomization:
    `auth.ca_file` to that mounted path. Do not disable issuer TLS verification
    in production; the operating-system trust store alone is not sufficient for
    the Center binary's rustls/webpki client.
+   The bundled proxy's browser logout endpoint is configured as
+   `auth.logout_path: /oauth2/sign_out`. Keep that same-origin path aligned if
+   replacing the proxy. It clears the proxy session; IdP-wide SSO logout is a
+   separate provider/proxy configuration.
 3. Create the required Secret without committing credentials:
 
    ```sh

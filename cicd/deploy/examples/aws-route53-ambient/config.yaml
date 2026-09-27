@@ -17,6 +17,7 @@ data:
       discovery: https://idp.example.invalid/.well-known/openid-configuration
       audiences: [edgion-center-dashboard]
       groups_claim: groups
+      logout_path: /oauth2/sign_out
     grpc_security:
       tls:
         cert: /var/run/edgion-center/tls/tls.crt

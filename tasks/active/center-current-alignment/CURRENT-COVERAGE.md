@@ -168,6 +168,15 @@ English-only guard; the later no-legacy guard passes when run separately.
 
 ## Next audit actions
 
+Current deployment preparation: canonical Kubernetes and both cloud overlays
+now configure the bundled proxy's logout path; all three render checks and eight
+Kubernetes config tests passed. Native Kubernetes binary build passed. Linux
+image `alignment-auth-20260928-v3` is building in session 69460; inspect that
+handle and `/tmp/ws5-center-kube-auth-image-v3.log` before proceeding. Restarting
+only the owned kind containerd restored the service but not API readiness.
+OrbStack is reachable; an isolated Center/Dex/proxy deployment can validate SAR
+without changing the shared Edgion Gateway CRDs. No such deployment is yet proven.
+
 1. Continue the exact operator/runtime-field audit against all current resource
    structs. Catalog coverage alone is insufficient: the current pass found the
    missing ExtensionRef.resolvedNamespace, Gateway TLS resolution and HTTP rule
