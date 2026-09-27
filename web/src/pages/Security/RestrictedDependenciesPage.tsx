@@ -23,18 +23,19 @@ export default function RestrictedDependenciesPage() {
   const [selected, setSelected] = useState<ResourceKey | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const canList = access.canResource(kind, 'list-keys')
-  const query = useQuery({ queryKey: ['restricted-keys', kind, scope], queryFn: () => resourceApi.listKeys(kind), enabled: canList, retry: false })
-  const rows = (query.data?.data ?? []).filter((row) => `${row.metadata.namespace}/${row.metadata.name}`.toLowerCase().includes(search.toLowerCase()))
+  const query = useQuery({ queryKey: ['restricted-keys', kind, scope], queryFn: () => resourceApi.listKeys(kind, { silent: true }), enabled: canList, retry: false })
+  const rows = (canList ? query.data?.data ?? [] : []).filter((row) => `${row.metadata.namespace}/${row.metadata.name}`.toLowerCase().includes(search.toLowerCase()))
   const title = kind === 'secret' ? 'Secret' : 'ConfigMap'
   const open = (resource: ResourceKey | null) => { setSelected(resource); setEditorOpen(true) }
   return <div>
     <PageHeader title="Restricted dependencies" subtitle="Metadata-only Secret and ConfigMap management. Values are write-only." actions={<Space>
-      <PermissionAwareButton data-testid={resourceActionTestId(kind, 'refresh')} icon={<ReloadOutlined />} resourceKind={kind} resourceVerb="list-keys" onClick={() => query.refetch()}>Refresh</PermissionAwareButton>
+      <PermissionAwareButton data-testid={resourceActionTestId(kind, 'refresh')} icon={<ReloadOutlined />} resourceKind={kind} resourceVerb="list-keys" loading={query.isFetching} onClick={() => query.refetch()}>Refresh</PermissionAwareButton>
       <PermissionAwareButton data-testid={resourceActionTestId(kind, 'create')} type="primary" icon={<PlusOutlined />} resourceKind={kind} resourceVerb="create" onClick={() => open(null)}>Create {title}</PermissionAwareButton>
     </Space>} />
     <Alert type="info" showIcon message="Protected value handling" description="This page only requests resource keys. Replacements start empty and require the complete new content." style={{ marginBottom: 16 }} />
     <Tabs activeKey={kind} onChange={(key) => { setKind(key as RestrictedKind); setSelected(null) }} items={[{ key: 'secret', label: <span data-testid="secret-tab">Secrets</span> }, { key: 'configmap', label: <span data-testid="configmap-tab">ConfigMaps</span> }]} />
     {!canList && <Alert type="warning" showIcon message={access.authorizationPending ? 'Authorization is loading' : `Metadata access denied for ${title}`} description="The request stays disabled until list-keys permission is confirmed." style={{ marginBottom: 16 }} />}
+    {canList && query.isError && <Alert type="error" showIcon message={`Unable to load ${title} metadata`} description="Refresh to retry. Previously loaded rows may be out of date." style={{ marginBottom: 16 }} />}
     <Input.Search data-testid={resourceActionTestId(kind, 'search')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search namespace/name" style={{ width: 300, marginBottom: 16 }} />
     <Table<ResourceKey> rowKey={(row) => `${row.metadata.namespace}/${row.metadata.name}`} loading={canList && query.isLoading} dataSource={rows} columns={[
       { title: 'Name', dataIndex: ['metadata', 'name'] },

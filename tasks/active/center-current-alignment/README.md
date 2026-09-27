@@ -2396,3 +2396,35 @@ before acting on CCI execution files or proposing replacements.
   to reintroduce a stale limit. No Edgion files were changed in this pass.
 - This is source/adapter/component evidence, not new live TLS forwarding proof.
   Backend/runtime coverage remains as recorded above; the full goal stays active.
+
+
+### 2026-09-28: Restricted dependency read failure and recovery
+
+- Secret/ConfigMap metadata read failures now have a persistent sanitized error
+  with a stale-cache warning. Refresh shows its pending state. The query uses
+  the silent API option so raw transport errors do not also reach a global toast.
+  Cached rows are hidden while Controller list-keys authorization is unavailable.
+- Added component coverage for both kinds' read failure/recovery, retention of
+  stale rows while authorization remains valid, and hiding previously visible
+  metadata when Controller access is revoked. No value-read request was added.
+- Real browser proof used current Vite source on 15174, deployed Kubernetes
+  Center v5, Dex authentication, real Kubernetes SAR, and the retained FS
+  Controller over the federation tunnel. A dedicated exact-path, GET-only
+  temporary grant exposed Controller access and ConfigMap keys. The browser
+  loaded metadata, never a ConfigMap value; Secret remained default-denied.
+  Removing the list grant produced the persistent error with cached metadata;
+  restoring it recovered. Final proof also asserts no raw error toast.
+- Artifacts: `/tmp/ws5-center-dependencies-20260928/` contains `proof.cjs`,
+  `proof-final.log`, `result.json`, inspected `read-denied.png`, and
+  `restored.json`. All four live checks passed. The temporary ClusterRole and
+  binding were removed; a subsequent proxy read returned 403 as before.
+  The labeled, synthetic ConfigMap `default/dependency-metadata-proof` remains
+  on the isolated FS Controller for review. No shared cluster resource changed.
+- This proves Kubernetes Center authorization and browser error states, not
+  Kubernetes Controller watch-namespace filtering. The existing namespace
+  isolation E2E remains outstanding; do not count this narrower proof as that
+  gate. No Edgion source change or image rebuild was made.
+- Final frontend suite: 679 tests in 103 files passed; TypeScript/Vite build,
+  lint and diff checks passed. Logs: `/tmp/ws5-dependencies-full-final.log`,
+  `/tmp/ws5-dependencies-build-final.log`, `/tmp/ws5-dependencies-lint-final.log`.
+  Existing Vite chunk-size warnings remain. Goal active; no push.
