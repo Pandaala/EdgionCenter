@@ -39,7 +39,7 @@ for (const expectedCase of expectedCases.filter(({ id }) => !id.includes('-auth-
       await page.getByTestId(`${catalog.kind}-tab`).click()
       await page.getByTestId(`${catalog.kind}-search`).fill(name)
     }
-    const tableRow = page.getByRole('row').filter({ hasText: name }).first()
+    const tableRow = page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) }).first()
     await expect(tableRow).toBeVisible()
     if (expectedCase.actionTestId === 'route-ref-denied' || expectedCase.actionTestId === 'route-ref-granted') {
       await tableRow.getByTestId(`${catalog.kind}-row-view`).click()
@@ -60,7 +60,7 @@ for (const expectedCase of expectedCases.filter(({ id }) => !id.includes('-auth-
         unresolved: { type: 'ResolvedRefs', status: 'False', reason: 'BackendNotFound' },
         'referencegrant-denied': { type: 'ResolvedRefs', status: 'False', reason: 'RefNotPermitted' },
         'referencegrant-allowed': { type: 'ResolvedRefs', status: 'True' },
-        conflict: { type: 'Conflicted', status: 'True', reason: 'LostOldestWins' },
+        conflict: { type: 'Accepted', status: 'False', reason: 'Conflicted' },
       }
       const wanted = expectedCondition[expectedCase.condition]
       await pollResource(request, readProcessed, ({ conditions }) => conditions.some((condition) => {

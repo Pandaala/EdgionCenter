@@ -64,3 +64,14 @@ it('does not infer partial invalidity from False or Unknown', () => {
     ] }))).toEqual([])
   }
 })
+
+
+it('recognizes current policy Accepted=False/Conflicted without interpreting stale conflicts', () => {
+  const value = route('policy', 'svc', { ancestors: [{ ancestorRef: { name: 'edge' }, conditions: [
+    { type: 'Accepted', status: 'False', reason: 'Conflicted', observedGeneration: 4 },
+  ] }] })
+  value.metadata.generation = 4
+  expect(resourceIssues(value)).toEqual(['rejected', 'conflict'])
+  value.metadata.generation = 5
+  expect(resourceIssues(value)).toEqual(['stale'])
+})

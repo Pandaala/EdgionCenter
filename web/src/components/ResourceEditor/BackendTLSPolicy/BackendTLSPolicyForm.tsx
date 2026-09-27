@@ -68,7 +68,7 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
               size="small"
               style={{ marginBottom: 8 }}
               extra={
-                !readOnly && (data.spec?.targetRefs || []).length > 1 ? (
+                !readOnly ? (
                   <Button
                     data-testid="backendtlspolicy-target-remove"
                     type="text"

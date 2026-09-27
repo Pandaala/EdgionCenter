@@ -19,20 +19,20 @@ All rows remain open unless explicitly marked complete.
 
 | Area | Items | Current status |
 | --- | --- | --- |
-| Shared infrastructure | Resource catalog, mutation envelopes, conditions, permissions, Controller switching, pagination | In progress: deployment status display and currentStatus filtering |
+| Shared infrastructure | Resource catalog, mutation envelopes, conditions, permissions, Controller switching, pagination | 22-kind catalog and mutation boundaries aligned; per-writer condition polarity/freshness covered; broader runtime transitions pending |
 | Infrastructure | GatewayClass, Gateway, ReferenceGrant | Native list actions and CRUD passed; validation/runtime stripping aligned; cross-namespace grant and listener attachment behavior pending |
 | Routes | HTTPRoute, GRPCRoute, TCPRoute, UDPRoute, TLSRoute | Generic native CRUD passed; TCP/UDP v1 aligned; advanced route/attachment semantics pending |
-| Services | Service, EndpointSlice, EdgionBackendTrafficPolicy | Lossless Service/EndpointSlice adapters, native actions/CRUD and actual Service batch deletion passed; traffic-policy and discovery runtime workflows pending |
-| AI backends | EdgionBackend, HTTPRoute references, AiProxy, policy attachments | Catalog/access map, menu, editor, route/plugin/policy wiring added; native browser CRUD passed; advanced attachment and failure workflows pending |
+| Services | Service, EndpointSlice, EdgionBackendTrafficPolicy | Lossless Service/EndpointSlice adapters and native CRUD/batch deletion passed; HTTPS probe policy and AI applicability aligned; live probe/resilience/discovery workflows pending |
+| AI backends | EdgionBackend, HTTPRoute references, AiProxy, policy attachments | Catalog/access map, editor, route/plugin/policy wiring and topology added; native CRUD and supported AI policy round-trip passed; advanced attachment and failure workflows pending |
 | Security | EdgionTls, BackendTLSPolicy, Secret/ConfigMap restricted dependencies | Native actions/CRUD passed; typed mTLS SANs and backend identity admission aligned; handshake and authorization denial workflows pending |
 | Plugins | EdgionPlugins, EdgionStreamPlugins, EdgionConfigData | Current HTTP/stream catalogs aligned; nine ConfigData types editable, four new variants passed native browser CRUD; deeper validation and plugin workflows pending |
 | System | EdgionGatewayConfig, LinkSys, EdgionAcme | GatewayConfig controls/policy aligned; ACME HTTP-01 aligned; all eight LinkSys variants have typed browser CRUD evidence; advanced behavior and remaining validation open |
-| Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Native dashboard refresh/topology controls passed; topology semantic completeness and RegionRoute remain pending |
-| Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Pending |
-| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification and native RegionRoute failover/restore/source sync passed; mixed outcome retention covered by component tests; enable/missing-resource/traffic audit open |
+| Controller views | Operations dashboard, user dashboard, topology, RegionRoute | Native dashboard/topology controls and AI backend nodes passed; graph freshness/partial-invalid/grant boundaries tested; advanced attachment semantics pending |
+| Federation views | Center dashboard, Controllers, registration, counts, proxy, watches, reload | Native two-Controller federation/proxy/watch and reload convergence passed; ownership/fencing, reconnect and count freshness scenarios remain open |
+| Global views | RegionRoute overrides, global ConfigData inventory and subtypes | Eight inventory leaves wired, safe/redacted payload boundaries tested; live global verification and native RegionRoute failover/restore/source sync/enable preservation/missing-target recovery passed; mixed outcome retention covered by component tests; actual traffic remains open |
 | Cloud | Provider accounts, Cloudflare DNS, Route53 DNS | Native local account create/edit/CAS conflict/label preservation passed; provider DNS adapters and external workflows still pending |
-| Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Native standalone auth/logout, audit filters/pagination, user and role mutations passed; restricted-role denial, OIDC and Kubernetes capability workflows pending |
-| Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Pending |
+| Administration | Login/discovery, audit, users, roles, standalone/Kubernetes capabilities | Native standalone auth/logout, audit filters/pagination, user/role mutations and restricted-role denial passed; OIDC and Kubernetes capability workflows pending |
+| Runtime validation | Local Center/frontend, current Controller, browser workflows, full matrix | Focused native browser runs and frontend checks passed; combined RBAC run exposed five failures, all passed focused rerun after fixes; clean full rerun and Kubernetes/MySQL/live traffic remain open |
 
 ## Findings and work log
 
@@ -1419,3 +1419,37 @@ before acting on CCI execution files or proposing replacements.
   Logs /tmp/ws5-center-gateway-status-{tests,build,lint}.log.
 - This batch has component evidence, no new runtime listener-conflict or traffic
   test. Broader per-resource/menu and Kubernetes ownership checks remain open.
+
+
+### Full standalone RBAC regression and current policy arbitration
+
+- Ran all 148 browser cases with real database RBAC, two native Controllers,
+  current frontend and run-owned fixtures: alignment-full-rbac-20260928-v1,
+  session 92554 terminal 1, /tmp/ws5-center-full-rbac-native.log. Result: 142
+  passed, 5 failed, 1 Kubernetes-only namespace test skipped. All 22 resource
+  CRUD cases, typed ConfigData/LinkSys variants, RegionRoute flows and restricted
+  user denials passed. This run is not a green full-suite claim.
+- Two failures were stale policy arbitration assertions. Current handlers for
+  both backend policies emit Accepted=False/Conflicted, not the old standalone
+  Conflicted=True/LostOldestWins condition. Corrected generated expectations and
+  topology conflict classification, retaining generation checks.
+- BackendTLSPolicy's add button is bounded to one target, but its remove button
+  was only available above one target, leaving replacement controls unreachable.
+  Allow removing the sole target in the draft, then adding its replacement;
+  mutation validation still requires exactly one target. The action case now
+  verifies the bound and exercises remove-then-add.
+- Policy action selection matched a same-prefix conflict fixture. Use exact
+  resource-name matching in action/generated list tests. Keep action assertions.
+- The remaining failure was role modal cancellation timing. The failed screenshot
+  showed the modal already gone; no component defect was established. The
+  unchanged role/user case passed its focused rerun. Do not call it resolved
+  without a clean full rerun; no timeout increase or assertion removal was made.
+- Focused native RBAC run alignment-full-rbac-fixes-20260928-v1 passed login and
+  all five prior failures (6 cases, 80658 terminal zero). All 70 seeds retained.
+  /tmp/ws5-center-full-rbac-fixes-native.log. Twenty-three affected tests (28360),
+  build 11350, lint 3836 and E2E types 73793 passed, all terminal zero, logs
+  /tmp/ws5-center-full-rbac-fixes-{tests,build,lint,types}.log.
+- Separately, the pre-fix full frontend suite passed 550 tests in 97 files
+  (55454 terminal zero), /tmp/ws5-center-full-web-final-status.log. Current
+  follow-up scope adds one classifier test. Full browser rerun remains next;
+  Kubernetes, external-provider and Gateway traffic proof remain outstanding.

@@ -15,7 +15,10 @@ export function resourceIssues(resource: K8sResource): ResourceIssue[] {
     const reason = condition.reason ?? ''
     const conflictReason = /conflict/i.test(reason) && !/^NoConflict/i.test(reason) && !/Resolved/i.test(reason)
     if (condition.status === 'False' && condition.type === 'ResolvedRefs') issues.add('unresolved')
-    if (condition.status === 'False' && condition.type === 'Accepted') issues.add('rejected')
+    if (condition.status === 'False' && condition.type === 'Accepted') {
+      issues.add('rejected')
+      if (reason === 'Conflicted') issues.add('conflict')
+    }
     if (condition.status === 'False' && /unresolved|not.?found|refnotpermitted|invalid.?ref/i.test(text)) issues.add('unresolved')
     if (condition.status === 'True' && condition.type !== 'NoConflicts'
       && (/^(Conflict|Conflicted|Conflicts)$/i.test(condition.type) || conflictReason)) issues.add('conflict')

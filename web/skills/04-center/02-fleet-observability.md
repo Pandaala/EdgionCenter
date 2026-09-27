@@ -122,3 +122,9 @@ GatewayStatusDetails renders gateway-level conditions once and each listener's
 conditions alongside its attachedRoutes and supportedKinds. Do not flatten
 listener conditions into the gateway section as well. Listener freshness is
 compared against the Gateway metadata.generation.
+
+
+Current BackendTLSPolicy and EdgionBackendTrafficPolicy encode arbitration loss
+as Accepted=False with reason Conflicted on the ancestor, not as
+Conflicted=True/LostOldestWins. Topology reports both rejection and conflict for
+that exact current condition; generation freshness still takes precedence.

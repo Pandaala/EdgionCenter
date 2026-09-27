@@ -37,6 +37,15 @@ const formControls: Partial<Record<string, readonly string[]>> = {
 async function exerciseFormControls(page: import('@playwright/test').Page, kind: string): Promise<void> {
   const controls = formControls[kind]
   if (!controls) return
+  if (kind === 'backendtlspolicy') {
+    const add = page.getByTestId(controls[0])
+    await expect(add).toBeDisabled()
+    await page.getByTestId(controls[1]).click()
+    await expect(add).toBeEnabled()
+    await add.click()
+    await expect(add).toBeDisabled()
+    return
+  }
   await page.getByTestId(controls[0]).first().click()
   const remove = page.getByTestId(controls[1]).last()
   await expect(remove).toBeEnabled()
@@ -88,7 +97,7 @@ for (const catalog of RESOURCE_CATALOG.values()) {
       await expect(refresh).toBeEnabled()
       await refresh.click()
       await page.getByTestId(`${catalog.kind}-search`).fill(fixtureName)
-      const row = page.getByRole('row').filter({ hasText: fixtureName }).first()
+      const row = page.getByRole('row').filter({ has: page.getByText(fixtureName, { exact: true }) }).first()
       await expect(row).toBeVisible()
       const replace = row.getByTestId(`${catalog.kind}-row-replace`)
       await expect(replace).toBeEnabled()
@@ -115,7 +124,7 @@ for (const catalog of RESOURCE_CATALOG.values()) {
     await expect(refresh).toBeEnabled()
     await refresh.click()
     if (!actions.searchExceptions.includes(catalog.kind)) await page.getByTestId(`${catalog.kind}-search`).fill(fixtureName)
-    const row = page.getByRole('row').filter({ hasText: fixtureName }).first()
+    const row = page.getByRole('row').filter({ has: page.getByText(fixtureName, { exact: true }) }).first()
     await expect(row).toBeVisible()
     if (catalog.kind === 'edgionbackendtrafficpolicy') {
       for (const label of ['Health Check · HTTPS', 'Retry Constraint', 'Circuit Breaker', 'Connection Override']) {
