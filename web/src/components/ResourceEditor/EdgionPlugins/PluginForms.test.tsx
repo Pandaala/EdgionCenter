@@ -19,8 +19,8 @@ describe('structured plugin forms', () => {
     }
     render(<EdgionStreamPluginsForm data={resource} onChange={onChange} />)
     expect(screen.getByText(/GeoIP rules must use DirectPeerIp/)).toBeInTheDocument()
-    const item = screen.getByText('failOpen').closest('.ant-form-item')!
-    fireEvent.click(item.querySelector('[role="switch"]')!)
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'failOpen' }))
+    fireEvent.click(screen.getByText('true', { selector: '.ant-select-item-option-content' }))
     expect(onChange).toHaveBeenCalledWith({
       ...resource,
       spec: { ...resource.spec, plugins: [{ ...resource.spec.plugins[0], config: { ...resource.spec.plugins[0].config, failOpen: true } }] },

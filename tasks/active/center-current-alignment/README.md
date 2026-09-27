@@ -1018,3 +1018,24 @@ before acting on CCI execution files or proposing replacements.
   from unverified live DNS/Gateway workflows. All tool sessions terminal.
 - Updated Cloud ledger status to reflect verified local account behavior without
   claiming provider-specific DNS completion.
+
+### Plugin/system menus and optional boolean controls
+
+- Cloud creation batch committed as 14dcd78, no push.
+- Native handle 50326 passed thirteen cases: auth plus list actions and actual
+  CRUD for GatewayConfig, HTTP plugins, stream plugins, ConfigData, ACME and
+  LinkSys. Log /tmp/ws5-center-system-actions-v1.log. Owned services stopped,
+  70 exact fixtures retained. Cases exercise generic resource workflows, not
+  every plugin configuration or data-plane execution.
+- Known boolean fields previously displayed an unchecked switch when absent,
+  suggesting false even for server defaults such as RealIp.recursive=true.
+  Replaced that control with an explicit true/false selector whose absent value
+  stays unset. Existing Clear removes the field. No default is materialized into
+  the resource; unknown siblings and false are retained.
+- Added omitted/false/clear regression and updated stream GeoIP form interaction.
+  Initial runs 24595/17525 exposed outdated switch selectors and duplicate hidden
+  AntD option text in tests. Corrected visible-option queries; final 52800 passed
+  ten cases. Build 30752 and lint 79033 passed. Logs:
+  /tmp/ws5-center-plugin-boolean-*.log. All current sessions terminal.
+- Generic browser coverage above does not specifically prove the new boolean
+  interaction. The per-plugin nested schema and runtime audit remains open.
