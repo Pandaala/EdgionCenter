@@ -189,9 +189,54 @@ resourceCatalog. Log: `/tmp/ws5-center-linksys-ownership-tests.log`. This checks
 the mutation/configuration boundary; persistent-provider global TLS lifecycle
 validation remains separate from this inventory.
 
+## Checked: AI credentials, ACME, ConfigData and core envelopes
+
+Checkpoint: 2026-09-28, Center `6cc1ca5`. No additional ownership-path repair was
+needed in this pass. Current source was traced through nested types and the
+mutation adapters, including variant-specific filtering outside the catalog.
+
+- EdgionBackend: currentStatus and ai.credentialPool.credentials[].secret are
+  serialized internal fields. AiCredential flattens SecretSlot; secretRef,
+  alias, weight, limits, models/pricing, provider and defaults remain authored.
+  reconcileOutcome is serde(skip); compiled model catalogs and computed pricing
+  live in separate runtime types. The Controller clears and resolves every slot
+  before producing its current-generation outcome.
+- EdgionAcme: currentStatus and resolvedListenerAttachments are serialized
+  internal fields. notifyAfterPublish is serde(skip). HTTP-01 ParentReferences,
+  account/EAB Secret references, renewal durations, storage and automatic TLS
+  settings remain authored. Active challenges and scheduler state belong to
+  status, not the mutation spec. The old renewBeforeDays exclusion remains a
+  stale-field removal, not a current runtime property.
+- EdgionConfigData: currentStatus is excluded and unknownFields is serde(skip).
+  All nine supported data variants were inventoried, including imported
+  RegionDef, ProxyProtocolTrustPolicy, UrlAccessCandidate and ConditionSet.
+  The type-specific adapter removes resolvedValues/resolvedCredentials/
+  resolvedIps/refDenied under URL-list conditions while preserving Misc payloads.
+  Condition matchers/descriptors are serde(skip). WAF bundle content is authored
+  even though its processed-view serializer redacts it: it must not be stripped
+  from a mutation. The ConfigData list/editor uses the storage-backed namespaced
+  API through useResourceList; cache_list_resources is the separate redacted
+  processed-status path.
+- ReferenceGrant: from/to group, kind, source namespace and optional target name
+  are authored; its current spec has no internal projection.
+- Core envelopes: Service retains spec; EndpointSlice retains addressType,
+  endpoints and ports; Secret retains data/stringData/type/immutable; ConfigMap
+  retains data/binaryData/immutable. Shared mutation serialization excludes status
+  and server metadata and retains resourceVersion for updates. Secret/ConfigMap
+  remain restricted dependencies with explicit replacement flows; this pass
+  does not authorize adding them to a global resource read model.
+
+Authority: current shared edgion_backend.rs, edgion_acme.rs,
+edgion_config_data/*, conditions.rs, proxy_protocol.rs and reference_grant.rs;
+Controller handlers edgion_backend.rs / edgion_acme.rs and namespaced_handlers.rs;
+Center resourceCatalog.ts, resource-document.ts and the per-resource adapters.
+62 tests pass across edgionbackend, edgionacme, edgionConfigData, core-resources,
+secret and resourceCatalog. Log:
+`/tmp/ws5-center-remaining-resource-ownership-tests.log`. This is ownership and
+adapter evidence, not new AI-provider traffic or ACME issuance evidence.
+
 ## Still to reconcile in the dedicated ownership pass
 
-HTTP/stream plugin configurations and conditions; AI credential slots;
-ACME/ConfigData; Kubernetes core resource envelopes.
+HTTP/stream plugin configurations and their imported condition/configuration types.
 Earlier repairs and tests remain evidence, but each nested ownership review needs
 an explicit current-source inventory before this audit can be closed.
