@@ -20,7 +20,15 @@ Center cloud integration is independent of Controller federation.
 - **Focused flow**: resource-specific browser or backend scenario described below.
 - **Open**: missing or narrower evidence; never count it as completion.
 
-The latest fully passing unfiltered resource run `alignment-full-current-20260928-v3` passed
+The current unfiltered standalone regression passes **173 tests with two
+Kubernetes-only skips**, and the full frontend suite passes **804 tests in 116
+files**. Build, lint, E2E types and strict inventory also pass. All 22 CRUD cases
+and both new client-certificate clearing browser cases pass in the same execution.
+See [latest regression evidence](LATEST-REGRESSION-EVIDENCE.md) for the exact
+source, runtime and artifact scope. This supersedes the historical standalone
+baselines below; their failure/retry records remain intact.
+
+The earlier fully passing unfiltered resource run `alignment-full-current-20260928-v3` passed
 155 tests with two Kubernetes-only skips (capabilities and dependency namespace
 scope). Session 20509 exited zero; all 112 annotated ledger cases passed,
 including all 22 generic resource CRUD cases, plus the focused routes/WAF/
@@ -147,27 +155,14 @@ Cloudflare test race was fixed and passed both focused and matrix runs.
 
 ## Latest complete frontend suite
 
-The latest full frontend run passed 706 tests in 107 files, including ACME
-lifecycle source precedence, shared observations, expiry conversion, stale-version
-rejection and failed-read clearing. Log: `/tmp/ws5-center-acme-lifecycle-full.log`.
-The final layout adjustment passed all five lifecycle tests again, plus build
-and lint (`/tmp/ws5-center-acme-lifecycle-layout.log`, `-build-final.log`,
-`-lint-final.log`). The bundle-size warning remains. E2E types and inventory
-passed in the preceding passes; this repair changed no E2E types or selectors.
+804 tests in 116 files pass in `/tmp/ws5-center-latest-frontend-full.log`.
+Production build, lint, E2E types and inventory pass. The bundle-size warning
+remains. The same production frontend passes the unfiltered 173-case standalone
+browser run above. Earlier 706/751/755/760-test checkpoints remain historical
+in the work log and focused evidence files.
 
-This supersedes the 701-test checkpoint. Four lifecycle browser checkpoints
-supplement four ACME trigger checks and six runtime-status checks; injected
-Ready/expiry and denial responses are explicitly distinguished from actual
-native Pending and server-side trigger denial in ACME-MENU-EVIDENCE.md.
-The full native browser regression above predates the later frontend fixes;
-focused browser evidence supplements it without upgrading that run's scope.
-
-The dedicated kind node was rechecked in the same pass: its API still returns
-EOF, `crictl ps -a` has no control-plane containers, and containerd's main thread
-is blocked in `wait_for_partner -> fifo_open -> openat` while repeated container
-creation requests report reserved names. This is stronger evidence than the
-previous assumption of slow image unpacking. The node services remain running;
-no unrelated cluster was modified and no runtime restart was attempted.
+The dedicated kind cluster failure and the separate OrbStack Kubernetes evidence
+are unchanged; this frontend/native pass does not upgrade their validation scope.
 
 ## Source-to-coverage reconciliation
 

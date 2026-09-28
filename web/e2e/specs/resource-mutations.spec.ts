@@ -373,6 +373,44 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+for (const keepOther of [false, true]) {
+  test(`backend TLS client certificate browser clearing preserves other options: ${keepOther}`, async ({ page, request }) => {
+    const catalog = RESOURCE_CATALOG.get('backendtlspolicy')!
+    await waitForControllerCapabilities(request, controller, [{ resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+    const name = `${prefix}-client-cert-clear-${keepOther}`
+    const document = mutationDocument(catalog, name)
+    document.spec.options = {
+      'edgion.io/client-certificate-ref': `${prefix}-tls`,
+      ...(keepOther ? { 'example.com/future': '' } : {}),
+    }
+    const path = itemPath(catalog, namespace, name)
+    const created = await request.post(collectionPath(catalog, namespace), { data: yaml.dump(document), headers: yamlHeaders })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    try {
+      await waitForStableResourceVersion(request, catalog, namespace, name)
+      await openResourcePage(page, catalog)
+      await (await resourceRow(page, catalog, name)).getByTestId('backendtlspolicy-row-edit').click()
+      const certItem = page.locator('.ant-form-item').filter({ hasText: 'Client certificate Secret name' })
+      await certItem.locator('input').fill('')
+      await page.getByTestId('editor-yaml-tab').click()
+      const expected = keepOther ? { 'example.com/future': '' } : undefined
+      expect((await yamlEditorDocument(page)).spec.options).toEqual(expected)
+      await page.getByTestId('editor-form-tab').click()
+      const response = page.waitForResponse(value => value.request().method() === 'PUT' && value.url().endsWith(path))
+      await page.getByTestId('editor-submit').click()
+      const result = await response
+      expect(result.ok(), await result.text()).toBeTruthy()
+      const updated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+      expect(updated.spec.options).toEqual(expected)
+      expect(updated.spec.targetRefs).toEqual(document.spec.targetRefs)
+      expect(updated.spec.validation).toEqual(document.spec.validation)
+    } finally {
+      const cleanup = await request.delete(path)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact backend TLS fixture cleanup failed').toBeTruthy()
+    }
+  })
+}
+
 for (const [kind, port] of [['httproute', 8080], ['grpcroute', 8081], ['tcproute', 9000], ['udproute', 9001], ['tlsroute', 8443]] as const) {
   test(`route parent browser clearing restores optional fields for ${kind}`, async ({ page, request }) => {
     const catalog = RESOURCE_CATALOG.get(kind)!

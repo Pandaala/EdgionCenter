@@ -103,11 +103,11 @@ const BackendTLSPolicyList = () => {
       items: policies,
     }),
     {
-      title: t('col.targetService'), key: 'target',
+      title: t('col.targetBackend'), key: 'target',
       render: (_: any, r: K8sResource) => (
         <Space wrap>
           {(r.spec?.targetRefs || []).map((ref: any, i: number) => (
-            <Tag key={i} color="blue">{ref.name}</Tag>
+            <Tag key={i} color="blue">{ref.kind || 'Service'}/{ref.name}{ref.sectionName ? `#${ref.sectionName}` : ''}</Tag>
           ))}
         </Space>
       ),

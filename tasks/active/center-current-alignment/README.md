@@ -2919,3 +2919,14 @@ parsing with submission preflight and never interprets this same-namespace optio
 as a cross-namespace dependency. Invalid nonempty strings remain unknown. All 67
 focused tests, build and lint pass; see the topology follow-up in
 [client certificate evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md).
+
+
+## 2026-09-28 — current complete standalone regression
+
+Full frontend: 804 tests/116 files. Build, lint, E2E types and inventory pass.
+Unfiltered native browser: 173 passed, two Kubernetes-only skips, zero failures.
+Includes all 22 CRUD workflows and new BackendTLSPolicy client-certificate
+clearing/option-preservation API readback. The list identifies backend kind/name
+and section instead of assuming all targets are Services. Owned processes stopped;
+70 labeled seeds retained. See [latest regression evidence](LATEST-REGRESSION-EVIDENCE.md).
+Overall backend/dashboard alignment remains active.
