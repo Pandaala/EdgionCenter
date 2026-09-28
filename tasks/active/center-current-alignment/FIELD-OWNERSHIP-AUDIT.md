@@ -272,12 +272,43 @@ The final full frontend run passes all 846 tests in 117 files:
 `/tmp/ws5-plugin-dye-fields-{build,lint}.log`. The first failed full run remains
 at `/tmp/ws5-center-plugin-audit-full-tests.log`.
 
-Stream exclusions still use recursive terminal filtering. The remaining review
-must cover operator-chosen GlobalConnectionIpRestriction profile names before
-claiming the complete plugin ownership pass is closed.
+## Checked: HTTP and Stream plugin ownership inventory
 
-## Still to reconcile in the dedicated ownership pass
+Checkpoint: 2026-09-28, following `790f3c7`. Stream filtering had the same map-key
+collision: a GlobalConnectionIpRestriction profile named allowMatcher or
+refDenied was removed. It now uses explicit root, profile-member, rate-limit and
+reference paths. Create/update regressions preserve both profile names and an
+operator extension while removing the actual matcher and reference denial fields.
+59 tests pass across resourceCatalog, resource-document and edgionstreamplugins;
+build/lint pass. Logs: `/tmp/ws5-stream-scoped-fields-{tests,build,lint}.log`.
 
-HTTP/stream plugin configurations and their imported condition/configuration types.
-Earlier repairs and tests remain evidence, but each nested ownership review needs
-an explicit current-source inventory before this audit can be closed.
+The inventory covers the current EdgionPlugin, EdgionStreamPlugin and
+TlsRouteStreamPlugin enums, their configuration structs, all four HTTP entry
+types, BodyRequirement, DyeSuite, ConditionSet/HmacMatchConfig, shared outbound
+HTTP/TLS types and EdgionConfigDataRef. Serialized internal members group as:
+
+| Owner | Internal fields and placement |
+| --- | --- |
+| HTTP auth configs | resolvedUsers, resolvedKey(s), resolvedCredential(s), resolvedGroupsByIss, resolvedCaSecrets, resolvedOidcClientSecret, resolvedSessionSecret; LDAP/OIDC TLS material on their config |
+| HTTP external calls | ForwardAuth/Guardrail resolvedSecrets and shared tls material; AiGuard evaluator.resolvedSecrets/tls; ExtProc grpcService.tls |
+| Wasm source | source.fetch.resolvedAuthHeader/tls and source.oci.resolvedPullSecret |
+| Conditions | resolvedValues, resolvedIps, HMAC resolvedCredentials and reference refDenied under entry/body/dye conditions and RequestRestriction/RequestAccessPolicy conditions |
+| RequestAccessPolicy | config.resolvedProfiles, rule config.resolvedCandidates, direct IP expansion and typed IP/URL/selector reference denial markers |
+| Other typed references | HTTP/Stream allowRefs/denyRefs, selectors/overrides, stream profile references and RequestMirror backendRef.refDenied |
+| Logical WAF | resolvedPolicy, selectedProfile, resolvedRefIndices, resolvedBundles, resolutionErrors, ownerNamespace and policy/selector reference denial markers |
+
+The root currentStatus is excluded. Compiled regex/IP/GeoIP matchers, parsed
+durations, body caches, unknown-field diagnostics and WAF status-only flags use
+serde(skip) or separate runtime types. Defensive exclusions for these names do
+not establish that they are transported. Arbitrary Mock headers, Wasm JSON,
+JsonSchemaValidation schema, ProxyRewrite literals and operator-chosen map keys
+are configuration, not runtime state. Stream entries have enable plus the tagged
+config; they do not inherit HTTP entry/body/dye conditions. GeoIpLocation shares
+typed rule groups with HTTP, with a serde-skipped CIDR matcher.
+
+Controller ownership was cross-checked against edgion_plugins.rs resolution of
+credentials, WAF, access profiles and condition references, and
+edgion_stream_plugins.rs reference-marker recomputation. The mutation ownership
+pass now covers all catalog kinds. This closes that bounded source/adapter
+review only; the broader runtime and menu requirements in COMPLETION-AUDIT.md
+remain open.

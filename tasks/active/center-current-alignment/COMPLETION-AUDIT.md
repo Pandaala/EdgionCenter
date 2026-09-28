@@ -1,6 +1,6 @@
 # Completion audit checkpoint
 
-Date: 2026-09-28. Source checkpoint: `7433d37` plus documentation in this commit.
+Date: 2026-09-28. Source checkpoint: `790f3c7` plus the Stream filtering repair in this commit.
 Verdict: **not yet complete**. This reconciles current evidence; it does not
 replace the user's full backend/dashboard, resource-by-resource/menu-by-menu scope.
 
@@ -9,10 +9,10 @@ replace the user's full backend/dashboard, resource-by-resource/menu-by-menu sco
 | Requirement | Current evidence | Assessment |
 | --- | --- | --- |
 | Use current Edgion, without reconstructing its history | Current ResourceKind and CRD/handler reads; per-fix source citations | Satisfied for work performed |
-| Cover every resource type | Fresh exact set comparison: 22 Edgion kinds = 22 Center catalog kinds; all 20 first-class resource paths occur in the Controller menu; Secret/ConfigMap share restricted dependencies | Catalog complete; nested operator/runtime ownership audit still open |
+| Cover every resource type | Fresh exact set comparison: 22 Edgion kinds = 22 Center catalog kinds; all 20 first-class resource paths occur in the Controller menu; Secret/ConfigMap share restricted dependencies | Catalog and nested ownership review complete; runtime requirements remain below |
 | Check every menu | Current Center menu has 17 leaves; controller catalog paths have no omissions; native 173-pass baseline plus focused follow-ups and separate OIDC/Kubernetes evidence | Current menu coverage indexed; runtime limits below remain explicit |
 | Update Center backend | Federation ownership revocation, global write semantics, auth/cloud/error handling repairs; fresh 876 workspace + 247 no-default-feature app tests | Implemented paths verified; deployed Kubernetes image predates later backend fixes |
-| Update Center frontend | Fresh 835 tests in 117 files; recent Gateway/BTP fixes have focused browser/component evidence | Current unit/component regression passes; last complete native run predates newest fixes |
+| Update Center frontend | 846 tests in 117 files plus 59 focused tests for the final Stream repair; Gateway/BTP fixes have focused browser/component evidence | Current unit/component regression passes; last complete native run predates newest fixes |
 | Exercise local runtime | Isolated native Center + two mTLS Controllers; API readback, real Gateway traffic, and separate OrbStack deployments | Established for recorded scenarios; no blanket conformance claim |
 | Commit Center only, do not push | Center task commits; Edgion ACME repair remains local/uncommitted; unrelated work preserved | Scope retained |
 
@@ -21,6 +21,10 @@ Current resource/menu details: CURRENT-COVERAGE.md. The opening table in README.
 is the original historical checkpoint, not an up-to-date pending-work list.
 
 ## Fresh gates
+
+- Latest full frontend: 846 passed / 117 files; `/tmp/ws5-center-plugin-audit-final-full-tests.log`.
+  The later Stream-only repair passes 59 focused tests, build and lint;
+  `/tmp/ws5-stream-scoped-fields-{tests,build,lint}.log`.
 
 - Frontend: 835 passed / 117 files, 78.09 seconds.
   `/tmp/ws5-center-closure-frontend-full.log`.
@@ -40,14 +44,12 @@ is the original historical checkpoint, not an up-to-date pending-work list.
 
 ## Remaining work, not superseded historical TODOs
 
-1. Finish the nested operator/runtime-field review across the current resource
-   implementations. The recent Gateway private projection finding proves why
-   catalog parity and generic CRUD alone cannot close this requirement. Inspect
-   ownership in ingestion before modifying exclusion paths; schemars(skip) alone
-   does not determine ownership. Preserve supported operator configuration.
-   [FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md) now records the checked
-   EdgionTls, BackendTLSPolicy, EdgionBackendTrafficPolicy, Gateway, GatewayClass
-   and EdgionGatewayConfig mutation boundaries.
+1. The dedicated nested operator/runtime ownership pass is now recorded for all
+   catalog kinds in [FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md), including
+   the route mirror/ExternalAuth repairs and HTTP/Stream opaque-data preservation.
+   The full frontend run passed 846 tests before the final Stream-only repair;
+   that repair has 59 focused tests plus build/lint evidence. This closes source
+   ownership review, not the traffic/menu requirements below.
 2. Close selected cross-resource runtime gaps retained in the existing scope:
    frontend TLS policy transitions, AI backend/provider routing and policy
    attachment, and resilience behaviors beyond the five proven probe types.

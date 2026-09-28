@@ -190,20 +190,22 @@ const EXCLUDED_MUTATION_PATHS = {
   ],
   edgionstreamplugins: [
     ['spec', 'currentStatus'],
-    ['spec', 'plugins', '*', 'policyAction'],
-    ['spec', 'plugins', '*', 'config', '**', 'refDenied'],
-    ['spec', 'plugins', '*', 'config', '**', 'ipMatcher'],
-    ['spec', 'plugins', '*', 'config', '**', 'allowMatcher'],
-    ['spec', 'plugins', '*', 'config', '**', 'denyMatcher'],
-    ['spec', 'plugins', '*', 'config', '**', 'intervalDuration'],
-    ['spec', 'plugins', '*', 'config', '**', 'effectiveSlots'],
-    ['spec', 'tlsRoutePlugins', '*', 'policyAction'],
-    ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'refDenied'],
-    ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'ipMatcher'],
-    ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'allowMatcher'],
-    ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'denyMatcher'],
-    ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'intervalDuration'],
-    ['spec', 'tlsRoutePlugins', '*', 'config', '**', 'effectiveSlots'],
+    ...['plugins', 'tlsRoutePlugins'].flatMap((stage) => [
+      ['spec', stage, '*', 'policyAction'],
+      ...['ipMatcher', 'allowMatcher', 'denyMatcher', 'intervalDuration', 'effectiveSlots'].map(
+        (field) => ['spec', stage, '*', 'config', field],
+      ),
+      ...['allowMatcher', 'denyMatcher'].map(
+        (field) => ['spec', stage, '*', 'config', 'profiles', '*', field],
+      ),
+      ...['perListener', 'perSourceIp'].map(
+        (field) => ['spec', stage, '*', 'config', field, 'intervalDuration'],
+      ),
+      ...[
+        ['activeProfileRef'], ['allowRefs', '*'], ['denyRefs', '*'],
+        ['profiles', '*', 'allowRefs', '*'], ['profiles', '*', 'denyRefs', '*'],
+      ].map((reference) => ['spec', stage, '*', 'config', ...reference, 'refDenied']),
+    ]),
   ],
   edgionconfigdata: [['spec', 'currentStatus']],
   edgionacme: [

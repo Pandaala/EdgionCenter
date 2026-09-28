@@ -2,6 +2,29 @@ import { describe, expect, it } from 'vitest'
 import { fromYaml, normalize, toMutationDocument } from './edgionstreamplugins'
 
 describe('EdgionStreamPlugins lossless adapter', () => {
+  it.each(['create', 'update'] as const)('retains profile names matching internal fields on %s', (mode) => {
+    const profile = { allowRefs: [{ name: 'office', refDenied: { reason: 'RefNotPermitted' } }], defaultAction: 'deny', allowMatcher: 'runtime' }
+    const resource: any = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionStreamPlugins', metadata: { name: 'named', namespace: 'edge' },
+      spec: { plugins: [{ type: 'GlobalConnectionIpRestriction', config: {
+        enable: true, activeProfile: 'allowMatcher', activeProfileRef: { name: 'selector', refDenied: {} },
+        profiles: { allowMatcher: structuredClone(profile), refDenied: structuredClone(profile) },
+        future: { refDenied: 'operator data' },
+      } }] },
+    }
+    const before = structuredClone(resource)
+    const mutation: any = toMutationDocument(resource, mode)
+    expect(mutation.spec.plugins[0].config).toEqual({
+      enable: true, activeProfile: 'allowMatcher', activeProfileRef: { name: 'selector' },
+      profiles: {
+        allowMatcher: { allowRefs: [{ name: 'office' }], defaultAction: 'deny' },
+        refDenied: { allowRefs: [{ name: 'office' }], defaultAction: 'deny' },
+      },
+      future: { refDenied: 'operator data' },
+    })
+    expect(resource).toEqual(before)
+  })
+
   it('preserves both stages, all current variants, unknown fields, and explicit empties', () => {
     const fixture = {
       apiVersion: 'edgion.io/v1',
