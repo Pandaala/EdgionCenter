@@ -56,8 +56,11 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    The current full frontend run passes 848 tests including the Stream repair,
    which also has focused build/lint evidence. This closes source
    ownership review, not the traffic/menu requirements below.
-2. Close remaining cross-resource runtime gaps, especially frontend TLS policy
-   transitions. Selected AI backend/provider routing, typed policy attachment and
+2. The selected frontend TLS transition gap is now verified by seven real
+   handshake matrices: strict/fallback mode, clear-versus-delete port override,
+   default inheritance and CA Secret rotation/restoration through Center. See
+   [FRONTEND-TLS-TRAFFIC-EVIDENCE.md](FRONTEND-TLS-TRAFFIC-EVIDENCE.md).
+   Selected AI backend/provider routing, typed policy attachment and
    resilience beyond active probes now have actual traffic evidence: endpoint
    edits, credential rotation and concurrency limit changes/deletion pass in two
    isolated runs with Center form/API mutations. See

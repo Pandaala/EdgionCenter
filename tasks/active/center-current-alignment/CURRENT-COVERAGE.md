@@ -109,7 +109,10 @@ have real Gateway traffic evidence, including form edits and policy deletion.
 Two isolated 12-checkpoint runs pass; see
 [AI-BACKEND-TRAFFIC-EVIDENCE.md](AI-BACKEND-TRAFFIC-EVIDENCE.md). This covers
 selected concurrency resilience beyond active probes, not every resilience
-mechanism or provider protocol. Frontend TLS transitions remain open.
+mechanism or provider protocol. Gateway frontend TLS transitions now also pass
+seven real handshake matrices covering form mode changes, port override
+clearing/deletion, default inheritance and CA rotation/restoration. See
+[FRONTEND-TLS-TRAFFIC-EVIDENCE.md](FRONTEND-TLS-TRAFFIC-EVIDENCE.md).
 
 Recent native logs supplement the baseline: `/tmp/ws5-center-waf-ui-native-v1.log`,
 `/tmp/ws5-center-http-retry-native-v1.log`, `/tmp/ws5-center-grpc-match-native-v1.log`,
