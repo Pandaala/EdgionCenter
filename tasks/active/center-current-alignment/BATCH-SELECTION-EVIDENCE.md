@@ -47,3 +47,12 @@ The full frontend suite passes 751 tests in 113 files. Production build and lint
 pass; the existing bundle-size warning remains. Browser screenshots were inspected.
 
 No Edgion files changed in this pass. The broader alignment audit remains active.
+
+## Subsequent actual deletion evidence
+
+The repository browser suite now also selects two isolated HTTPRoutes, hides one
+with search, confirms deletion, verifies both objects are absent through actual
+API reads, and verifies an unselected third object remains. This passed in the
+combined native regression; see
+[COMBINED-BROWSER-EVIDENCE.md](COMBINED-BROWSER-EVIDENCE.md). It adds authorized
+mutation evidence without changing the limits of the earlier two UI checkpoints.

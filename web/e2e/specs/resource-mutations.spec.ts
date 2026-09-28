@@ -693,6 +693,51 @@ test('editor submit replaces an isolated ConfigMap and cleans it exactly', async
   if (cleanupError) throw cleanupError
 })
 
+test('filtered batch deletion removes both selected HTTPRoutes and preserves unselected resources', async ({ page, request }) => {
+  const catalog = RESOURCE_CATALOG.get('httproute')!
+  await waitForControllerCapabilities(request, controller, [{
+    resourceKind: 'httproute', verbs: ['get', 'list', 'create', 'delete'],
+  }])
+  const names = ['visible', 'hidden', 'unselected'].map((suffix) => `${prefix}-filtered-${suffix}`)
+  const createdNames: string[] = []
+  try {
+    for (const name of names) {
+      const document = mutationDocument(catalog, name)
+      const created = await request.post(collectionPath(catalog, namespace), {
+        data: yaml.dump(document, { lineWidth: -1 }), headers: yamlHeaders,
+      })
+      expect(created.ok(), await created.text()).toBeTruthy()
+      createdNames.push(name)
+      await waitForStableResourceVersion(request, catalog, namespace, name)
+    }
+    await openResourcePage(page, catalog)
+    const search = page.getByTestId('httproute-search')
+    await search.fill(`${prefix}-filtered-`)
+    for (const name of names.slice(0, 2)) {
+      const row = page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) })
+      await row.locator('input[type="checkbox"]').check()
+    }
+    await search.fill(names[0])
+    await expect(page.getByRole('row').filter({ has: page.getByText(names[1], { exact: true }) })).toHaveCount(0)
+    await page.getByTestId('httproute-batch-delete').click()
+    const confirm = page.getByTestId('resource-batch-delete-confirm')
+    await expect(confirm).toBeEnabled()
+    const responses = names.slice(0, 2).map((name) => page.waitForResponse((response) =>
+      response.request().method() === 'DELETE' && response.url().endsWith(itemPath(catalog, namespace, name)),
+    ))
+    await confirm.click()
+    for (const response of await Promise.all(responses)) expect(response.ok(), await response.text()).toBeTruthy()
+    for (const name of names.slice(0, 2)) await expectApiAbsent(request, itemPath(catalog, namespace, name))
+    const untouched = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, names[2])
+    expect(untouched.metadata?.labels?.['edgion.io/e2e-run']).toBe(runId)
+  } finally {
+    for (const name of createdNames) {
+      const cleanup = await request.delete(itemPath(catalog, namespace, name))
+      expect(cleanup.ok() || cleanup.status() === 404, `Exact HTTPRoute cleanup failed: ${name}`).toBeTruthy()
+    }
+  }
+})
+
 test('single and batch delete confirmations remove only isolated Services', async ({ page, request }) => {
   await waitForControllerCapabilities(request, controller, [{
     resourceKind: 'service',

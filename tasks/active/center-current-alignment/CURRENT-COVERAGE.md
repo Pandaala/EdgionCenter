@@ -20,7 +20,7 @@ Center cloud integration is independent of Controller federation.
 - **Focused flow**: resource-specific browser or backend scenario described below.
 - **Open**: missing or narrower evidence; never count it as completion.
 
-The latest complete resource run `alignment-full-current-20260928-v3` passed
+The latest fully passing unfiltered resource run `alignment-full-current-20260928-v3` passed
 155 tests with two Kubernetes-only skips (capabilities and dependency namespace
 scope). Session 20509 exited zero; all 112 annotated ledger cases passed,
 including all 22 generic resource CRUD cases, plus the focused routes/WAF/
@@ -38,8 +38,16 @@ menus/controllers and metadata-only permissions. Artifacts:
 custom-resource Kubernetes matrix or its CRD-schema gate.
 
 The older 147-test run remains historical evidence, superseded by this run.
-The subsequent authentication repair has separate current browser/component
-evidence below; the full resource run predates that repair.
+That run predates subsequent authentication and shared-list repairs. The current
+combined regression at production commit `daf70d3` ran all 158 standalone cases:
+155 passed, one temporary ACME grant error failed, and two Kubernetes-only cases
+skipped. Correcting the private grant to Service/acme-trigger made the unchanged
+ACME case and its authentication setup pass. All 156 applicable cases have passing
+evidence across these executions; the original full-run failure is retained,
+not relabeled as a successful gate. All 22 CRUD cases and the new actual filtered
+batch deletion case passed. See
+[COMBINED-BROWSER-EVIDENCE.md](COMBINED-BROWSER-EVIDENCE.md) for exact scope,
+artifact paths and the distinction between the original ledger and retry.
 
 ## Controller resource menus
 

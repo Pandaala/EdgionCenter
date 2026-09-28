@@ -2834,3 +2834,19 @@ before acting on CCI execution files or proposing replacements.
   switch cleanup without resource mutations or policy changes.
 - [BATCH-SELECTION-EVIDENCE.md](BATCH-SELECTION-EVIDENCE.md) records scope,
   artifacts and limits. Overall alignment remains active.
+
+
+### 2026-09-28: Combined current native browser regression
+
+- Rebuilt both native binaries and exercised every standalone browser case on
+  isolated ports with explicit test grants and Center database RBAC enabled.
+- Original result: 155 passed, one ACME fixture-grant failure, two Kubernetes-only
+  skips. Correcting the private operation grant to Service/acme-trigger yielded
+  two passing retry tests (authentication and the unchanged ACME action case).
+  The original failed report and 111/112 passing ledger are retained honestly.
+- Added actual filtered HTTPRoute batch deletion with API absence checks and an
+  unselected-resource preservation check; it passed. All 22 CRUD cases passed.
+- E2E types, lint, strict inventory and diff checks pass. Seventy seed files are
+  retained and verified; existing native/OrbStack environments are unchanged.
+- [COMBINED-BROWSER-EVIDENCE.md](COMBINED-BROWSER-EVIDENCE.md) records both
+  executions, artifact paths and limits. Overall alignment remains active.
