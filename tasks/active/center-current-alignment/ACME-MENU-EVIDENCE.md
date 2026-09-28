@@ -71,7 +71,7 @@ Artifacts: `/tmp/ws5-center-acme-issuance-20260928/`. The owned namespace is
 `ws5-center-acme-20260928`, Controller identity is `e2e-acme/alignment-acme`, and
 resource/GatewayClass name is `center-acme-issuance`. This uses the retained
 current-source Linux Controller artifact copied into an isolated container,
-not the old shared-cluster Controller. Copied/source binary SHA-256 is
+not the old shared-cluster Controller. The initial issuance binary SHA-256 was
 `b5defc40eef33a9768d014a7b3a816a51faf39f132f89f540cc0c9371c1069fd`.
 The native Gateway uses the existing current-source debug artifact.
 
@@ -105,8 +105,8 @@ in `browser-result.json` / `browser-proof.cjs`:
 
 First certificate serial is `CE4A33CA15AC8C`, expiry
 `2026-12-27T00:20:19.000Z`. Kubernetes Secret publication and initial Gateway
-certificate hot loading are now established. This does not prove a replacement
-certificate or renewal.
+certificate hot loading were established in that initial pass. Replacement and
+renewal are separately established below.
 
 Retained handles: Docker `ws5-center-acme-controller`, `ws5-center-acme-pebble`,
 network `ws5-center-acme-20260928`; native Gateway session 63587. Controller Admin
@@ -116,10 +116,25 @@ missing read permissions for namespace metadata and the legacy config alias;
 these were corrected only in the owned RBAC definitions. No existing CRDs or
 unrelated workloads were changed.
 
-## Remaining work
+## Real renewal, recovery and certificate replacement
 
-[ACME-SCHEDULER-CLEAR-GAP.md](ACME-SCHEDULER-CLEAR-GAP.md) records the upstream
-422 failure clearing the scheduler checkpoint after successful publication.
-Resolve that contract before claiming renewal completion. Continue certificate
-replacement, renewal and recovery checks; this pass changed no production code
-and does not rerun unchanged unit/build gates.
+The local Edgion repair and full evidence are in
+[ACME-SCHEDULER-CLEAR-GAP.md](ACME-SCHEDULER-CLEAR-GAP.md). The rebuilt Controller
+SHA-256 is `58dc6445b428044bb81b003ebc1fa8b06f80f7880f2ed37b8197b828f261d803`.
+It recovered the old checkpoint without reissuing the original certificate.
+The final renewal browser scenario passes five checks: actual Center form CAS,
+real CA issuance with scheduler clearing, replacement Secret certificate served
+by the unchanged Gateway process, actual renewed expiry in Center, and restoration
+of the original renewal policy. Final serial is `5e7f3e2dd9b1c54a`, expiry
+`2026-12-27T00:42:19.000Z`. `renewed.png` was visually inspected.
+
+Artifacts are `renewal-proof.cjs`, `renewal-result.json`, `renewed.png` and
+`fixed-binary.json` in the same isolated run directory. Two earlier runs failed
+test-oracle assertions and are documented separately; the complete corrected run
+passed. Gateway PID 57529 was retained through Controller restart and renewal.
+A final API-server read confirms Ready, scheduler absent and renewBefore 1h.
+
+The three Edgion repair files remain local and uncommitted. Its 29 ACME tests,
+format and structural guards pass; no full Edgion matrix is claimed. This pass
+changes only Center evidence, so the previous frontend and backend test baselines
+remain unchanged. The wider menu/resource alignment audit remains active.

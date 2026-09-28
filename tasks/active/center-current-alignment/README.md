@@ -2743,3 +2743,18 @@ before acting on CCI execution files or proposing replacements.
 - The runtime topology still uses the original binary. Renewal and replacement
   certificate verification remain pending; no success is inferred from compilation
   progress. Center has no additional source change for this upstream repair.
+
+
+### 2026-09-28: ACME recovery and real renewal verified
+
+- The Linux Controller build completed and the owned container now runs the local
+  SSA-omission repair. Recovery cleared the stale checkpoint without reissuing.
+- The complete renewal scenario passes five checks through the actual Center form,
+  real CA and Gateway TLS listener. The unchanged Gateway process hot-loaded the
+  replacement certificate; Center shows its real expiry. Original policy restored.
+- Two earlier test-oracle failures and their corrections are recorded in
+  [ACME-SCHEDULER-CLEAR-GAP.md](ACME-SCHEDULER-CLEAR-GAP.md), along with exact
+  artifacts, binary hashes and targeted checks. No full-matrix rerun is claimed.
+- Center evidence is committed independently. The three Edgion repair files remain
+  uncommitted, unrelated changes are preserved, and nothing is pushed. Overall
+  alignment remains active.
