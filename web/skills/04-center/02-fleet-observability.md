@@ -118,6 +118,13 @@ rather than hiding each other by priority. A condition reporting unresolved refs
 separate from a missing-resource placeholder, so it never suppresses graph edges.
 A resolved edge establishes reference existence, not runtime readiness.
 
+BackendTLSPolicy's client certificate option uses the shared policy name parser,
+not the generic namespace/name string reference parser. Trim accepted names and
+resolve only in the policy namespace. Nonempty malformed strings remain unknown
+references, never resolved Secret edges or cross-namespace ReferenceGrant checks.
+Empty/non-string values do not invent dependencies; Controller conditions remain
+responsible for reporting invalid policy configuration.
+
 
 ReferenceGrant projections apply to outbound cross-namespace references, not
 reverse parent/policy attachment arrows. Route-to-Gateway attachment follows the

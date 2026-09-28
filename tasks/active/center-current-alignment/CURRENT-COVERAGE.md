@@ -346,3 +346,10 @@ BackendTLSPolicy client certificate follow-up: clearing the optional form field
 now removes the key, and preflight matches current Controller name validation.
 Thirty-five focused tests cover mutation payload preservation and name boundaries.
 See [evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md). Overall audit remains active.
+
+
+BackendTLSPolicy topology follow-up: the graph now shares client certificate name
+parsing with submission preflight and never interprets this same-namespace option
+as a cross-namespace dependency. Invalid nonempty strings remain unknown. All 67
+focused tests, build and lint pass; see the topology follow-up in
+[client certificate evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md).

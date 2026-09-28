@@ -121,6 +121,48 @@ describe('buildTopologyGraph', () => {
     expect(graph.nodes.some((node) => node.data.kind === 'referencegrant')).toBe(true)
   })
 
+  it('resolves client certificate whitespace in the policy namespace', () => {
+    const graph = buildTopologyGraph({
+      backendtlspolicy: [resource('BackendTLSPolicy', 'btp', 'demo', {
+        options: { 'edgion.io/client-certificate-ref': '  client-cert\n' },
+      })],
+      secret: [resource('Secret', 'client-cert', 'demo')],
+    }, null)
+    expect(graph.edges).toContainEqual(expect.objectContaining({
+      source: 'backendtlspolicy/demo/btp', target: 'secret/demo/client-cert',
+      label: 'client certificate', state: 'resolved',
+    }))
+    expect(graph.nodes.filter(node => node.data.kind === 'secret')).toHaveLength(1)
+  })
+
+  it.each(['other/client-cert', 'client..cert', 'Upper', 'a'.repeat(64)])(
+    'keeps invalid client certificate %j unknown without a cross-namespace grant', value => {
+      const graph = buildTopologyGraph({
+        backendtlspolicy: [resource('BackendTLSPolicy', 'btp', 'demo', {
+          options: { 'edgion.io/client-certificate-ref': value },
+        })],
+        secret: [resource('Secret', 'client-cert', 'other'), resource('Secret', value, 'demo')],
+      }, null, new Set(), true)
+      expect(graph.edges).toHaveLength(1)
+      expect(graph.edges[0]).toMatchObject({
+        source: 'backendtlspolicy/demo/btp', target: `unknown/demo/${value}`,
+        label: 'invalid client certificate', state: 'unknown',
+      })
+      expect(graph.nodes.some(node => node.data.kind === 'referencegrant')).toBe(false)
+    },
+  )
+
+  it.each([undefined, '', '   ', null, { name: 'client-cert', namespace: 'other' }])(
+    'does not invent a Secret dependency from empty or non-string option %j', value => {
+      const graph = buildTopologyGraph({
+        backendtlspolicy: [resource('BackendTLSPolicy', 'btp', 'demo', {
+          options: { 'edgion.io/client-certificate-ref': value },
+        })],
+      }, null)
+      expect(graph.edges).toEqual([])
+    },
+  )
+
   it('projects matching and missing ReferenceGrant decisions for cross-namespace refs', () => {
     const graph = buildTopologyGraph({
       httproute: [

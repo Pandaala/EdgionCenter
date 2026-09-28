@@ -4,6 +4,7 @@ import { useQueries } from '@tanstack/react-query'
 import { clusterResourceApi, resourceApi } from '@/api/resources'
 import type { K8sResource, ResourceKind } from '@/api/types'
 import { resourceIssues } from '@/utils/controller-observability'
+import { backendTLSClientCertificateName } from '@/utils/backendtlspolicy'
 
 export type TopologyEdgeState = 'resolved' | 'unresolved' | 'conflict' | 'unavailable' | 'unknown'
 
@@ -280,8 +281,12 @@ function referencesFor(kind: ResourceKind, resource: K8sResource): Reference[] {
         if (ref) refs.push(ref)
       }
       const clientCertificate = spec.options?.['edgion.io/client-certificate-ref']
-      const ref = refFrom(clientCertificate, 'secret', namespace, 'client certificate')
-      if (ref) refs.push(ref)
+      const certificateName = backendTLSClientCertificateName(clientCertificate)
+      if (certificateName) {
+        refs.push({ kind: 'secret', name: certificateName, namespace, label: 'client certificate' })
+      } else if (typeof clientCertificate === 'string' && clientCertificate.trim()) {
+        refs.push({ kind: 'unknown', name: clientCertificate, namespace, label: 'invalid client certificate' })
+      }
     }
   }
   if (kind === 'referencegrant') {

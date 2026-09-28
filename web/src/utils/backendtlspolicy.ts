@@ -81,6 +81,15 @@ export function toMutationYaml(policy: BackendTLSPolicy, mode: 'create' | 'updat
   return mutationDocumentToYaml(policy, 'backendtlspolicy', mode)
 }
 
+/** Resolve the same-namespace option using Edgion's client certificate name rules. */
+export function backendTLSClientCertificateName(value: unknown): string | undefined {
+  // Match parse_client_certificate_option / valid_kube_name in Edgion.
+  const name = typeof value === 'string' ? value.trim() : ''
+  if (!name || name.length > 253 || name.split('.').some(label =>
+    label.length > 63 || !/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(label))) return undefined
+  return name
+}
+
 export function validateBackendTLSPolicy(policy: BackendTLSPolicy): void {
   if (!policy.metadata.name || !policy.metadata.namespace) throw new Error('Name and namespace are required')
   if (!Array.isArray(policy.spec.targetRefs) || policy.spec.targetRefs.length !== 1) throw new Error('Exactly one targetRef is required')
@@ -108,12 +117,7 @@ export function validateBackendTLSPolicy(policy: BackendTLSPolicy): void {
     seenCaRefs.add(key)
   })
   const clientCert = policy.spec.options?.['edgion.io/client-certificate-ref']
-  // Match parse_client_certificate_option / valid_kube_name in Edgion.
-  const clientCertName = typeof clientCert === 'string' ? clientCert.trim() : ''
-  if (clientCert !== undefined && (
-    !clientCertName || clientCertName.length > 253 ||
-    clientCertName.split('.').some(label => label.length > 63 || !/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(label))
-  )) {
+  if (clientCert !== undefined && backendTLSClientCertificateName(clientCert) === undefined) {
     throw new Error('Client certificate reference must be a bare Secret name in the policy namespace')
   }
   const subjectAltNames = policy.spec.validation.subjectAltNames
