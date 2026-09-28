@@ -2906,3 +2906,9 @@ before acting on CCI execution files or proposing replacements.
 - [GRPC-FILTER-PREFLIGHT-EVIDENCE.md](GRPC-FILTER-PREFLIGHT-EVIDENCE.md) records
   current Controller authority, artifacts and verification limits. Existing
   environments are unchanged; overall alignment remains active.
+
+
+BackendTLSPolicy client certificate follow-up: clearing the optional form field
+now removes the key, and preflight matches current Controller name validation.
+Thirty-five focused tests cover mutation payload preservation and name boundaries.
+See [evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md). Overall audit remains active.

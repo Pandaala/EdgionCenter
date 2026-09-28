@@ -140,6 +140,11 @@ spec:
   (no sectionName). The form prevents adding a second target.
 - Choose same-namespace Secret/ConfigMap CA references or wellKnownCACertificates:
   System, never both. Client certificate option accepts a bare Secret name.
+  Clearing the form field removes the option (and omits an otherwise empty
+  options map). An explicitly empty YAML option is invalid. Preflight follows
+  Controller trimming and name limits: 253 total characters, 63 per nonempty
+  lowercase alphanumeric/hyphen label, with alphanumeric label edges. Validation
+  preserves the original value and unrelated options.
 - validation.hostname is a precise, lowercase hostname, at most 253 characters.
 - Optional subjectAltNames contains 1–5 typed Hostname or URI entries. Hostname
   permits a leading wildcard; URI must be absolute and at most 253 UTF-8 bytes.

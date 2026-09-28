@@ -71,3 +71,25 @@ describe('BackendTLSPolicy identity admission', () => {
     expect(() => validateBackendTLSPolicy(policy)).not.toThrow()
   })
 })
+
+
+describe('BackendTLSPolicy client certificate names', () => {
+  const policyWith = (value: unknown) => normalize({
+    apiVersion: 'gateway.networking.k8s.io/v1', kind: 'BackendTLSPolicy',
+    metadata: { name: 'api', namespace: 'prod' },
+    spec: { targetRefs: [{ group: '', kind: 'Service', name: 'api' }],
+      validation: { hostname: 'api.internal', wellKnownCACertificates: 'System' },
+      options: { 'edgion.io/client-certificate-ref': value } },
+  })
+
+  it.each(['', '   ', 'a..b', 'a.-b', 'a-.b', 'Upper', 'ns/cert', 'a'.repeat(64),
+    Array(4).fill('a'.repeat(63)).join('.'), null, 12])('rejects invalid option %j', value => {
+    expect(() => toMutationYaml(policyWith(value), 'update')).toThrow('bare Secret name')
+  })
+
+  it.each(['client-cert', 'a.b', 'a'.repeat(63),
+    [...Array(3).fill('a'.repeat(63)), 'b'.repeat(61)].join('.'), '  client-cert\n'])('preserves accepted option %j', value => {
+    const mutation = yaml.load(toMutationYaml(policyWith(value), 'update')) as any
+    expect(mutation.spec.options['edgion.io/client-certificate-ref']).toBe(value)
+  })
+})

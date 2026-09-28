@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as yaml from 'js-yaml'
 import BackendTLSPolicyEditor from './BackendTLSPolicyEditor'
 import { renderWithQueryClient } from '@/test/render'
 const api=vi.hoisted(()=>({create:vi.fn()}))
@@ -20,6 +21,25 @@ describe('BackendTLSPolicy request payloads',()=>{
     await waitFor(()=>expect(api.create).toHaveBeenCalledOnce())
     expect(api.create.mock.calls[0][3]).not.toMatch(/caCertificateRefs:[\s\S]*namespace:/)
     expect(api.create.mock.calls[0][3]).toContain('edgion.io/client-certificate-ref: client-cert')
+  })
+  it.each([false, true])('clears the client certificate and preserves other options: %s', async keepOther => {
+    renderEditor()
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+    fireEvent.change(screen.getByLabelText('yaml-source'), { target: { value: yaml.dump({
+      apiVersion: 'gateway.networking.k8s.io/v1', kind: 'BackendTLSPolicy',
+      metadata: { name: 'api', namespace: 'prod' },
+      spec: { targetRefs: [{ group: '', kind: 'Service', name: 'api' }],
+        validation: { hostname: 'api.internal', wellKnownCACertificates: 'System' },
+        options: { 'edgion.io/client-certificate-ref': 'client-cert', ...(keepOther ? { 'example.com/future': '' } : {}) } },
+    }) } })
+    fireEvent.click(screen.getByRole('tab', { name: 'Form' }))
+    const certItem = screen.getByText('Same namespace only. Enter a bare Secret name, never namespace/name.').closest('.ant-form-item')!
+    fireEvent.change(certItem.querySelector('input')!, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(api.create).toHaveBeenCalledOnce())
+    const mutation = yaml.load(api.create.mock.calls[0][3]) as any
+    expect(mutation.spec.options).toEqual(keepOther ? { 'example.com/future': '' } : undefined)
+    expect(mutation.spec.validation).toEqual({ hostname: 'api.internal', wellKnownCACertificates: 'System' })
   })
   it('submits the YAML path through validation and mutation stripping',async()=>{
     renderEditor();fireEvent.click(screen.getByRole('tab',{name:'YAML'}))

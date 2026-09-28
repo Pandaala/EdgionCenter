@@ -108,7 +108,12 @@ export function validateBackendTLSPolicy(policy: BackendTLSPolicy): void {
     seenCaRefs.add(key)
   })
   const clientCert = policy.spec.options?.['edgion.io/client-certificate-ref']
-  if (clientCert && (clientCert.includes('/') || !/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/.test(clientCert))) {
+  // Match parse_client_certificate_option / valid_kube_name in Edgion.
+  const clientCertName = typeof clientCert === 'string' ? clientCert.trim() : ''
+  if (clientCert !== undefined && (
+    !clientCertName || clientCertName.length > 253 ||
+    clientCertName.split('.').some(label => label.length > 63 || !/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(label))
+  )) {
     throw new Error('Client certificate reference must be a bare Secret name in the policy namespace')
   }
   const subjectAltNames = policy.spec.validation.subjectAltNames

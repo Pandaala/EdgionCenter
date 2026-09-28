@@ -195,7 +195,12 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
             {!readOnly && <Button type="dashed" disabled={(data.spec.validation.subjectAltNames || []).length >= 5} icon={<PlusOutlined />} onClick={() => onChange({...data,spec:{...data.spec,validation:{...data.spec.validation,subjectAltNames:[...(data.spec.validation.subjectAltNames||[]),{type:'Hostname',hostname:''}]}}})}>Add SAN</Button>}
           </Card>
           <Form.Item label="Client certificate Secret name" extra="Same namespace only. Enter a bare Secret name, never namespace/name." style={{ marginTop: 12 }}>
-            <Input disabled={readOnly} value={data.spec.options?.['edgion.io/client-certificate-ref'] || ''} onChange={(e) => onChange({...data,spec:{...data.spec,options:{...data.spec.options,'edgion.io/client-certificate-ref':e.target.value}}})} />
+            <Input disabled={readOnly} value={data.spec.options?.['edgion.io/client-certificate-ref'] || ''} onChange={(e) => {
+              const options = { ...data.spec.options }
+              if (e.target.value === '') delete options['edgion.io/client-certificate-ref']
+              else options['edgion.io/client-certificate-ref'] = e.target.value
+              onChange({ ...data, spec: { ...data.spec, options: Object.keys(options).length ? options : undefined } })
+            }} />
           </Form.Item>
         </Card>
       </Space>

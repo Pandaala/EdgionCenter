@@ -340,3 +340,9 @@ rule/backend mutation preflights. Unsupported Form/YAML submissions retain draft
 and issue no write request; corrected supported filters save normally. Forty-four
 focused tests, seven native browser cases and build/lint/E2E checks pass. See
 [GRPC-FILTER-PREFLIGHT-EVIDENCE.md](GRPC-FILTER-PREFLIGHT-EVIDENCE.md).
+
+
+BackendTLSPolicy client certificate follow-up: clearing the optional form field
+now removes the key, and preflight matches current Controller name validation.
+Thirty-five focused tests cover mutation payload preservation and name boundaries.
+See [evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md). Overall audit remains active.
