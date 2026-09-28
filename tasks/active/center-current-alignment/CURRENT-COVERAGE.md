@@ -364,3 +364,9 @@ frontend/default/per-port containers now match current Controller admission.
 Starting from empty TLS configuration produces a valid per-port document. All 48
 focused tests and four native browser cases pass, along with build/lint/types.
 See [GATEWAY-FRONTEND-CA-EVIDENCE.md](GATEWAY-FRONTEND-CA-EVIDENCE.md).
+
+
+Gateway TLS topology now includes default/per-port frontend CA and backend client
+certificate dependencies, retaining namespace/grant and metadata-only boundaries.
+Thirty-nine graph tests plus build/lint pass. See
+[GATEWAY-TLS-TOPOLOGY-EVIDENCE.md](GATEWAY-TLS-TOPOLOGY-EVIDENCE.md).

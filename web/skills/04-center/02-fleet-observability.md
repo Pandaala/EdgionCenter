@@ -152,3 +152,13 @@ EndpointSlice backend nodes use the current Gateway discovery eligibility rule:
 only explicit `conditions.ready: true` avoids the not-ready badge. Missing/null
 ready and serving-only endpoints remain not ready. This is source readiness,
 not an active probe result; topology does not infer endpoint runtime health.
+
+
+Gateway TLS topology includes listener serving certificates plus the operator
+paths spec.tls.backend.clientCertificateRef and spec.tls.frontend default/perPort
+CA references. Edge labels distinguish backend identity, default CA and each port.
+Frontend references require explicit empty group and Secret/ConfigMap kind;
+malformed identities remain unknown. Do not scan listener frontendValidation or
+resolved material. These are configured dependencies, not proof a policy was
+selected for a listener or its certificate is trusted. Secret/ConfigMap inventory
+continues to use metadata-only listKeys, with unavailable distinct from missing.

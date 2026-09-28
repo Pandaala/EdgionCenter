@@ -210,6 +210,21 @@ function referencesFor(kind: ResourceKind, resource: K8sResource): Reference[] {
     refs.push({ kind: 'gatewayclass', name: spec.gatewayClassName, label: 'class', reverse: true })
   }
   if (kind === 'gateway') {
+    const clientCertificate = spec.tls?.backend?.clientCertificateRef
+    const clientRef = refFrom(clientCertificate, 'secret', namespace, 'backend client certificate')
+    if (clientRef) refs.push({ ...clientRef, kind: clientRef.kind === 'secret' ? 'secret' : 'unknown' })
+    const frontend = spec.tls?.frontend
+    const addFrontendCaRefs = (validation: any, label: string) => {
+      if (!Array.isArray(validation?.caCertificateRefs)) return
+      for (const certificate of validation.caCertificateRefs) {
+        const ref = refFrom(certificate, 'secret', namespace, label)
+        if (ref) refs.push({ ...ref, kind: certificate?.group === '' && ['Secret', 'ConfigMap'].includes(certificate?.kind) ? ref.kind : 'unknown' })
+      }
+    }
+    addFrontendCaRefs(frontend?.default?.validation, 'frontend CA (default)')
+    for (const entry of frontend?.perPort ?? []) {
+      addFrontendCaRefs(entry.tls?.validation, `frontend CA (port ${entry.port})`)
+    }
     for (const listener of spec.listeners ?? []) {
       for (const certificate of listener.tls?.certificateRefs ?? []) {
         const ref = refFrom(certificate, 'secret', namespace, `certificate#${listener.name ?? ''}`)

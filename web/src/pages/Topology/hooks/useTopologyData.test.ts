@@ -32,6 +32,55 @@ describe('buildTopologyGraph', () => {
     expect(edges).toContain('edgionconfigdata/security/policy->edgionconfigdata/shared/extra')
     expect(graph.nodes.some((node) => node.data.name === 'unrelated')).toBe(false)
   })
+  it('links Gateway operator TLS references without scanning private certificate projections', () => {
+    const graph = buildTopologyGraph({
+      gateway: [resource('Gateway', 'edge', 'demo', {
+        tls: {
+          backend: { clientCertificateRef: { name: 'client', namespace: 'pki' }, resolvedClientCertificate: { secretRef: { name: 'private' } } },
+          frontend: { default: { validation: { caCertificateRefs: [{ group: '', kind: 'ConfigMap', name: 'default-ca' }] } },
+            perPort: [{ port: 443, tls: { validation: { caCertificateRefs: [{ group: '', kind: 'Secret', name: 'port-ca', namespace: 'pki' }] } } }] },
+        },
+        listeners: [{ name: 'https', tls: { frontendValidation: { caCertificateRefs: [{ group: '', kind: 'Secret', name: 'private' }] } } }],
+      })],
+      secret: [resource('Secret', 'client', 'pki'), resource('Secret', 'port-ca', 'pki')],
+      configmap: [resource('ConfigMap', 'default-ca', 'demo')],
+      referencegrant: [resource('ReferenceGrant', 'tls', 'pki', {
+        from: [{ group: 'gateway.networking.k8s.io', kind: 'Gateway', namespace: 'demo' }],
+        to: [{ group: '', kind: 'Secret' }],
+      })],
+    }, 'demo', new Set(), true)
+    for (const [target, label] of [
+      ['secret/pki/client', 'backend client certificate'],
+      ['configmap/demo/default-ca', 'frontend CA (default)'],
+      ['secret/pki/port-ca', 'frontend CA (port 443)'],
+    ]) expect(graph.edges).toContainEqual(expect.objectContaining({ source: 'gateway/demo/edge', target, label, state: 'resolved' }))
+    expect(graph.nodes.some(node => node.data.name === 'private')).toBe(false)
+    expect(graph.edges).toContainEqual(expect.objectContaining({ source: 'gateway/demo/edge', target: 'referencegrant/pki/tls', label: 'granted' }))
+  })
+
+  it('distinguishes unavailable CA inventory from a missing CA', () => {
+    const gateway = resource('Gateway', 'edge', 'demo', { tls: { frontend: { default: { validation: {
+      caCertificateRefs: [{ group: '', kind: 'ConfigMap', name: 'ca' }],
+    } } } } })
+    const unavailable = buildTopologyGraph({ gateway: [gateway] }, null, new Set(['configmap']))
+    expect(unavailable.edges[0]).toMatchObject({ target: 'configmap/demo/ca', state: 'unavailable' })
+    const missing = buildTopologyGraph({ gateway: [gateway] }, null)
+    expect(missing.edges[0]).toMatchObject({ target: 'configmap/demo/ca', state: 'unresolved' })
+  })
+
+  it.each([
+    { kind: 'Secret', name: 'ca' },
+    { group: 'core', kind: 'Secret', name: 'ca' },
+    { group: '', name: 'ca' },
+    { group: '', kind: 'Service', name: 'ca' },
+    { group: 'foreign.example', kind: 'ConfigMap', name: 'ca' },
+  ])('keeps malformed frontend CA references unknown: %j', reference => {
+    const graph = buildTopologyGraph({ gateway: [resource('Gateway', 'edge', 'demo', { tls: { frontend: {
+      default: { validation: { caCertificateRefs: [reference] } },
+    } } })] }, null)
+    expect(graph.edges[0]).toMatchObject({ target: 'unknown/demo/ca', state: 'unknown' })
+  })
+
   it('builds gateway-to-backend and policy/dependency relationships', () => {
     const graph = buildTopologyGraph({
       gatewayclass: [resource('GatewayClass', 'edgion', undefined)],
