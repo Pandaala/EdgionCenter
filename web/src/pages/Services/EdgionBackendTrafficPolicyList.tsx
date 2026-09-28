@@ -10,7 +10,7 @@ import { batchDeleteFailureKeys, resourceApi } from '@/api/resources'
 import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import ResourceListError from '@/components/resource/ResourceListError'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { resourceActionTestId } from '@/components/resource/testIds'
@@ -117,7 +117,7 @@ const EdgionBackendTrafficPolicyList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: (_: unknown, item: EdgionBackendTrafficPolicy) => <ResourceConditions status={item.status} generation={item.metadata.generation} compact />,
+      render: (_: unknown, item: EdgionBackendTrafficPolicy) => <ResourceStatus kind="edgionbackendtrafficpolicy" resource={item} />,
     },
     {
       title: t('col.actions'),

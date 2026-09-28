@@ -23,7 +23,7 @@ import ResourceListError from '@/components/resource/ResourceListError'
 import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 
 const { Search } = Input
 
@@ -208,7 +208,7 @@ const EdgionPluginsList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: (_: unknown, record: K8sResource) => <ResourceConditions status={record.status} generation={record.metadata.generation} compact />,
+      render: (_: unknown, record: K8sResource) => <ResourceStatus kind="edgionplugins" resource={record} />,
     },
     {
       title: t('col.actions'),

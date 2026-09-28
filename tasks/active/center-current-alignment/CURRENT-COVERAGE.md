@@ -139,16 +139,18 @@ Cloudflare test race was fixed and passed both focused and matrix runs.
 
 ## Latest complete frontend suite
 
-The latest full frontend run passed 679 tests in 103 files, including dependency
-read failure/recovery, current Gateway TLS-mode restrictions and route hostname
-validation. The retained log `/tmp/ws5-dependencies-full-final.log` was rechecked
-at this checkpoint. TypeScript/Vite build and ESLint also passed, recorded in
-`/tmp/ws5-dependencies-build-final.log` and
-`/tmp/ws5-dependencies-lint-final.log`. The build retains its bundle-size warning.
+The latest full frontend run passed 690 tests in 104 files, including runtime
+status identity/version checks, source-status precedence, failed-read recovery,
+and bounded observation requests. The subsequently added source-list Controller
+switch regression passed separately (one test in one file). Logs:
+`/tmp/ws5-center-status-full-final.log` and `/tmp/ws5-center-status-target.log`.
+TypeScript/Vite build, ESLint, E2E types and inventory passed. Build/lint logs:
+`/tmp/ws5-center-status-build-scoped.log` and
+`/tmp/ws5-center-status-lint-scoped.log`. The bundle-size warning remains.
 
-This supersedes the earlier 590, 625, 635, 642, 647 and 676-test checkpoints for
-unit/component coverage. Subsequent health-probe work changed only runtime
-fixtures and evidence documents, so it did not rerun those unchanged gates.
+This supersedes the earlier 679-test checkpoint for unit/component coverage.
+Six focused native browser checkpoints verify the runtime-status repair;
+see [STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md) for scope and limitations.
 The full native browser regression above predates the later frontend fixes;
 focused browser evidence supplements it without upgrading that run's scope.
 
@@ -203,10 +205,10 @@ in the owned namespace. The embedded v5 image predates these frontend changes.
 
 ## Next audit actions
 
-Priority confirmed gap: native resource-list conditions are blank although
-Controller processed status is available. See [STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md).
-The [ReferenceGrant traffic proof](REFERENCE-GRANT-TRAFFIC-EVIDENCE.md) verifies
-authorization and traffic, but explicitly does not establish list-status display.
+The native list-status gap is now repaired across 17 existing status columns.
+[STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md) records current implementation and
+live denial/recovery evidence. Continue the remaining per-resource and menu
+audits below; this focused repair does not complete those audits.
 
 
 Current deployed Kubernetes authentication proof is recorded in

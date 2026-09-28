@@ -80,12 +80,13 @@ export const resourceApi = {
     kind: ResourceKind,
     namespace: string | undefined,
     name: string,
+    signal?: AbortSignal,
   ): Promise<T> => {
     const params = new URLSearchParams({ name })
     if (namespace) params.set('namespace', namespace)
     const { data } = await apiClient.get<ApiResponse<T>>(
       `/configserver/${encodeURIComponent(kind)}?${params}`,
-      processedRequestConfig(target),
+      { ...processedRequestConfig(target), signal },
     )
     if (!data.success || !data.data) throw new Error(data.error || 'Processed resource response is unsuccessful')
     return data.data
@@ -97,13 +98,13 @@ export const resourceApi = {
    */
   listAll: async <T extends K8sResource>(
     kind: ResourceKind,
-    options: { limit?: number; continue?: string; silent?: boolean } = {}
+    options: { limit?: number; continue?: string; silent?: boolean; target?: ControllerMutationTarget } = {}
   ): Promise<ListResponse<T>> => {
     const params = new URLSearchParams()
     if (options.limit) params.set('limit', String(options.limit))
     if (options.continue) params.set('continue', options.continue)
     const qs = params.toString() ? `?${params.toString()}` : ''
-    const { data } = await apiClient.get(`/namespaced/${kind}${qs}`, { _silent: options.silent } as any)
+    const { data } = await apiClient.get(`/namespaced/${kind}${qs}`, { ...(options.target ? mutationRequestConfig(options.target) : {}), _silent: options.silent } as any)
     return data
   },
 
@@ -134,9 +135,10 @@ export const resourceApi = {
    */
   list: async <T extends K8sResource>(
     kind: ResourceKind,
-    namespace: string
+    namespace: string,
+    target?: ControllerMutationTarget,
   ): Promise<ListResponse<T>> => {
-    const { data } = await apiClient.get(`/namespaced/${kind}/${namespace}`)
+    const { data } = await apiClient.get(`/namespaced/${kind}/${namespace}`, target ? mutationRequestConfig(target) : undefined)
     return data
   },
 
@@ -238,13 +240,13 @@ export const resourceApi = {
 export const clusterResourceApi = {
   listAll: async <T extends K8sResource>(
     kind: ResourceKind,
-    options: { limit?: number; continue?: string; silent?: boolean } = {}
+    options: { limit?: number; continue?: string; silent?: boolean; target?: ControllerMutationTarget } = {}
   ): Promise<ListResponse<T>> => {
     const params = new URLSearchParams()
     if (options.limit) params.set('limit', String(options.limit))
     if (options.continue) params.set('continue', options.continue)
     const qs = params.toString() ? `?${params.toString()}` : ''
-    const { data } = await apiClient.get(`/cluster/${kind}${qs}`, { _silent: options.silent } as any)
+    const { data } = await apiClient.get(`/cluster/${kind}${qs}`, { ...(options.target ? mutationRequestConfig(options.target) : {}), _silent: options.silent } as any)
     return data
   },
 

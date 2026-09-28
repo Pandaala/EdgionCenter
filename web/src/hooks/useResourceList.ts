@@ -4,6 +4,8 @@ import { message } from 'antd'
 import { resourceApi, clusterResourceApi } from '@/api/resources'
 import type { K8sResource, ResourceKind } from '@/api/types'
 import { useT } from '@/i18n'
+import { useInvalidateRuntimeStatus } from './useRuntimeResourceStatus'
+import { useControllerMutationTarget } from './useControllerMutationTarget'
 
 const DEFAULT_PAGE_SIZE = 50
 const STALE_RESET_DEDUP_MS = 5000
@@ -45,14 +47,15 @@ export function useResourceList<T extends K8sResource>(
   kind: ResourceKind,
   options: UseResourceListOptions,
 ) {
-  const { namespaced, namespace, limit = DEFAULT_PAGE_SIZE, scope = null, enabled = true } = options
+  const target = useControllerMutationTarget()
+  const { namespaced, namespace, limit = DEFAULT_PAGE_SIZE, scope = target.controllerId, enabled = true } = options
   const t = useT()
   const queryClient = useQueryClient()
   const lastResetRef = useRef<number>(0)
 
   const queryKey = useMemo(
-    () => ['resource-list', kind, namespaced ? namespace ?? null : 'cluster', limit, scope],
-    [kind, namespaced, namespace, limit, scope],
+    () => ['resource-list', kind, namespaced ? namespace ?? null : 'cluster', limit, scope, target.controllerId],
+    [kind, namespaced, namespace, limit, scope, target.controllerId],
   )
 
   const query = useInfiniteQuery({
@@ -61,15 +64,17 @@ export function useResourceList<T extends K8sResource>(
     queryFn: async ({ pageParam }) => {
       if (namespaced) {
         if (namespace) {
-          return resourceApi.list<T>(kind, namespace) // single-namespace path doesn't support cursor; one page
+          return resourceApi.list<T>(kind, namespace, target) // single-namespace path doesn't support cursor; one page
         }
-        return resourceApi.listAll<T>(kind, { limit, continue: pageParam })
+        return resourceApi.listAll<T>(kind, { limit, continue: pageParam, target })
       }
-      return clusterResourceApi.listAll<T>(kind, { limit, continue: pageParam })
+      return clusterResourceApi.listAll<T>(kind, { limit, continue: pageParam, target })
     },
     getNextPageParam: (lastPage) => lastPage.continue_token ?? undefined,
     enabled,
   })
+
+  useInvalidateRuntimeStatus(kind, query.dataUpdatedAt)
 
   // Stale-token auto-recovery with 5s dedup window.
   useEffect(() => {

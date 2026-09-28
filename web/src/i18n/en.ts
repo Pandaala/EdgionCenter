@@ -1322,6 +1322,10 @@ const en = {
   'writeOutcome.summary.landedUnconfirmed': 'The write landed on all {modified} targets, but not every one is confirmed in effect — see the per-controller detail below.',
   'writeOutcome.summary.mixed': '{modified} landed, {failed} failed — see the per-controller detail below.',
   'writeOutcome.summary.allFailed': 'The write failed on every target — see the detail below.',
+  'status.runtimeLoading': 'Checking status…',
+  'status.runtimeUnavailable': 'Status unavailable',
+  'status.runtimePending': 'Status awaiting processing',
+  'status.runtimeSource': 'Controller runtime observation; editable configuration is unchanged',
 }
 
 export default en

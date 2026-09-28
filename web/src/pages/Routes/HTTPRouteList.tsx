@@ -14,7 +14,7 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
@@ -151,7 +151,7 @@ const HTTPRouteList = () => {
     {
       title: t('col.status'),
       key: 'status',
-      render: (_: unknown, record: K8sResource) => <ResourceConditions status={record.status} generation={record.metadata.generation} compact />,
+      render: (_: unknown, record: K8sResource) => <ResourceStatus kind="httproute" resource={record} />,
     },
     {
       title: t('col.actions'),

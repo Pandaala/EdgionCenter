@@ -24,6 +24,8 @@
     "topology-canvas",
     "route-ref-denied",
     "route-ref-granted",
+    "runtime-status-unavailable",
+    "runtime-status-observation",
     "editor-conditions-tab",
     "yaml-editor",
     "gateway-address-add",

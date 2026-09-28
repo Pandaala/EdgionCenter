@@ -12,8 +12,9 @@ import { clusterResourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import EdgionGatewayConfigEditor from '@/components/ResourceEditor/EdgionGatewayConfig/EdgionGatewayConfigEditor'
 import { useT } from '@/i18n'
+import { useInvalidateRuntimeStatus } from '@/hooks/useRuntimeResourceStatus'
 import PageHeader from '@/components/PageHeader'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
@@ -26,10 +27,12 @@ const EdgionGatewayConfigPage = () => {
   const queryClient = useQueryClient()
   const { controllerId } = useParams<{ controllerId?: string }>()
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, refetch, dataUpdatedAt } = useQuery({
     queryKey: ['edgiongatewayconfig', controllerId ?? ''],
-    queryFn: () => clusterResourceApi.listAll<K8sResource>('edgiongatewayconfig'),
+    queryFn: () => clusterResourceApi.listAll<K8sResource>('edgiongatewayconfig', { target: mutationTarget }),
   })
+
+  useInvalidateRuntimeStatus('edgiongatewayconfig', dataUpdatedAt)
 
   const deleteMutation = useMutation({
     mutationFn: ({ name, resourceVersion }: { name: string; resourceVersion: string }) => clusterResourceApi.delete(mutationTarget, 'edgiongatewayconfig', name, resourceVersion),
@@ -51,7 +54,7 @@ const EdgionGatewayConfigPage = () => {
         ? <Tag>{r.spec.preflightPolicy.mode}</Tag> : '-' },
     { title: 'Real IP Header', key: 'realip',
       render: (_: any, r: K8sResource) => r.spec?.realIp?.realIpHeader || '-' },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceStatus kind="edgiongatewayconfig" resource={r} /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (

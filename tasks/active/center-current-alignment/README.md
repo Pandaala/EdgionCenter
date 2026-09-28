@@ -2650,3 +2650,20 @@ before acting on CCI execution files or proposing replacements.
 - See [REFERENCE-GRANT-TRAFFIC-EVIDENCE.md](REFERENCE-GRANT-TRAFFIC-EVIDENCE.md).
   No production source change or fresh test-matrix claim in this pass. Overall
   task remains active; no Edgion edits or push.
+
+
+### 2026-09-28: Native list status and Controller-bound source reads
+
+- Repaired 17 existing status columns with a shared display-only processed-status
+  fallback. Preserve source multi-writer status and require exact resource identity
+  and version. Bound concurrent reads to four; refresh on source refresh and poll
+  active observations every 15 seconds. Failed reads hide stale healthy badges.
+- Bound source-list requests and cache keys to the captured Controller, including
+  callers without explicit scope. Processed specs never enter editable data.
+- Full frontend suite passed 690 tests/104 files; the subsequent Controller-switch
+  test passed separately. Build, lint, E2E types and inventory passed. Six native
+  browser checkpoints cover real grant denial/recovery and injected status-read
+  failure/recovery. Fixture restoration passed.
+- [STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md) is resolved with evidence and limits.
+  Kubernetes v5 predates this change. Broader alignment remains active; no Edgion
+  changes or push.

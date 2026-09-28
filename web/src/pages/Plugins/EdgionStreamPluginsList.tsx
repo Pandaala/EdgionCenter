@@ -16,7 +16,7 @@ import ResourceListError from '@/components/resource/ResourceListError'
 import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 
 const { Search } = Input
 
@@ -112,7 +112,7 @@ const EdgionStreamPluginsList = () => {
       items: streamPlugins,
     }),
     {
-      title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact />,
+      title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceStatus kind="edgionstreamplugins" resource={r} />,
     },
     {
       title: t('col.plugins'), key: 'plugins',

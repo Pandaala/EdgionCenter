@@ -13,7 +13,7 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceBatchDeleteConfirmProps, resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
@@ -131,7 +131,7 @@ const EdgionTlsList = () => {
         return <Tag color={color}>{mode}</Tag>
       },
     },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceStatus kind="edgiontls" resource={r} /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, record: K8sResource) => (

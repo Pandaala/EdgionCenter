@@ -3,6 +3,7 @@ import { apiClient } from './client'
 import { controllerAccessApi } from './access'
 import {
   BatchDeletePartialError,
+  clusterResourceApi,
   resourceApi,
   type ControllerMutationTarget,
 } from './resources'
@@ -12,6 +13,20 @@ afterEach(() => {
 })
 
 describe('resource mutation execution boundary', () => {
+  it('pins source list reads to the captured Controller across all scopes', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { success: true, data: [], count: 0 } })
+    const target = { controllerId: 'east/controller' }
+    await resourceApi.listAll('httproute', { limit: 20, target })
+    await resourceApi.list('httproute', 'app', target)
+    await clusterResourceApi.listAll('gatewayclass', { target })
+    expect(get.mock.calls.map(([url]) => url)).toEqual([
+      '/namespaced/httproute?limit=20', '/namespaced/httproute/app', '/cluster/gatewayclass',
+    ])
+    for (const [, config] of get.mock.calls) {
+      expect(config).toMatchObject({ baseURL: '/api/v1/proxy/east~controller/api/v1', _skipControllerProxy: true })
+    }
+  })
+
   it('reads processed status from the captured Controller without the CRUD API prefix', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({
       data: { success: true, data: { kind: 'HTTPRoute', metadata: { name: 'route' }, status: { parents: [] } } },

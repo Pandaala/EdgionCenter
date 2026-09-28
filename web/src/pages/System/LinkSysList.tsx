@@ -13,7 +13,7 @@ import { useResourceList } from '@/hooks/useResourceList'
 import { getResourceMetaColumns } from '@/components/resource/resourceMetaColumns'
 import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 import { useControllerAccess } from '@/hooks/useControllerAccess'
 import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { resourceActionTestId } from '@/components/resource/testIds'
@@ -140,7 +140,7 @@ const LinkSysList = () => {
       },
     },
     { title: t('col.address'), key: 'addr', render: (_: any, r: K8sResource) => getAddressSummary(r) || '-' },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceStatus kind="linksys" resource={r} /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, record: K8sResource) => (

@@ -14,7 +14,7 @@ import SearchScopeHint from '@/components/resource/SearchScopeHint'
 import ResourceListError from '@/components/resource/ResourceListError'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
-import ResourceConditions from '@/components/resource/ResourceConditions'
+import ResourceStatus from '@/components/resource/ResourceStatus'
 
 const { Search } = Input
 
@@ -67,7 +67,7 @@ const GatewayClassList = () => {
       render: (_: any, r: K8sResource) => <Tag color="blue">{r.spec?.controllerName || '-'}</Tag> },
     { title: t('col.description'), key: 'desc',
       render: (_: any, r: K8sResource) => r.spec?.description || '-' },
-    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceConditions status={r.status} generation={r.metadata.generation} compact /> },
+    { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceStatus kind="gatewayclass" resource={r} /> },
     {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (

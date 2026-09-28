@@ -123,3 +123,26 @@ const ResourceList = () => {
 4. **Editor state**: `{ visible, mode, resource? }` — three-state management for create/edit/view
 5. **rowKey**: use `{namespace}/{name}` combination to ensure uniqueness
 6. **Loading state**: bind `isLoading` to the Table's `loading` prop
+
+
+## Source lists and runtime status
+
+Use `useResourceList` for paginated source rows; its cache and HTTP requests bind
+explicitly to the Controller captured by the page. Custom queries must do the
+same. Do not rely on a mutable global proxy interceptor to choose the target
+of a previously constructed request.
+
+Existing status columns use `ResourceStatus` with the kind and entire source row.
+Source status takes precedence, preserving Kubernetes multi-writer conditions.
+If absent, `useRuntimeResourceStatus` reads the individual processed resource
+through Center and accepts only matching Controller, kind, namespace, name and
+resourceVersion. Keep processed spec out of source rows, editors and mutations.
+Do not add synthetic status to ReferenceGrant or restricted dependency lists.
+
+Observations are limited to mounted rows and four concurrent reads, poll every
+15 seconds while active, and refresh after successful source-list refresh even
+when resourceVersion is unchanged. Custom list queries must call
+`useInvalidateRuntimeStatus(kind, dataUpdatedAt)`. Unmounted queued reads are
+cancelled. Missing versions, mismatched observations and read errors must remain
+visible without hiding readable source rows. Never render a cached healthy
+observation after a failed read, or expose raw remote error details.

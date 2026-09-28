@@ -1322,6 +1322,10 @@ const zh = {
   'writeOutcome.summary.landedUnconfirmed': '写入已在全部 {modified} 个目标上落地，但并非每个都已确认生效——请查看下方的逐 Controller 详情。',
   'writeOutcome.summary.mixed': '{modified} 个已写入，{failed} 个失败——请查看下方的逐 Controller 详情。',
   'writeOutcome.summary.allFailed': '写入在所有目标上均失败——请查看下方详情。',
+  'status.runtimeLoading': '正在检查状态…',
+  'status.runtimeUnavailable': '状态不可用',
+  'status.runtimePending': '等待 Controller 处理',
+  'status.runtimeSource': 'Controller 运行状态；可编辑配置保持不变',
 }
 
 export default zh
