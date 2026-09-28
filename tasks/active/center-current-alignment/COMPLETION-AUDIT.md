@@ -54,8 +54,10 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    Existing configuration persistence must not be called traffic proof. Global outbound
    client identity resolution is repaired in the local, uncommitted Controller
    worktree; Center rejects unsupported global hostname/SAN constraints. See
-   [GLOBAL-OUTBOUND-TLS-EVIDENCE.md](GLOBAL-OUTBOUND-TLS-EVIDENCE.md). Deploy the
-   repaired Controller and verify inherited mTLS before closing that path.
+   [GLOBAL-OUTBOUND-TLS-EVIDENCE.md](GLOBAL-OUTBOUND-TLS-EVIDENCE.md). Native
+   inherited mTLS and Secret rotation now pass, but ReferenceGrant revocation
+   reproduces stale Webhook client reuse after forced TLS rebuild failure. Resolve
+   that invalidation boundary and rerun revocation/recovery/deletion before closure.
 3. Reconcile Center menu async/fault coverage with current backend source. Real
    owner migration is proven; Pod crash takeover and ambiguous post-dispatch
    faults have narrower adapter/runtime evidence. New cloud error states have

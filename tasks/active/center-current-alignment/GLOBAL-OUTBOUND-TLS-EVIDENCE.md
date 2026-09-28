@@ -74,3 +74,48 @@ of claiming that resolution is absent. Its production build passes, recorded at
 `/tmp/ws5-global-client-identity-center-build.log`. Existing Controllers need the
 local repair deployed; this source change does not upgrade retained runtimes.
 Edgion changes remain uncommitted under the user's repository-specific policy.
+
+## Native inherited mTLS: success and a revocation regression
+
+Both current native binaries build successfully. Shared common outbound-TLS tests
+pass (19 tests). Logs: `/tmp/ws5-global-client-identity-common-tests.log`,
+`/tmp/ws5-global-client-identity-controller-build.log`, and
+`/tmp/ws5-global-client-identity-gateway-build.log`.
+
+The isolated harness is `/tmp/ws5-global-client-identity-runtime-20260928/run.cjs`.
+It uses private certificate material and dedicated ports, a fresh Controller and
+Gateway, a TLS server requiring verified client certificates, and an HTTP backend.
+LinkSys Webhook declares enabled TLS but no local CA or client identity. The
+EGC supplies both; a ReferenceGrant permits its cross-namespace client Secret.
+WebhookKeyGet feeds KeyAuth so a missing result is observable as request failure.
+
+Authoritative run: `run-1790566102298`, log `run-host-fixed.log` in that directory's
+parent. Its `result.json` is **failed**, not an overall pass:
+
+- Initial inherited mTLS succeeded; the HTTPS server observed `client-first`.
+- Updating the Secret through the Controller API changed the observed peer to
+  `client-rotated` without restarting either process.
+- Deleting the ReferenceGrant did not stop subsequent authenticated calls within
+  the 45-second observation budget. Gateway logged OutboundTlsClientCertInvalid
+  while preparing the replacement, but the old Webhook client remained published.
+- Grant restoration and Secret deletion/recreation steps were not reached. They
+  have no new native evidence from this run.
+
+Current source explains the failure: EGC publication invokes
+`LinkSysStore::rebuild_clients()` with forced=true; the Webhook arm in
+`link_sys/runtime/store.rs::apply_entry` logs preparation failure and preserves
+its old same-kind runtime. Existing tests and review guidance explicitly preserve
+clients on ordinary failed updates. Global TLS authorization changes need a
+separate invalidation decision; do not silently change ordinary last-good update
+semantics. Caller-held in-flight handles have their own documented lifetime.
+Persistent providers have a different runner and need their own scope assessment.
+
+Harness corrections before the authoritative run: required integration-mode env
+opt-in; current Kind_namespace_name filesystem names; explicit Host through
+node:http (node:fetch probes reached the IP-host route and returned 404); and
+KeyAuth to distinguish WebhookKeyGet's intentional missing-value continuation.
+Earlier run logs remain as failed harness evidence. They are not product TLS
+failures. Every run cleaned up only its owned Controller/Gateway and local servers;
+private fixtures and diagnostics remain for review. The conf_sync channel used
+the existing local skip-TLS test profile; the tested outbound Webhook used real
+CA verification and mandatory client certificates.
