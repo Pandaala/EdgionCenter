@@ -1014,7 +1014,7 @@ const zh = {
   'section.globalPlugins': '全局插件',
   'section.linkSys': 'LinkSys',
   'help.globalTlsIdentityConstraints': 'The current Controller rejects global hostname and non-empty subjectAltNames. Clear these fields before saving.',
-  'help.globalTlsClientIdentity': 'The current Controller does not resolve this global client certificate. Inheriting outbound connections fail unless they supply their own client identity.',
+  'help.globalTlsClientIdentity': 'Requires an explicit namespace and a permitted Secret reference. Inherited outbound TLS fails if this client identity cannot be resolved.',
   'section.outboundTls': '出站 TLS',
   'section.dnsResolver': 'DNS 解析器',
   'field.addressValue': '地址值',

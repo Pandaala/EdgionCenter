@@ -52,10 +52,10 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    frontend TLS policy transitions, AI backend/provider routing and policy
    attachment, and resilience behaviors beyond the five proven probe types.
    Existing configuration persistence must not be called traffic proof. Global outbound
-   client identity is a confirmed Controller resolution gap: Center now exposes
-   the limitation and rejects unsupported global hostname/SAN constraints. See
-   [GLOBAL-OUTBOUND-TLS-EVIDENCE.md](GLOBAL-OUTBOUND-TLS-EVIDENCE.md). Complete the
-   resolution/requeue repair and verify inherited mTLS before closing that path.
+   client identity resolution is repaired in the local, uncommitted Controller
+   worktree; Center rejects unsupported global hostname/SAN constraints. See
+   [GLOBAL-OUTBOUND-TLS-EVIDENCE.md](GLOBAL-OUTBOUND-TLS-EVIDENCE.md). Deploy the
+   repaired Controller and verify inherited mTLS before closing that path.
 3. Reconcile Center menu async/fault coverage with current backend source. Real
    owner migration is proven; Pod crash takeover and ambiguous post-dispatch
    faults have narrower adapter/runtime evidence. New cloud error states have
