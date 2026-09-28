@@ -2683,3 +2683,18 @@ before acting on CCI execution files or proposing replacements.
   [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md) records remaining lifecycle/expiry
   display work and the separate Kubernetes issuance evidence boundary. Overall
   alignment remains active; no Edgion edits or push.
+
+
+### 2026-09-28: ACME lifecycle and certificate expiry
+
+- Lifecycle and Conditions now share the same source-priority, version-matched
+  runtime observation. Certificate expiry is shown in UTC; missing/invalid values
+  stay absent and failed reads hide cached lifecycle/expiry. Horizontal scrolling
+  preserves readable dates and actions at narrow viewport widths.
+- Full frontend suite passes 706 tests in 107 files. Five new lifecycle tests
+  and the existing ten status tests also passed focused checks. Final layout
+  checks, build and lint pass. Four browser checkpoints distinguish actual native
+  Pending from injected Ready/expiry and denial responses; restoration passes.
+- See [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md). Real Kubernetes issuance,
+  renewal, Secret publication and Gateway hot reload remain separate work. No
+  Edgion changes, resource/policy mutations or push.

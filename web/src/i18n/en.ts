@@ -1331,6 +1331,9 @@ const en = {
   'acme.trigger.unavailable': 'ACME service is unavailable. Check Controller service status before retrying.',
   'acme.trigger.failed': 'ACME trigger was rejected. Refresh the resource before retrying.',
   'acme.trigger.unknown': 'ACME trigger outcome is unknown. Check resource status before retrying.',
+  'acme.lifecycle.title': 'Lifecycle',
+  'acme.lifecycle.expires': 'Certificate expires (UTC)',
+  'acme.lifecycle.hint': 'Observed certificate lifecycle. Pending does not confirm that the issuance service is running.',
 }
 
 export default en

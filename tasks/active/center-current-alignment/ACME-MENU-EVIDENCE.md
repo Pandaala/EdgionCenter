@@ -39,12 +39,35 @@ click suppression, unsuccessful envelopes, denial/unavailability, and ambiguous
 transport without replay. Build, lint and the unchanged 268-selector inventory
 passed. Full frontend results are recorded in CURRENT-COVERAGE.md.
 
+## Lifecycle and expiry display repair
+
+`AcmeLifecycle` now renders source phase and certificateNotAfter, falling back
+through `ResourceStatus` to an identity/version-matched processed observation.
+Conditions and lifecycle share the same query rather than issuing independent
+requests. A failed observation hides both cached phase and expiry. Missing or
+invalid timestamps remain absent, while valid timestamps have explicit UTC
+presentation and an ISO `time` attribute. Pending includes a service-availability
+caveat; it does not imply the background issuer is running. The table scrolls
+horizontally to preserve readable dates and access to actions on narrow screens.
+
+Five lifecycle component tests cover source precedence, shared processed reads,
+UTC conversion, missing/invalid fields, version mismatch and failed refresh.
+Existing ResourceStatus tests also pass. After the presentation adjustment, the
+five lifecycle tests, build and lint passed again. Logs use the prefix
+`/tmp/ws5-center-acme-lifecycle-` (focused, layout, build-final and lint-final).
+
+Four browser checkpoints passed against current Vite/Center:
+actual native Pending, injected Ready/expiry rendering, injected read denial
+clearing phase and expiry, and recovery to actual native Pending. The expiry
+and denial responses are browser fixtures, not certificate issuance evidence.
+Artifacts: `/tmp/ws5-center-acme-lifecycle-20260928/` (`browser-proof.cjs`,
+`result.json`, `native-pending.png`, `injected-expiry.png`). A stale text locator
+after the line-break adjustment failed once; it was corrected to inspect the
+lifecycle cell, and the complete scenario passed. No resources or policies changed.
+
 ## Remaining work
 
-The list's separate Lifecycle column still reads source `status.phase` only;
-it does not share the processed-status fallback used by Conditions. Certificate
-expiry is not displayed despite the old resource guide claiming otherwise.
-Continue these display fields against current EdgionAcmeStatus, preserving
-source/runtime separation and acknowledging that FS Pending is not a running
-issuance service. Real issuance/renewal needs a Kubernetes Controller leader and
-an isolated ACME test CA; this native denial proof does not establish either.
+Real issuance/renewal needs a Kubernetes Controller leader and an isolated ACME
+test CA. Native validation, denial and display proofs do not establish issuance,
+Secret publication, renewal or Gateway certificate hot reload. Continue those
+runtime checks without adding DNS-01 or expanding the supported product scope.

@@ -1,12 +1,13 @@
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message, Badge } from 'antd'
+import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import EdgionAcmeEditor from '@/components/ResourceEditor/EdgionAcme/EdgionAcmeEditor'
+import AcmeLifecycle from '@/components/resource/AcmeLifecycle'
 import AcmeTriggerButton from '@/components/resource/AcmeTriggerButton'
 import { useT } from '@/i18n'
 import PageHeader from '@/components/PageHeader'
@@ -19,11 +20,6 @@ import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
 
 const { Search } = Input
-
-const phaseColorMap: Record<string, string> = {
-  Ready: 'success', Issuing: 'processing', Renewing: 'processing',
-  Pending: 'warning', Failed: 'error',
-}
 
 const EdgionAcmeList = () => {
   const t = useT()
@@ -89,12 +85,8 @@ const EdgionAcmeList = () => {
         <Tag color="purple">{r.spec?.challenge?.type || '-'}</Tag>
       ),
     },
-    { title: 'Lifecycle', key: 'phase',
-      render: (_: any, r: K8sResource) => {
-        const phase = r.status?.phase
-        if (!phase) return '-'
-        return <Badge status={phaseColorMap[phase] as any || 'default'} text={phase} />
-      },
+    { title: t('acme.lifecycle.title'), key: 'phase', width: 240,
+      render: (_: unknown, r: K8sResource) => <AcmeLifecycle resource={r} />,
     },
     { title: t('col.status'), key: 'status', render: (_: unknown, r: K8sResource) => <ResourceStatus kind="edgionacme" resource={r} /> },
     {
@@ -141,6 +133,7 @@ const EdgionAcmeList = () => {
 
       <Table rowKey={(r) => `${r.metadata.namespace ?? ''}/${r.metadata.name}`}
         columns={columns} dataSource={filtered} loading={isLoading}
+        scroll={{ x: 'max-content' }}
         size="middle"
         pagination={{
           defaultPageSize: 20,

@@ -1331,6 +1331,9 @@ const zh = {
   'acme.trigger.unavailable': 'ACME 服务不可用，请检查 Controller 服务状态后再重试。',
   'acme.trigger.failed': 'ACME 触发请求被拒绝，请刷新资源后再重试。',
   'acme.trigger.unknown': 'ACME 触发结果尚未确认，请检查资源状态后再重试。',
+  'acme.lifecycle.title': '生命周期',
+  'acme.lifecycle.expires': '证书到期时间（UTC）',
+  'acme.lifecycle.hint': '已观测的证书生命周期。Pending 不代表签发服务正在运行。',
 }
 
 export default zh

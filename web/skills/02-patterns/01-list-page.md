@@ -146,3 +146,8 @@ when resourceVersion is unchanged. Custom list queries must call
 cancelled. Missing versions, mismatched observations and read errors must remain
 visible without hiding readable source rows. Never render a cached healthy
 observation after a failed read, or expose raw remote error details.
+
+For resource-specific status fields, pass a `renderStatus` callback to
+`ResourceStatus` (see `AcmeLifecycle`). This retains the same precedence,
+identity/version validation and read-failure behavior as Conditions. Callbacks
+receive only the observation status; never merge it into the editable resource.

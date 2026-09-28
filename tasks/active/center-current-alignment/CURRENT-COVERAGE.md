@@ -70,7 +70,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | EdgionStreamPlugins | plugins/stream | Current connection/TLS-stage catalogs and stage-specific controls |
 | EdgionConfigData | plugins/metadata | Nine typed variants; four new variants have dedicated native CRUD |
 | LinkSys | system/linksys | All eight variants have dedicated native browser CRUD |
-| EdgionAcme | system/acme | HTTP-01 scope; renewal/notification boundaries; captured and permission-gated trigger, queue/uncertain outcomes, actual default denial and FS service-unavailable proof; lifecycle/expiry display and real Kubernetes issuance remain open |
+| EdgionAcme | system/acme | HTTP-01 scope; renewal/notification boundaries; captured and permission-gated trigger, queue/uncertain outcomes, actual default denial and FS service-unavailable proof; shared lifecycle/UTC expiry display with failure recovery; real Kubernetes issuance remains open |
 
 All five active probe types (HTTP, HTTPS, TCP, gRPC and GRPCS) have Gateway traffic
 proof, including Center form edits, Controller version readback and failure/
@@ -139,19 +139,18 @@ Cloudflare test race was fixed and passed both focused and matrix runs.
 
 ## Latest complete frontend suite
 
-The latest full frontend run passed 701 tests in 106 files, including ACME
-trigger target binding, duplicate dispatch prevention and delivery outcomes,
-runtime-status identity/version checks, and source-list Controller isolation.
-Log: `/tmp/ws5-center-acme-full.log`. TypeScript/Vite build, ESLint and E2E
-inventory passed; logs are `/tmp/ws5-center-acme-build.log`,
-`/tmp/ws5-center-acme-lint.log` and `/tmp/ws5-center-acme-inventory.log`.
-The bundle-size warning remains. E2E types passed in the preceding status pass;
-this ACME repair did not change E2E TypeScript files.
+The latest full frontend run passed 706 tests in 107 files, including ACME
+lifecycle source precedence, shared observations, expiry conversion, stale-version
+rejection and failed-read clearing. Log: `/tmp/ws5-center-acme-lifecycle-full.log`.
+The final layout adjustment passed all five lifecycle tests again, plus build
+and lint (`/tmp/ws5-center-acme-lifecycle-layout.log`, `-build-final.log`,
+`-lint-final.log`). The bundle-size warning remains. E2E types and inventory
+passed in the preceding passes; this repair changed no E2E types or selectors.
 
-This supersedes the 690-test full suite plus separate Controller-switch test.
-Four native ACME menu/API checkpoints supplement the six runtime-status browser
-checkpoints; their exact scope and simulated inputs are recorded in the linked
-ACME and status evidence documents.
+This supersedes the 701-test checkpoint. Four lifecycle browser checkpoints
+supplement four ACME trigger checks and six runtime-status checks; injected
+Ready/expiry and denial responses are explicitly distinguished from actual
+native Pending and server-side trigger denial in ACME-MENU-EVIDENCE.md.
 The full native browser regression above predates the later frontend fixes;
 focused browser evidence supplements it without upgrading that run's scope.
 
@@ -205,7 +204,7 @@ provider grants were removed after verification; 52 metadata-only CRDs remain
 in the owned namespace. The embedded v5 image predates these frontend changes.
 
 See [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md) for the trigger repair and
-the remaining lifecycle/expiry display and Kubernetes issuance checks.
+the lifecycle/expiry repair and remaining Kubernetes issuance checks.
 
 ## Next audit actions
 

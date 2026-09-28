@@ -116,9 +116,11 @@ description: System configuration resource development guide — EdgionGatewayCo
   domains, HTTP-01 scope, and renewal durations before sending through the tunnel.
 - Strip status, currentStatus, resolvedListenerAttachments, notifyAfterPublish, and
   server-owned metadata on mutation. Preserve resourceVersion for update CAS.
-- List displays source phase, domains, challenge type, and conditions. The phase
-  column does not yet use processed-status fallback; certificate expiry is a
-  remaining display gap, tracked in `tasks/active/center-current-alignment/ACME-MENU-EVIDENCE.md`.
+- List displays phase, certificate expiry in UTC, domains, challenge type, and
+  conditions. `AcmeLifecycle` shares `ResourceStatus` identity/version checks and
+  processed fallback; it preserves source status and hides cached lifecycle on
+  failed reads. Missing/invalid expiry stays absent. Pending is not evidence that
+  the issuer is running. Native UI checks are separate from real issuance proof.
 - Manual trigger uses `AcmeTriggerButton` and the dedicated `acme.trigger`
   operation, not the resource update permission. Its HTTP request captures the
   page Controller: `POST /api/v1/services/acme/{namespace}/{name}/trigger`.
