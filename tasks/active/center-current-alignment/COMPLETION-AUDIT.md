@@ -1,6 +1,6 @@
 # Completion audit checkpoint
 
-Date: 2026-09-28. Source checkpoint: `790f3c7` plus the Stream filtering repair in this commit.
+Date: 2026-09-28. Source checkpoint: `ba012f3` (current full frontend and native browser regression).
 Verdict: **not yet complete**. This reconciles current evidence; it does not
 replace the user's full backend/dashboard, resource-by-resource/menu-by-menu scope.
 
@@ -10,11 +10,11 @@ replace the user's full backend/dashboard, resource-by-resource/menu-by-menu sco
 | --- | --- | --- |
 | Use current Edgion, without reconstructing its history | Current ResourceKind and CRD/handler reads; per-fix source citations | Satisfied for work performed |
 | Cover every resource type | Fresh exact set comparison: 22 Edgion kinds = 22 Center catalog kinds; all 20 first-class resource paths occur in the Controller menu; Secret/ConfigMap share restricted dependencies | Catalog and nested ownership review complete; runtime requirements remain below |
-| Check every menu | Current Center menu has 17 leaves; controller catalog paths have no omissions; native 173-pass baseline plus focused follow-ups and separate OIDC/Kubernetes evidence | Current menu coverage indexed; runtime limits below remain explicit |
+| Check every menu | Current Center menu has 17 leaves; controller catalog paths have no omissions; current native 174-pass regression and separate OIDC/Kubernetes evidence | Current menu coverage indexed; runtime limits below remain explicit |
 | Update Center backend | Federation ownership revocation, global write semantics, auth/cloud/error handling repairs; fresh 876 workspace + 247 no-default-feature app tests | Implemented paths verified; deployed Kubernetes image predates later backend fixes |
-| Update Center frontend | 846 tests in 117 files plus 59 focused tests for the final Stream repair; Gateway/BTP fixes have focused browser/component evidence | Current unit/component regression passes; last complete native run predates newest fixes |
+| Update Center frontend | 848 tests in 117 files including the final Stream repair; Gateway/BTP fixes have focused browser/component evidence | Current unit/component and complete standalone browser regressions pass |
 | Exercise local runtime | Isolated native Center + two mTLS Controllers; API readback, real Gateway traffic, and separate OrbStack deployments | Established for recorded scenarios; no blanket conformance claim |
-| Commit Center only, do not push | Center task commits; Edgion ACME repair remains local/uncommitted; unrelated work preserved | Scope retained |
+| Commit Center only, do not push | Center task commits; Edgion ACME and outbound TLS repairs remain local/uncommitted; unrelated work preserved | Scope retained |
 
 Source comparison artifact: `/tmp/ws5-center-closure-source-audit.json`.
 Current resource/menu details: CURRENT-COVERAGE.md. The opening table in README.md
@@ -22,9 +22,15 @@ is the original historical checkpoint, not an up-to-date pending-work list.
 
 ## Fresh gates
 
-- Latest full frontend: 846 passed / 117 files; `/tmp/ws5-center-plugin-audit-final-full-tests.log`.
-  The later Stream-only repair passes 59 focused tests, build and lint;
-  `/tmp/ws5-stream-scoped-fields-{tests,build,lint}.log`.
+- Current complete native browser regression: **174 passed, 2 Kubernetes-only
+  skips**, 9.7 minutes. Both native programs rebuilt, SQL RBAC enabled, two real
+  mTLS Controllers, all 70 retained fixture files verified. See
+  [CURRENT-NATIVE-REGRESSION.md](CURRENT-NATIVE-REGRESSION.md) for provenance
+  and the browser/API versus traffic evidence boundary.
+
+- Latest full frontend: 848 passed / 117 files, 84.70 seconds;
+  `/tmp/ws5-center-current-final-frontend.log`. This includes the final Stream repair.
+  Its build/lint evidence is `/tmp/ws5-stream-scoped-fields-{build,lint}.log`.
 
 - Frontend: 835 passed / 117 files, 78.09 seconds.
   `/tmp/ws5-center-closure-frontend-full.log`.
@@ -47,8 +53,8 @@ is the original historical checkpoint, not an up-to-date pending-work list.
 1. The dedicated nested operator/runtime ownership pass is now recorded for all
    catalog kinds in [FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md), including
    the route mirror/ExternalAuth repairs and HTTP/Stream opaque-data preservation.
-   The full frontend run passed 846 tests before the final Stream-only repair;
-   that repair has 59 focused tests plus build/lint evidence. This closes source
+   The current full frontend run passes 848 tests including the Stream repair,
+   which also has focused build/lint evidence. This closes source
    ownership review, not the traffic/menu requirements below.
 2. Close selected cross-resource runtime gaps retained in the existing scope:
    frontend TLS policy transitions, AI backend/provider routing and policy
@@ -66,9 +72,10 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    owner migration is proven; Pod crash takeover and ambiguous post-dispatch
    faults have narrower adapter/runtime evidence. New cloud error states have
    component/HTTP adapter evidence rather than native provider mutations.
-4. After resulting fixes, rerun affected checks and the complete current native
-   browser regression. The Kubernetes v5 deployment and old full browser runs
-   cannot acquire newer source coverage by documentation changes.
+4. The complete current standalone browser regression now passes (174 tests,
+   two Kubernetes-only skips). Rerun affected checks after subsequent fixes.
+   The Kubernetes v5 deployment still predates newer backend repairs; a fresh
+   standalone run does not upgrade that deployment or its fault evidence.
 
 Optional external-account/MySQL tests and a broken isolated kind node are
 validation limits, not reasons to stop work that can proceed in native runtimes.

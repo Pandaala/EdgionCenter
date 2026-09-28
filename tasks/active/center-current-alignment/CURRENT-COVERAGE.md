@@ -5,6 +5,17 @@ This is a current index; [README.md](README.md) retains the chronological eviden
 [COMPLETION-AUDIT.md](COMPLETION-AUDIT.md) reconciles the objective and remaining work.
 Older process handles and "next" notes there are historical unless revalidated.
 
+## Latest complete regression
+
+At Center `ba012f3`, the full frontend passes **848 tests / 117 files** and the
+complete native standalone browser suite passes **174 tests with two
+Kubernetes-only skips**. Center and Controller were rebuilt, the isolated runtime
+used SQL RBAC and real mTLS federation, and all 70 retained fixture files were
+verified. See [CURRENT-NATIVE-REGRESSION.md](CURRENT-NATIVE-REGRESSION.md).
+This supersedes older full frontend/browser counts below; their feature-specific
+evidence remains useful. Gateway traffic and Kubernetes fault requirements stay
+open in the completion audit.
+
 ## Scope and authority
 
 The user requested the complete Center backend/dashboard review against current
