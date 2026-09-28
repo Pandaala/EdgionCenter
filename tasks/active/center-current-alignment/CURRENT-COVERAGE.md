@@ -392,3 +392,10 @@ submission now enforce that limit, and System trust disables adding CA refs.
 Neutral CA/target labels cover ConfigMap and EdgionBackend. Thirty-eight focused
 tests plus build/lint pass; see the CA-count follow-up in
 [backend TLS evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md).
+
+
+Nested ownership audit: EdgionTls, BackendTLSPolicy and backend traffic policy
+root/nested transport fields match the existing mutation exclusions. No additional
+production edit was needed. Eighty-five existing tests pass. The exact source
+inventory, cache/transport distinctions and remaining resource scopes are in
+[FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md).

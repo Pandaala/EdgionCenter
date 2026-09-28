@@ -2986,3 +2986,10 @@ no-default-feature app tests plus format/Clippy/isolation/rendering, then exits 
 the preserved unrelated English-only baseline. Later no-legacy/diff checks pass.
 The full scope is not complete; [COMPLETION-AUDIT.md](COMPLETION-AUDIT.md) replaces
 obsolete generic pending statements with current evidence boundaries and actions.
+
+
+Nested ownership audit: EdgionTls, BackendTLSPolicy and backend traffic policy
+root/nested transport fields match the existing mutation exclusions. No additional
+production edit was needed. Eighty-five existing tests pass. The exact source
+inventory, cache/transport distinctions and remaining resource scopes are in
+[FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md).

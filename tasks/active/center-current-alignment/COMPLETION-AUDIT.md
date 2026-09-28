@@ -45,6 +45,8 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    catalog parity and generic CRUD alone cannot close this requirement. Inspect
    ownership in ingestion before modifying exclusion paths; schemars(skip) alone
    does not determine ownership. Preserve supported operator configuration.
+   [FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md) now records the checked
+   EdgionTls, BackendTLSPolicy and EdgionBackendTrafficPolicy mutation boundaries.
 2. Close selected cross-resource runtime gaps retained in the existing scope:
    frontend TLS policy transitions, AI backend/provider routing and policy
    attachment, and resilience behaviors beyond the five proven probe types.
