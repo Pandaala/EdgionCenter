@@ -165,3 +165,17 @@ failures within five seconds do not trigger another automatic reset. A failed
 first-page recovery stays visible even after that window; the normal Retry action
 remains available. Recovery notices describe an in-progress refresh, not success.
 Regression evidence lives in `src/hooks/useResourceList.pagination.test.tsx`.
+
+
+## Batch selection and Controller changes
+
+Resolve selected row keys against the complete loaded source list, not the search
+result. Filtering changes visibility, not the operator's selected set. Capture
+namespace/name/resourceVersion in the confirmation payload, and use mutation
+variables for the successful count: current selection can change while requests
+are running. Keep existing partial-failure handling so only failures stay selected.
+
+ControllerProxy keys its page shell by normalized Controller identity. Navigation
+to another Controller discards list selections and open editor drafts, including
+when the new Controller has resources with identical namespace/name. Request
+clients must still capture their target; remounting is not a transport boundary.

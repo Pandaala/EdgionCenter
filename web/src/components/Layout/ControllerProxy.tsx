@@ -23,5 +23,6 @@ export default function ControllerProxy() {
     }
   }, [realId])
 
-  return <AppShell />
+  // Selections and open editors belong to one Controller, even for identical resource names.
+  return <AppShell key={realId} />
 }

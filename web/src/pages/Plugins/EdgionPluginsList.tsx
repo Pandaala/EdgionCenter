@@ -63,8 +63,8 @@ const EdgionPluginsList = () => {
   const batchDeleteMutation = useMutation({
     mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
       resourceApi.batchDelete(mutationTarget, 'edgionplugins', resources),
-    onSuccess: () => {
-      message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
+    onSuccess: (_, resources) => {
+      message.success(t('msg.batchDeleteOk', { n: resources.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'edgionplugins'] })
     },
@@ -99,7 +99,7 @@ const EdgionPluginsList = () => {
   }
 
   const handleBatchDelete = () => {
-    const selectedResources = filteredList
+    const selectedResources = plugins
       .filter((p) => selectedRowKeys.includes(`${p.metadata.namespace}/${p.metadata.name}`))
       .map((p) => ({ namespace: p.metadata.namespace!, name: p.metadata.name, resourceVersion: p.metadata.resourceVersion! }))
 

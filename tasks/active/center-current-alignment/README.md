@@ -2821,3 +2821,16 @@ before acting on CCI execution files or proposing replacements.
   [LIST-ACTION-PERMISSIONS-EVIDENCE.md](LIST-ACTION-PERMISSIONS-EVIDENCE.md).
 - Corrected Gateway's same-namespace StreamPlugins input hint and stale Gateway,
   GatewayClass and ReferenceGrant guide statements. Overall audit remains active.
+
+
+### 2026-09-28: Batch selection and Controller-local page state
+
+- Nine lists now form batch payloads from all loaded selected resources, including
+  rows hidden by search. Thirteen success handlers report the submitted count.
+- Controller navigation remounts the page shell, clearing old selections and
+  editor drafts even for identical resource names. Captured HTTP targets remain.
+- 19 focused tests and the full 751-test / 113-file frontend suite pass; build/lint
+  pass. Two native UI checks confirm filtered selection counts and Controller
+  switch cleanup without resource mutations or policy changes.
+- [BATCH-SELECTION-EVIDENCE.md](BATCH-SELECTION-EVIDENCE.md) records scope,
+  artifacts and limits. Overall alignment remains active.

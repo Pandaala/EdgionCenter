@@ -292,3 +292,10 @@ suite: 737 tests in 111 files. Twelve native checkpoints verify actual default
 read-only and explicit ACME write policies without mutations. See
 [LIST-ACTION-PERMISSIONS-EVIDENCE.md](LIST-ACTION-PERMISSIONS-EVIDENCE.md) for
 empty-list limits and the Gateway annotation-hint corrections.
+
+
+Batch-selection follow-up: nine resource lists retain selected rows hidden by
+search; thirteen report the submitted count rather than live selection size.
+Controller navigation now clears page selection/editor state. Full frontend:
+751 tests / 113 files, build/lint passed; two native UI checkpoints passed without
+mutations. See [BATCH-SELECTION-EVIDENCE.md](BATCH-SELECTION-EVIDENCE.md).

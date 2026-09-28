@@ -56,8 +56,8 @@ const GatewayList = () => {
   const batchDeleteMutation = useMutation({
     mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
       resourceApi.batchDelete(mutationTarget, 'gateway', resources),
-    onSuccess: () => {
-      message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
+    onSuccess: (_, resources) => {
+      message.success(t('msg.batchDeleteOk', { n: resources.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'gateway'] })
     },
@@ -90,7 +90,7 @@ const GatewayList = () => {
   }
 
   const handleBatchDelete = () => {
-    const selected = filtered
+    const selected = gateways
       .filter((r) => selectedRowKeys.includes(`${r.metadata.namespace}/${r.metadata.name}`))
       .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name, resourceVersion: r.metadata.resourceVersion! }))
     Modal.confirm({

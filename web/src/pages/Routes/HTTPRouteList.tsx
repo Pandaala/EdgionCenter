@@ -60,8 +60,8 @@ const HTTPRouteList = () => {
   const batchDeleteMutation = useMutation({
     mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
       resourceApi.batchDelete(mutationTarget, 'httproute', resources),
-    onSuccess: () => {
-      message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
+    onSuccess: (_, resources) => {
+      message.success(t('msg.batchDeleteOk', { n: resources.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'httproute'] })
     },
@@ -97,7 +97,7 @@ const HTTPRouteList = () => {
   }
 
   const handleBatchDelete = () => {
-    const selectedResources = filteredRoutes
+    const selectedResources = routes
       .filter((route) => selectedRowKeys.includes(`${route.metadata.namespace}/${route.metadata.name}`))
       .map((route) => ({
         namespace: route.metadata.namespace!,

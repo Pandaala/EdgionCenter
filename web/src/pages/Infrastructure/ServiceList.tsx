@@ -57,7 +57,7 @@ const ServiceList = () => {
   })
   const batchDeleteMutation = useMutation({
     mutationFn: (resources: Array<{namespace:string;name:string;resourceVersion:string}>) => resourceApi.batchDelete(mutationTarget, 'service', resources),
-    onSuccess: () => { message.success(t('msg.batchDeleteOk',{n:selectedRowKeys.length})); setSelectedRowKeys([]); queryClient.invalidateQueries({queryKey:['resource-list','service']}) },
+    onSuccess: (_, resources) => { message.success(t('msg.batchDeleteOk',{n: resources.length})); setSelectedRowKeys([]); queryClient.invalidateQueries({queryKey:['resource-list','service']}) },
     onError: (error: unknown) => {
       const failedKeys = batchDeleteFailureKeys(error)
       if (failedKeys) {

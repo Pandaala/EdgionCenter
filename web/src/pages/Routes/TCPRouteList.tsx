@@ -56,8 +56,8 @@ const TCPRouteList = () => {
   const batchDeleteMutation = useMutation({
     mutationFn: (resources: Array<{ namespace: string; name: string; resourceVersion: string }>) =>
       resourceApi.batchDelete(mutationTarget, 'tcproute', resources),
-    onSuccess: () => {
-      message.success(t('msg.batchDeleteOk', { n: selectedRowKeys.length }))
+    onSuccess: (_, resources) => {
+      message.success(t('msg.batchDeleteOk', { n: resources.length }))
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['resource-list', 'tcproute'] })
     },
@@ -89,7 +89,7 @@ const TCPRouteList = () => {
   }
 
   const handleBatchDelete = () => {
-    const selected = filtered
+    const selected = routes
       .filter((r) => selectedRowKeys.includes(`${r.metadata.namespace}/${r.metadata.name}`))
       .map((r) => ({ namespace: r.metadata.namespace!, name: r.metadata.name, resourceVersion: r.metadata.resourceVersion! }))
     Modal.confirm({
