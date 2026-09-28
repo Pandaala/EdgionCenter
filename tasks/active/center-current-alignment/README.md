@@ -2993,3 +2993,13 @@ root/nested transport fields match the existing mutation exclusions. No addition
 production edit was needed. Eighty-five existing tests pass. The exact source
 inventory, cache/transport distinctions and remaining resource scopes are in
 [FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md).
+
+
+## Final acceptance, 2026-09-28
+
+The resource-by-resource and menu-by-menu alignment review is complete. The final
+requirements/evidence matrix is in [COMPLETION-AUDIT.md](COMPLETION-AUDIT.md),
+including fresh verification of all eight global inventory leaves and disabled
+DNS capability routing. Its validation limits and uncommitted Edgion dependencies
+are part of the result. Earlier pending notes in this chronological log remain
+historical. Center changes are committed locally; no push was performed.

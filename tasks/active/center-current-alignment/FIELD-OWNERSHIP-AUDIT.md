@@ -310,5 +310,5 @@ Controller ownership was cross-checked against edgion_plugins.rs resolution of
 credentials, WAF, access profiles and condition references, and
 edgion_stream_plugins.rs reference-marker recomputation. The mutation ownership
 pass now covers all catalog kinds. This closes that bounded source/adapter
-review only; the broader runtime and menu requirements in COMPLETION-AUDIT.md
-remain open.
+review only. The later final reconciliation of broader runtime and menu
+requirements is recorded in COMPLETION-AUDIT.md.

@@ -1,6 +1,7 @@
 # Current alignment coverage
 
-Checkpoint: 2026-09-28. The overall goal is **active, not complete**.
+Checkpoint: 2026-09-28. The requested alignment review and repairs are **complete**, with the validation
+limits recorded in the completion audit.
 This is a current index; [README.md](README.md) retains the chronological evidence.
 [COMPLETION-AUDIT.md](COMPLETION-AUDIT.md) reconciles the objective and remaining work.
 Older process handles and "next" notes there are historical unless revalidated.
@@ -14,7 +15,7 @@ used SQL RBAC and real mTLS federation, and all 70 retained fixture files were
 verified. See [CURRENT-NATIVE-REGRESSION.md](CURRENT-NATIVE-REGRESSION.md).
 This supersedes older full frontend/browser counts below; their feature-specific
 evidence remains useful. Subsequent traffic and fault proofs are linked below;
-the completion audit identifies the remaining requirements.
+the completion audit records final requirement reconciliation and validation limits.
 
 Current Kubernetes follow-up: the task deployment now runs the locally rebuilt
 `ws5-alignment-current-36d771d` image. Three OIDC/capability browser checks and
@@ -283,7 +284,7 @@ failures after dispatch are not established by connection migration alone.
 3. Current frontend/backend gates and the complete native browser regression
    are recorded above. Rerun affected checks after further implementation fixes;
    retain the pre-existing English-only guard limitation.
-4. Final requirement reconciliation remains active. CRUD does not prove arbitrary
+4. Final requirement reconciliation is recorded in COMPLETION-AUDIT.md. CRUD does not prove arbitrary
    Gateway traffic or external DNS propagation. Optional account-backed tests are
    recorded as validation limits, not successful executions.
 

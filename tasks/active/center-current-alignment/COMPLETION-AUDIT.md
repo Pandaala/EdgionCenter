@@ -1,16 +1,18 @@
 # Completion audit checkpoint
 
 Date: 2026-09-28. Source checkpoint: `ba012f3` (current full frontend and native browser regression).
-Verdict: **not yet complete**. This reconciles current evidence; it does not
-replace the user's full backend/dashboard, resource-by-resource/menu-by-menu scope.
+Verdict: **complete for the requested current-source Center alignment review and
+repairs**, following the final reconciliation below. This covers the entire
+backend/dashboard resource and menu inventory, with explicit validation limits;
+it is not certification of every Gateway protocol or external cloud provider.
 
 ## Requirements and evidence
 
 | Requirement | Current evidence | Assessment |
 | --- | --- | --- |
 | Use current Edgion, without reconstructing its history | Current ResourceKind and CRD/handler reads; per-fix source citations | Satisfied for work performed |
-| Cover every resource type | Fresh exact set comparison: 22 Edgion kinds = 22 Center catalog kinds; all 20 first-class resource paths occur in the Controller menu; Secret/ConfigMap share restricted dependencies | Catalog and nested ownership review complete; runtime requirements remain below |
-| Check every menu | Current Center menu has 17 leaves; controller catalog paths have no omissions; current native 174-pass regression and separate OIDC/Kubernetes evidence | Current menu coverage indexed; runtime limits below remain explicit |
+| Cover every resource type | Fresh exact set comparison: 22 Edgion kinds = 22 Center catalog kinds; all 20 first-class resource paths occur in the Controller menu; Secret/ConfigMap share restricted dependencies | All 22 kinds have source/adapter review and passing native CRUD with API readback; focused runtime evidence below |
+| Check every menu | Current Center menu has 17 leaves; controller catalog paths have no omissions; current native 174-pass regression and separate OIDC/Kubernetes evidence | All 17 Center leaves and Controller resource/operations menus checked; deployment-dependent limits remain explicit |
 | Update Center backend | Federation ownership revocation, global write semantics, auth/cloud/error handling repairs; fresh 876 workspace + 247 no-default-feature app tests | Current Kubernetes image deployed; OIDC/capabilities and forced owner-Pod recovery verified |
 | Update Center frontend | 848 tests in 117 files including the final Stream repair; Gateway/BTP fixes have focused browser/component evidence | Current unit/component and complete standalone browser regressions pass |
 | Exercise local runtime | Isolated native Center + two mTLS Controllers; API readback, real Gateway traffic, and separate OrbStack deployments | Established for recorded scenarios; no blanket conformance claim |
@@ -100,8 +102,8 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    image with the embedded dashboard; its fresh checks are recorded separately.
 
 The selected runtime gaps listed at the earlier checkpoint now have concrete
-evidence. Final requirement-by-requirement reconciliation against the full
-resource/menu scope remains before marking the overall goal complete.
+evidence. Final requirement reconciliation is recorded below; no known required
+Center repair or resource/menu audit item remains open.
 
 Optional external-account/MySQL tests and a broken isolated kind node are
 validation limits, not reasons to stop work that can proceed in native runtimes.
@@ -115,3 +117,39 @@ failure/recovery), actual RegionRoute dual-Gateway failover/source synchronizati
 ReferenceGrant traffic transitions, and ACME issuance/renewal/certificate hot-load
 with the local Controller repair. These must not remain generic pending items
 in the current ledger, but none proves every feature of its wider category.
+
+## Final reconciliation at e26ab78
+
+The original objective and README completion criteria were re-read, and current
+source, test implementations, terminal logs and runtime result files were checked.
+No production source changed after the latest full regression. The previous
+turn corrected stale index conclusions; this pass checked the underlying evidence.
+
+| Original scope | Inspected evidence and conclusion |
+| --- | --- |
+| Infrastructure, routes, services, security, plugins and system resources | Exact 22-kind equality and 20 first-class menu paths; FIELD-OWNERSHIP-AUDIT.md records nested operator/runtime review. Every current kind has its own passing `real CRUD crosses the browser and API boundary` entry in the latest log. The test implementation creates through the editor, checks API documents, edits through forms, checks persisted fields and deletes isolated objects. Secret/ConfigMap retain their restricted workflow. |
+| Controller operations, user dashboard and topology | Current browser cases exercise refresh/filter/legend/node actions, both Controller slots, resource counts and AI/credential-reference topology; focused status, attachment and permission repairs have their linked regression evidence. |
+| Center overview and Controllers | Current browser navigation, counts, reload and Controller actions; 27 native federation lifecycle and nine mTLS checks; current-image OIDC, owner failure and ambiguous-write results are independently recorded. |
+| RegionRoute | Latest browser failover, restore, source sync, enable preservation and missing-target recovery pass. Dual-Gateway result files prove actual routing and permission-induced partial outcomes followed by recovery. |
+| All eight global inventory leaves | A fresh read-only browser pass visits every descriptor route, asserts its exact type heading and table, receives HTTP 200 for that type's inventory query, and rejects error alerts. `/tmp/ws5-final-global-menus-result.json` contains all eight. Existing typed mutation cases separately check watch-fed values/redaction. |
+| Provider accounts and both DNS menus | Fresh native account list/render passes. Current discovery explicitly disables both DNS capabilities; direct visits return to Federation Overview without provider requests. Enabled DNS forms/errors/mutations are covered by CloudPages component tests and the 195-test hermetic provider/API gate. Real-account tests are optional under cicd/integration/README.md and were not run. |
+| Login, audit, users and roles | Latest standalone suite exercises password auth/logout, restricted user status/password/permissions, audit controls and isolated role/user mutations. Separate real Dex/OAuth and Kubernetes SAR/capability cases cover that composition. |
+| Cross-resource runtime alignment | Re-read successful result files for frontend TLS (9 checks), AI routing/policy (12), owner-Pod failure (10), ambiguous write (8), inherited outbound identity on Webhook/Redis (7 each), all five probe protocols, dual-Gateway RegionRoute and ACME issuance/renewal. These supplement, rather than replace, per-resource browser/API proof. |
+| Validation and repository constraints | Full frontend 848/117; standalone browser 174 passed, two Kubernetes-only skips with separate Kubernetes evidence; backend 876 + 247, build/lint and dependency/render checks. Center commits only, no push; unrelated work preserved; Edgion task repairs remain uncommitted as instructed. |
+
+The fresh menu script is `/tmp/ws5-final-global-menus.cjs`. Its final run passed
+11 checkpoints and closed its browser/context. The first attempt wrongly assumed
+the retained runtime enabled DNS and timed out waiting for an account request;
+`/tmp/ws5-final-global-menus-first-attempt.json` preserves that failure. Inspection
+of `/api/v1/server-info` and App.tsx established the disabled-capability behavior
+before correcting the oracle. No cloud credentials were used or inspected, and
+no external provider mutation was attempted.
+
+Validation limits remain explicit: the full matrix exits at the unrelated root
+English-only document, despite passing the implementation gates; external MySQL
+and real-cloud opt-ins were not run; bundle-size warnings remain. Local Controller
+ACME/global-client-identity and Gateway forced-client-invalidation repairs are
+required for the corresponding demonstrated runtime behavior and are still
+uncommitted in Edgion. None of these is silently converted into a green gate or
+an upstream release claim. Current files and retained artifacts, not historical
+process handles, are the evidence authority.
