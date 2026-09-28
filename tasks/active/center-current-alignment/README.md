@@ -2731,3 +2731,15 @@ before acting on CCI execution files or proposing replacements.
 - Final build and lint passed (`/tmp/ws5-center-gatewayconfig-list-build.log`,
   `/tmp/ws5-center-gatewayconfig-list-lint.log`); existing bundle-size warning
   remains. No E2E types or action selectors changed.
+
+
+### 2026-09-28: ACME scheduler local repair and build checkpoint
+
+- Applied the narrow Edgion SSA-omission repair locally, updated the recovery
+  regression and owning guide. Real API dry-run preserves all other status fields.
+- All 29 ACME tests pass, along with format, SSA-force and unit-test-layout guards.
+  Edgion changes remain uncommitted. The Linux build remains live; its exact handle
+  and the prepared recovery/renewal proof are in ACME-SCHEDULER-CLEAR-GAP.md.
+- The runtime topology still uses the original binary. Renewal and replacement
+  certificate verification remain pending; no success is inferred from compilation
+  progress. Center has no additional source change for this upstream repair.

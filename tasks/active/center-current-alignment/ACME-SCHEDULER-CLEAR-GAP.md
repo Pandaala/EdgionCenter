@@ -43,3 +43,34 @@ clear removes the checkpoint without changing unrelated status, and repeated
 clear remains safe. Then rerun real issuance, renewal through Center and Gateway
 certificate replacement. Current evidence establishes first issuance and initial
 Secret hot loading; it does not establish renewal completion.
+
+## Local repair checkpoint (runtime verification pending)
+
+The Edgion working tree now omits the scheduler field when clearing, retaining
+`status: {}`, the same forced SSA manager, and UID/resourceVersion preconditions.
+The Ready-recovery test now requires an empty status object rather than using
+JSON indexing plus is_null (which conflated missing and explicit-null values).
+The owning regression guide documents structural-CRD deletion semantics.
+These three Edgion files are deliberately uncommitted; unrelated work is preserved.
+
+A real API-server dry run of the corrected body returns 200, removes scheduler,
+and preserves every other existing status field. Artifact:
+`/tmp/ws5-center-acme-issuance-20260928/scheduler-omit-dryrun.json`.
+All 29 Controller ACME tests pass (`/tmp/ws5-acme-scheduler-tests.log`). Formatting,
+SSA-force and unit-test-layout guards pass. This is targeted verification, not a
+fresh full Edgion workspace matrix.
+
+The Linux Controller build is still running at this checkpoint: exec session
+89178, Docker container `ws5-acme-controller-build`, log
+`/tmp/ws5-acme-scheduler-linux-build.log`. Re-poll that exact build before taking
+any action; do not start another build merely because observation is delayed.
+The running ACME topology still has the original Controller binary.
+
+After a successful terminal build, stop only `ws5-center-acme-controller`, copy
+the built Controller to `/tmp/ws5-center-acme-issuance-20260928/bin/edgion-controller`,
+and start that same container. Keep Gateway session 63587 running. The prepared
+`renewal-proof.cjs` first requires recovery to Ready with scheduler absent and the
+original serial unchanged. It then changes renewBefore through the actual Center
+form, verifies a new certificate and the Gateway fingerprint, and restores the
+original renewal window in finally. Do not mark this gap resolved before those
+runtime checks pass.
