@@ -56,9 +56,13 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    The current full frontend run passes 848 tests including the Stream repair,
    which also has focused build/lint evidence. This closes source
    ownership review, not the traffic/menu requirements below.
-2. Close selected cross-resource runtime gaps retained in the existing scope:
-   frontend TLS policy transitions, AI backend/provider routing and policy
-   attachment, and resilience behaviors beyond the five proven probe types.
+2. Close remaining cross-resource runtime gaps, especially frontend TLS policy
+   transitions. Selected AI backend/provider routing, typed policy attachment and
+   resilience beyond active probes now have actual traffic evidence: endpoint
+   edits, credential rotation and concurrency limit changes/deletion pass in two
+   isolated runs with Center form/API mutations. See
+   [AI-BACKEND-TRAFFIC-EVIDENCE.md](AI-BACKEND-TRAFFIC-EVIDENCE.md) for the exact
+   OpenAI-compatible provider scope and the mechanisms not covered by that run.
    Existing configuration persistence must not be called traffic proof. Global outbound
    client identity resolution is repaired in the local, uncommitted Controller
    worktree; Center rejects unsupported global hostname/SAN constraints. See

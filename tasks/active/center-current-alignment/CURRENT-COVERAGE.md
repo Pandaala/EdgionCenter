@@ -88,7 +88,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | TLSRoute | routes/tls | v1 plus accepted alternate; v2 Proxy Protocol, retries and keepalive native edits; explicit SNI hostname requirement and current list bounds |
 | Service | services/list | Immutable-field handling, zero weights, single/batch delete workflows; targetPort clearing preserves omission and restores actual Gateway traffic |
 | EndpointSlice | services/endpointslices | Native top-level addressType/endpoints/ports envelope retained |
-| EdgionBackend | services/ai-backends | New resource, provider/credential/model editor, AI route and topology references |
+| EdgionBackend | services/ai-backends | New resource, provider/credential/model editor, AI route and topology references; real provider endpoint form edits, model alias resolution and credential Secret rotation through Center |
 | EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary; live HTTP/HTTPS/TCP/gRPC/GRPCS probes, HTTPS/GRPCS mTLS, service and certificate failure/recovery through Center forms |
 | EdgionTls | security/tls | Typed mTLS SANs and resolved-secret mutation boundary; Gateway attachment form, optional reference clearing and native API readback |
 | BackendTLSPolicy | security/backendtls | Current identity/target restrictions and lossless form edits |
@@ -104,7 +104,12 @@ All five active probe types (HTTP, HTTPS, TCP, gRPC and GRPCS) have Gateway traf
 proof, including Center form edits, Controller version readback and failure/
 recovery. HTTPS and GRPCS mTLS cover absent, trusted and untrusted client
 identities. See [HEALTH-POLICY-TRAFFIC-EVIDENCE.md](HEALTH-POLICY-TRAFFIC-EVIDENCE.md).
-Broader TLS options and other resilience mechanisms remain open.
+AI backend endpoint/credential changes and attached concurrency limits now also
+have real Gateway traffic evidence, including form edits and policy deletion.
+Two isolated 12-checkpoint runs pass; see
+[AI-BACKEND-TRAFFIC-EVIDENCE.md](AI-BACKEND-TRAFFIC-EVIDENCE.md). This covers
+selected concurrency resilience beyond active probes, not every resilience
+mechanism or provider protocol. Frontend TLS transitions remain open.
 
 Recent native logs supplement the baseline: `/tmp/ws5-center-waf-ui-native-v1.log`,
 `/tmp/ws5-center-http-retry-native-v1.log`, `/tmp/ws5-center-grpc-match-native-v1.log`,
