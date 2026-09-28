@@ -62,10 +62,15 @@ spec:
   Rust regex compilation remains Controller-owned; browser checks are preflight.
 - At most 16 hosts and 32 parent references. Reference edits preserve group/kind,
   namespace, sectionName and port where supported by the reference schema.
+- The shared ParentRefsSection allows removing the last reference for EdgionTls;
+  the form then omits parentRefs. Without references the configuration is unbound
+  and Controller warns that it applies to no Gateway. Adding a reference uses the
+  resource namespace. Clearing optional namespace/sectionName omits those fields,
+  restoring same-namespace/default listener selection rather than an empty name.
 - Strip resolved certificate material and Controller runtime fields on mutation.
   Native configuration CRUD does not establish certificate or handshake success.
 
-## Secret (Pending Development)
+## Secret and ConfigMap restricted dependencies
 
 **TLS type**:
 ```yaml
@@ -93,16 +98,19 @@ data:
 ```
 
 **Development Notes**:
-- Namespaced resource, kind: `secret`
-- Type enum: `kubernetes.io/tls`, `Opaque`
-- **Security sensitive**: tls.key should not be displayed in plaintext on the frontend
-- Creation form:
-  - type selection (TLS certificate / CA certificate / Generic)
-  - File upload (PEM format) or text paste
-  - Base64 encoding handled on the frontend
-- List page displays: name, namespace, type, data keys, creation time
-- View mode: display certificate info (expiry, CN, etc.), **hide** key content
-- Association display: EdgionTls/Gateway that reference this Secret
+- Both namespaced kinds use RestrictedDependenciesPage, not a general value
+  inventory. The page requests list-keys and shows only name, namespace and the
+  permission-gated Replace action. Refresh requires list-keys; create/update
+  controls require their matching concrete-kind permissions.
+- Replacements begin empty with metadata and resourceVersion from the key list.
+  Operators supply the complete new content in Form or YAML; the editor never
+  fetches or hydrates existing values. There is no existing-value/certificate
+  detail view on this page. Secret and raw ConfigMap payloads stay out of the
+  global resource model.
+- Secret creation/replacement supports a type and data entries; standard TLS
+  Secrets use tls.crt/tls.key and CA Secrets use ca.crt. ConfigMap has its own
+  complete-replacement editor. Their mutation adapters preserve CAS preconditions
+  and remove server-owned fields.
 
 ## BackendTLSPolicy
 

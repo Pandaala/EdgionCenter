@@ -1,11 +1,12 @@
 /**
- * EdgionTls 表单
+ * EdgionTls operator configuration form.
  */
 
 import React from 'react'
 import { Form, Input, Card, Select, Space } from 'antd'
 import MetadataSection from '../common/MetadataSection'
 import HostnamesSection from '../common/HostnamesSection'
+import ParentRefsSection from '../common/ParentRefsSection'
 import ClientAuthSection from './sections/ClientAuthSection'
 import type { EdgionTls } from '@/types/edgion-tls'
 import { useT } from '@/i18n'
@@ -33,6 +34,20 @@ const EdgionTlsForm: React.FC<EdgionTlsFormProps> = ({ data, onChange, readOnly 
           onChange={(metadata) => onChange({ ...data, metadata })}
           disabled={readOnly}
           isCreate={isCreate}
+        />
+
+        <ParentRefsSection
+          value={data.spec.parentRefs}
+          onChange={(parentRefs) => {
+            const spec = { ...data.spec }
+            if (parentRefs.length) spec.parentRefs = parentRefs.map((parent) => ({ ...parent }))
+            else delete spec.parentRefs
+            onChange({ ...data, spec })
+          }}
+          namespace={data.metadata.namespace}
+          disabled={readOnly}
+          allowEmpty
+          maxItems={32}
         />
 
         <Card title={t('section.hostnames')} size="small">

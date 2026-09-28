@@ -15,6 +15,8 @@ interface ParentRefsSectionProps {
   onChange?: (value: ParentReference[]) => void;
   disabled?: boolean;
   namespace?: string;
+  allowEmpty?: boolean;
+  maxItems?: number;
 }
 
 const ParentRefsSection: React.FC<ParentRefsSectionProps> = ({
@@ -22,6 +24,8 @@ const ParentRefsSection: React.FC<ParentRefsSectionProps> = ({
   onChange,
   disabled = false,
   namespace = DEFAULT_VALUES.defaultNamespace,
+  allowEmpty = false,
+  maxItems,
 }) => {
   const t = useT();
 
@@ -45,7 +49,7 @@ const ParentRefsSection: React.FC<ParentRefsSectionProps> = ({
 
   const handleRemoveParent = (index: number) => {
     const newParents = value.filter((_, i) => i !== index);
-    if (newParents.length > 0) {
+    if (allowEmpty || newParents.length > 0) {
       onChange?.(newParents);
     }
   };
@@ -59,7 +63,7 @@ const ParentRefsSection: React.FC<ParentRefsSectionProps> = ({
           size="small"
           title={`Gateway ${index + 1}`}
           extra={
-            !disabled && value.length > 1 && (
+            !disabled && (allowEmpty || value.length > 1) && (
               <Button
                 danger
                 size="small"
@@ -95,9 +99,9 @@ const ParentRefsSection: React.FC<ParentRefsSectionProps> = ({
               style={{ marginBottom: 0 }}
             >
               <Input
-                value={parent.namespace || namespace}
+                value={parent.namespace ?? ''}
                 onChange={(e) =>
-                  handleParentChange(index, { ...parent, namespace: e.target.value })
+                  handleParentChange(index, { ...parent, namespace: e.target.value || undefined })
                 }
                 placeholder={namespace}
                 disabled={disabled}
@@ -112,7 +116,7 @@ const ParentRefsSection: React.FC<ParentRefsSectionProps> = ({
               <Input
                 value={parent.sectionName}
                 onChange={(e) =>
-                  handleParentChange(index, { ...parent, sectionName: e.target.value })
+                  handleParentChange(index, { ...parent, sectionName: e.target.value || undefined })
                 }
                 placeholder="http-listener"
                 disabled={disabled}
@@ -174,6 +178,7 @@ const ParentRefsSection: React.FC<ParentRefsSectionProps> = ({
         <Button
           type="dashed"
           onClick={handleAddParent}
+          disabled={maxItems !== undefined && value.length >= maxItems}
           block
           icon={<PlusOutlined />}
         >

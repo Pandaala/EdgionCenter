@@ -2850,3 +2850,18 @@ before acting on CCI execution files or proposing replacements.
   retained and verified; existing native/OrbStack environments are unchanged.
 - [COMBINED-BROWSER-EVIDENCE.md](COMBINED-BROWSER-EVIDENCE.md) records both
   executions, artifact paths and limits. Overall alignment remains active.
+
+
+### 2026-09-28: EdgionTls optional Gateway attachments in the form
+
+- Added the missing shared parent-reference section with optional last-entry
+  removal and the current 32-entry bound. Narrow edits preserve all other fields.
+- Shared namespace/listener clearing now omits optional fields. Existing route
+  forms retain their last-reference behavior; five resource action/CRUD workflows
+  pass against the current native Controller.
+- Full frontend passes 755 tests / 114 files; twelve browser cases, final build,
+  lint and E2E types pass. The attachment case proves actual API persistence and
+  exact cleanup, not TLS handshake success.
+- Updated stale security-guide statements about Secret/ConfigMap value access.
+  [TLS-ATTACHMENT-FORM-EVIDENCE.md](TLS-ATTACHMENT-FORM-EVIDENCE.md) records
+  contract sources, artifacts and limits. Overall alignment remains active.

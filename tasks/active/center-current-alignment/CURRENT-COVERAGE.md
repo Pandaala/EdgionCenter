@@ -70,7 +70,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | EndpointSlice | services/endpointslices | Native top-level addressType/endpoints/ports envelope retained |
 | EdgionBackend | services/ai-backends | New resource, provider/credential/model editor, AI route and topology references |
 | EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary; live HTTP/HTTPS/TCP/gRPC/GRPCS probes, HTTPS/GRPCS mTLS, service and certificate failure/recovery through Center forms |
-| EdgionTls | security/tls | Typed mTLS SANs and resolved-secret mutation boundary |
+| EdgionTls | security/tls | Typed mTLS SANs and resolved-secret mutation boundary; Gateway attachment form, optional reference clearing and native API readback |
 | BackendTLSPolicy | security/backendtls | Current identity/target restrictions and lossless form edits |
 | Secret | security/dependencies | Metadata-only listing; explicit write controls; no global secret read model; read failure/recovery components and live default-policy denial; direct Kubernetes Controller namespace filtering plus the real dual-Controller Center proxy E2E |
 | ConfigMap | security/dependencies | Restricted dependency operations and exact replacement/readback; live Kubernetes Center metadata-only reads, SAR denial and recovery; direct Kubernetes Controller namespace filtering plus the real dual-Controller Center proxy E2E |
@@ -307,3 +307,12 @@ search; thirteen report the submitted count rather than live selection size.
 Controller navigation now clears page selection/editor state. Full frontend:
 751 tests / 113 files, build/lint passed; two native UI checkpoints passed without
 mutations. See [BATCH-SELECTION-EVIDENCE.md](BATCH-SELECTION-EVIDENCE.md).
+
+
+EdgionTls attachment follow-up: the form now exposes Gateway parent references,
+preserves advanced fields, permits removing the last optional reference and caps
+additions at 32. Shared namespace/listener clearing restores omission. Full
+frontend: 755 tests / 114 files; build/lint/E2E types pass. Twelve native browser
+cases pass, including actual attachment persistence and shared route regressions.
+See [TLS-ATTACHMENT-FORM-EVIDENCE.md](TLS-ATTACHMENT-FORM-EVIDENCE.md). This does
+not establish TLS handshake behavior.

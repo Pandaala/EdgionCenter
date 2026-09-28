@@ -693,6 +693,70 @@ test('editor submit replaces an isolated ConfigMap and cleans it exactly', async
   if (cleanupError) throw cleanupError
 })
 
+test('EdgionTls browser form adds and clears optional Gateway attachments', async ({ page, request }) => {
+  const catalog = RESOURCE_CATALOG.get('edgiontls')!
+  await waitForControllerCapabilities(request, controller, [{
+    resourceKind: 'edgiontls', verbs: ['get', 'list', 'create', 'update', 'delete'],
+  }])
+  const name = `${prefix}-tls-attachment-form`
+  const document = mutationDocument(catalog, name)
+  const path = itemPath(catalog, namespace, name)
+  const created = await request.post(collectionPath(catalog, namespace), {
+    data: yaml.dump(document, { lineWidth: -1 }), headers: yamlHeaders,
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  const edit = async () => {
+    await waitForStableResourceVersion(request, catalog, namespace, name)
+    await openResourcePage(page, catalog)
+    await (await resourceRow(page, catalog, name)).getByTestId('edgiontls-row-edit').click()
+  }
+  const save = async () => {
+    const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().endsWith(path))
+    await page.getByTestId('editor-submit').click()
+    const result = await response
+    expect(result.ok(), await result.text()).toBeTruthy()
+    return readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+  }
+  try {
+    await edit()
+    await page.getByRole('button', { name: /Add Gateway/ }).click()
+    await page.getByPlaceholder('example-gateway', { exact: true }).fill(`${prefix}-gateway`)
+    await page.getByPlaceholder('http-listener', { exact: true }).fill('tls')
+    await page.getByPlaceholder('80', { exact: true }).fill('8443')
+    await page.getByTestId('editor-yaml-tab').click()
+    expect((await yamlEditorDocument(page)).spec.parentRefs).toEqual([{
+      group: 'gateway.networking.k8s.io', kind: 'Gateway', namespace,
+      name: `${prefix}-gateway`, sectionName: 'tls', port: 8443,
+    }])
+    await page.getByTestId('editor-form-tab').click()
+    const attached = await save()
+    expect(attached.spec.parentRefs[0]).toMatchObject({ name: `${prefix}-gateway`, sectionName: 'tls', port: 8443 })
+    expect(attached.spec.clientAuth).toEqual(document.spec.clientAuth)
+
+    await edit()
+    await page.getByPlaceholder(namespace, { exact: true }).fill('')
+    await page.getByPlaceholder('http-listener', { exact: true }).fill('')
+    const defaults = await save()
+    expect(defaults.spec.parentRefs[0]).not.toHaveProperty('namespace')
+    expect(defaults.spec.parentRefs[0]).not.toHaveProperty('sectionName')
+    expect(defaults.spec.parentRefs[0].port).toBe(8443)
+
+    await edit()
+    const parent = page.locator('.ant-card').filter({ has: page.getByText('Gateway 1', { exact: true }) }).last()
+    await parent.getByRole('button', { name: /Delete/ }).click()
+    await page.getByTestId('editor-yaml-tab').click()
+    expect((await yamlEditorDocument(page)).spec).not.toHaveProperty('parentRefs')
+    await page.getByTestId('editor-form-tab').click()
+    const detached = await save()
+    expect(detached.spec).not.toHaveProperty('parentRefs')
+    expect(detached.spec.hosts).toEqual(document.spec.hosts)
+    expect(detached.spec.secretRef).toEqual(document.spec.secretRef)
+  } finally {
+    const cleanup = await request.delete(path)
+    expect(cleanup.ok() || cleanup.status() === 404, 'Exact EdgionTls cleanup failed').toBeTruthy()
+  }
+})
+
 test('filtered batch deletion removes both selected HTTPRoutes and preserves unselected resources', async ({ page, request }) => {
   const catalog = RESOURCE_CATALOG.get('httproute')!
   await waitForControllerCapabilities(request, controller, [{
