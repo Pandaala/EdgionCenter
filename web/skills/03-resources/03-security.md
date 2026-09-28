@@ -138,8 +138,10 @@ spec:
 - Defines the gateway → backend mTLS policy
 - One target: core Service (optional sectionName) or edgion.io EdgionBackend
   (no sectionName). The form prevents adding a second target.
-- Choose same-namespace Secret/ConfigMap CA references or wellKnownCACertificates:
+- Choose up to eight same-namespace Secret/ConfigMap CA references or wellKnownCACertificates:
   System, never both. Client certificate option accepts a bare Secret name.
+  The form disables adding CA references while System is selected or eight refs
+  are present. Form/YAML preflight rejects larger or non-array reference lists.
   Clearing the form field removes the option (and omits an otherwise empty
   options map). An explicitly empty YAML option is invalid. Preflight follows
   Controller trimming and name limits: 253 total characters, 63 per nonempty

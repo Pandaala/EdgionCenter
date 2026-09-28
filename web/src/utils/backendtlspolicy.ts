@@ -106,6 +106,7 @@ export function validateBackendTLSPolicy(policy: BackendTLSPolicy): void {
     throw new Error('Validation hostname must be a valid precise hostname')
   }
   const refs = policy.spec.validation.caCertificateRefs ?? []
+  if (!Array.isArray(refs) || refs.length > 8) throw new Error('CA references must be an array with at most eight entries')
   if (!refs.length && policy.spec.validation.wellKnownCACertificates !== 'System') throw new Error('Choose CA references or the System CA bundle')
   if (refs.length && policy.spec.validation.wellKnownCACertificates !== undefined) throw new Error('CA references and the System CA bundle are mutually exclusive')
   const seenCaRefs = new Set<string>()

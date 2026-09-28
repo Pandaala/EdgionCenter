@@ -93,3 +93,22 @@ describe('BackendTLSPolicy client certificate names', () => {
     expect(mutation.spec.options['edgion.io/client-certificate-ref']).toBe(value)
   })
 })
+
+
+describe('BackendTLSPolicy CA reference bounds', () => {
+  it('accepts eight references and rejects nine without changing the draft', () => {
+    const policy = normalize({ apiVersion: 'gateway.networking.k8s.io/v1', kind: 'BackendTLSPolicy',
+      metadata: { name: 'api', namespace: 'prod' }, spec: {
+        targetRefs: [{ group: '', kind: 'Service', name: 'api' }],
+        validation: { hostname: 'api.internal', caCertificateRefs: Array.from({ length: 8 }, (_, i) => ({ group: '', kind: 'ConfigMap', name: `ca-${i}` })) },
+      },
+    })
+    expect(() => toMutationYaml(policy, 'create')).not.toThrow()
+    policy.spec.validation.caCertificateRefs!.push({ group: '', kind: 'Secret', name: 'extra' })
+    const before = structuredClone(policy)
+    expect(() => toMutationYaml(policy, 'update')).toThrow('at most eight')
+    expect(policy).toEqual(before)
+    policy.spec.validation.caCertificateRefs = {} as any
+    expect(() => toMutationYaml(policy, 'create')).toThrow('must be an array')
+  })
+})

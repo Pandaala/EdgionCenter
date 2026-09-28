@@ -61,7 +61,7 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
           isCreate={isCreate}
         />
 
-        <Card title={t('section.targetRefs')} size="small">
+        <Card title={t('col.targetBackend')} size="small">
           {(data.spec?.targetRefs || []).map((ref, index) => (
             <Card
               key={index}
@@ -152,7 +152,7 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
                   ) : null
                 }
               >
-                <Form.Item label={t('field.secretName')} required style={{ marginBottom: 8 }}>
+                <Form.Item label={t('field.name')} required style={{ marginBottom: 8 }}>
                   <Input
                     value={ref.name}
                     onChange={(e) => updateCaRef(index, { name: e.target.value })}
@@ -181,7 +181,7 @@ const BackendTLSPolicyForm: React.FC<BackendTLSPolicyFormProps> = ({ data, onCha
               </Card>
             ))}
             {!readOnly && (
-              <Button type="dashed" icon={<PlusOutlined />} onClick={addCaRef} block>
+              <Button type="dashed" icon={<PlusOutlined />} onClick={addCaRef} disabled={data.spec.validation.wellKnownCACertificates === 'System' || (data.spec.validation.caCertificateRefs?.length ?? 0) >= 8} block>
                 {t('btn.addCaRef')}
               </Button>
             )}

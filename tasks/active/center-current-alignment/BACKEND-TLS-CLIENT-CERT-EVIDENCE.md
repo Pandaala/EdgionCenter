@@ -45,3 +45,24 @@ otherwise matching Secret present, absence of cross-namespace grant synthesis,
 and five empty/non-string cases. Production build and ESLint pass.
 Logs: `/tmp/ws5-center-tls-topology-{tests,build,lint}.log`.
 No new browser, federation, or TLS handshake claim is made by these graph tests.
+
+
+## CA count and trust-source form follow-up
+
+Both current vendored Gateway API v1.6.2 CRD channels (standard/experimental),
+for v1 and v1alpha3, set BackendTLSPolicy validation.caCertificateRefs.maxItems
+exactly to 8. Center now checks that limit and rejects malformed non-array values
+before mutation. The form disables addition at eight and while System is active,
+preventing contradictory trust-source drafts through the add action. Existing
+invalid YAML remains editable; validation does not silently drop references.
+
+CA reference labels are neutral Name because both Secret and ConfigMap are
+supported. Both backend-policy target cards use the existing Target backend
+translation instead of the obsolete Service-only heading.
+
+38 focused tests in three files pass: boundary eight/nine and malformed arrays,
+actual trust-source add controls, existing BackendTLSPolicy submission/identity
+coverage. Build and lint pass. Logs:
+/tmp/ws5-center-backend-tls-ca-{tests,build,lint}.log.
+CRD bounds were parsed directly from both current YAML files. This is source and
+component evidence, with no new native browser or TLS handshake claim.

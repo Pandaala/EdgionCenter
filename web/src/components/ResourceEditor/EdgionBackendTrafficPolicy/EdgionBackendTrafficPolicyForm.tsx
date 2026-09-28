@@ -146,7 +146,7 @@ const EdgionBackendTrafficPolicyForm = ({
 
         {aiTargets && <Alert type="info" showIcon message={t('notice.aiPolicySections')} />}
 
-        <Card title={t('section.targetRefs')} size="small">
+        <Card title={t('col.targetBackend')} size="small">
           {data.spec.targetRefs.map((ref, index) => (
             <Card
               key={index}

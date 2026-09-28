@@ -2966,3 +2966,10 @@ identity or sibling port policies. Clearing a port keeps its empty TLS override;
 deleting the override restores inheritance. Thirty-five focused tests, four native
 browser cases and build/lint/types pass; see the removal follow-up in
 [GATEWAY-FRONTEND-CA-EVIDENCE.md](GATEWAY-FRONTEND-CA-EVIDENCE.md).
+
+
+BackendTLSPolicy CA-list follow-up: current CRDs cap references at eight. Form and
+submission now enforce that limit, and System trust disables adding CA refs.
+Neutral CA/target labels cover ConfigMap and EdgionBackend. Thirty-eight focused
+tests plus build/lint pass; see the CA-count follow-up in
+[backend TLS evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md).
