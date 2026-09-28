@@ -90,6 +90,8 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'rules', '*', 'parsedAllowNonIdempotentRetry'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'backendTlsPolicy'],
     ['spec', 'rules', '*', 'backendRefs', '*', 'refDenied'],
+    ['spec', 'rules', '*', 'filters', '*', 'requestMirror', 'backendRef', 'refDenied'],
+    ['spec', 'rules', '*', 'backendRefs', '*', 'filters', '*', 'requestMirror', 'backendRef', 'refDenied'],
     ['spec', 'rules', '**', 'externalAuth', 'allowDegradation'],
     ['spec', 'rules', '**', 'externalAuth', 'allowDegradationTemplate'],
     ['spec', 'rules', '**', 'requestMirror', 'percentage'],

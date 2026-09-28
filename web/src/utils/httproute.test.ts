@@ -217,3 +217,27 @@ describe('HTTPRoute lossless adapter', () => {
     })
   })
 })
+
+
+it.each(['create', 'update'] as const)('strips mirror authorization results at both filter locations on %s', (mode) => {
+  const mirror = {
+    type: 'RequestMirror',
+    requestMirror: {
+      percent: 25,
+      backendRef: { name: 'mirror', namespace: 'shared', port: 8080, refDenied: { reason: 'RefNotPermitted' }, future: { refDenied: 'operator value' } },
+    },
+  }
+  const route: any = {
+    apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute', metadata: { name: 'mirror-route', namespace: 'default' },
+    spec: { rules: [{ filters: [structuredClone(mirror)], backendRefs: [{ name: 'primary', port: 80, filters: [structuredClone(mirror)] }] }] },
+  }
+  const before = structuredClone(route)
+  const mutation: any = toHTTPRouteMutationDocument(route, mode)
+  for (const filter of [mutation.spec.rules[0].filters[0], mutation.spec.rules[0].backendRefs[0].filters[0]]) {
+    expect(filter.requestMirror).toEqual({
+      percent: 25,
+      backendRef: { name: 'mirror', namespace: 'shared', port: 8080, future: { refDenied: 'operator value' } },
+    })
+  }
+  expect(route).toEqual(before)
+})

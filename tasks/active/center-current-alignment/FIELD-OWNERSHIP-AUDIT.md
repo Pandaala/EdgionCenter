@@ -104,6 +104,26 @@ preservation, unsupported-input validation and current configuration constraints
 Log: `/tmp/ws5-center-gateway-ownership-tests.log`. No new browser or traffic claim
 is made by this ownership check.
 
+## HTTPRoute mirror authorization projection repair
+
+Checkpoint: 2026-09-28, following Center `b9210ad`. The current Controller
+recomputes `requestMirror.backendRef.refDenied` in both rule filters and backend
+filters (`handlers/request_mirror.rs::resolve_rule`). The shared
+`BackendObjectReference` serializes this authorization result despite hiding it
+from the schema. Center previously excluded ordinary backend authorization
+results but retained the nested mirror results in mutation documents.
+
+The HTTPRoute catalog now excludes both exact mirror paths. Create and update
+regressions exercise `toHTTPRouteMutationDocument`, retaining the mirror target,
+namespace, port, percentage and an unrelated nested operator `refDenied` field.
+The original editor draft remains unchanged.
+
+Verification: 40 tests pass across httproute and resourceCatalog; production
+build and lint pass. Logs: `/tmp/ws5-center-mirror-ownership-tests.log`,
+`/tmp/ws5-center-mirror-ownership-build.log`, and
+`/tmp/ws5-center-mirror-ownership-lint.log`. This is mutation-boundary evidence;
+the full nested route inventory and runtime mirroring audit remain open.
+
 ## Still to reconcile in the dedicated ownership pass
 
 Five route kinds and their nested
