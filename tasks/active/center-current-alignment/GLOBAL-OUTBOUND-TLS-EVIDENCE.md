@@ -119,3 +119,32 @@ failures. Every run cleaned up only its owned Controller/Gateway and local serve
 private fixtures and diagnostics remain for review. The conf_sync channel used
 the existing local skip-TLS test profile; the tested outbound Webhook used real
 CA verification and mandatory client certificates.
+
+## Forced Webhook TLS invalidation repaired and verified
+
+The local Gateway change removes and stops the published Webhook entry before a
+forced global TLS rebuild. A replacement that is not ready or fails preparation
+therefore leaves no current client carrying the revoked material. Ordinary
+same-kind failed updates retain their existing last-good behavior. Caller-held
+in-flight handles retain their documented lifetime; this does not promise
+instant cancellation of already-started requests.
+
+All 33 LinkSys store tests pass, including the new preparation-failure/not-ready,
+ordinary-update preservation, forced invalidation and recovery regression.
+The Gateway binary builds successfully. Logs:
+`/tmp/ws5-global-client-revocation-gateway-tests.log` and
+`/tmp/ws5-global-client-revocation-gateway-build.log`.
+
+Fresh native run `run-1790575124261` passes all seven harness checks. Its
+`result.json` records verified `client-first` and `client-rotated` peers and
+`localWebhookIdentityConfigured: false`. Both ReferenceGrant revocation and
+Secret deletion converge to HTTP 401; grant restoration and Secret recreation
+restore HTTP 200 with the expected peer identity. Log:
+`/tmp/ws5-global-client-identity-runtime-20260928/run-revocation-fixed.log`.
+The prior failed run remains regression evidence. The harness exited normally
+and cleaned up its own processes. These checks use direct Controller mutations;
+they do not add Center browser or federation transport coverage.
+
+The Controller and Gateway repairs remain uncommitted in Edgion. Persistent
+LinkSys providers use a separate lifecycle runner; their forced TLS invalidation
+behavior is still pending assessment and is not covered by this Webhook result.
