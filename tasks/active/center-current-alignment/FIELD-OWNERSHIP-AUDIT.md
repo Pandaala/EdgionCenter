@@ -257,6 +257,25 @@ production build and lint pass. Logs:
 review must still verify the narrowed paths cover every serialized runtime field;
 these tests alone do not close the full plugin ownership inventory.
 
+### Body and dye condition follow-up
+
+The first full frontend run after narrowing found three failures: two exposed
+missing body-condition paths (dye conditions were also identified by source
+inspection), and one asserted recursive deletion through an invented extAuth
+entry shape absent from the current resource model. The body and both dye
+directions now use explicit condition paths. The obsolete fixture was replaced
+with the real AiGuard evaluator/TLS nesting and an authored extension sibling.
+Four stage regressions cover dye conditions for create and update.
+
+The final full frontend run passes all 846 tests in 117 files:
+`/tmp/ws5-center-plugin-audit-final-full-tests.log`. Build and lint pass in
+`/tmp/ws5-plugin-dye-fields-{build,lint}.log`. The first failed full run remains
+at `/tmp/ws5-center-plugin-audit-full-tests.log`.
+
+Stream exclusions still use recursive terminal filtering. The remaining review
+must cover operator-chosen GlobalConnectionIpRestriction profile names before
+claiming the complete plugin ownership pass is closed.
+
 ## Still to reconcile in the dedicated ownership pass
 
 HTTP/stream plugin configurations and their imported condition/configuration types.

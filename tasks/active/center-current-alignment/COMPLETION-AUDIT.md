@@ -57,8 +57,9 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    [GLOBAL-OUTBOUND-TLS-EVIDENCE.md](GLOBAL-OUTBOUND-TLS-EVIDENCE.md). Native
    inherited mTLS, Secret rotation, ReferenceGrant revocation/restoration and
    Secret deletion/recreation now pass after the local Gateway forced-rebuild
-   invalidation repair. Persistent LinkSys providers use a separate runner and
-   still need a scoped invalidation assessment; Webhook evidence does not cover them.
+   invalidation repair. The persistent runner is also repaired: 80 runtime tests
+   and a native Redis mTLS rotation/revocation/recovery scenario pass. The other
+   persistent providers have no new provider-specific handshake proof from that run.
 3. Reconcile Center menu async/fault coverage with current backend source. Real
    owner migration is proven; Pod crash takeover and ambiguous post-dispatch
    faults have narrower adapter/runtime evidence. New cloud error states have

@@ -3,6 +3,32 @@ import { buildMutationDocument } from '@/utils/resource-document'
 import { RESOURCE_CATALOG, getResourceCatalogEntry, listFirstClassResources } from './resourceCatalog'
 
 describe('resource catalog', () => {
+  it.each(['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins', 'upstreamResponsePlugins'])(
+    'removes resolved dye conditions in %s while retaining authored rules', (stage) => {
+      const rule = { name: 'x-tag', on: ['success'], value: 'authored', conditions: { run: { allOf: [{
+        type: 'secretMatch', key: { type: 'header', name: 'x-key' }, secretRef: { name: 'keys' }, secretKey: 'values',
+        resolvedValues: ['private-runtime-value'],
+      }] } } }
+      const source = {
+        apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'dye', namespace: 'edge' },
+        spec: { [stage]: [{ type: 'Mock', config: {}, dye: { request: [structuredClone(rule)], response: [structuredClone(rule)] } }] },
+      }
+      const before = structuredClone(source)
+      for (const mode of ['create', 'update'] as const) {
+        const mutation: any = buildMutationDocument(source, { resourceKind: 'edgionplugins', mode })
+        for (const direction of ['request', 'response']) {
+          const output = mutation.spec[stage][0].dye[direction][0]
+          expect(output.name).toBe('x-tag')
+          expect(output.value).toBe('authored')
+          expect(output.conditions.run.allOf[0]).toEqual({
+            type: 'secretMatch', key: { type: 'header', name: 'x-key' }, secretRef: { name: 'keys' }, secretKey: 'values',
+          })
+        }
+      }
+      expect(source).toEqual(before)
+    },
+  )
+
   it.each(['create', 'update'] as const)('preserves authored plugin maps and JSON literals on %s', (mode) => {
     const literal = { resolvedSecrets: 'operator data', nested: { refDenied: false }, compiledRegex: null }
     const source = {

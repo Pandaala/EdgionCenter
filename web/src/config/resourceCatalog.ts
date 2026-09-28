@@ -58,6 +58,9 @@ const HTTP_PLUGIN_INTERNAL_PATHS: readonly MutationPath[] = HTTP_PLUGIN_STAGES.f
     ...HTTP_PLUGIN_INTERNAL_TERMINALS.flatMap((terminal) => [
       ['spec', stage, '*', 'config', terminal],
       ['spec', stage, '*', 'conditions', '**', terminal],
+      ['spec', stage, '*', 'body', 'conditions', '**', terminal],
+      ['spec', stage, '*', 'dye', 'request', '*', 'conditions', '**', terminal],
+      ['spec', stage, '*', 'dye', 'response', '*', 'conditions', '**', terminal],
       ['spec', stage, '*', 'config', 'conditions', '**', terminal],
       ['spec', stage, '*', 'config', 'profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', terminal],
       ['spec', stage, '*', 'config', 'profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'conditions', '**', terminal],

@@ -265,28 +265,30 @@ describe('resource document preservation', () => {
     expect(result).not.toHaveProperty('endpoints')
   })
 
-  it('recursively strips nested plugin runtime and resolved-secret terminals', () => {
+  it('strips nested evaluator material while retaining operator payloads', () => {
     const result = buildMutationDocument({
       apiVersion: 'edgion.io/v1',
       kind: 'EdgionPlugins',
       metadata: { name: 'plugins', namespace: 'edge' },
       spec: {
         requestPlugins: [{
-          extAuth: {
-            config: {
-              endpoint: 'https://auth.example',
-              nested: { resolvedSecrets: { token: 'redacted' }, keep: true },
+          type: 'AiGuard',
+          config: {
+            evaluator: {
+              target: { url: 'https://auth.example' },
+              resolvedSecrets: { token: 'redacted' },
+              tls: { enabled: true, resolvedClientCertificate: 'redacted' },
             },
-            resolvedCredential: 'redacted',
+            future: { resolvedCredential: 'operator-value' },
           },
         }],
       },
     }, { mode: 'update', resourceKind: 'edgionplugins' })
 
-    expect(result).toHaveProperty('spec.requestPlugins.0.extAuth.config.endpoint', 'https://auth.example')
-    expect(result).toHaveProperty('spec.requestPlugins.0.extAuth.config.nested.keep', true)
-    expect(result).not.toHaveProperty('spec.requestPlugins.0.extAuth.resolvedCredential')
-    expect(result).not.toHaveProperty('spec.requestPlugins.0.extAuth.config.nested.resolvedSecrets')
+    expect(result).toHaveProperty('spec.requestPlugins.0.config.evaluator.target.url', 'https://auth.example')
+    expect(result).toHaveProperty('spec.requestPlugins.0.config.future.resolvedCredential', 'operator-value')
+    expect(result).not.toHaveProperty('spec.requestPlugins.0.config.evaluator.resolvedSecrets')
+    expect(result).not.toHaveProperty('spec.requestPlugins.0.config.evaluator.tls.resolvedClientCertificate')
   })
 
   it.each(['create', 'update'] as const)('removes resolved WAF inputs on %s while preserving operator configuration', (mode) => {

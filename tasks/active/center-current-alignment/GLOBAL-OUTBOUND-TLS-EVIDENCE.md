@@ -148,3 +148,32 @@ they do not add Center browser or federation transport coverage.
 The Controller and Gateway repairs remain uncommitted in Edgion. Persistent
 LinkSys providers use a separate lifecycle runner; their forced TLS invalidation
 behavior is still pending assessment and is not covered by this Webhook result.
+
+## Persistent runner repair and native Redis verification
+
+The local persistent runner now retires its old publication before a forced
+global TLS rebuild, including fingerprint/build/init failures and NotReady.
+NotReady posts retain the force generation across ordinary replays. Ordinary
+failed updates retain the documented last-good behavior. All 80 runtime tests
+pass (`/tmp/ws5-persistent-tls-revocation-final-tests.log`); the Gateway binary
+build passes (`/tmp/ws5-persistent-tls-revocation-build.log`).
+
+Native Redis run `run-1790576394531` passes seven checks: startup, inherited
+client identity, rotation, grant revocation/restoration, and Secret deletion/
+recreation. Artifacts are under `/tmp/ws5-global-redis-identity-runtime-20260928`,
+with `run-observable.log` and the run's `result.json`. LinkSys has no local CA or
+client reference. The fixture uses a mandatory-client-certificate Node TLS
+listener forwarding Redis protocol to an isolated redis:7-alpine container on
+loopback; its peer observations confirm both verified certificate identities.
+The plaintext fixture hop is local and is not a production transport claim.
+
+Each HTTP request executes a DSL redis.get through the current LinkSys lookup.
+The response header reports ready/unavailable; both are HTTP 200 from the test
+route. Revocation/deletion converge to unavailable and restoration/recreation
+return ready with the expected TLS peer. This proves Redis client publication
+and request behavior, not an HTTP auth rejection. The first run used a deny
+probe that did not expose this distinction and timed out despite logs showing
+the old client shutdown; that failed run is retained as `run-1790576251675`.
+The harness cleans up only its own processes, sockets and Redis container.
+Etcd/Elasticsearch/Kafka/OTLP share the tested runner but have no new native
+provider-specific handshake evidence from this run. Edgion remains uncommitted.
