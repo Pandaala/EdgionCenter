@@ -151,3 +151,17 @@ For resource-specific status fields, pass a `renderStatus` callback to
 `ResourceStatus` (see `AcmeLifecycle`). This retains the same precedence,
 identity/version validation and read-failure behavior as Conditions. Callbacks
 receive only the observation status; never merge it into the editable resource.
+
+
+## Expired pagination cursors
+
+`useResourceList` handles HTTP 410 / StalePagination by resetting the exact active
+query and fetching page one. Do not replace this with removeQueries: removing the
+cache entry does not restart the mounted infinite-query observer. Reset all old
+pages/tokens together; never append a fresh page to the old snapshot.
+
+Recovery respects the enabled gate and current Controller identity. Repeated
+failures within five seconds do not trigger another automatic reset. A failed
+first-page recovery stays visible even after that window; the normal Retry action
+remains available. Recovery notices describe an in-progress refresh, not success.
+Regression evidence lives in `src/hooks/useResourceList.pagination.test.tsx`.

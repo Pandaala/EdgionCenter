@@ -160,7 +160,7 @@ const zh = {
   'msg.noRename': '不允许修改资源的名称或命名空间',
   'msg.validationFailed': '验证失败: {err}',
   'msg.submitFailed': '提交失败: {err}',
-  'msg.tokenExpiredRefreshed': '列表已刷新（分页令牌过期）',
+  'msg.tokenExpiredRefreshing': '正在刷新列表（分页令牌过期）',
   'msg.backendListError': '加载列表失败',
   'msg.backendListNotSupported': '后端不支持此列表 — 请检查 Controller 版本',
   'msg.retry': '重试',

@@ -160,7 +160,7 @@ const en = {
   'msg.noRename': 'Cannot modify resource name or namespace',
   'msg.validationFailed': 'Validation failed: {err}',
   'msg.submitFailed': 'Submit failed: {err}',
-  'msg.tokenExpiredRefreshed': 'List refreshed (pagination token expired)',
+  'msg.tokenExpiredRefreshing': 'Refreshing list (pagination token expired)',
   'msg.backendListError': 'Failed to load list',
   'msg.backendListNotSupported': "Backend doesn't support this list — check controller version",
   'msg.retry': 'Retry',

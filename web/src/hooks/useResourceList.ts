@@ -39,9 +39,8 @@ function isStalePaginationError(err: unknown): boolean {
  * `items` array (already concatenated across pages) plus React Query state.
  *
  * Stale-token recovery: if backend returns HTTP 410 or `code: StalePagination`,
- * the hook auto-removes its cached queries (triggering a fresh first-page
- * fetch) and shows an info toast. A 5-second dedup window prevents toast
- * spam if the backend stays stale.
+ * the hook resets the exact active query and fetches page one again. A
+ * 5-second window per current query prevents automatic recovery loops.
  */
 export function useResourceList<T extends K8sResource>(
   kind: ResourceKind,
@@ -51,7 +50,7 @@ export function useResourceList<T extends K8sResource>(
   const { namespaced, namespace, limit = DEFAULT_PAGE_SIZE, scope = target.controllerId, enabled = true } = options
   const t = useT()
   const queryClient = useQueryClient()
-  const lastResetRef = useRef<number>(0)
+  const lastResetRef = useRef<{ queryKey: readonly unknown[]; at: number } | null>(null)
 
   const queryKey = useMemo(
     () => ['resource-list', kind, namespaced ? namespace ?? null : 'cluster', limit, scope, target.controllerId],
@@ -78,16 +77,19 @@ export function useResourceList<T extends K8sResource>(
 
   // Stale-token auto-recovery with 5s dedup window.
   useEffect(() => {
-    if (!query.error) return
+    if (!enabled || !query.error) return
     if (!isStalePaginationError(query.error)) return
     const now = Date.now()
-    if (now - lastResetRef.current < STALE_RESET_DEDUP_MS) return
-    lastResetRef.current = now
-    // Must match the exact queryKey used by useInfiniteQuery above
-    // (undefined !== null in react-query v5 hashKey).
-    queryClient.removeQueries({ queryKey })
-    message.info(t('msg.tokenExpiredRefreshed'))
-  }, [query.error, queryClient, queryKey, t])
+    const previous = lastResetRef.current
+    // A failed first-page recovery must stay visible even after the toast window.
+    if (previous?.queryKey === queryKey
+      && (query.dataUpdatedAt === 0 || now - previous.at < STALE_RESET_DEDUP_MS)) return
+    lastResetRef.current = { queryKey, at: now }
+    // Removal detaches the cache entry without restarting its active observer.
+    // Reset discards stale pages/tokens and refetches only this active query.
+    void queryClient.resetQueries({ queryKey, exact: true })
+    message.info(t('msg.tokenExpiredRefreshing'))
+  }, [enabled, query.error, query.dataUpdatedAt, queryClient, queryKey, t])
 
   const items = useMemo(
     () => (query.data?.pages ?? []).flatMap((p) => p.data ?? []),

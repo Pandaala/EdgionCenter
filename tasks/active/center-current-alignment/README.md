@@ -2772,3 +2772,16 @@ before acting on CCI execution files or proposing replacements.
   visible. No fixture resources or policies changed.
 - [READ-TARGET-EVIDENCE.md](READ-TARGET-EVIDENCE.md) records artifacts and limits.
   Center changes may be committed; nothing is pushed. Overall audit remains active.
+
+
+### 2026-09-28: Expired resource-list cursor recovery
+
+- Reproduced two failures where removing a stale query left the mounted list on
+  old rows. Reset now discards the old pages and reloads the first page.
+- Recovery remains scoped to the current query and Controller; persistent errors
+  remain visible for manual retry. The localized notice describes progress.
+- Full frontend suite: 716 tests / 110 files passed. Four pagination tests passed
+  again after the final persistent-error guard. Two browser assertions recover
+  injected expiry to real Controller Service rows without manual retry.
+- [PAGINATION-RECOVERY-EVIDENCE.md](PAGINATION-RECOVERY-EVIDENCE.md) records the
+  baseline failure and evidence. No runtime resources or policies changed.

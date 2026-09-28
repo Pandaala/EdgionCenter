@@ -263,3 +263,10 @@ Metadata/topology request-target follow-up: restricted dependency keys and all
 route Controller. 38 focused tests, build/lint and two native browser checks pass.
 See [READ-TARGET-EVIDENCE.md](READ-TARGET-EVIDENCE.md). Existing Secret denial is
 preserved; this adds request-isolation evidence, not new inventory permissions.
+
+
+Pagination recovery follow-up: stale cursors now reset the exact active list and
+restart page one. The full frontend suite passed 716 tests in 110 files; four
+pagination regressions passed again after tightening the persistent-error guard.
+Two browser checks recover injected expired pagination to actual native rows.
+See [PAGINATION-RECOVERY-EVIDENCE.md](PAGINATION-RECOVERY-EVIDENCE.md).
