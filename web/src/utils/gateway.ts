@@ -71,11 +71,20 @@ function validateReference(ref: { name?: string; namespace?: string }, path: str
 }
 
 function validateFrontendValidation(validation: any, path: string, errors: string[]) {
-  if (!validation) return
-  if (validation.mode && !['AllowValidOnly', 'AllowInsecureFallback'].includes(validation.mode)) errors.push(`${path}.mode is invalid`)
+  if (validation == null) return
+  if (validation.mode != null && !['AllowValidOnly', 'AllowInsecureFallback'].includes(validation.mode)) errors.push(`${path}.mode is invalid`)
   const refs = validation.caCertificateRefs
   if (!Array.isArray(refs) || refs.length === 0) errors.push(`${path}.caCertificateRefs requires at least one reference`)
-  else refs.forEach((ref: any, index: number) => validateReference(ref, `${path}.caCertificateRefs[${index}]`, errors))
+  else {
+    if (refs.length > 16) errors.push(`${path}.caCertificateRefs must contain at most 16 references`)
+    refs.forEach((ref: any, index: number) => {
+      const refPath = `${path}.caCertificateRefs[${index}]`
+      if (ref?.group !== '') errors.push(`${refPath}.group must be the exact empty core group`)
+      if (typeof ref?.kind !== 'string' || ref.kind.length > 63 || !/^[a-zA-Z](?:[-a-zA-Z0-9]*[a-zA-Z0-9])?$/.test(ref.kind) || ref.kind.includes('\n')) errors.push(`${refPath}.kind is invalid or missing`)
+      if (typeof ref?.name !== 'string' || !ref.name || new TextEncoder().encode(ref.name).length > 253) errors.push(`${refPath}.name must contain 1-253 bytes`)
+      if (ref?.namespace != null && (typeof ref.namespace !== 'string' || ref.namespace.length > 63 || !/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(ref.namespace) || ref.namespace.includes('\n'))) errors.push(`${refPath}.namespace is invalid`)
+    })
+  }
 }
 
 export function validateGateway(resource: Gateway): string[] {
@@ -123,6 +132,7 @@ export function validateGateway(resource: Gateway): string[] {
   })
   const globalTls = resource.spec?.tls
   if (globalTls?.backend?.clientCertificateRef) validateReference(globalTls.backend.clientCertificateRef, 'spec.tls.backend.clientCertificateRef', errors)
+  if (globalTls?.frontend && (!globalTls.frontend.default || typeof globalTls.frontend.default !== 'object' || Array.isArray(globalTls.frontend.default))) errors.push('spec.tls.frontend.default is required')
   validateFrontendValidation(globalTls?.frontend?.default?.validation, 'spec.tls.frontend.default.validation', errors)
   if ((globalTls?.frontend?.perPort?.length ?? 0) > 64) errors.push('spec.tls.frontend.perPort must contain at most 64 entries')
   const ports = new Set<number>()
@@ -131,6 +141,7 @@ export function validateGateway(resource: Gateway): string[] {
     if (!Number.isInteger(entry.port) || entry.port < 1 || entry.port > 65535) errors.push(`${path}.port must be 1-65535`)
     else if (ports.has(entry.port)) errors.push(`${path}.port must be unique`)
     else ports.add(entry.port)
+    if (!entry.tls || typeof entry.tls !== 'object' || Array.isArray(entry.tls)) errors.push(`${path}.tls is required`)
     validateFrontendValidation(entry.tls?.validation, `${path}.tls.validation`, errors)
   })
   return errors

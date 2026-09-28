@@ -46,3 +46,5 @@ optional-group/optional-kind certificate reference model and preflight. Verify a
 align that boundary, including the required frontend default object when starting
 with a per-port policy. Existing form tests use some shapes the current Controller
 will not deserialize; native validation must remain the authority.
+
+The concrete next audit above is resolved by [frontend CA evidence](GATEWAY-FRONTEND-CA-EVIDENCE.md).

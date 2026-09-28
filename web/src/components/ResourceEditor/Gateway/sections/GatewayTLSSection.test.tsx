@@ -28,3 +28,15 @@ describe('GatewayTLSSection', () => {
     expect(next.futureTls).toEqual({ preserved: true })
   })
 })
+
+it('adds the required empty default when starting with a per-port policy', () => {
+  const onChange = vi.fn()
+  const value = { backend: { clientCertificateRef: { name: 'client' } } }
+  render(<GatewayTLSSection value={value} onChange={onChange} />)
+  fireEvent.click(screen.getByRole('button', { name: /Add Port Override/i }))
+  expect(onChange).toHaveBeenCalledWith({
+    ...value, frontend: { default: {}, perPort: [{ port: 443, tls: {
+      validation: { mode: 'AllowValidOnly', caCertificateRefs: [] },
+    } }] },
+  })
+})

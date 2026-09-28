@@ -2939,3 +2939,10 @@ native browser cases pass; build/lint/types pass. See
 [GATEWAY-FRONTEND-PROJECTION-EVIDENCE.md](GATEWAY-FRONTEND-PROJECTION-EVIDENCE.md)
 for the retained initial fixture failure and next concrete CA-reference audit.
 The preceding 804-test/173-browser full run predates this repair.
+
+
+Gateway frontend CA follow-up: required group/kind/name, reference bounds and
+frontend/default/per-port containers now match current Controller admission.
+Starting from empty TLS configuration produces a valid per-port document. All 48
+focused tests and four native browser cases pass, along with build/lint/types.
+See [GATEWAY-FRONTEND-CA-EVIDENCE.md](GATEWAY-FRONTEND-CA-EVIDENCE.md).

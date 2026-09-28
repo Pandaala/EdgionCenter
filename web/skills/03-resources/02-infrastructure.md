@@ -238,3 +238,11 @@ listener field is runtime-only, has no form controls, and is excluded from all
 mutation documents alongside resolved CA material and matcher eligibility.
 Raw read/YAML documents may show it; malformed runtime projections must not block
 editing the operator-owned Gateway frontend policy.
+
+Frontend validation uses 1-16 explicit CA references: group must be the exact empty
+core group, kind and name are required, and optional namespace must be nonempty.
+These requirements differ from serving-certificate Secret references with optional
+group/kind. The frontend object requires default (an empty object is legal), and
+every perPort entry requires tls. The form supplies default when creating the first
+port override, preserves existing default/backend configuration, and caps additions
+at 16 CA references and 64 port overrides. Preflight does not rewrite invalid YAML.

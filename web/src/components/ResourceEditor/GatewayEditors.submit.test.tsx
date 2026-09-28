@@ -97,7 +97,7 @@ describe('Gateway family editor submit boundaries', () => {
     fireEvent.change(screen.getByLabelText('Editor YAML'), { target: { value: yaml.dump({ ...resource, spec: { ...resource.spec, tls: { frontend: { perPort: [{ port: 0, tls: { validation: { caCertificateRefs: [] } } }] } } } }) } })
     fireEvent.click(screen.getByTestId('editor-submit'))
     expect(resourceUpdate).not.toHaveBeenCalled()
-    const valid = { ...resource, metadata: { ...resource.metadata, resourceVersion: 'server' }, spec: { ...resource.spec, tls: { frontend: { perPort: [{ port: 443, tls: { validation: { caCertificateRefs: [{ name: 'ca', kind: 'ConfigMap' }] } } }] } }, futureSpec: [] }, status: {} }
+    const valid = { ...resource, metadata: { ...resource.metadata, resourceVersion: 'server' }, spec: { ...resource.spec, tls: { frontend: { default: {}, perPort: [{ port: 443, tls: { validation: { caCertificateRefs: [{ group: '', name: 'ca', kind: 'ConfigMap' }] } } }] } }, futureSpec: [] }, status: {} }
     fireEvent.change(screen.getByLabelText('Editor YAML'), { target: { value: yaml.dump(valid) } })
     fireEvent.click(screen.getByTestId('editor-submit'))
     await waitFor(() => expect(resourceUpdate).toHaveBeenCalledOnce())

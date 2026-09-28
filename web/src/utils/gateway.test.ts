@@ -21,7 +21,7 @@ const fixture: any = {
         resolvedFrontendCaRefs: '[redacted]',
       },
     }],
-    tls: { backend: { clientCertificateRef: { name: 'client', namespace: 'certs', kind: 'Secret' } }, frontend: { default: { validation: { mode: 'AllowValidOnly', caCertificateRefs: [{ name: 'default-ca', kind: 'ConfigMap' }] } }, perPort: [{ port: 443, tls: { validation: { mode: 'AllowInsecureFallback', caCertificateRefs: [{ name: 'port-ca', kind: 'Secret' }] } }, futurePort: true }] } },
+    tls: { backend: { clientCertificateRef: { name: 'client', namespace: 'certs', kind: 'Secret' } }, frontend: { default: { validation: { mode: 'AllowValidOnly', caCertificateRefs: [{ name: 'default-ca', group: '', kind: 'ConfigMap' }] } }, perPort: [{ port: 443, tls: { validation: { mode: 'AllowInsecureFallback', caCertificateRefs: [{ name: 'port-ca', group: '', kind: 'Secret' }] } }, futurePort: true }] } },
     futureSpec: { enabled: false },
   },
   status: { listeners: [{ name: 'https', attachedRoutes: 2 }] },
@@ -158,4 +158,42 @@ it('ignores malformed listener projections while validating the operator fronten
   expect(mutation.spec.tls.frontend).toEqual(resource.spec.tls.frontend)
   resource.spec.tls.frontend.default.validation.caCertificateRefs = []
   expect(validateGateway(resource)).toContain('spec.tls.frontend.default.validation.caCertificateRefs requires at least one reference')
+})
+
+describe('Gateway frontend CA admission', () => {
+  const validRef = { group: '', kind: 'ConfigMap', name: 'client-ca' }
+  it.each([
+    [{ kind: 'Secret', name: 'ca' }, '.group'],
+    [{ ...validRef, group: 'core' }, '.group'],
+    [{ group: '', name: 'ca' }, '.kind'],
+    [{ ...validRef, kind: '' }, '.kind'],
+    [{ ...validRef, kind: '1Secret' }, '.kind'],
+    [{ ...validRef, kind: 'S'.repeat(64) }, '.kind'],
+    [{ ...validRef, name: '' }, '.name'],
+    [{ ...validRef, name: 'a'.repeat(254) }, '.name'],
+    [{ ...validRef, namespace: '' }, '.namespace'],
+    [{ ...validRef, namespace: 'bad.namespace' }, '.namespace'],
+    [{ ...validRef, namespace: 'a'.repeat(64) }, '.namespace'],
+    [null, '.group'],
+  ])('rejects malformed reference %j', (ref, field) => {
+    const resource = structuredClone(fixture)
+    resource.spec.tls.frontend.default.validation.caCertificateRefs = [ref]
+    expect(validateGateway(resource).join(';')).toContain(`spec.tls.frontend.default.validation.caCertificateRefs[0]${field}`)
+  })
+
+  it('enforces bounds and required containers without rewriting drafts', () => {
+    const resource = structuredClone(fixture)
+    resource.spec.tls.frontend.default.validation.caCertificateRefs = Array(16).fill(validRef)
+    expect(validateGateway(resource)).toEqual([])
+    resource.spec.tls.frontend.default.validation.caCertificateRefs.push(validRef)
+    expect(validateGateway(resource).join(';')).toContain('at most 16')
+    resource.spec.tls.frontend = { perPort: [{ port: 443 }] }
+    const before = structuredClone(resource)
+    expect(validateGateway(resource)).toEqual([
+      'spec.tls.frontend.default is required', 'spec.tls.frontend.perPort[0].tls is required',
+    ])
+    expect(resource).toEqual(before)
+    resource.spec.tls.frontend = { default: {}, perPort: [{ port: 443, tls: {} }] }
+    expect(validateGateway(resource)).toEqual([])
+  })
 })

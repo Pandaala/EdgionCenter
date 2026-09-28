@@ -408,6 +408,25 @@ test('Gateway frontend policy editing omits private listener projections', async
     const updated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
     document.spec.tls.frontend.perPort[0].tls.validation.caCertificateRefs[0].name = `${prefix}-secret`
     expect(updated.spec.tls.frontend).toEqual(document.spec.tls.frontend)
+    await waitForStableResourceVersion(request, catalog, namespace, name)
+    await (await resourceRow(page, catalog, name)).getByTestId('gateway-row-edit').click()
+    await page.getByTestId('editor-yaml-tab').click()
+    const fresh = await yamlEditorDocument(page)
+    fresh.spec.tls = {}
+    await replaceYaml(page, yaml.dump(fresh))
+    await page.getByTestId('editor-form-tab').click()
+    await page.getByRole('button', { name: /Add port override/i }).click()
+    const portCard = page.locator('.ant-card').filter({ has: page.getByText('Port Override 1', { exact: true }) }).last()
+    await portCard.getByRole('button', { name: /Add reference/i }).click()
+    await portCard.getByRole('textbox', { name: 'Name', exact: true }).fill(`${prefix}-secret`)
+    const portResponse = page.waitForResponse(value => value.request().method() === 'PUT' && value.url().endsWith(path))
+    await page.getByTestId('editor-submit').click()
+    const portResult = await portResponse
+    expect(portResult.ok(), await portResult.text()).toBeTruthy()
+    const portUpdated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+    expect(portUpdated.spec.tls.frontend).toEqual({ default: {}, perPort: [{ port: 443, tls: {
+      validation: { mode: 'AllowValidOnly', caCertificateRefs: [{ name: `${prefix}-secret`, group: '', kind: 'Secret' }] },
+    } }] })
   } finally {
     const cleanup = await request.delete(path)
     expect(cleanup.ok() || cleanup.status() === 404, 'Exact Gateway frontend fixture cleanup failed').toBeTruthy()
