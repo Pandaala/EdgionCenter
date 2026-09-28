@@ -129,6 +129,7 @@ it.each(['create', 'update'] as const)('omits current listener TLS resolution fi
     delete operatorTls.resolvedCertificateRefs
     delete operatorTls.resolvedFrontendCaRefs
     delete operatorTls.frontendMatcherEligibility
+    delete operatorTls.frontendValidation
     expect(listener.tls).toEqual(operatorTls)
   }
   expect(mutation.spec.listeners[2]).toEqual(resource.spec.listeners[2])
@@ -145,4 +146,16 @@ it('rejects TLS termination without changing the operator document', () => {
   expect(resource).toEqual(before)
   resource.spec.listeners[0].tls = { mode: 'Passthrough' }
   expect(validateGateway(resource)).toEqual([])
+})
+
+
+it('ignores malformed listener projections while validating the operator frontend policy', () => {
+  const resource = structuredClone(fixture)
+  resource.spec.listeners[0].tls.frontendValidation = { mode: 'invalid', caCertificateRefs: [] }
+  expect(validateGateway(resource)).toEqual([])
+  const mutation = yaml.load(gatewayToMutationYaml(resource, 'update')) as any
+  expect(mutation.spec.listeners[0].tls).not.toHaveProperty('frontendValidation')
+  expect(mutation.spec.tls.frontend).toEqual(resource.spec.tls.frontend)
+  resource.spec.tls.frontend.default.validation.caCertificateRefs = []
+  expect(validateGateway(resource)).toContain('spec.tls.frontend.default.validation.caCertificateRefs requires at least one reference')
 })

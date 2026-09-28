@@ -20,6 +20,15 @@ metadata:
     edgion.io/edgion-stream-plugins: "plugin-name"   # Same-namespace Gateway StreamPlugins
 spec:
   gatewayClassName: edgion                           # Required: associate GatewayClass
+  tls:
+    frontend:
+      default:
+        validation:
+          mode: AllowValidOnly
+          caCertificateRefs:
+            - name: client-ca
+              group: ""
+              kind: Secret
   listeners:
     - name: http
       port: 80
@@ -40,9 +49,6 @@ spec:
         certificateRefs:
           - name: my-cert-secret
             namespace: default                       # Cross-namespace requires ReferenceGrant
-        frontendValidation:                          # Optional: client certificate validation
-          caCertificateRefs:
-            - name: client-ca
         options:
           edgion.io/cert-provider: "EdgionTls"       # Exact dynamic provider value; omit for Secret refs
 
@@ -223,3 +229,12 @@ Gateway configuration lists. Pending or failed authorization disables actions;
 confirmed read permission does not enable writes. Use the existing access document
 and Center proxy permissions rather than duplicating policy logic in a page.
 Server-side authorization remains the execution boundary.
+
+
+Gateway frontend client-certificate validation is configured only through
+`spec.tls.frontend.default.validation` and `spec.tls.frontend.perPort[].tls.validation`.
+The Controller projects it into HTTPS listener `tls.frontendValidation`; that
+listener field is runtime-only, has no form controls, and is excluded from all
+mutation documents alongside resolved CA material and matcher eligibility.
+Raw read/YAML documents may show it; malformed runtime projections must not block
+editing the operator-owned Gateway frontend policy.

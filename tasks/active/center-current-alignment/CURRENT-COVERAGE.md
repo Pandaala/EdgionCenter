@@ -348,3 +348,12 @@ parsing with submission preflight and never interprets this same-namespace optio
 as a cross-namespace dependency. Invalid nonempty strings remain unknown. All 67
 focused tests, build and lint pass; see the topology follow-up in
 [client certificate evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md).
+
+
+Gateway frontend TLS follow-up: listener frontendValidation is now correctly
+read-only runtime data, omitted from mutations and absent from form controls.
+The operator path remains spec.tls.frontend. Fifty-six focused tests and four
+native browser cases pass; build/lint/types pass. See
+[GATEWAY-FRONTEND-PROJECTION-EVIDENCE.md](GATEWAY-FRONTEND-PROJECTION-EVIDENCE.md)
+for the retained initial fixture failure and next concrete CA-reference audit.
+The preceding 804-test/173-browser full run predates this repair.

@@ -51,6 +51,7 @@ export interface ListenerTLS {
   mode?: TLSMode
   certificateRefs?: CertificateRef[]
   options?: Record<string, unknown>
+  /** Controller-private projection of spec.tls.frontend; excluded from mutations. */
   frontendValidation?: FrontendTLSValidation
   [key: string]: unknown
 }

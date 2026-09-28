@@ -30,6 +30,8 @@ describe('ListenerEditor', () => {
         onRemove={vi.fn()}
       />,
     )
+    expect(screen.queryByText('Frontend Client Certificate Validation')).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('client-ca')).not.toBeInTheDocument()
     fireEvent.change(screen.getByDisplayValue('one'), { target: { value: 'one-updated' } })
 
     expect(onChange).toHaveBeenCalledWith({

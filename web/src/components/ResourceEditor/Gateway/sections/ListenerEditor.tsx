@@ -5,7 +5,7 @@
 import React from 'react'
 import { AutoComplete, Card, Form, Input, InputNumber, Select, Button, Space } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import type { CertificateRef, FrontendTLSValidation, GatewayListener } from '@/types/gateway-api/gateway'
+import type { CertificateRef, GatewayListener } from '@/types/gateway-api/gateway'
 import { useT } from '@/i18n'
 
 interface ListenerEditorProps {
@@ -136,20 +136,6 @@ const ListenerEditor: React.FC<ListenerEditorProps> = ({
                 <ReferenceList value={certificateRefs} disabled={disabled} title={t('gw.certificate')} onChange={(certificateRefs) => update({ tls: { ...listener.tls, certificateRefs } })} />
               </>
             )}
-
-            <Card title={t('gw.frontendValidation')} size="small" type="inner" style={{ marginTop: 8 }}>
-              <Form.Item label={t('field.validationMode')} style={{ marginBottom: 8 }}>
-                <Select
-                  allowClear
-                  value={listener.tls?.frontendValidation?.mode}
-                  options={[{ value: 'AllowValidOnly' }, { value: 'AllowInsecureFallback' }]}
-                  onChange={(mode) => update({ tls: { ...listener.tls, frontendValidation: { ...listener.tls?.frontendValidation, mode } as FrontendTLSValidation } })}
-                  disabled={disabled}
-                  style={{ width: 220 }}
-                />
-              </Form.Item>
-              <ReferenceList value={listener.tls?.frontendValidation?.caCertificateRefs || []} disabled={disabled} title={t('gw.caReference')} onChange={(caCertificateRefs) => update({ tls: { ...listener.tls, frontendValidation: { ...listener.tls?.frontendValidation, caCertificateRefs } } })} />
-            </Card>
 
             <Card title={t('gw.tlsOptions')} size="small" type="inner" style={{ marginTop: 8 }}>
               {Object.entries(listener.tls?.options || {}).map(([key, value], optionIndex) => <Space key={`${key}-${optionIndex}`} wrap style={{ marginBottom: 8 }}>

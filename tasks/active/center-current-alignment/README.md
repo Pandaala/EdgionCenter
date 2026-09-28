@@ -2930,3 +2930,12 @@ clearing/option-preservation API readback. The list identifies backend kind/name
 and section instead of assuming all targets are Services. Owned processes stopped;
 70 labeled seeds retained. See [latest regression evidence](LATEST-REGRESSION-EVIDENCE.md).
 Overall backend/dashboard alignment remains active.
+
+
+Gateway frontend TLS follow-up: listener frontendValidation is now correctly
+read-only runtime data, omitted from mutations and absent from form controls.
+The operator path remains spec.tls.frontend. Fifty-six focused tests and four
+native browser cases pass; build/lint/types pass. See
+[GATEWAY-FRONTEND-PROJECTION-EVIDENCE.md](GATEWAY-FRONTEND-PROJECTION-EVIDENCE.md)
+for the retained initial fixture failure and next concrete CA-reference audit.
+The preceding 804-test/173-browser full run predates this repair.

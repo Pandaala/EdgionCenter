@@ -104,7 +104,6 @@ export function validateGateway(resource: Gateway): string[] {
       if (!listener.tls.certificateRefs?.length && !Object.keys(listener.tls.options || {}).length) errors.push(`${path}.tls.certificateRefs or options is required for Terminate`)
       listener.tls.certificateRefs?.forEach((ref, refIndex) => validateReference(ref, `${path}.tls.certificateRefs[${refIndex}]`, errors))
     }
-    validateFrontendValidation(listener.tls?.frontendValidation, `${path}.tls.frontendValidation`, errors)
     const namespaces = listener.allowedRoutes?.namespaces
     if (namespaces?.from === 'Selector') {
       const selector = namespaces.selector

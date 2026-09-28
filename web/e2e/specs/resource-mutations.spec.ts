@@ -373,6 +373,47 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+test('Gateway frontend policy editing omits private listener projections', async ({ page, request }) => {
+  const catalog = RESOURCE_CATALOG.get('gateway')!
+  await waitForControllerCapabilities(request, controller, [{ resourceKind: catalog.kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+  const name = `${prefix}-frontend-projection`
+  const document = mutationDocument(catalog, name)
+  document.spec.listeners = [{ name: 'https', protocol: 'HTTPS', port: 443, tls: {
+    mode: 'Terminate', certificateRefs: [{ name: `${prefix}-secret` }],
+  } }]
+  document.spec.tls = { frontend: {
+    default: { validation: { mode: 'AllowValidOnly', caCertificateRefs: [{ group: '', name: `${prefix}-secret`, kind: 'Secret' }] } },
+    perPort: [{ port: 443, tls: { validation: { mode: 'AllowInsecureFallback', caCertificateRefs: [{ group: '', name: 'old-ca', kind: 'Secret' }] } } }],
+  } }
+  const path = itemPath(catalog, namespace, name)
+  const created = await request.post(collectionPath(catalog, namespace), { data: yaml.dump(document), headers: yamlHeaders })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  try {
+    await waitForStableResourceVersion(request, catalog, namespace, name)
+    await openResourcePage(page, catalog)
+    await (await resourceRow(page, catalog, name)).getByTestId('gateway-row-edit').click()
+    await page.getByTestId('editor-yaml-tab').click()
+    const draft = await yamlEditorDocument(page)
+    draft.spec.listeners[0].tls.frontendValidation = { mode: 'invalid', caCertificateRefs: [] }
+    await replaceYaml(page, yaml.dump(draft))
+    await page.getByTestId('editor-form-tab').click()
+    await expect(page.getByText('Frontend Client Certificate Validation', { exact: true })).toHaveCount(0)
+    await page.locator('input[value="old-ca"]').fill(`${prefix}-secret`)
+    const response = page.waitForResponse(value => value.request().method() === 'PUT' && value.url().endsWith(path))
+    await page.getByTestId('editor-submit').click()
+    const result = await response
+    expect(result.ok(), await result.text()).toBeTruthy()
+    const submitted = yaml.load(result.request().postData()!) as Record<string, any>
+    expect(submitted.spec.listeners[0].tls).not.toHaveProperty('frontendValidation')
+    const updated = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+    document.spec.tls.frontend.perPort[0].tls.validation.caCertificateRefs[0].name = `${prefix}-secret`
+    expect(updated.spec.tls.frontend).toEqual(document.spec.tls.frontend)
+  } finally {
+    const cleanup = await request.delete(path)
+    expect(cleanup.ok() || cleanup.status() === 404, 'Exact Gateway frontend fixture cleanup failed').toBeTruthy()
+  }
+})
+
 for (const keepOther of [false, true]) {
   test(`backend TLS client certificate browser clearing preserves other options: ${keepOther}`, async ({ page, request }) => {
     const catalog = RESOURCE_CATALOG.get('backendtlspolicy')!

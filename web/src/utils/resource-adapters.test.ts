@@ -87,7 +87,7 @@ describe('lossless route and gateway adapters', () => {
     const mutation = parse(gatewayToMutationYaml(normalized, 'update'))
     expect(mutation.spec.listeners[0].tls.certificateRefs).toEqual(fixture.spec.listeners[0].tls.certificateRefs)
     expect(mutation.spec.listeners[0].tls.options).toEqual(fixture.spec.listeners[0].tls.options)
-    expect(mutation.spec.listeners[0].tls.frontendValidation).toEqual(fixture.spec.listeners[0].tls.frontendValidation)
+    expect(mutation.spec.listeners[0].tls).not.toHaveProperty('frontendValidation')
     expect(mutation.spec.listeners[0].allowedRoutes).toEqual(fixture.spec.listeners[0].allowedRoutes)
     expect(mutation.spec.tls.frontend).toEqual(fixture.spec.tls.frontend)
     expect(mutation.spec.tls.backend).not.toHaveProperty('resolvedClientCertificate')
