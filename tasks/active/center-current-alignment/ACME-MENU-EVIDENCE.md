@@ -65,9 +65,61 @@ Artifacts: `/tmp/ws5-center-acme-lifecycle-20260928/` (`browser-proof.cjs`,
 after the line-break adjustment failed once; it was corrected to inspect the
 lifecycle cell, and the complete scenario passed. No resources or policies changed.
 
+## Real Kubernetes issuance and Gateway certificate loading
+
+Artifacts: `/tmp/ws5-center-acme-issuance-20260928/`. The owned namespace is
+`ws5-center-acme-20260928`, Controller identity is `e2e-acme/alignment-acme`, and
+resource/GatewayClass name is `center-acme-issuance`. This uses the retained
+current-source Linux Controller artifact copied into an isolated container,
+not the old shared-cluster Controller. Copied/source binary SHA-256 is
+`b5defc40eef33a9768d014a7b3a816a51faf39f132f89f540cc0c9371c1069fd`.
+The native Gateway uses the existing current-source debug artifact.
+
+Center remains native on 12201 with the current Vite dashboard on 15173. The
+Controller connects to it over mTLS and watches only the owned namespace, with
+namespaced ServiceAccount permissions and limited cluster resource reads/status
+writes. Its Center policy grants the concrete ACME resource and trigger operations,
+without Secret reads or wildcard access. The Gateway's conf-sync test transport
+is loopback plaintext; this run does not add conf-sync TLS evidence.
+
+Pebble runs in a dedicated Docker network with real challenge validation
+(`PEBBLE_VA_ALWAYS_VALID=0`). Its image ID is
+`sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199`.
+The isolated Controller trusts only the fixture CA via Linux SSL_CERT_FILE;
+macOS system trust was not changed. The test CA contacts Gateway HTTP port 18300
+for `acme-alignment.test`; certificates are served on HTTPS 18301. Configs,
+credentials and private keys remain under /tmp and are not committed.
+
+The resource was created through Center's federation proxy. Pebble logs prove
+actual HTTP-01 validation and certificate issuance. Four subsequent checks pass
+in `browser-result.json` / `browser-proof.cjs`:
+
+1. Center's actual Ready, serial and expiry match the public certificate fetched
+   from the owned Secret by the external test harness. No private key was read.
+2. Gateway HTTPS presents the same certificate fingerprint, without restarting
+   Gateway after Secret publication. The TLS fingerprint observation disables
+   public trust validation and is not a public-PKI verification claim.
+3. The actual Center menu displays Ready and the exact expiry with an enabled
+   scoped trigger. `issued.png` was visually inspected.
+4. The real menu trigger returns 200 and says only that the check was queued.
+
+First certificate serial is `CE4A33CA15AC8C`, expiry
+`2026-12-27T00:20:19.000Z`. Kubernetes Secret publication and initial Gateway
+certificate hot loading are now established. This does not prove a replacement
+certificate or renewal.
+
+Retained handles: Docker `ws5-center-acme-controller`, `ws5-center-acme-pebble`,
+network `ws5-center-acme-20260928`; native Gateway session 63587. Controller Admin
+15923 and conf-sync 51003 bind host loopback. ServiceAccount token expires after
+8 hours; revalidate runtime/auth before further work. Bootstrap initially exposed
+missing read permissions for namespace metadata and the legacy config alias;
+these were corrected only in the owned RBAC definitions. No existing CRDs or
+unrelated workloads were changed.
+
 ## Remaining work
 
-Real issuance/renewal needs a Kubernetes Controller leader and an isolated ACME
-test CA. Native validation, denial and display proofs do not establish issuance,
-Secret publication, renewal or Gateway certificate hot reload. Continue those
-runtime checks without adding DNS-01 or expanding the supported product scope.
+[ACME-SCHEDULER-CLEAR-GAP.md](ACME-SCHEDULER-CLEAR-GAP.md) records the upstream
+422 failure clearing the scheduler checkpoint after successful publication.
+Resolve that contract before claiming renewal completion. Continue certificate
+replacement, renewal and recovery checks; this pass changed no production code
+and does not rerun unchanged unit/build gates.

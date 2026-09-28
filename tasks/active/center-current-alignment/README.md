@@ -2698,3 +2698,19 @@ before acting on CCI execution files or proposing replacements.
 - See [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md). Real Kubernetes issuance,
   renewal, Secret publication and Gateway hot reload remain separate work. No
   Edgion changes, resource/policy mutations or push.
+
+
+### 2026-09-28: Real ACME issuance through Center and upstream clearing gap
+
+- Brought up an isolated Kubernetes Controller leader, native Gateway and Pebble
+  with actual HTTP-01 validation and container-local CA trust. Center-created ACME
+  resource issued successfully and published its TLS Secret. Gateway served that
+  exact certificate without restart; Center displayed its real Ready/expiry.
+- Four browser/API/certificate checkpoints pass; a real menu trigger reports only
+  queue admission. No private key was read by the proof, and no shared CRD changed.
+- Reproduced an upstream contract failure: scheduler clearing sends null while
+  the CRD requires object. The real service retries; an exact API dry-run returns
+  422. See [ACME-SCHEDULER-CLEAR-GAP.md](ACME-SCHEDULER-CLEAR-GAP.md).
+- [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md) records artifacts and retained
+  topology. Renewal is not claimed. No production source changes or new matrix
+  claim in this pass; no Edgion edits, commits or push. Overall goal stays active.

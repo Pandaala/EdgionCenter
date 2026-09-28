@@ -70,7 +70,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | EdgionStreamPlugins | plugins/stream | Current connection/TLS-stage catalogs and stage-specific controls |
 | EdgionConfigData | plugins/metadata | Nine typed variants; four new variants have dedicated native CRUD |
 | LinkSys | system/linksys | All eight variants have dedicated native browser CRUD |
-| EdgionAcme | system/acme | HTTP-01 scope; renewal/notification boundaries; captured and permission-gated trigger, queue/uncertain outcomes, actual default denial and FS service-unavailable proof; shared lifecycle/UTC expiry display with failure recovery; real Kubernetes issuance remains open |
+| EdgionAcme | system/acme | HTTP-01 scope; renewal/notification boundaries; captured and permission-gated trigger, queue/uncertain outcomes, actual default denial and FS service-unavailable proof; shared lifecycle/UTC expiry display with failure recovery; real Kubernetes HTTP-01 issuance, Secret publication and initial Gateway certificate hot loading; renewal remains open due to scheduler-clear 422 |
 
 All five active probe types (HTTP, HTTPS, TCP, gRPC and GRPCS) have Gateway traffic
 proof, including Center form edits, Controller version readback and failure/
@@ -204,7 +204,9 @@ provider grants were removed after verification; 52 metadata-only CRDs remain
 in the owned namespace. The embedded v5 image predates these frontend changes.
 
 See [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md) for the trigger repair and
-the lifecycle/expiry repair and remaining Kubernetes issuance checks.
+the lifecycle/expiry repair and real Kubernetes issuance proof. The upstream
+[ACME scheduler clear gap](ACME-SCHEDULER-CLEAR-GAP.md) prevents closing the
+renewal audit; initial issuance and certificate loading are separately proven.
 
 ## Next audit actions
 
