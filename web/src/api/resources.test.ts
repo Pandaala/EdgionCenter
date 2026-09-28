@@ -13,6 +13,26 @@ afterEach(() => {
 })
 
 describe('resource mutation execution boundary', () => {
+  it('pins ACME dispatch and treats success as queue admission only', async () => {
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { success: true } })
+    expect(await resourceApi.triggerAcme({ controllerId: 'east/controller' }, 'app', 'cert')).toBe('queued')
+    expect(post).toHaveBeenCalledWith('/services/acme/app/cert/trigger', undefined,
+      expect.objectContaining({ baseURL: '/api/v1/proxy/east~controller/api/v1', _skipControllerProxy: true, _silent: true }))
+  })
+
+  it.each([[403, 'denied'], [503, 'unavailable'], [404, 'failed'], [502, 'unknown'], [504, 'unknown'], [undefined, 'unknown']])(
+    'classifies ACME dispatch failure %s without retrying', async (status, expected) => {
+      const post = vi.spyOn(apiClient, 'post').mockRejectedValue({ isAxiosError: true,
+        response: status ? { status, data: { error: 'private remote detail' } } : undefined })
+      expect(await resourceApi.triggerAcme({ controllerId: null }, 'app', 'cert')).toBe(expected)
+      expect(post).toHaveBeenCalledTimes(1)
+    })
+
+  it('rejects an unsuccessful ACME response envelope', async () => {
+    vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { success: false, error: 'private remote detail' } })
+    expect(await resourceApi.triggerAcme({ controllerId: null }, 'app', 'cert')).toBe('failed')
+  })
+
   it('pins source list reads to the captured Controller across all scopes', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { success: true, data: [], count: 0 } })
     const target = { controllerId: 'east/controller' }

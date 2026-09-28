@@ -1,13 +1,13 @@
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
 import { Table, Button, Space, Input, Tag, Modal, message, Badge } from 'antd'
-import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resourceApi } from '@/api/resources'
 import type { K8sResource } from '@/api/types'
 import EdgionAcmeEditor from '@/components/ResourceEditor/EdgionAcme/EdgionAcmeEditor'
-import { apiClient } from '@/api/client'
+import AcmeTriggerButton from '@/components/resource/AcmeTriggerButton'
 import { useT } from '@/i18n'
 import PageHeader from '@/components/PageHeader'
 import { useResourceList } from '@/hooks/useResourceList'
@@ -66,14 +66,6 @@ const EdgionAcmeList = () => {
     setEditorMode(mode); setSelectedResource(resource || null); setEditorVisible(true)
   }
 
-  const handleTrigger = async (r: K8sResource) => {
-    try {
-      await apiClient.post(`/services/acme/${r.metadata.namespace}/${r.metadata.name}/trigger`)
-      message.success(t('msg.triggerOk'))
-      refetch()
-    } catch (e: any) { message.error(t('msg.triggerFailed', { err: e.message })) }
-  }
-
   const columns = [
     ...getResourceMetaColumns<K8sResource>({
       namespaced: true,
@@ -111,7 +103,7 @@ const EdgionAcmeList = () => {
         <Space>
           <Button data-testid={resourceActionTestId('edgionacme', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
           <Button data-testid={resourceActionTestId('edgionacme', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
-          <Button data-testid="acme-trigger" size="small" icon={<ThunderboltOutlined />} onClick={() => handleTrigger(record)}>{t('btn.trigger')}</Button>
+          <AcmeTriggerButton resource={record} />
           <Button data-testid={resourceActionTestId('edgionacme', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
             onClick={() => Modal.confirm({
               ...resourceDeleteConfirmProps,

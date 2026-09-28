@@ -2667,3 +2667,19 @@ before acting on CCI execution files or proposing replacements.
 - [STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md) is resolved with evidence and limits.
   Kubernetes v5 predates this change. Broader alignment remains active; no Edgion
   changes or push.
+
+
+### 2026-09-28: ACME trigger authorization and delivery outcome
+
+- Replaced the raw global-proxy trigger with a captured Controller request and
+  the existing dedicated operation permission. Pending dispatch prevents repeated
+  clicks. Success means queue admission; ambiguous delivery is reported without
+  automatic replay. Upstream error details stay out of messages.
+- Sixteen focused API/component tests and four native browser/API checkpoints
+  pass. Real default denial, simulated stale UI access with actual server 403,
+  and native service-unavailable 503 are distinguished. No policy or CA changes.
+- Full frontend suite passes 701 tests in 106 files; build, lint and inventory
+  pass. Logs are indexed in CURRENT-COVERAGE.md.
+  [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md) records remaining lifecycle/expiry
+  display work and the separate Kubernetes issuance evidence boundary. Overall
+  alignment remains active; no Edgion edits or push.

@@ -116,6 +116,13 @@ description: System configuration resource development guide — EdgionGatewayCo
   domains, HTTP-01 scope, and renewal durations before sending through the tunnel.
 - Strip status, currentStatus, resolvedListenerAttachments, notifyAfterPublish, and
   server-owned metadata on mutation. Preserve resourceVersion for update CAS.
-- List displays phase, domains, challenge type, certificate expiry, and conditions.
-  Manual issuance uses the Controller service endpoint through Center's proxy:
-  `POST /api/v1/services/acme/{namespace}/{name}/trigger`.
+- List displays source phase, domains, challenge type, and conditions. The phase
+  column does not yet use processed-status fallback; certificate expiry is a
+  remaining display gap, tracked in `tasks/active/center-current-alignment/ACME-MENU-EVIDENCE.md`.
+- Manual trigger uses `AcmeTriggerButton` and the dedicated `acme.trigger`
+  operation, not the resource update permission. Its HTTP request captures the
+  page Controller: `POST /api/v1/services/acme/{namespace}/{name}/trigger`.
+  A successful response means a check was queued, never that issuance completed.
+  Do not replay uncertain requests or expose raw upstream errors. Disable repeat
+  clicks while pending. The actual service runs only on a Kubernetes leader;
+  native FS validation does not issue certificates.

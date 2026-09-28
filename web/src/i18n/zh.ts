@@ -1326,6 +1326,11 @@ const zh = {
   'status.runtimeUnavailable': '状态不可用',
   'status.runtimePending': '等待 Controller 处理',
   'status.runtimeSource': 'Controller 运行状态；可编辑配置保持不变',
+  'acme.trigger.queued': 'ACME 检查已入队，证书签发尚未确认。',
+  'acme.trigger.denied': '没有触发 ACME 的权限。',
+  'acme.trigger.unavailable': 'ACME 服务不可用，请检查 Controller 服务状态后再重试。',
+  'acme.trigger.failed': 'ACME 触发请求被拒绝，请刷新资源后再重试。',
+  'acme.trigger.unknown': 'ACME 触发结果尚未确认，请检查资源状态后再重试。',
 }
 
 export default zh

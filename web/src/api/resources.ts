@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { isAxiosError } from 'axios'
 import type { ApiResponse, ListResponse, K8sResource, ResourceKey, ResourceKind } from './types'
 import * as yaml from 'js-yaml'
 import type { AxiosRequestConfig } from 'axios'
@@ -69,7 +70,26 @@ function requiredResourceVersionHeader(version: string): Record<string, string> 
   return resourceVersionHeader({ apiVersion: '', kind: '', metadata: { name: '', resourceVersion: version } })
 }
 
+export type AcmeTriggerOutcome = 'queued' | 'denied' | 'unavailable' | 'failed' | 'unknown'
+
 export const resourceApi = {
+  /** Acknowledges scheduler admission only; never retries an ambiguous dispatch. */
+  triggerAcme: async (target: ControllerMutationTarget, namespace: string, name: string): Promise<AcmeTriggerOutcome> => {
+    try {
+      const { data } = await apiClient.post<ApiResponse<string>>(
+        `/services/acme/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/trigger`,
+        undefined,
+        { ...mutationRequestConfig(target), _silent: true } as AxiosRequestConfig,
+      )
+      return data.success === true ? 'queued' : 'failed'
+    } catch (error) {
+      const status = isAxiosError(error) ? error.response?.status : undefined
+      if (status === 401 || status === 403) return 'denied'
+      if (status === 503) return 'unavailable'
+      if (status && status >= 400 && status < 500) return 'failed'
+      return 'unknown'
+    }
+  },
   /**
    * Read the Controller's processed ConfigSync view, including native status.
    * File-system CRUD endpoints intentionally return only the operator-owned

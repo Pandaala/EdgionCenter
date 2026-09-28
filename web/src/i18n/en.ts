@@ -1326,6 +1326,11 @@ const en = {
   'status.runtimeUnavailable': 'Status unavailable',
   'status.runtimePending': 'Status awaiting processing',
   'status.runtimeSource': 'Controller runtime observation; editable configuration is unchanged',
+  'acme.trigger.queued': 'ACME check queued. Certificate issuance is not yet confirmed.',
+  'acme.trigger.denied': 'ACME trigger is not authorized.',
+  'acme.trigger.unavailable': 'ACME service is unavailable. Check Controller service status before retrying.',
+  'acme.trigger.failed': 'ACME trigger was rejected. Refresh the resource before retrying.',
+  'acme.trigger.unknown': 'ACME trigger outcome is unknown. Check resource status before retrying.',
 }
 
 export default en
