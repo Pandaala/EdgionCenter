@@ -1,6 +1,7 @@
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
+import { Table, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { clusterResourceApi } from '@/api/resources'
@@ -72,9 +73,9 @@ const GatewayClassList = () => {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (
         <Space>
-          <Button data-testid={resourceActionTestId('gatewayclass', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</Button>
-          <Button data-testid={resourceActionTestId('gatewayclass', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</Button>
-          <Button data-testid={resourceActionTestId('gatewayclass', 'row-delete')} size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(r.metadata.name, r.metadata.resourceVersion!)}>{t('btn.delete')}</Button>
+          <PermissionAwareButton resourceKind="gatewayclass" resourceVerb="get" data-testid={resourceActionTestId('gatewayclass', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="gatewayclass" resourceVerb="update" data-testid={resourceActionTestId('gatewayclass', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="gatewayclass" resourceVerb="delete" data-testid={resourceActionTestId('gatewayclass', 'row-delete')} size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(r.metadata.name, r.metadata.resourceVersion!)}>{t('btn.delete')}</PermissionAwareButton>
         </Space>
       ),
     },
@@ -89,8 +90,8 @@ const GatewayClassList = () => {
         subtitle={t('page.subtitle.gatewayClass')}
         actions={
           <>
-            <Button data-testid={resourceActionTestId('gatewayclass', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button data-testid={resourceActionTestId('gatewayclass', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <PermissionAwareButton resourceKind="gatewayclass" resourceVerb="list" data-testid={resourceActionTestId('gatewayclass', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</PermissionAwareButton>
+            <PermissionAwareButton resourceKind="gatewayclass" resourceVerb="create" data-testid={resourceActionTestId('gatewayclass', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</PermissionAwareButton>
           </>
         }
       />

@@ -1,6 +1,7 @@
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
+import { Table, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -102,10 +103,10 @@ const ReferenceGrantList = () => {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (
         <Space>
-          <Button data-testid={resourceActionTestId('referencegrant', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</Button>
-          <Button data-testid={resourceActionTestId('referencegrant', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</Button>
-          <Button data-testid={resourceActionTestId('referencegrant', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
-            onClick={() => handleDelete(r.metadata.namespace!, r.metadata.name, r.metadata.resourceVersion!)}>{t('btn.delete')}</Button>
+          <PermissionAwareButton resourceKind="referencegrant" resourceVerb="get" data-testid={resourceActionTestId('referencegrant', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="referencegrant" resourceVerb="update" data-testid={resourceActionTestId('referencegrant', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="referencegrant" resourceVerb="delete" data-testid={resourceActionTestId('referencegrant', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
+            onClick={() => handleDelete(r.metadata.namespace!, r.metadata.name, r.metadata.resourceVersion!)}>{t('btn.delete')}</PermissionAwareButton>
         </Space>
       ),
     },
@@ -120,8 +121,8 @@ const ReferenceGrantList = () => {
         subtitle={t('page.subtitle.referenceGrant')}
         actions={
           <>
-            <Button data-testid={resourceActionTestId('referencegrant', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button data-testid={resourceActionTestId('referencegrant', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <PermissionAwareButton resourceKind="referencegrant" resourceVerb="list" data-testid={resourceActionTestId('referencegrant', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</PermissionAwareButton>
+            <PermissionAwareButton resourceKind="referencegrant" resourceVerb="create" data-testid={resourceActionTestId('referencegrant', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</PermissionAwareButton>
           </>
         }
       />

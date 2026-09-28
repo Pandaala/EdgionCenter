@@ -1,10 +1,11 @@
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 /**
  * Cluster-scoped EdgionGatewayConfig resources selected by GatewayClasses.
  */
 
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Modal, message, Tag } from 'antd'
+import { Table, Space, Modal, message, Tag } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -60,15 +61,15 @@ const EdgionGatewayConfigPage = () => {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, r: K8sResource) => (
         <Space>
-          <Button data-testid={resourceActionTestId('edgiongatewayconfig', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</Button>
-          <Button data-testid={resourceActionTestId('edgiongatewayconfig', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</Button>
-          <Button data-testid={resourceActionTestId('edgiongatewayconfig', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
+          <PermissionAwareButton resourceKind="edgiongatewayconfig" resourceVerb="get" data-testid={resourceActionTestId('edgiongatewayconfig', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', r)}>{t('btn.view')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgiongatewayconfig" resourceVerb="update" data-testid={resourceActionTestId('edgiongatewayconfig', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', r)}>{t('btn.edit')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgiongatewayconfig" resourceVerb="delete" data-testid={resourceActionTestId('edgiongatewayconfig', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
             onClick={() => Modal.confirm({
               ...resourceDeleteConfirmProps,
               title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name: r.metadata.name }),
               okText: t('confirm.okText'), okType: 'danger', cancelText: t('btn.cancel'),
               onOk: () => deleteMutation.mutate({ name: r.metadata.name, resourceVersion: r.metadata.resourceVersion! }),
-            })}>{t('btn.delete')}</Button>
+            })}>{t('btn.delete')}</PermissionAwareButton>
         </Space>
       ),
     },
@@ -83,8 +84,8 @@ const EdgionGatewayConfigPage = () => {
         subtitle={t('page.subtitle.gatewayConfig')}
         actions={
           <>
-            <Button data-testid={resourceActionTestId('edgiongatewayconfig', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button data-testid={resourceActionTestId('edgiongatewayconfig', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <PermissionAwareButton resourceKind="edgiongatewayconfig" resourceVerb="list" data-testid={resourceActionTestId('edgiongatewayconfig', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</PermissionAwareButton>
+            <PermissionAwareButton resourceKind="edgiongatewayconfig" resourceVerb="create" data-testid={resourceActionTestId('edgiongatewayconfig', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</PermissionAwareButton>
           </>
         }
       />

@@ -1,6 +1,7 @@
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Modal, message } from 'antd'
+import { Table, Space, Input, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -158,14 +159,13 @@ const HTTPRouteList = () => {
       key: 'actions',
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button data-testid={resourceActionTestId('httproute', 'row-view')} type="link" icon={<EyeOutlined />} size="small" onClick={() => handleView(record)}>
+          <PermissionAwareButton resourceKind="httproute" resourceVerb="get" data-testid={resourceActionTestId('httproute', 'row-view')} type="link" icon={<EyeOutlined />} size="small" onClick={() => handleView(record)}>
             {t('btn.view')}
-          </Button>
-          <Button data-testid={resourceActionTestId('httproute', 'row-edit')} type="link" icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)}>
+          </PermissionAwareButton>
+          <PermissionAwareButton resourceKind="httproute" resourceVerb="update" data-testid={resourceActionTestId('httproute', 'row-edit')} type="link" icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)}>
             {t('btn.edit')}
-          </Button>
-          <Button
-            data-testid={resourceActionTestId('httproute', 'row-delete')}
+          </PermissionAwareButton>
+          <PermissionAwareButton resourceKind="httproute" resourceVerb="delete" data-testid={resourceActionTestId('httproute', 'row-delete')}
             type="link"
             danger
             icon={<DeleteOutlined />}
@@ -173,7 +173,7 @@ const HTTPRouteList = () => {
             onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}
           >
             {t('btn.delete')}
-          </Button>
+          </PermissionAwareButton>
         </Space>
       ),
     },
@@ -188,12 +188,12 @@ const HTTPRouteList = () => {
         subtitle={t('page.subtitle.httpRoute')}
         actions={
           <>
-            <Button data-testid={resourceActionTestId('httproute', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>
+            <PermissionAwareButton resourceKind="httproute" resourceVerb="list" data-testid={resourceActionTestId('httproute', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('btn.refresh')}
-            </Button>
-            <Button data-testid={resourceActionTestId('httproute', 'create')} type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+            </PermissionAwareButton>
+            <PermissionAwareButton resourceKind="httproute" resourceVerb="create" data-testid={resourceActionTestId('httproute', 'create')} type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
               {t('btn.create')}
-            </Button>
+            </PermissionAwareButton>
           </>
         }
       />
@@ -216,9 +216,9 @@ const HTTPRouteList = () => {
         <div style={{ marginBottom: 16 }}>
           <Space>
             <span>{t('status.selected', { n: selectedRowKeys.length })}</span>
-            <Button data-testid={resourceActionTestId('httproute', 'batch-delete')} danger onClick={handleBatchDelete}>
+            <PermissionAwareButton resourceKind="httproute" resourceVerb="delete" data-testid={resourceActionTestId('httproute', 'batch-delete')} danger onClick={handleBatchDelete}>
               {t('btn.batchDelete')}
-            </Button>
+            </PermissionAwareButton>
           </Space>
         </div>
       )}

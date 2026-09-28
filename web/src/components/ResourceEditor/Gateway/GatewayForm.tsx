@@ -121,7 +121,7 @@ const GatewayForm: React.FC<GatewayFormProps> = ({ data, onChange, readOnly = fa
             <Input
               value={annotations['edgion.io/edgion-stream-plugins'] || ''}
               onChange={(e) => updateAnnotation('edgion.io/edgion-stream-plugins', e.target.value)}
-              placeholder="namespace/plugin-name"
+              placeholder="plugin-name"
               disabled={readOnly}
             />
           </Form.Item>

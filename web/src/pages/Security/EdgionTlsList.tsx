@@ -1,6 +1,7 @@
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
+import { Table, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -136,10 +137,10 @@ const EdgionTlsList = () => {
       title: t('col.actions'), key: 'actions', width: 160,
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button data-testid={resourceActionTestId('edgiontls', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
-          <Button data-testid={resourceActionTestId('edgiontls', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
-          <Button data-testid={resourceActionTestId('edgiontls', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}>{t('btn.delete')}</Button>
+          <PermissionAwareButton resourceKind="edgiontls" resourceVerb="get" data-testid={resourceActionTestId('edgiontls', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgiontls" resourceVerb="update" data-testid={resourceActionTestId('edgiontls', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgiontls" resourceVerb="delete" data-testid={resourceActionTestId('edgiontls', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record.metadata.namespace!, record.metadata.name, record.metadata.resourceVersion!)}>{t('btn.delete')}</PermissionAwareButton>
         </Space>
       ),
     },
@@ -154,8 +155,8 @@ const EdgionTlsList = () => {
         subtitle={t('page.subtitle.tls')}
         actions={
           <>
-            <Button data-testid={resourceActionTestId('edgiontls', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button data-testid={resourceActionTestId('edgiontls', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <PermissionAwareButton resourceKind="edgiontls" resourceVerb="list" data-testid={resourceActionTestId('edgiontls', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</PermissionAwareButton>
+            <PermissionAwareButton resourceKind="edgiontls" resourceVerb="create" data-testid={resourceActionTestId('edgiontls', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</PermissionAwareButton>
           </>
         }
       />
@@ -172,7 +173,7 @@ const EdgionTlsList = () => {
         <div style={{ marginBottom: 16 }}>
           <Space>
             <span>{t('status.selected', { n: selectedRowKeys.length })}</span>
-            <Button data-testid={resourceActionTestId('edgiontls', 'batch-delete')} danger onClick={handleBatchDelete}>{t('btn.batchDelete')}</Button>
+            <PermissionAwareButton resourceKind="edgiontls" resourceVerb="delete" data-testid={resourceActionTestId('edgiontls', 'batch-delete')} danger onClick={handleBatchDelete}>{t('btn.batchDelete')}</PermissionAwareButton>
           </Space>
         </div>
       )}

@@ -5,7 +5,7 @@ description: Infrastructure resource development guide — Gateway/GatewayClass/
 
 # Infrastructure Resources
 
-## Gateway (Pending Development)
+## Gateway
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -17,7 +17,7 @@ metadata:
     edgion.io/enable-http2: "true"                   # HTTP/2 support (default true)
     edgion.io/http-to-https-redirect: "true"         # HTTP→HTTPS automatic redirect
     edgion.io/https-redirect-port: "443"             # HTTPS redirect port
-    edgion.io/edgion-stream-plugins: "ns/name"       # Gateway-level StreamPlugins
+    edgion.io/edgion-stream-plugins: "plugin-name"   # Same-namespace Gateway StreamPlugins
 spec:
   gatewayClassName: edgion                           # Required: associate GatewayClass
   listeners:
@@ -44,7 +44,7 @@ spec:
           caCertificateRefs:
             - name: client-ca
         options:
-          edgion.io/cert-provider: "edgion-tls"      # "secret" (default) | "edgion-tls"
+          edgion.io/cert-provider: "EdgionTls"       # Exact dynamic provider value; omit for Secret refs
 
     - name: tcp-redis
       port: 6379
@@ -83,7 +83,9 @@ status:                                              # Read-only
 - TLS configuration only appears for HTTPS/TLS (conditional rendering)
 - annotations control HTTP/2, HTTPS redirect, and StreamPlugins
 - status is read-only display (listener status, attachedRoutes, addresses)
-- List page highlights: name, namespace, listener count/ports, attached route count
+- List columns show name, namespace, age, GatewayClass, up to four listeners and status.
+- Existing listeners and allowedRoutes fields survive narrow edits; native listener
+  status and attachedRoutes are available in read-only details.
 
 **Form Sections**:
 - MetadataSection + AnnotationsSection (HTTP/2, HTTPS redirect toggles)
@@ -91,7 +93,7 @@ status:                                              # Read-only
 - ListenersSection (dynamically add/remove listeners)
   - ListenerEditor (name + protocol + port + hostname + TLS + allowedRoutes)
 
-## GatewayClass (Pending Development)
+## GatewayClass
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -110,10 +112,10 @@ spec:
 **Development Notes**:
 - **Cluster-scoped resource**, uses `clusterResourceApi`, kind: `gatewayclass`
 - Simple structure: controllerName + parametersRef + description
-- Typically only one instance
+- Multiple GatewayClasses may coexist.
 - parametersRef associates EdgionGatewayConfig
-- List page displays the count of associated Gateways
-- Primarily YAML editing + basic information display
+- List columns show name, age, controllerName, description and status.
+- The editor supports structured fields and YAML, including parametersRef.
 
 ## Service
 
@@ -187,7 +189,7 @@ endpoints:
 - Runtime authority: sibling `edgion-gateway/src/backends/discovery/coordinator.rs`,
   the loop building EndpointOrigin and ready_slots.
 
-## ReferenceGrant (Pending Development)
+## ReferenceGrant
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -206,8 +208,18 @@ spec:
 ```
 
 **Development Notes**:
-- Namespaced resource, kind: `referencegrant` (must be added to ResourceKind)
+- Namespaced resource, kind: `referencegrant`
 - Controls cross-namespace resource reference permissions
 - Form: from (group + kind + namespace list) + to (group + kind list)
 - List page displays: name, namespace, from resource type/namespace, to resource type
-- Needs to add a menu item in the sidebar
+- The existing sidebar menu supports Form/YAML editing and preserves multiple from/to entries.
+
+
+## Resource action permissions
+
+Gateway, GatewayClass and ReferenceGrant list actions use PermissionAwareButton
+with their concrete kind and verb. The same applies to route, TLS, ACME and
+Gateway configuration lists. Pending or failed authorization disables actions;
+confirmed read permission does not enable writes. Use the existing access document
+and Center proxy permissions rather than duplicating policy logic in a page.
+Server-side authorization remains the execution boundary.

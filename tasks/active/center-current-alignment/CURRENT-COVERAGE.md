@@ -284,3 +284,11 @@ Service targetPort follow-up: clearing the optional form value now omits the fie
 instead of sending an invalid empty string. 13 focused tests, build/lint and the
 actual Center save/readback/Gateway recovery scenario pass. Temporary update
 permission was revoked. See [SERVICE-PORT-EVIDENCE.md](SERVICE-PORT-EVIDENCE.md).
+
+
+Legacy list-action follow-up: eleven active resource menus now use the shared
+concrete-kind/verb permission controls, including batch actions. Full frontend
+suite: 737 tests in 111 files. Twelve native checkpoints verify actual default
+read-only and explicit ACME write policies without mutations. See
+[LIST-ACTION-PERMISSIONS-EVIDENCE.md](LIST-ACTION-PERMISSIONS-EVIDENCE.md) for
+empty-list limits and the Gateway annotation-hint corrections.

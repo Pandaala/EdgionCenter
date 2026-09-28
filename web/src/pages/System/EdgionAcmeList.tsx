@@ -1,6 +1,7 @@
+import PermissionAwareButton from '@/components/resource/PermissionAwareButton'
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useState } from 'react'
-import { Table, Button, Space, Input, Tag, Modal, message } from 'antd'
+import { Table, Space, Input, Tag, Modal, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -93,10 +94,10 @@ const EdgionAcmeList = () => {
       title: t('col.actions'), key: 'actions', width: 200,
       render: (_: any, record: K8sResource) => (
         <Space>
-          <Button data-testid={resourceActionTestId('edgionacme', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</Button>
-          <Button data-testid={resourceActionTestId('edgionacme', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</Button>
+          <PermissionAwareButton resourceKind="edgionacme" resourceVerb="get" data-testid={resourceActionTestId('edgionacme', 'row-view')} size="small" icon={<EyeOutlined />} onClick={() => openEditor('view', record)}>{t('btn.view')}</PermissionAwareButton>
+          <PermissionAwareButton resourceKind="edgionacme" resourceVerb="update" data-testid={resourceActionTestId('edgionacme', 'row-edit')} size="small" icon={<EditOutlined />} onClick={() => openEditor('edit', record)}>{t('btn.edit')}</PermissionAwareButton>
           <AcmeTriggerButton resource={record} />
-          <Button data-testid={resourceActionTestId('edgionacme', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
+          <PermissionAwareButton resourceKind="edgionacme" resourceVerb="delete" data-testid={resourceActionTestId('edgionacme', 'row-delete')} size="small" danger icon={<DeleteOutlined />}
             onClick={() => Modal.confirm({
               ...resourceDeleteConfirmProps,
               title: t('confirm.deleteTitle'), content: t('confirm.deleteMsg', { name: record.metadata.name }),
@@ -104,7 +105,7 @@ const EdgionAcmeList = () => {
               onOk: () => deleteMutation.mutate({
                 namespace: record.metadata.namespace!, name: record.metadata.name, resourceVersion: record.metadata.resourceVersion!,
               }),
-            })}>{t('btn.delete')}</Button>
+            })}>{t('btn.delete')}</PermissionAwareButton>
         </Space>
       ),
     },
@@ -121,8 +122,8 @@ const EdgionAcmeList = () => {
           <>
             <Search data-testid={resourceActionTestId('edgionacme', 'search')} placeholder={t('ph.searchNameNs')} value={searchText} onChange={(e) => setSearchText(e.target.value)}
               style={{ width: 240 }} allowClear />
-            <Button data-testid={resourceActionTestId('edgionacme', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</Button>
-            <Button data-testid={resourceActionTestId('edgionacme', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</Button>
+            <PermissionAwareButton resourceKind="edgionacme" resourceVerb="list" data-testid={resourceActionTestId('edgionacme', 'refresh')} icon={<ReloadOutlined />} onClick={() => refetch()}>{t('btn.refresh')}</PermissionAwareButton>
+            <PermissionAwareButton resourceKind="edgionacme" resourceVerb="create" data-testid={resourceActionTestId('edgionacme', 'create')} type="primary" icon={<PlusOutlined />} onClick={() => openEditor('create')}>{t('btn.create')}</PermissionAwareButton>
           </>
         }
       />

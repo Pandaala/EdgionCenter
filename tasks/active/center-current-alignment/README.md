@@ -2808,3 +2808,16 @@ before acting on CCI execution files or proposing replacements.
 - Original fixture and default Controller policy restored; temporary Service update
   permission revoked. Failed harness attempts are recorded separately from the
   passing final run in [SERVICE-PORT-EVIDENCE.md](SERVICE-PORT-EVIDENCE.md).
+
+
+### 2026-09-28: Legacy resource-list actions respect Controller permissions
+
+- Replaced plain action buttons in eleven active resource menus with the existing
+  permission-aware control and exact kind/verb mapping. No policies changed.
+- Eleven page tests cover read-only, pending, partial/full grant and revocation;
+  full frontend suite passes 737 tests / 111 files. Build and lint pass.
+- Twelve native checkpoints cover default Controller A permissions and explicit
+  ACME writes. No proxy mutations occurred. Empty native lists are called out in
+  [LIST-ACTION-PERMISSIONS-EVIDENCE.md](LIST-ACTION-PERMISSIONS-EVIDENCE.md).
+- Corrected Gateway's same-namespace StreamPlugins input hint and stale Gateway,
+  GatewayClass and ReferenceGrant guide statements. Overall audit remains active.
