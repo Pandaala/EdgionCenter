@@ -2893,3 +2893,16 @@ before acting on CCI execution files or proposing replacements.
   passing runs are recorded in
   [BACKEND-NAMESPACE-EVIDENCE.md](BACKEND-NAMESPACE-EVIDENCE.md).
   Existing environments are unchanged; overall alignment remains active.
+
+
+### 2026-09-28: GRPCRoute filter type preflight
+
+- Shared the current three filter discriminators across TypeScript, the form
+  selector and rule/backend submission validation. Invalid drafts remain editable
+  and report an exact path before a write request is dispatched.
+- Forty-four focused tests and seven native browser cases pass. The four new
+  Form/YAML and rule/backend combinations prove zero writes on rejection and one
+  successful create/readback after correction. Build/lint/E2E types pass.
+- [GRPC-FILTER-PREFLIGHT-EVIDENCE.md](GRPC-FILTER-PREFLIGHT-EVIDENCE.md) records
+  current Controller authority, artifacts and verification limits. Existing
+  environments are unchanged; overall alignment remains active.

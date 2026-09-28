@@ -32,6 +32,11 @@ filters, mirror sampling and unrelated references remain intact. Empty-string
 namespace is not an alias for omission in the Controller's reference resolution.
 Current Edgion GRPCRoute filters are RequestHeaderModifier,
 ResponseHeaderModifier and ExtensionRef; RequestMirror is not supported there.
+The GRPCRoute type, filter selector and mutation preflight share
+`GRPC_ROUTE_FILTER_TYPES`. Form and YAML submissions validate both rule filters
+and backend filters, report the exact unsupported-type path, and retain the
+draft for correction. Supported filters keep unknown operator fields; Controller
+validation remains authoritative for payload semantics and runtime acceptance.
 
 The shared mutation hostname validator follows the current Controller parser and
 vendored Gateway API v1.6.2 CRDs: HTTPRoute/GRPCRoute allow an omitted or empty

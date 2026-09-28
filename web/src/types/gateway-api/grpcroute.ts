@@ -26,8 +26,10 @@ export interface GRPCRouteMatch {
   headers?: GRPCHeaderMatch[]
 }
 
+export const GRPC_ROUTE_FILTER_TYPES = ['RequestHeaderModifier', 'ResponseHeaderModifier', 'ExtensionRef'] as const
+
 export interface GRPCRouteFilter {
-  type: 'RequestHeaderModifier' | 'ResponseHeaderModifier' | 'ExtensionRef'
+  type: typeof GRPC_ROUTE_FILTER_TYPES[number]
   requestHeaderModifier?: import('./httproute').HTTPRequestHeaderFilter
   responseHeaderModifier?: import('./httproute').HTTPRequestHeaderFilter
   extensionRef?: import('./backend').LocalObjectReference

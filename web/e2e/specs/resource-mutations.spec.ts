@@ -456,6 +456,51 @@ for (const kind of ['httproute', 'grpcroute', 'tcproute', 'udproute', 'tlsroute'
   })
 }
 
+for (const backend of [false, true]) {
+  for (const submitTab of ['form', 'yaml'] as const) {
+    test(`gRPC ${backend ? 'backend' : 'rule'} filter preflight rejects unsupported ${submitTab} submission and permits correction`, async ({ page, request }) => {
+      const catalog = RESOURCE_CATALOG.get('grpcroute')!
+      await waitForControllerCapabilities(request, controller, [{ resourceKind: 'grpcroute', verbs: ['get', 'list', 'create', 'delete'] }])
+      const name = `${prefix}-grpc-filter-${backend ? 'backend' : 'rule'}-${submitTab}`
+      const path = itemPath(catalog, namespace, name)
+      await expectApiAbsent(request, path)
+      const document = mutationDocument(catalog, name)
+      const target = backend ? document.spec.rules[0].backendRefs[0] : document.spec.rules[0]
+      target.filters = [{ type: 'RequestMirror', requestMirror: { backendRef: { name: `${prefix}-service`, port: 8080 } } }]
+      let creates = 0
+      page.on('request', (value) => { if (value.method() === 'POST' && value.url().endsWith(collectionPath(catalog, namespace))) creates += 1 })
+      try {
+        await openResourcePage(page, catalog)
+        await page.getByTestId('grpcroute-create').click()
+        await page.getByTestId('editor-yaml-tab').click()
+        await replaceYaml(page, yaml.dump(document, { lineWidth: -1 }))
+        if (submitTab === 'form') await page.getByTestId('editor-form-tab').click()
+        await page.getByTestId('editor-submit').click()
+        const filterPath = backend ? 'rules[0].backendRefs[0].filters[0].type' : 'rules[0].filters[0].type'
+        await expect(page.locator('.ant-message-notice-content').filter({ hasText: `${filterPath} must be a supported GRPCRoute filter` })).toBeVisible()
+        expect(creates).toBe(0)
+        await expectApiAbsent(request, path)
+        await page.getByTestId('editor-yaml-tab').click()
+        const retained = await yamlEditorDocument(page)
+        expect((backend ? retained.spec.rules[0].backendRefs[0] : retained.spec.rules[0]).filters[0].type).toBe('RequestMirror')
+        target.filters = [{ type: 'RequestHeaderModifier', requestHeaderModifier: { set: [{ name: 'x-filter-preflight', value: 'corrected' }] } }]
+        await replaceYaml(page, yaml.dump(document, { lineWidth: -1 }))
+        if (submitTab === 'form') await page.getByTestId('editor-form-tab').click()
+        const response = page.waitForResponse((value) => value.request().method() === 'POST' && value.url().endsWith(collectionPath(catalog, namespace)))
+        await page.getByTestId('editor-submit').click()
+        const result = await response
+        expect(result.ok(), await result.text()).toBeTruthy()
+        expect(creates).toBe(1)
+        const saved = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+        expect((backend ? saved.spec.rules[0].backendRefs[0] : saved.spec.rules[0]).filters).toEqual(target.filters)
+      } finally {
+        const cleanup = await request.delete(path)
+        expect(cleanup.ok() || cleanup.status() === 404, 'Exact gRPC filter preflight cleanup failed').toBeTruthy()
+      }
+    })
+  }
+}
+
 for (const kind of ['httproute', 'grpcroute'] as const) {
   test(`route policy browser clearing restores optional fields for ${kind}`, async ({ page, request }) => {
     const catalog = RESOURCE_CATALOG.get(kind)!

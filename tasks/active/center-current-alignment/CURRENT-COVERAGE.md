@@ -333,3 +333,10 @@ port, zero weight and other reference fields. Full frontend: 760 tests / 115 fil
 save/readback evidence; HTTP additionally covers RequestMirror. The first invalid
 gRPC mirror fixture and its correction are retained in
 [BACKEND-NAMESPACE-EVIDENCE.md](BACKEND-NAMESPACE-EVIDENCE.md).
+
+
+GRPCRoute filter follow-up: one shared type list now drives the selector and both
+rule/backend mutation preflights. Unsupported Form/YAML submissions retain drafts
+and issue no write request; corrected supported filters save normally. Forty-four
+focused tests, seven native browser cases and build/lint/E2E checks pass. See
+[GRPC-FILTER-PREFLIGHT-EVIDENCE.md](GRPC-FILTER-PREFLIGHT-EVIDENCE.md).

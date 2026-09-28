@@ -7,7 +7,7 @@ import type {
   HTTPRouteFilter,
 } from '@/types/gateway-api/httproute'
 import type { HTTPHeader } from '@/types/gateway-api/backend'
-import type { GRPCRouteFilter } from '@/types/gateway-api/grpcroute'
+import { GRPC_ROUTE_FILTER_TYPES, type GRPCRouteFilter } from '@/types/gateway-api/grpcroute'
 import { useT } from '@/i18n'
 import ExternalAuthFilterEditor from './ExternalAuthFilterEditor'
 
@@ -30,7 +30,6 @@ const HTTP_TYPES = [
   'ExternalAuth',
   'ExtensionRef',
 ] as const
-const GRPC_TYPES = ['RequestHeaderModifier', 'ResponseHeaderModifier', 'ExtensionRef'] as const
 
 function HeaderRows({
   value = {}, onChange, disabled,
@@ -216,7 +215,7 @@ export function switchRouteFilterType(current: RouteFilter, type: string): Route
 
 const RouteFiltersEditor: React.FC<Props> = ({ value = [], onChange, disabled = false, protocol = 'http' }) => {
   const t = useT()
-  const types = protocol === 'http' ? HTTP_TYPES : GRPC_TYPES
+  const types = protocol === 'http' ? HTTP_TYPES : GRPC_ROUTE_FILTER_TYPES
   const update = (index: number, filter: RouteFilter) => {
     const next = [...value]
     next[index] = filter
