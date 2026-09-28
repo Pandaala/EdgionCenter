@@ -3,6 +3,39 @@ import { buildMutationDocument } from '@/utils/resource-document'
 import { RESOURCE_CATALOG, getResourceCatalogEntry, listFirstClassResources } from './resourceCatalog'
 
 describe('resource catalog', () => {
+  it.each(['create', 'update'] as const)('preserves authored plugin maps and JSON literals on %s', (mode) => {
+    const literal = { resolvedSecrets: 'operator data', nested: { refDenied: false }, compiledRegex: null }
+    const source = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'opaque', namespace: 'edge' },
+      spec: { requestPlugins: [
+        { type: 'Mock', config: { headers: { resolvedSecrets: 'response-header' } } },
+        { type: 'Wasm', config: {
+          pluginConfig: { json: structuredClone(literal) }, vmConfig: { json: structuredClone(literal) },
+          source: { url: 'https://modules.example.com/plugin.wasm', fetch: {
+            authHeaderSecretRef: { name: 'pull', key: 'token' }, resolvedAuthHeader: '[redacted]',
+            tls: { enabled: true, clientCertificateRef: { name: 'identity' }, resolvedClientCertificate: '[redacted]' },
+          } },
+        } },
+        { type: 'ProxyRewrite', config: { jsonBody: { operations: [{ op: 'add', path: '/data', value: structuredClone(literal) }] } } },
+        { type: 'Canary', config: { enable: true, activeProfile: 'resolvedSecrets', profiles: { resolvedSecrets: { name: 'api' } }, activeProfileRef: { name: 'selector', refDenied: {} } } },
+      ] },
+    }
+    const before = structuredClone(source)
+    const mutation: any = buildMutationDocument(source, { resourceKind: 'edgionplugins', mode })
+    expect(mutation.spec.requestPlugins[0].config.headers).toEqual({ resolvedSecrets: 'response-header' })
+    expect(mutation.spec.requestPlugins[1].config.pluginConfig.json).toEqual(literal)
+    expect(mutation.spec.requestPlugins[1].config.vmConfig.json).toEqual(literal)
+    expect(mutation.spec.requestPlugins[1].config.source.fetch).toEqual({
+      authHeaderSecretRef: { name: 'pull', key: 'token' },
+      tls: { enabled: true, clientCertificateRef: { name: 'identity' } },
+    })
+    expect(mutation.spec.requestPlugins[2].config.jsonBody.operations[0].value).toEqual(literal)
+    expect(mutation.spec.requestPlugins[3].config).toEqual({
+      enable: true, activeProfile: 'resolvedSecrets', profiles: { resolvedSecrets: { name: 'api' } }, activeProfileRef: { name: 'selector' },
+    })
+    expect(source).toEqual(before)
+  })
+
   it.each(['create', 'update'] as const)('strips deployment runtime status in %s while retaining operator siblings', (mode) => {
     const kinds = [
       'gatewayclass', 'edgiongatewayconfig', 'gateway', 'httproute', 'grpcroute',

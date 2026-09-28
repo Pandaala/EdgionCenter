@@ -235,6 +235,28 @@ secret and resourceCatalog. Log:
 `/tmp/ws5-center-remaining-resource-ownership-tests.log`. This is ownership and
 adapter evidence, not new AI-provider traffic or ACME issuance evidence.
 
+## HTTP plugin opaque-data preservation repair
+
+Checkpoint: 2026-09-28, following `5d433a5`. Recursive terminal-name filtering
+deleted authored Mock header names, Wasm plugin/vm JSON, ProxyRewrite JSON Patch
+literal keys and Canary profile names when they matched names such as
+resolvedSecrets. The regression failed for both create and update before repair
+(`/tmp/ws5-plugin-opaque-field-regression.log`).
+
+The catalog now scopes HTTP exclusions to known config fields, condition trees,
+RequestAccessPolicy rule containers, TLS blocks, Wasm source resolution and
+typed references. It does not recursively descend into arbitrary plugin payloads
+or operator-named maps. WAF policy/selector reference denial markers are now
+excluded at their exact paths as well. Authored data and source drafts remain
+unchanged, while the Wasm pull-auth/TLS material and selector denial marker are
+removed from mutation output.
+
+49 tests across resourceCatalog, edgionplugins and edgionstreamplugins pass;
+production build and lint pass. Logs:
+`/tmp/ws5-plugin-scoped-fields-{tests,build,lint}.log`. The remaining imported-type
+review must still verify the narrowed paths cover every serialized runtime field;
+these tests alone do not close the full plugin ownership inventory.
+
 ## Still to reconcile in the dedicated ownership pass
 
 HTTP/stream plugin configurations and their imported condition/configuration types.

@@ -53,7 +53,28 @@ const HTTP_PLUGIN_INTERNAL_PATHS: readonly MutationPath[] = HTTP_PLUGIN_STAGES.f
     ['spec', stage, '*', 'config', 'resolvedProfiles'],
     ['spec', stage, '*', 'config', 'resolutionWarnings'],
     ['spec', stage, '*', 'config', 'profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'resolvedCandidates'],
-    ...HTTP_PLUGIN_INTERNAL_TERMINALS.map((terminal) => ['spec', stage, '*', '**', terminal]),
+    // Descend only through typed configuration containers. Plugin JSON literals,
+    // header maps and operator-chosen profile names may use these same keys.
+    ...HTTP_PLUGIN_INTERNAL_TERMINALS.flatMap((terminal) => [
+      ['spec', stage, '*', 'config', terminal],
+      ['spec', stage, '*', 'conditions', '**', terminal],
+      ['spec', stage, '*', 'config', 'conditions', '**', terminal],
+      ['spec', stage, '*', 'config', 'profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', terminal],
+      ['spec', stage, '*', 'config', 'profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'conditions', '**', terminal],
+    ]),
+    ...[
+      ['tls'], ['grpcService', 'tls'], ['evaluator', 'tls'], ['source', 'fetch', 'tls'],
+    ].flatMap((container) => ['resolvedCaCertificates', 'resolvedClientCertificate'].map(
+      (terminal) => ['spec', stage, '*', 'config', ...container, terminal],
+    )),
+    ['spec', stage, '*', 'config', 'evaluator', 'resolvedSecrets'],
+    ['spec', stage, '*', 'config', 'source', 'fetch', 'resolvedAuthHeader'],
+    ['spec', stage, '*', 'config', 'source', 'oci', 'resolvedPullSecret'],
+    ...[
+      ['backendRef'], ['overrideRef'], ['activeProfileRef'], ['allowRefs', '*'], ['denyRefs', '*'],
+      ['profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'ipRefs', '*'],
+      ['profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'configRefs', '*'],
+    ].map((reference) => ['spec', stage, '*', 'config', ...reference, 'refDenied']),
   ]
 ))
 
@@ -155,6 +176,8 @@ const EXCLUDED_MUTATION_PATHS = {
   ],
   edgionplugins: [
     ['spec', 'currentStatus'], ...HTTP_PLUGIN_INTERNAL_PATHS,
+    ['spec', 'waf', 'policyRef', 'refDenied'],
+    ['spec', 'waf', 'activeProfileRef', 'refDenied'],
     ['spec', 'waf', 'rules'],
     ['spec', 'waf', 'resolvedPolicy'], ['spec', 'waf', 'selectedProfile'],
     ['spec', 'waf', 'resolvedRefIndices'], ['spec', 'waf', 'resolvedBundles'],
