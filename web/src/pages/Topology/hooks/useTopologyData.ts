@@ -228,7 +228,7 @@ function referencesFor(kind: ResourceKind, resource: K8sResource): Reference[] {
     for (const listener of spec.listeners ?? []) {
       for (const certificate of listener.tls?.certificateRefs ?? []) {
         const ref = refFrom(certificate, 'secret', namespace, `certificate#${listener.name ?? ''}`)
-        if (ref) refs.push(ref)
+        if (ref) refs.push({ ...ref, kind: (certificate?.group ?? '') === '' && (certificate?.kind ?? 'Secret') === 'Secret' ? ref.kind : 'unknown' })
       }
     }
   }

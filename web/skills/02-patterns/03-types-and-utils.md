@@ -121,8 +121,10 @@ export function yamlToResource(yamlStr: string): ResourceType {
 - **Server-owned**: status, uid, generation, managedFields, creationTimestamp.
 - **Runtime/internal**: documented Controller-derived parsed, compiled, resolved,
   denial and redacted paths. Verify ownership in the current resource definition;
-  `schemars(skip)` alone is insufficient (Gateway listener `frontendValidation`
-  is operator input despite that annotation).
+  `schemars(skip)` alone is insufficient: inspect ingestion and projection code.
+  Gateway listener `frontendValidation` is Controller-private and cleared before
+  projection from the operator-owned `spec.tls.frontend`; strip the listener path
+  from mutations while preserving the Gateway-level policy.
 
 Adapters preserve unknown operator spec fields for forward compatibility while
 explicitly stripping known internal paths.

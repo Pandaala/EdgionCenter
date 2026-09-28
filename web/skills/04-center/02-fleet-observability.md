@@ -162,3 +162,9 @@ malformed identities remain unknown. Do not scan listener frontendValidation or
 resolved material. These are configured dependencies, not proof a policy was
 selected for a listener or its certificate is trusted. Secret/ConfigMap inventory
 continues to use metadata-only listKeys, with unavailable distinct from missing.
+
+Serving-certificate identity is stricter than the generic core reference parser:
+Gateway listener certificateRefs accept only omitted/empty group and Secret kind
+(omitted kind defaults to Secret). Other identities stay unknown even if an
+object with that name exists. Gateway backend client identity separately accepts
+the Controller's core-group alias. Do not conflate these resolver contracts.

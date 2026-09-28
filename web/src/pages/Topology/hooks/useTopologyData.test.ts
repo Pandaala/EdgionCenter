@@ -81,6 +81,33 @@ describe('buildTopologyGraph', () => {
     expect(graph.edges[0]).toMatchObject({ target: 'unknown/demo/ca', state: 'unknown' })
   })
 
+  it.each([
+    { group: 'core', kind: 'Secret', name: 'cert' },
+    { group: '', kind: 'ConfigMap', name: 'cert' },
+    { group: 'edgion.io', kind: 'EdgionTls', name: 'cert' },
+  ])('keeps unsupported Gateway serving-certificate references unknown: %j', reference => {
+    const graph = buildTopologyGraph({
+      gateway: [resource('Gateway', 'edge', 'demo', { listeners: [{ name: 'https', tls: { certificateRefs: [reference] } }] })],
+      secret: [resource('Secret', 'cert', 'demo')],
+      configmap: [resource('ConfigMap', 'cert', 'demo')],
+      edgiontls: [resource('EdgionTls', 'cert', 'demo')],
+    }, null)
+    expect(graph.edges[0]).toMatchObject({ target: 'unknown/demo/cert', state: 'unknown' })
+  })
+
+  it('distinguishes default serving Secret references from backend core-group aliases', () => {
+    const graph = buildTopologyGraph({
+      gateway: [resource('Gateway', 'edge', 'demo', {
+        listeners: [{ name: 'https', tls: { certificateRefs: [{ name: 'serving' }, { name: 'explicit', group: '', kind: 'Secret' }] } }],
+        tls: { backend: { clientCertificateRef: { name: 'client', group: 'core', kind: 'Secret' } } },
+      })],
+      secret: ['serving', 'explicit', 'client'].map(name => resource('Secret', name, 'demo')),
+    }, null)
+    expect(graph.edges).toHaveLength(3)
+    expect(graph.edges.every(edge => edge.state === 'resolved')).toBe(true)
+    expect(graph.edges.map(edge => edge.target).sort()).toEqual(['secret/demo/client', 'secret/demo/explicit', 'secret/demo/serving'])
+  })
+
   it('builds gateway-to-backend and policy/dependency relationships', () => {
     const graph = buildTopologyGraph({
       gatewayclass: [resource('GatewayClass', 'edgion', undefined)],

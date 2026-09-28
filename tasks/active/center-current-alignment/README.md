@@ -2952,3 +2952,10 @@ Gateway TLS topology now includes default/per-port frontend CA and backend clien
 certificate dependencies, retaining namespace/grant and metadata-only boundaries.
 Thirty-nine graph tests plus build/lint pass. See
 [GATEWAY-TLS-TOPOLOGY-EVIDENCE.md](GATEWAY-TLS-TOPOLOGY-EVIDENCE.md).
+
+
+Gateway serving-certificate topology follow-up distinguishes the strict empty
+serving group from the backend core alias; invalid kinds no longer resolve to
+same-named objects. All 43 graph tests, build and lint pass. See the serving
+follow-up in [Gateway TLS topology evidence](GATEWAY-TLS-TOPOLOGY-EVIDENCE.md).
+Stale adapter guidance about frontendValidation ownership is corrected.
