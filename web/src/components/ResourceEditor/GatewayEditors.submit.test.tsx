@@ -175,6 +175,13 @@ describe('Gateway family editor submit boundaries', () => {
     fireEvent.change(screen.getByLabelText('Editor YAML'), { target: { value: yaml.dump({ ...resource, spec: { tcpTimeout: { idleTimeout: 'later' }, dnsResolver: { servers: ['1.1.1.1'], linkSysRef: { namespace: 'prod', name: 'dns' } } } }) } })
     fireEvent.click(screen.getByTestId('editor-submit'))
     expect(clusterUpdate).not.toHaveBeenCalled()
+    for (const validation of [{ hostname: '' }, { subjectAltNames: [{ type: 'Hostname', hostname: 'api.example.com' }] }]) {
+      const draft = yaml.dump({ ...resource, spec: { outboundTls: { validation } } })
+      fireEvent.change(screen.getByLabelText('Editor YAML'), { target: { value: draft } })
+      fireEvent.click(screen.getByTestId('editor-submit'))
+      expect(clusterUpdate).not.toHaveBeenCalled()
+      expect(screen.getByLabelText('Editor YAML')).toHaveValue(draft)
+    }
     fireEvent.change(screen.getByLabelText('Editor YAML'), { target: { value: yaml.dump({ ...resource, metadata: { ...resource.metadata, resourceVersion: 'server' }, spec: { tcpTimeout: { idleTimeout: '1h' }, dnsResolver: { servers: ['1.1.1.1'], cacheTtl: '5s' }, pathNormalization: { legacyUnknownField: false } }, status: {} }) } })
     fireEvent.click(screen.getByTestId('editor-submit'))
     await waitFor(() => expect(clusterUpdate).toHaveBeenCalledOnce())

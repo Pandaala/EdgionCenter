@@ -37,7 +37,7 @@ const fixture: any = {
     },
     preflightPolicy: { mode: 'all-options', statusCode: 204 },
     linkSys: { webhookMaxResponseBytes: 32768, maxInstancesPerKind: 200 },
-    outboundTls: { verify: false, validation: { caCertificateRefs: [{ group: '', kind: 'Secret', namespace: 'certs', name: 'ca' }], wellKnownCACertificates: 'System', hostname: 'api.example.com', subjectAltNames: [{ type: 'Hostname', hostname: 'api.example.com' }, { type: 'URI', uri: 'spiffe://cluster/id' }] }, clientCertificateRef: { kind: 'Secret', namespace: 'certs', name: 'client' } },
+    outboundTls: { verify: false, validation: { caCertificateRefs: [{ group: '', kind: 'Secret', namespace: 'certs', name: 'ca' }], wellKnownCACertificates: 'System' }, clientCertificateRef: { kind: 'Secret', namespace: 'certs', name: 'client' } },
     dnsResolver: { servers: ['1.1.1.1', '8.8.8.8:53'], cacheTtl: '10s' },
     pathNormalization: { legacyUnknownField: false },
     futureSpec: { empty: [], disabled: false },
@@ -277,4 +277,22 @@ describe('GatewayConfig malformed trusted proxy inputs', () => {
       expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('trustedIps[0]')
     }
   })
+})
+
+
+it('rejects unsupported global TLS identity constraints without modifying the draft', () => {
+  for (const hostname of ['', 'api.example.com']) {
+    const resource = structuredClone(fixture)
+    resource.spec.outboundTls.validation.hostname = hostname
+    resource.spec.outboundTls.validation.subjectAltNames = [{ type: 'URI', uri: 'spiffe://cluster/id' }]
+    const before = structuredClone(resource)
+    const errors = validateEdgionGatewayConfig(resource)
+    expect(errors).toContain('spec.outboundTls.validation.hostname is not supported by the current Controller')
+    expect(errors).toContain('spec.outboundTls.validation.subjectAltNames is not supported by the current Controller')
+    expect(resource).toEqual(before)
+    expect(fromYaml(toYaml(resource))).toEqual(before)
+  }
+  const resource = structuredClone(fixture)
+  resource.spec.outboundTls.validation.subjectAltNames = []
+  expect(validateEdgionGatewayConfig(resource)).toEqual([])
 })

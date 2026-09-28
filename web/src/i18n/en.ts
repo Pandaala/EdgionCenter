@@ -1013,6 +1013,8 @@ const en = {
   'section.securityProtect': 'Security Protection',
   'section.globalPlugins': 'Global Plugins',
   'section.linkSys': 'LinkSys',
+  'help.globalTlsIdentityConstraints': 'The current Controller rejects global hostname and non-empty subjectAltNames. Clear these fields before saving.',
+  'help.globalTlsClientIdentity': 'The current Controller does not resolve this global client certificate. Inheriting outbound connections fail unless they supply their own client identity.',
   'section.outboundTls': 'Outbound TLS',
   'section.dnsResolver': 'DNS Resolver',
   'field.addressValue': 'Address Value',

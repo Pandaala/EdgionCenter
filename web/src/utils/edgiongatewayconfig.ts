@@ -231,6 +231,8 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
     if (!outbound.clientCertificateRef.namespace?.trim()) errors.push('spec.outboundTls.clientCertificateRef.namespace is required for a cluster-scoped resource')
     if (outbound.clientCertificateRef.kind && outbound.clientCertificateRef.kind !== 'Secret') errors.push('spec.outboundTls.clientCertificateRef.kind must be Secret')
   }
+  if (outbound?.validation?.hostname != null) errors.push('spec.outboundTls.validation.hostname is not supported by the current Controller')
+  if (outbound?.validation?.subjectAltNames?.length) errors.push('spec.outboundTls.validation.subjectAltNames is not supported by the current Controller')
   outbound?.validation?.subjectAltNames?.forEach((san, index) => {
     if (san.type === 'Hostname' && !san.hostname?.trim()) errors.push(`spec.outboundTls.validation.subjectAltNames[${index}].hostname is required`)
     if (san.type === 'URI' && !san.uri?.trim()) errors.push(`spec.outboundTls.validation.subjectAltNames[${index}].uri is required`)
