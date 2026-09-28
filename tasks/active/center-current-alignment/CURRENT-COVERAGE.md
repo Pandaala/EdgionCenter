@@ -270,3 +270,11 @@ restart page one. The full frontend suite passed 716 tests in 110 files; four
 pagination regressions passed again after tightening the persistent-error guard.
 Two browser checks recover injected expired pagination to actual native rows.
 See [PAGINATION-RECOVERY-EVIDENCE.md](PAGINATION-RECOVERY-EVIDENCE.md).
+
+
+EndpointSlice readiness follow-up: topology now matches current Gateway discovery,
+which requires explicit ready=true. Seven actual flow/page checks cover missing,
+null, false, serving-only, true and terminating+true states plus restoration.
+29 focused tests and build/lint pass. See
+[ENDPOINT-READINESS-EVIDENCE.md](ENDPOINT-READINESS-EVIDENCE.md); the fixture writes
+are external harness setup, not evidence of default Center write permission.

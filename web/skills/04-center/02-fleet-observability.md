@@ -139,3 +139,9 @@ Current BackendTLSPolicy and EdgionBackendTrafficPolicy encode arbitration loss
 as Accepted=False with reason Conflicted on the ancestor, not as
 Conflicted=True/LostOldestWins. Topology reports both rejection and conflict for
 that exact current condition; generation freshness still takes precedence.
+
+
+EndpointSlice backend nodes use the current Gateway discovery eligibility rule:
+only explicit `conditions.ready: true` avoids the not-ready badge. Missing/null
+ready and serving-only endpoints remain not ready. This is source readiness,
+not an active probe result; topology does not infer endpoint runtime health.

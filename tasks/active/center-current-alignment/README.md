@@ -2785,3 +2785,15 @@ before acting on CCI execution files or proposing replacements.
   injected expiry to real Controller Service rows without manual retry.
 - [PAGINATION-RECOVERY-EVIDENCE.md](PAGINATION-RECOVERY-EVIDENCE.md) records the
   baseline failure and evidence. No runtime resources or policies changed.
+
+
+### 2026-09-28: EndpointSlice readiness aligned with Gateway
+
+- Corrected topology's missing/null readiness handling to match the Gateway's
+  explicit-true discovery rule. Source readiness remains separate from probes.
+- Seven actual browser/traffic checks prove 200/503 transitions and final recovery;
+  29 focused tests, build and lint pass. The three owned fixtures remain ready.
+- Updated stale Service/EndpointSlice development notes to describe existing
+  permission-gated CRUD and Form/YAML behavior. No Controller policy changed.
+- [ENDPOINT-READINESS-EVIDENCE.md](ENDPOINT-READINESS-EVIDENCE.md) records sources,
+  fixture identity, artifacts and limits. Overall alignment remains active.

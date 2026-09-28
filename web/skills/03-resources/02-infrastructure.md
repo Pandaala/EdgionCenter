@@ -115,7 +115,7 @@ spec:
 - List page displays the count of associated Gateways
 - Primarily YAML editing + basic information display
 
-## Service (Pending Development — Read-only)
+## Service
 
 ```yaml
 apiVersion: v1
@@ -136,12 +136,15 @@ spec:
 
 **Development Notes**:
 - Namespaced resource, kind: `service`
-- **Read-only display** (Service is managed by K8s or created by the user via YAML)
-- List page displays: name, namespace, type, ports (Tags), selector
-- Supports YAML viewing and editing
-- Association display: Routes that reference this Service, associated EndpointSlices
+- CRUD actions are gated by Controller permissions; the default remote policy is read-only.
+- List columns show name, namespace, age, type and up to three ports.
+- The form covers type, ExternalName, session affinity, selectors and multiple ports.
+  Form/YAML conversion preserves additional operator fields through a narrow edit;
+  mutation serialization strips status/server metadata and retains update resourceVersion.
+- Topology links Routes, Services and associated EndpointSlices. These are declared
+  relationships, not proof of successful routing or endpoint health.
 
-## EndpointSlice (Pending Development — Read-only)
+## EndpointSlice
 
 ```yaml
 apiVersion: discovery.k8s.io/v1
@@ -165,9 +168,20 @@ endpoints:
 
 **Development Notes**:
 - Namespaced resource, kind: `endpointslice`
-- **Purely read-only display**
-- List page displays: name, namespace, associated service, endpoint count, ready status
-- Detail view shows endpoint list
+- CRUD actions are gated by Controller permissions; Form and YAML views are available.
+- Address type, ports and endpoints are top-level fields, not fields under spec.
+- List columns show associated Service and the count of explicitly ready endpoints.
+- The form edits multiple ports/endpoints, addresses, ready, serving and hostname;
+  other operator fields remain editable through YAML and survive narrow form edits.
+- Current Gateway discovery accepts only `conditions.ready == true` into ready_slots.
+  Missing conditions, missing ready, null and false are not ready. Serving alone
+  does not make an endpoint eligible; terminating does not override explicit ready.
+  The topology backend node follows this exact rule. This is the current Edgion
+  implementation, not a generic interpretation of Kubernetes readiness defaults.
+- Source readiness is separate from active health checks and outlier detection.
+  A ready node does not establish runtime health, port validity or route admission.
+- Runtime authority: sibling `edgion-gateway/src/backends/discovery/coordinator.rs`,
+  the loop building EndpointOrigin and ready_slots.
 
 ## ReferenceGrant (Pending Development)
 

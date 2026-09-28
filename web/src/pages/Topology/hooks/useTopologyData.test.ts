@@ -263,3 +263,23 @@ it('matches an AI credential grant in the credential namespace', () => {
   expect(graph.edges.some((edge) => edge.source === 'edgionbackend/apps/provider'
     && edge.target === 'referencegrant/credentials/ai-key' && edge.label === 'granted')).toBe(true)
 })
+
+
+it.each([
+  [undefined, true],
+  [{}, true],
+  [{ ready: null }, true],
+  [{ ready: false, serving: true }, true],
+  [{ serving: true }, true],
+  [{ ready: true }, false],
+  [{ ready: true, terminating: true }, false],
+])('matches Gateway endpoint readiness for %j', (conditions, unhealthy) => {
+  const graph = buildTopologyGraph({ endpointslice: [{
+    apiVersion: 'discovery.k8s.io/v1', kind: 'EndpointSlice',
+    metadata: { name: 'slice', namespace: 'app' },
+    addressType: 'IPv4', endpoints: [{ addresses: ['10.0.0.8'], conditions }],
+  } as K8sResource] }, null)
+  const endpoint = graph.nodes.find((node) => node.data.kind === 'backend')!
+  expect(endpoint.data.unhealthy).toBe(unhealthy)
+  expect(endpoint.data.resource.status).toEqual(conditions)
+})

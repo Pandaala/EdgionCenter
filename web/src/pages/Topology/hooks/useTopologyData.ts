@@ -452,7 +452,8 @@ export function buildTopologyGraph(resources: TopologyResources, namespaceFilter
         id: backendId,
         data: {
           kind: 'backend', name: addresses, namespace, layer: layerFor('backend'), synthetic: true,
-          unhealthy: (endpoint.conditions as Record<string, unknown> | undefined)?.ready === false,
+          // Match Gateway discovery: only an explicit ready=true enters ready_slots.
+          unhealthy: (endpoint.conditions as Record<string, unknown> | undefined)?.ready !== true,
           resource: { apiVersion: 'discovery.k8s.io/v1', kind: 'Backend', metadata: { name: addresses, namespace }, status: endpoint.conditions },
         },
       }

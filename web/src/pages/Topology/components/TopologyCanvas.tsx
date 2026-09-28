@@ -160,6 +160,7 @@ export default function TopologyCanvas({ nodes, edges, onNodeClick }: Props) {
                   <div
                     ref={(element) => { element ? cardRefs.current.set(node.id, element) : cardRefs.current.delete(node.id) }}
                     data-testid="topology-node"
+                    data-node-id={node.id}
                     data-node-testid={`topology-node-${node.data.kind}-${node.data.name}`}
                     onClick={() => onNodeClick(node.data)}
                     style={{
