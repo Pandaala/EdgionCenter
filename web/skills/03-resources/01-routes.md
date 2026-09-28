@@ -12,6 +12,14 @@ All route resources share:
 - `spec.rules` — routing rules
 - Namespaced resource, uses `resourceApi`
 
+HTTPRoute, GRPCRoute and the three stream-route forms use the same
+`ResourceEditor/common/ParentRefsSection`. Clearing optional namespace or
+sectionName omits the field, restoring the owner namespace or listener selection
+without an explicit section restriction. Port and other reference fields remain
+unchanged. Narrow edits preserve sibling references and unknown operator fields.
+The HTTPRoute-specific duplicate was removed; use the shared translated controls
+for subsequent attachment changes.
+
 The shared backend reference editor must preserve an explicit `weight: 0`.
 Clearing the input omits weight; entering zero must not omit it, because the
 Gateway defaults an absent weight to one. Zero excludes a backend from weighted

@@ -2865,3 +2865,16 @@ before acting on CCI execution files or proposing replacements.
 - Updated stale security-guide statements about Secret/ConfigMap value access.
   [TLS-ATTACHMENT-FORM-EVIDENCE.md](TLS-ATTACHMENT-FORM-EVIDENCE.md) records
   contract sources, artifacts and limits. Overall alignment remains active.
+
+
+### 2026-09-28: HTTPRoute shares optional parent-reference behavior
+
+- Reproduced HTTPRoute's empty-string namespace/sectionName clearing defect.
+  Switched its form to the shared translated component and removed the duplicate.
+- Seventeen focused tests pass. Nine native browser cases pass, including all
+  five route kinds clearing optional fields and preserving name, port and rules
+  through Form/YAML and actual Controller persistence.
+- Build, lint and E2E types pass. Initial broad-selector failures and the passing
+  fresh run are recorded separately in
+  [ROUTE-PARENT-CLEARING-EVIDENCE.md](ROUTE-PARENT-CLEARING-EVIDENCE.md).
+  Existing environments are unchanged; overall alignment remains active.

@@ -6,7 +6,7 @@
 import React from 'react';
 import { Card, Form, InputNumber, Select, Space, Typography } from 'antd';
 import MetadataSection from './sections/MetadataSection';
-import ParentRefsSection from './sections/ParentRefsSection';
+import ParentRefsSection from '../common/ParentRefsSection';
 import HostnamesSection from './sections/HostnamesSection';
 import RulesSection from './sections/RulesSection';
 import type { HTTPRoute } from '@/types/gateway-api';

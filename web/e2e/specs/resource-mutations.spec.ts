@@ -373,6 +373,41 @@ for (const catalog of RESOURCE_CATALOG.values()) {
   })
 }
 
+for (const [kind, port] of [['httproute', 8080], ['grpcroute', 8081], ['tcproute', 9000], ['udproute', 9001], ['tlsroute', 8443]] as const) {
+  test(`route parent browser clearing restores optional fields for ${kind}`, async ({ page, request }) => {
+    const catalog = RESOURCE_CATALOG.get(kind)!
+    await waitForControllerCapabilities(request, controller, [{ resourceKind: kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+    const name = `${prefix}-${kind}-parent-clear`
+    const document = mutationDocument(catalog, name)
+    document.spec.parentRefs[0] = { ...document.spec.parentRefs[0], namespace, port }
+    const path = itemPath(catalog, namespace, name)
+    const created = await request.post(collectionPath(catalog, namespace), { data: yaml.dump(document, { lineWidth: -1 }), headers: yamlHeaders })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    try {
+      await waitForStableResourceVersion(request, catalog, namespace, name)
+      await openResourcePage(page, catalog)
+      await (await resourceRow(page, catalog, name)).getByTestId(`${kind}-row-edit`).click()
+      const parent = page.locator('.ant-card').filter({ has: page.getByText('Gateway 1', { exact: true }) }).last()
+      await parent.getByPlaceholder(namespace, { exact: true }).fill('')
+      await parent.getByPlaceholder('http-listener', { exact: true }).fill('')
+      await page.getByTestId('editor-yaml-tab').click()
+      const expected = { name: `${prefix}-gateway`, port }
+      expect((await yamlEditorDocument(page)).spec.parentRefs).toEqual([expected])
+      await page.getByTestId('editor-form-tab').click()
+      const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().endsWith(path))
+      await page.getByTestId('editor-submit').click()
+      const result = await response
+      expect(result.ok(), await result.text()).toBeTruthy()
+      const updated = await readControllerResourceDocument(request, controller, kind, 'Namespaced', namespace, name)
+      expect(updated.spec.parentRefs).toEqual([expected])
+      expect(updated.spec.rules).toEqual(document.spec.rules)
+    } finally {
+      const cleanup = await request.delete(path)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact route parent fixture cleanup failed').toBeTruthy()
+    }
+  })
+}
+
 for (const kind of ['httproute', 'grpcroute'] as const) {
   test(`route policy browser clearing restores optional fields for ${kind}`, async ({ page, request }) => {
     const catalog = RESOURCE_CATALOG.get(kind)!

@@ -316,3 +316,11 @@ frontend: 755 tests / 114 files; build/lint/E2E types pass. Twelve native browse
 cases pass, including actual attachment persistence and shared route regressions.
 See [TLS-ATTACHMENT-FORM-EVIDENCE.md](TLS-ATTACHMENT-FORM-EVIDENCE.md). This does
 not establish TLS handshake behavior.
+
+
+Route attachment follow-up: HTTPRoute now uses the shared ParentRefsSection
+instead of its untranslated duplicate. Seventeen focused tests and nine native
+browser cases pass; all five route kinds prove optional namespace/sectionName
+omission with actual API readback and unchanged rules/ports. Build/lint/E2E types
+pass. See [ROUTE-PARENT-CLEARING-EVIDENCE.md](ROUTE-PARENT-CLEARING-EVIDENCE.md)
+for the reproduced defect and retained initial selector failures.
