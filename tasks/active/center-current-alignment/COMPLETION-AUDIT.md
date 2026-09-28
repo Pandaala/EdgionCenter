@@ -11,7 +11,7 @@ replace the user's full backend/dashboard, resource-by-resource/menu-by-menu sco
 | Use current Edgion, without reconstructing its history | Current ResourceKind and CRD/handler reads; per-fix source citations | Satisfied for work performed |
 | Cover every resource type | Fresh exact set comparison: 22 Edgion kinds = 22 Center catalog kinds; all 20 first-class resource paths occur in the Controller menu; Secret/ConfigMap share restricted dependencies | Catalog and nested ownership review complete; runtime requirements remain below |
 | Check every menu | Current Center menu has 17 leaves; controller catalog paths have no omissions; current native 174-pass regression and separate OIDC/Kubernetes evidence | Current menu coverage indexed; runtime limits below remain explicit |
-| Update Center backend | Federation ownership revocation, global write semantics, auth/cloud/error handling repairs; fresh 876 workspace + 247 no-default-feature app tests | Implemented paths verified; deployed Kubernetes image predates later backend fixes |
+| Update Center backend | Federation ownership revocation, global write semantics, auth/cloud/error handling repairs; fresh 876 workspace + 247 no-default-feature app tests | Current Kubernetes image deployed; OIDC/capabilities and forced owner-Pod recovery verified |
 | Update Center frontend | 848 tests in 117 files including the final Stream repair; Gateway/BTP fixes have focused browser/component evidence | Current unit/component and complete standalone browser regressions pass |
 | Exercise local runtime | Isolated native Center + two mTLS Controllers; API readback, real Gateway traffic, and separate OrbStack deployments | Established for recorded scenarios; no blanket conformance claim |
 | Commit Center only, do not push | Center task commits; Edgion ACME and outbound TLS repairs remain local/uncommitted; unrelated work preserved | Scope retained |
@@ -75,14 +75,18 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    invalidation repair. The persistent runner is also repaired: 80 runtime tests
    and a native Redis mTLS rotation/revocation/recovery scenario pass. The other
    persistent providers have no new provider-specific handshake proof from that run.
-3. Reconcile Center menu async/fault coverage with current backend source. Real
-   owner migration is proven; Pod crash takeover and ambiguous post-dispatch
-   faults have narrower adapter/runtime evidence. New cloud error states have
-   component/HTTP adapter evidence rather than native provider mutations.
+3. Reconcile the remaining ambiguous post-dispatch fault/non-replay evidence.
+   Current-image owner-Pod failure recovery now passes ten native checkpoints,
+   including explicit survivor ownership, increased fencing epoch, CAS write
+   readback and restored authorization. Three current Kubernetes OIDC/capability
+   browser checks also pass. See
+   [CURRENT-KUBERNETES-FAULT-EVIDENCE.md](CURRENT-KUBERNETES-FAULT-EVIDENCE.md).
+   New cloud error states retain component/HTTP adapter evidence rather than
+   native external-provider mutations.
 4. The complete current standalone browser regression now passes (174 tests,
    two Kubernetes-only skips). Rerun affected checks after subsequent fixes.
-   The Kubernetes v5 deployment still predates newer backend repairs; a fresh
-   standalone run does not upgrade that deployment or its fault evidence.
+   The older Kubernetes v5 deployment has now been replaced by a current release
+   image with the embedded dashboard; its fresh checks are recorded separately.
 
 Optional external-account/MySQL tests and a broken isolated kind node are
 validation limits, not reasons to stop work that can proceed in native runtimes.

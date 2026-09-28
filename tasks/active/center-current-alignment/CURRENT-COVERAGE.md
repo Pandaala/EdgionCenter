@@ -13,8 +13,15 @@ Kubernetes-only skips**. Center and Controller were rebuilt, the isolated runtim
 used SQL RBAC and real mTLS federation, and all 70 retained fixture files were
 verified. See [CURRENT-NATIVE-REGRESSION.md](CURRENT-NATIVE-REGRESSION.md).
 This supersedes older full frontend/browser counts below; their feature-specific
-evidence remains useful. Gateway traffic and Kubernetes fault requirements stay
-open in the completion audit.
+evidence remains useful. Subsequent traffic and fault proofs are linked below;
+the completion audit identifies the remaining requirements.
+
+Current Kubernetes follow-up: the task deployment now runs the locally rebuilt
+`ws5-alignment-current-36d771d` image. Three OIDC/capability browser checks and
+ten forced owner-Pod recovery checkpoints pass, including new survivor ownership,
+CAS readback and authorization restoration. See
+[CURRENT-KUBERNETES-FAULT-EVIDENCE.md](CURRENT-KUBERNETES-FAULT-EVIDENCE.md).
+Ambiguous post-dispatch response loss remains separate.
 
 ## Scope and authority
 
