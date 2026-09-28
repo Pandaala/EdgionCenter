@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { load } from 'js-yaml'
 import ServiceEditor from './Service/ServiceEditor'
 import EndpointSliceEditor from './EndpointSlice/EndpointSliceEditor'
 
@@ -56,4 +57,31 @@ describe('core resource editor submissions', () => {
     expect(submit.mock.calls[0][0]).toContain('kubernetes.io/service-name: api')
     expect(submit.mock.calls[0][1].endpoints[0].addresses).toEqual(['10.0.0.1'])
   })
+})
+
+
+it.each([['', undefined], ['9090', 9090], ['web', 'web']])('preserves Service fields while editing targetPort to %j', async (input, expected) => {
+  const submit = vi.fn().mockResolvedValue(undefined)
+  const resource = { apiVersion: 'v1', kind: 'Service', metadata: { name: 'api', namespace: 'app', resourceVersion: '9' }, spec: {
+    ports: [{ name: 'http', port: 80, targetPort: 8080, appProtocol: 'http', nodePort: 30080 }, { name: 'metrics', port: 9091, targetPort: 'metrics' }],
+    ipFamilyPolicy: 'SingleStack', futureField: { retain: true },
+  }, status: { loadBalancer: {} } }
+  render(<ServiceEditor visible mode="edit" resource={resource} onClose={vi.fn()} onSubmit={submit} />)
+  fireEvent.change(screen.getAllByPlaceholderText('targetPort')[0], { target: { value: input } })
+  fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+  const switched = load((screen.getByLabelText('yaml-source') as HTMLTextAreaElement).value) as any
+  if (expected === undefined) expect(switched.spec.ports[0]).not.toHaveProperty('targetPort')
+  else expect(switched.spec.ports[0].targetPort).toBe(expected)
+  fireEvent.click(screen.getByRole('tab', { name: 'Form' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(submit).toHaveBeenCalledOnce())
+  const result = load(submit.mock.calls[0][0]) as any
+  expect(result.spec.ports[0]).toMatchObject({ name: 'http', port: 80, appProtocol: 'http', nodePort: 30080 })
+  expect(result.spec.ports[1]).toEqual(resource.spec.ports[1])
+  expect(result.spec.futureField).toEqual({ retain: true })
+  expect(result.spec.ipFamilyPolicy).toBe('SingleStack')
+  expect(result.metadata.resourceVersion).toBe('9')
+  expect(result).not.toHaveProperty('status')
+  if (expected === undefined) expect(result.spec.ports[0]).not.toHaveProperty('targetPort')
+  else expect(result.spec.ports[0].targetPort).toBe(expected)
 })

@@ -139,6 +139,10 @@ spec:
 - CRUD actions are gated by Controller permissions; the default remote policy is read-only.
 - List columns show name, namespace, age, type and up to three ports.
 - The form covers type, ExternalName, session affinity, selectors and multiple ports.
+  Clearing optional targetPort removes the field; never serialize an empty string.
+  Current Gateway normalization defaults an absent targetPort to the Service port,
+  while an empty string makes the port identity invalid. Numeric and named values
+  retain their JSON types, and sibling ports/unknown fields survive the edit.
   Form/YAML conversion preserves additional operator fields through a narrow edit;
   mutation serialization strips status/server metadata and retains update resourceVersion.
 - Topology links Routes, Services and associated EndpointSlices. These are declared

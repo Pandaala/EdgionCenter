@@ -58,7 +58,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | TCPRoute | routes/tcp | v1 plus accepted alternate; stream-plugin/keepalive native edits |
 | UDPRoute | routes/udp | v1 plus accepted alternate; stream-plugin native edits and TCP-control exclusion |
 | TLSRoute | routes/tls | v1 plus accepted alternate; v2 Proxy Protocol, retries and keepalive native edits; explicit SNI hostname requirement and current list bounds |
-| Service | services/list | Immutable-field handling, zero weights, single/batch delete workflows |
+| Service | services/list | Immutable-field handling, zero weights, single/batch delete workflows; targetPort clearing preserves omission and restores actual Gateway traffic |
 | EndpointSlice | services/endpointslices | Native top-level addressType/endpoints/ports envelope retained |
 | EdgionBackend | services/ai-backends | New resource, provider/credential/model editor, AI route and topology references |
 | EdgionBackendTrafficPolicy | services/backend-traffic-policies | HTTPS probe editing, supported AI targets, unsupported AI controls, feature summary; live HTTP/HTTPS/TCP/gRPC/GRPCS probes, HTTPS/GRPCS mTLS, service and certificate failure/recovery through Center forms |
@@ -278,3 +278,9 @@ null, false, serving-only, true and terminating+true states plus restoration.
 29 focused tests and build/lint pass. See
 [ENDPOINT-READINESS-EVIDENCE.md](ENDPOINT-READINESS-EVIDENCE.md); the fixture writes
 are external harness setup, not evidence of default Center write permission.
+
+
+Service targetPort follow-up: clearing the optional form value now omits the field
+instead of sending an invalid empty string. 13 focused tests, build/lint and the
+actual Center save/readback/Gateway recovery scenario pass. Temporary update
+permission was revoked. See [SERVICE-PORT-EVIDENCE.md](SERVICE-PORT-EVIDENCE.md).

@@ -2797,3 +2797,14 @@ before acting on CCI execution files or proposing replacements.
   permission-gated CRUD and Form/YAML behavior. No Controller policy changed.
 - [ENDPOINT-READINESS-EVIDENCE.md](ENDPOINT-READINESS-EVIDENCE.md) records sources,
   fixture identity, artifacts and limits. Overall alignment remains active.
+
+
+### 2026-09-28: Service optional targetPort clearing
+
+- Fixed Form clearing to omit targetPort rather than emit the empty string that
+  current Gateway normalization rejects. Numeric/named edits preserve other fields.
+- 13 focused tests, build and lint pass. Actual Center form save removes the field
+  in Controller readback and changes Gateway traffic from reproduced 503 to 200.
+- Original fixture and default Controller policy restored; temporary Service update
+  permission revoked. Failed harness attempts are recorded separately from the
+  passing final run in [SERVICE-PORT-EVIDENCE.md](SERVICE-PORT-EVIDENCE.md).
