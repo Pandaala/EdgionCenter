@@ -21,7 +21,9 @@ Current Kubernetes follow-up: the task deployment now runs the locally rebuilt
 ten forced owner-Pod recovery checkpoints pass, including new survivor ownership,
 CAS readback and authorization restoration. See
 [CURRENT-KUBERNETES-FAULT-EVIDENCE.md](CURRENT-KUBERNETES-FAULT-EVIDENCE.md).
-Ambiguous post-dispatch response loss remains separate.
+Ambiguous post-dispatch response loss now also passes eight native checkpoints,
+including actual Controller write readback and exactly one observed PUT dispatch.
+See [AMBIGUOUS-WRITE-TRAFFIC-EVIDENCE.md](AMBIGUOUS-WRITE-TRAFFIC-EVIDENCE.md).
 
 ## Scope and authority
 

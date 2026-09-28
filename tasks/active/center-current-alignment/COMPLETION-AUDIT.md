@@ -48,7 +48,7 @@ is the original historical checkpoint, not an up-to-date pending-work list.
 - Strict E2E inventory and E2E typecheck are recorded in
   `/tmp/ws5-center-closure-inventory.log` and `-e2e-types.log`.
 
-## Remaining work, not superseded historical TODOs
+## Closure evidence and final reconciliation
 
 1. The dedicated nested operator/runtime ownership pass is now recorded for all
    catalog kinds in [FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md), including
@@ -75,7 +75,11 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    invalidation repair. The persistent runner is also repaired: 80 runtime tests
    and a native Redis mTLS rotation/revocation/recovery scenario pass. The other
    persistent providers have no new provider-specific handshake proof from that run.
-3. Reconcile the remaining ambiguous post-dispatch fault/non-replay evidence.
+3. Ambiguous post-dispatch response loss now has native non-replay evidence:
+   the Controller persists a CAS write, its encrypted response is dropped, the
+   non-owner returns explicit uncertainty (503), recovery reads the same version,
+   and Controller dispatch logs contain exactly one PUT. Eight checkpoints pass;
+   see [AMBIGUOUS-WRITE-TRAFFIC-EVIDENCE.md](AMBIGUOUS-WRITE-TRAFFIC-EVIDENCE.md).
    Current-image owner-Pod failure recovery now passes ten native checkpoints,
    including explicit survivor ownership, increased fencing epoch, CAS write
    readback and restored authorization. Three current Kubernetes OIDC/capability
@@ -87,6 +91,10 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    two Kubernetes-only skips). Rerun affected checks after subsequent fixes.
    The older Kubernetes v5 deployment has now been replaced by a current release
    image with the embedded dashboard; its fresh checks are recorded separately.
+
+The selected runtime gaps listed at the earlier checkpoint now have concrete
+evidence. Final requirement-by-requirement reconciliation against the full
+resource/menu scope remains before marking the overall goal complete.
 
 Optional external-account/MySQL tests and a broken isolated kind node are
 validation limits, not reasons to stop work that can proceed in native runtimes.
