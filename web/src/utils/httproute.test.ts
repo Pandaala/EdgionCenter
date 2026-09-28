@@ -241,3 +241,34 @@ it.each(['create', 'update'] as const)('strips mirror authorization results at b
   }
   expect(route).toEqual(before)
 })
+
+it.each(['create', 'update'] as const)('omits resolved ExternalAuth material while preserving references on %s', (mode) => {
+  const authoredAuth = {
+    target: { url: 'https://auth.example.com' },
+    tls: {
+      enabled: true,
+      clientCertificateRef: { name: 'identity', namespace: 'shared' },
+      validation: { caCertificateRefs: [{ name: 'ca', namespace: 'shared' }] },
+    },
+    request: { headers: { set: [{ name: 'x-key', value: '${secretRef:shared/auth:key}' }] } },
+    decision: { hideCredentials: true },
+    future: { resolvedSecrets: 'operator value' },
+  }
+  const filter = {
+    type: 'ExternalAuth',
+    externalAuth: {
+      ...authoredAuth,
+      resolvedSecrets: '[redacted]',
+      tls: { ...authoredAuth.tls, resolvedCaCertificates: '[redacted]', resolvedClientCertificate: '[redacted]' },
+    },
+  }
+  const route: any = {
+    apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute', metadata: { name: 'auth-route', namespace: 'default' },
+    spec: { rules: [{ filters: [structuredClone(filter)], backendRefs: [{ name: 'primary', port: 80, filters: [structuredClone(filter)] }] }] },
+  }
+  const before = structuredClone(route)
+  const mutation: any = toHTTPRouteMutationDocument(route, mode)
+  expect(mutation.spec.rules[0].filters[0].externalAuth).toEqual(authoredAuth)
+  expect(mutation.spec.rules[0].backendRefs[0].filters[0].externalAuth).toEqual(authoredAuth)
+  expect(route).toEqual(before)
+})

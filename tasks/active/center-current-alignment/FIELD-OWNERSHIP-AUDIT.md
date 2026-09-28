@@ -124,10 +124,45 @@ build and lint pass. Logs: `/tmp/ws5-center-mirror-ownership-tests.log`,
 `/tmp/ws5-center-mirror-ownership-lint.log`. This is mutation-boundary evidence;
 the full nested route inventory and runtime mirroring audit remain open.
 
+## Checked: five route mutation boundaries
+
+Checkpoint: 2026-09-28, following Center `fb9e73e`. The nested current-source
+inventory identified one further omission: HTTPRoute ExternalAuth embeds
+`ForwardAuthConfig`, whose `resolvedSecrets` and flattened connection's
+`tls.resolvedCaCertificates` / `tls.resolvedClientCertificate` are internal,
+serialized and redacted. Center now excludes those exact paths in both rule and
+backend filters. Create/update regressions retain the TLS references, request
+template and decision, preserve an unrelated nested `resolvedSecrets` field,
+and prove the original draft is unchanged. This establishes mutation ownership,
+not successful inline ExternalAuth secret resolution or authenticated traffic.
+
+| Resource | Serialized internal paths, relative to spec |
+| --- | --- |
+| HTTPRoute | currentStatus, resolvedStatusController, resolvedHostnames, resolvedListeners, invalidRuleIndices, resolvedRules; rules[].resolvedAiAdmission/resolvedTerminalRouteUid/resolvedTerminalRuleIdentity; backendRefs[].refDenied; rule/backend filter extensionRef.resolvedNamespace, mirror backendRef.refDenied and ExternalAuth resolved material |
+| GRPCRoute | currentStatus, resolvedStatusController, resolvedHostnames, resolvedListeners, invalidRuleIndices, resolvedRules; backendRefs[].refDenied and rule/backend filter extensionRef.resolvedNamespace |
+| TCPRoute / UDPRoute | currentStatus, resolvedStatusController, resolvedListeners, resolvedListenerAttachments; backendRefs[].refDenied |
+| TLSRoute | currentStatus, resolvedStatusController, resolvedListeners (including per-listener hostname intersections); backendRefs[].refDenied |
+
+Source inventory: the five `edgion-resources/src/resources/*_route.rs` specs,
+rules, matches, backend references and filter types; shared ParentReference;
+HTTPRoute header/redirect/rewrite/CORS/mirror/extension/timeout/retry/session
+persistence types; ForwardAuthConfig, ExternalHttpConnection, TlsConfig and
+OutboundRequestSpec. The five Controller route handlers own attachment and
+authorization projections; request_mirror.rs owns mirror authorization.
+Parsed timeouts/retry/mirror tuning, delegation diagnostics and backend TLS
+policy caches use serde(skip), so they are not additional transported fields.
+The upstream ExternalAuth raw object remains unsupported and must not be
+mistaken for a supported Edgion ForwardAuth configuration.
+
+63 tests pass across httproute, routes-roundtrip, grpcroute.filters and
+resourceCatalog. Production build and lint pass. Logs:
+`/tmp/ws5-center-route-ownership-{tests,build,lint}.log`. These checks retain
+operator references, namespace/port/weight, filters and unknown extensions;
+they do not close the remaining runtime traffic matrix.
+
 ## Still to reconcile in the dedicated ownership pass
 
-Five route kinds and their nested
-filters/references; HTTP/stream plugin configurations and conditions; LinkSys
+HTTP/stream plugin configurations and conditions; LinkSys
 variants; AI credential slots; ACME/ConfigData; Kubernetes core resource envelopes.
 Earlier repairs and tests remain evidence, but each nested ownership review needs
 an explicit current-source inventory before this audit can be closed.
