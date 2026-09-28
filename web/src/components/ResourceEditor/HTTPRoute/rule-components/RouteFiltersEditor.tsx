@@ -89,7 +89,7 @@ function ObjectRefFields({ value = {}, onChange, disabled }: {
     </Form.Item>
     <Space wrap>
       <Form.Item label={t('field.namespaceOpt')} style={{ marginBottom: 0 }}>
-        <Input value={value.namespace || ''} onChange={(e) => onChange({ ...value, namespace: e.target.value })} disabled={disabled} />
+        <Input aria-label={`RequestMirror ${t('field.namespaceOpt')}`} value={value.namespace ?? ''} onChange={(e) => onChange({ ...value, namespace: e.target.value || undefined })} disabled={disabled} />
       </Form.Item>
       <Form.Item label={t('field.portOpt')} style={{ marginBottom: 0 }}>
         <InputNumber value={value.port} min={1} max={65535} onChange={(port) => onChange({ ...value, port: port ?? undefined })} disabled={disabled} />

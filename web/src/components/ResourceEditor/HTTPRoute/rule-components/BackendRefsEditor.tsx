@@ -141,13 +141,14 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
 
             {/* 命名空间（可选） */}
             <Form.Item
-              label="命名空间 / Namespace（可选，默认同 HTTPRoute）"
+              label={t('field.namespaceOpt')}
               style={{ marginBottom: 0 }}
             >
               <Input
-                value={backend.namespace || namespace}
+                aria-label={t('field.namespaceOpt')}
+                value={backend.namespace ?? ''}
                 onChange={(e) =>
-                  handleBackendChange(index, { ...backend, namespace: e.target.value })
+                  handleBackendChange(index, { ...backend, namespace: e.target.value || undefined })
                 }
                 placeholder={namespace}
                 disabled={disabled}

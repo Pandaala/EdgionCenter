@@ -408,6 +408,54 @@ for (const [kind, port] of [['httproute', 8080], ['grpcroute', 8081], ['tcproute
   })
 }
 
+for (const kind of ['httproute', 'grpcroute', 'tcproute', 'udproute', 'tlsroute'] as const) {
+  test(`route backend browser clearing restores the owner namespace for ${kind}`, async ({ page, request }) => {
+    const catalog = RESOURCE_CATALOG.get(kind)!
+    await waitForControllerCapabilities(request, controller, [{ resourceKind: kind, verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+    const name = `${prefix}-${kind}-backend-clear`
+    const document = mutationDocument(catalog, name)
+    const backend = document.spec.rules[0].backendRefs[0]
+    Object.assign(backend, { namespace, weight: 0 })
+    const expectedBackends = structuredClone(document.spec.rules[0].backendRefs)
+    delete expectedBackends[0].namespace
+    if (kind === 'httproute') {
+      document.spec.rules[0].filters ??= []
+      let mirror = document.spec.rules[0].filters.find((filter: { type: string }) => filter.type === 'RequestMirror')
+      if (!mirror) {
+        mirror = { type: 'RequestMirror', requestMirror: { backendRef: { name: backend.name, port: backend.port }, percent: 10 } }
+        document.spec.rules[0].filters.push(mirror)
+      }
+      mirror.requestMirror.backendRef.namespace = namespace
+    }
+    const expectedFilters = structuredClone(document.spec.rules[0].filters)
+    for (const filter of expectedFilters ?? []) if (filter.type === 'RequestMirror') delete filter.requestMirror.backendRef.namespace
+    const path = itemPath(catalog, namespace, name)
+    const created = await request.post(collectionPath(catalog, namespace), { data: yaml.dump(document, { lineWidth: -1 }), headers: yamlHeaders })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    try {
+      await waitForStableResourceVersion(request, catalog, namespace, name)
+      await openResourcePage(page, catalog)
+      await (await resourceRow(page, catalog, name)).getByTestId(`${kind}-row-edit`).click()
+      await page.getByRole('textbox', { name: 'Namespace (optional)', exact: true }).fill('')
+      if (kind === 'httproute') await page.getByRole('textbox', { name: 'RequestMirror Namespace (optional)', exact: true }).fill('')
+      await page.getByTestId('editor-yaml-tab').click()
+      expect((await yamlEditorDocument(page)).spec.rules[0].backendRefs).toEqual(expectedBackends)
+      await page.getByTestId('editor-form-tab').click()
+      const response = page.waitForResponse((value) => value.request().method() === 'PUT' && value.url().endsWith(path))
+      await page.getByTestId('editor-submit').click()
+      const result = await response
+      expect(result.ok(), await result.text()).toBeTruthy()
+      const updated = await readControllerResourceDocument(request, controller, kind, 'Namespaced', namespace, name)
+      expect(updated.spec.rules[0].backendRefs).toEqual(expectedBackends)
+      expect(updated.spec.parentRefs).toEqual(document.spec.parentRefs)
+      expect(updated.spec.rules[0].filters).toEqual(expectedFilters)
+    } finally {
+      const cleanup = await request.delete(path)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact route backend fixture cleanup failed').toBeTruthy()
+    }
+  })
+}
+
 for (const kind of ['httproute', 'grpcroute'] as const) {
   test(`route policy browser clearing restores optional fields for ${kind}`, async ({ page, request }) => {
     const catalog = RESOURCE_CATALOG.get(kind)!

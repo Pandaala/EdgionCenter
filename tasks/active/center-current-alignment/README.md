@@ -2878,3 +2878,18 @@ before acting on CCI execution files or proposing replacements.
   fresh run are recorded separately in
   [ROUTE-PARENT-CLEARING-EVIDENCE.md](ROUTE-PARENT-CLEARING-EVIDENCE.md).
   Existing environments are unchanged; overall alignment remains active.
+
+
+### 2026-09-28: Backend namespace clearing across all routes
+
+- Reproduced and fixed empty-string namespace writes in HTTP, gRPC and stream
+  backend editors, plus HTTP RequestMirror. Ports, zero weights, filters and
+  sibling references survive narrow edits.
+- Full frontend passes 760 tests / 115 files. Eleven native browser cases pass,
+  including five route CRUD cases and actual backend/mirror namespace readback.
+  Build, lint, E2E types and retention checks pass.
+- Corrected an invalid gRPC RequestMirror test fixture after current Controller
+  rejected it; no product filter support was widened. Original failure and final
+  passing runs are recorded in
+  [BACKEND-NAMESPACE-EVIDENCE.md](BACKEND-NAMESPACE-EVIDENCE.md).
+  Existing environments are unchanged; overall alignment remains active.

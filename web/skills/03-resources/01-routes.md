@@ -25,6 +25,14 @@ Clearing the input omits weight; entering zero must not omit it, because the
 Gateway defaults an absent weight to one. Zero excludes a backend from weighted
 selection; HTTP named-jump behavior is a separate contract.
 
+Ordinary backend references in all five route forms omit namespace when the
+optional input is cleared, restoring the route namespace. HTTP RequestMirror
+backend references use the same omission semantics. Ports, explicit zero weights,
+filters, mirror sampling and unrelated references remain intact. Empty-string
+namespace is not an alias for omission in the Controller's reference resolution.
+Current Edgion GRPCRoute filters are RequestHeaderModifier,
+ResponseHeaderModifier and ExtensionRef; RequestMirror is not supported there.
+
 The shared mutation hostname validator follows the current Controller parser and
 vendored Gateway API v1.6.2 CRDs: HTTPRoute/GRPCRoute allow an omitted or empty
 list, with at most 16 entries; TLSRoute requires 1 through 1024 entries. Names

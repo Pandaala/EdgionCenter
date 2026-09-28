@@ -24,7 +24,7 @@ const GRPCBackendRefsEditor: React.FC<Props> = ({ value = [], onChange, disabled
       <Space direction="vertical" style={{ width: '100%' }}>
         <Form.Item label={t('field.name')} style={{ marginBottom: 0 }}><Input value={backend.name} onChange={(e) => update(index, { ...backend, name: e.target.value })} disabled={disabled} /></Form.Item>
         <Space wrap>
-          <Form.Item label={t('field.namespaceOpt')} style={{ marginBottom: 0 }}><Input value={backend.namespace || ''} placeholder={namespace} onChange={(e) => update(index, { ...backend, namespace: e.target.value })} disabled={disabled} /></Form.Item>
+          <Form.Item label={t('field.namespaceOpt')} style={{ marginBottom: 0 }}><Input aria-label={t('field.namespaceOpt')} value={backend.namespace ?? ''} placeholder={namespace} onChange={(e) => update(index, { ...backend, namespace: e.target.value || undefined })} disabled={disabled} /></Form.Item>
           <Form.Item label={t('field.portOpt')} style={{ marginBottom: 0 }}><InputNumber value={backend.port} min={1} max={65535} onChange={(port) => update(index, { ...backend, port: port ?? undefined })} disabled={disabled} /></Form.Item>
           <Form.Item label={t('field.weight')} style={{ marginBottom: 0 }}><InputNumber value={backend.weight} min={0} onChange={(weight) => update(index, { ...backend, weight: weight ?? undefined })} disabled={disabled} /></Form.Item>
           <Form.Item label={t('field.group')} style={{ marginBottom: 0 }}><Input value={backend.group || ''} onChange={(e) => update(index, { ...backend, group: e.target.value })} disabled={disabled} /></Form.Item>

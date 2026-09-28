@@ -4,6 +4,14 @@ import RouteFiltersEditor, { switchRouteFilterType } from './RouteFiltersEditor'
 import RulePoliciesEditor from './RulePoliciesEditor'
 
 describe('structured route editors', () => {
+  it('clears the HTTP mirror namespace while preserving its backend identity and sampling policy', () => {
+    const onChange = vi.fn()
+    const mirror = { backendRef: { name: 'mirror', namespace: 'shared-services', port: 8080, futureRef: true }, percent: 10, futureMirror: false }
+    render(<RouteFiltersEditor value={[{ type: 'RequestMirror', requestMirror: mirror }]} onChange={onChange} />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'RequestMirror Namespace (optional)' }), { target: { value: '' } })
+    expect(onChange).toHaveBeenLastCalledWith([{ type: 'RequestMirror', requestMirror: { ...mirror, backendRef: { ...mirror.backendRef, namespace: undefined } } }])
+  })
+
   it.each(['http', 'grpc'] as const)('omits cleared %s policy fields without erasing configured blocks or siblings', (protocol) => {
     const onChange = vi.fn()
     const rule = {

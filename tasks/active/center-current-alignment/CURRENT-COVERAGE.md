@@ -324,3 +324,12 @@ browser cases pass; all five route kinds prove optional namespace/sectionName
 omission with actual API readback and unchanged rules/ports. Build/lint/E2E types
 pass. See [ROUTE-PARENT-CLEARING-EVIDENCE.md](ROUTE-PARENT-CLEARING-EVIDENCE.md)
 for the reproduced defect and retained initial selector failures.
+
+
+Backend namespace follow-up: HTTP/gRPC/stream backend editors and HTTP mirror
+editing omit a cleared namespace, restoring the owner namespace while preserving
+port, zero weight and other reference fields. Full frontend: 760 tests / 115 files;
+11 native browser cases and build/lint/E2E checks pass. All five routes have actual
+save/readback evidence; HTTP additionally covers RequestMirror. The first invalid
+gRPC mirror fixture and its correction are retained in
+[BACKEND-NAMESPACE-EVIDENCE.md](BACKEND-NAMESPACE-EVIDENCE.md).

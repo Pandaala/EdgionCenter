@@ -129,9 +129,10 @@ const BackendRefsEditor: React.FC<BackendRefsEditorProps> = ({
               style={{ marginBottom: 0 }}
             >
               <Input
-                value={backend.namespace || namespace}
+                aria-label={t('field.namespaceOpt')}
+                value={backend.namespace ?? ''}
                 onChange={(e) =>
-                  handleBackendChange(index, { ...backend, namespace: e.target.value })
+                  handleBackendChange(index, { ...backend, namespace: e.target.value || undefined })
                 }
                 placeholder={namespace}
                 disabled={disabled}
