@@ -46,11 +46,15 @@ is the original historical checkpoint, not an up-to-date pending-work list.
    ownership in ingestion before modifying exclusion paths; schemars(skip) alone
    does not determine ownership. Preserve supported operator configuration.
    [FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md) now records the checked
-   EdgionTls, BackendTLSPolicy and EdgionBackendTrafficPolicy mutation boundaries.
+   EdgionTls, BackendTLSPolicy, EdgionBackendTrafficPolicy, Gateway, GatewayClass
+   and EdgionGatewayConfig mutation boundaries.
 2. Close selected cross-resource runtime gaps retained in the existing scope:
    frontend TLS policy transitions, AI backend/provider routing and policy
    attachment, and resilience behaviors beyond the five proven probe types.
-   Existing configuration persistence must not be called traffic proof.
+   Existing configuration persistence must not be called traffic proof. Trace global
+   outbound client-certificate handling: the current EGC Controller parse body
+   resolves CA material only; establish the actual consumer path before claiming
+   global outbound mTLS or deciding how Center should represent support.
 3. Reconcile Center menu async/fault coverage with current backend source. Real
    owner migration is proven; Pod crash takeover and ambiguous post-dispatch
    faults have narrower adapter/runtime evidence. New cloud error states have

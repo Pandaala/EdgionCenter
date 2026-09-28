@@ -63,9 +63,50 @@ Log: /tmp/ws5-center-tls-policy-ownership-tests.log.
 No test was added merely to duplicate the exclusion list. No new build, browser,
 traffic or handshake claim is made by this read-only source audit.
 
+## Checked: Gateway, GatewayClass, EdgionGatewayConfig
+
+Checkpoint: 2026-09-28, Center source `6293eab`. No additional mutation-boundary
+repair is required by this current-source inventory.
+
+| Resource | Serialized internal paths, relative to spec | Operator configuration retained |
+| --- | --- | --- |
+| GatewayClass | currentStatus | controllerName, description, parametersRef group/kind/name/namespace |
+| Gateway | currentStatus, resolvedInboundProxyProtocol, resolvedAttachmentProof, tls.backend.resolvedClientCertificate, listeners[].tls.frontendValidation, listeners[].tls.resolvedCertificateRefs, listeners[].tls.resolvedFrontendCaRefs, listeners[].tls.frontendMatcherEligibility | listeners, allowedRoutes namespace selectors/kinds, addresses, serving certificate references/options, Gateway-level backend identity and frontend default/per-port validation |
+| EdgionGatewayConfig | currentStatus, outboundTls.resolvedCaCertificates, outboundTls.resolvedClientCertificate | server/timeouts/retry, realIp/trustedIps, forwardedHeaders, securityProtect, requestBody, pluginPolicy/globalPluginsRef, accessLogExtern, preflightPolicy, linkSys limits, loadBalancing, outboundTls references/validation, dnsResolver |
+
+The three root definitions and all configuration structs declared in
+`edgion_gateway_config.rs` were inspected, including imported `RealIpConfig`,
+`IpGroup`, `PluginPolicyConfig`, `LinkSysRef`, and `OutboundTlsConfig` with its
+validation/reference/SAN leaf types. Compiled plugin policies, parsed duration
+and request-body limits, and RealIp matchers live in separate runtime types;
+they are not additional serialized configuration fields to strip.
+
+Gateway's `allowedListeners`, `infrastructure`, and `defaultScope` illustrate why
+schemars(skip) does not alone establish runtime ownership: the root explicitly
+retains these unsupported upstream inputs for validation/status before removing
+them from conf_sync. Center preserves the draft and reports unsupported fields
+in `validateGateway`, rather than silently making the submitted intent disappear.
+The existing `enableReferenceGrantValidation` exclusion is removal of an obsolete
+field, not a current serialized runtime member.
+
+Controller authority: `handlers/gateway.rs` resets listener runtime values before
+`project_standard_frontend_validation`, resolves backend identity and inbound
+PROXY policy, and builds the attachment proof. GatewayClass has no nested
+resolution fields. `handlers/edgion_gateway_config.rs::parse` clears and resolves
+outbound CA material; its inspected body does not resolve the client identity.
+The latter remains a runtime behavior boundary, not proof that global outbound
+mTLS works. Both resolved secret fields are schema-hidden/redacted in the shared
+`OutboundTlsConfig` and must remain excluded from Center mutations.
+
+58 existing tests pass across gateway, gatewayclass, edgiongatewayconfig and
+resourceCatalog suites. These verify mutation filtering, operator/unknown-field
+preservation, unsupported-input validation and current configuration constraints.
+Log: `/tmp/ws5-center-gateway-ownership-tests.log`. No new browser or traffic claim
+is made by this ownership check.
+
 ## Still to reconcile in the dedicated ownership pass
 
-Gateway/GatewayClass/global configuration; five route kinds and their nested
+Five route kinds and their nested
 filters/references; HTTP/stream plugin configurations and conditions; LinkSys
 variants; AI credential slots; ACME/ConfigData; Kubernetes core resource envelopes.
 Earlier repairs and tests remain evidence, but each nested ownership review needs
