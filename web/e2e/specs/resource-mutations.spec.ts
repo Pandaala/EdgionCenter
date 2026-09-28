@@ -427,6 +427,21 @@ test('Gateway frontend policy editing omits private listener projections', async
     expect(portUpdated.spec.tls.frontend).toEqual({ default: {}, perPort: [{ port: 443, tls: {
       validation: { mode: 'AllowValidOnly', caCertificateRefs: [{ name: `${prefix}-secret`, group: '', kind: 'Secret' }] },
     } }] })
+    await waitForStableResourceVersion(request, catalog, namespace, name)
+    await (await resourceRow(page, catalog, name)).getByTestId('gateway-row-edit').click()
+    await page.getByTestId('editor-yaml-tab').click()
+    const clearDraft = await yamlEditorDocument(page)
+    clearDraft.spec.tls.frontend.default = document.spec.tls.frontend.default
+    await replaceYaml(page, yaml.dump(clearDraft))
+    await page.getByTestId('editor-form-tab').click()
+    await page.locator('.ant-card').filter({ has: page.getByText('Port Override 1', { exact: true }) }).last()
+      .getByRole('button', { name: 'Clear Frontend Client Certificate Validation', exact: true }).click()
+    const clearResponse = page.waitForResponse(value => value.request().method() === 'PUT' && value.url().endsWith(path))
+    await page.getByTestId('editor-submit').click()
+    const clearResult = await clearResponse
+    expect(clearResult.ok(), await clearResult.text()).toBeTruthy()
+    const cleared = await readControllerResourceDocument(request, controller, catalog.kind, 'Namespaced', namespace, name)
+    expect(cleared.spec.tls.frontend).toEqual({ default: document.spec.tls.frontend.default, perPort: [{ port: 443, tls: {} }] })
   } finally {
     const cleanup = await request.delete(path)
     expect(cleanup.ok() || cleanup.status() === 404, 'Exact Gateway frontend fixture cleanup failed').toBeTruthy()

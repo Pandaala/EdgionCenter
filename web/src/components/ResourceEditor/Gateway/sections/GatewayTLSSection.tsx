@@ -29,9 +29,11 @@ function ReferenceEditor({ value, onChange, disabled, multiple = true, maxItems 
   </Space>
 }
 
-function ValidationEditor({ value, onChange, disabled }: { value?: FrontendTLSValidation; onChange: (value: FrontendTLSValidation) => void; disabled: boolean }) {
+function ValidationEditor({ value, onChange, disabled, portOverride = false }: { value?: FrontendTLSValidation; onChange: (value: FrontendTLSValidation | undefined) => void; disabled: boolean; portOverride?: boolean }) {
   const t = useT()
   return <>
+    {!disabled && value && <Button style={{ marginBottom: 8 }} onClick={() => onChange(undefined)} aria-label={`${t('btn.clear')} ${t('gw.frontendValidation')}`}>{t('btn.clear')}</Button>}
+    {portOverride && <div style={{ marginBottom: 8 }}>Clearing validation keeps this port override and disables the Gateway frontend validation policy on this port. Remove the port override to inherit the default policy.</div>}
     <Form.Item label={t('field.validationMode')} style={{ marginBottom: 8 }}><Select allowClear value={value?.mode} disabled={disabled} options={[{ value: 'AllowValidOnly' }, { value: 'AllowInsecureFallback' }]} onChange={(mode) => onChange({ ...value, mode })} /></Form.Item>
     <Form.Item label={t('field.caRefs')} style={{ marginBottom: 0 }}><ReferenceEditor maxItems={16} value={value?.caCertificateRefs || []} disabled={disabled} onChange={(caCertificateRefs) => onChange({ ...value, caCertificateRefs })} /></Form.Item>
   </>
@@ -53,7 +55,7 @@ export default function GatewayTLSSection({ value, onChange, disabled = false }:
       <Card title={t('section.gatewayFrontendPerPort')} size="small" type="inner">
         {perPort.map((item, index) => <Card key={index} size="small" type="inner" title={t('gw.portOverride', { n: index + 1 })} extra={!disabled && <Button type="text" danger icon={<MinusCircleOutlined />} aria-label={t('btn.deletePortOverride')} onClick={() => onChange({ ...value, frontend: { ...value?.frontend, default: value?.frontend?.default ?? {}, perPort: perPort.filter((_, itemIndex) => itemIndex !== index) } })} />} style={{ marginBottom: 8 }}>
           <Form.Item label={t('field.port')} required style={{ marginBottom: 8 }}><InputNumber min={1} max={65535} value={item.port} disabled={disabled} onChange={(port) => onChange({ ...value, frontend: { ...value?.frontend, default: value?.frontend?.default ?? {}, perPort: perPort.map((entry, itemIndex) => itemIndex === index ? { ...entry, port: port || 0 } : entry) } })} /></Form.Item>
-          <ValidationEditor value={item.tls?.validation} disabled={disabled} onChange={(validation) => onChange({ ...value, frontend: { ...value?.frontend, default: value?.frontend?.default ?? {}, perPort: perPort.map((entry, itemIndex) => itemIndex === index ? { ...entry, tls: { ...entry.tls, validation } } : entry) } })} />
+          <ValidationEditor portOverride value={item.tls?.validation} disabled={disabled} onChange={(validation) => onChange({ ...value, frontend: { ...value?.frontend, default: value?.frontend?.default ?? {}, perPort: perPort.map((entry, itemIndex) => itemIndex === index ? { ...entry, tls: { ...entry.tls, validation } } : entry) } })} />
         </Card>)}
         {!disabled && <Button type="dashed" block disabled={perPort.length >= 64} icon={<PlusOutlined />} onClick={() => onChange({ ...value, frontend: { ...value?.frontend, default: value?.frontend?.default ?? {}, perPort: [...perPort, { port: 443, tls: { validation: { mode: 'AllowValidOnly', caCertificateRefs: [] } } }] } })}>{t('btn.addPortOverride')}</Button>}
       </Card>

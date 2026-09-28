@@ -246,3 +246,10 @@ group/kind. The frontend object requires default (an empty object is legal), and
 every perPort entry requires tls. The form supplies default when creating the first
 port override, preserves existing default/backend configuration, and caps additions
 at 16 CA references and 64 port overrides. Preflight does not rewrite invalid YAML.
+
+Explicit Clear removes only a frontend validation policy. On a port override it
+retains port/tls and therefore suppresses default inheritance for that port;
+deleting the whole override restores inheritance. Keep these actions distinct.
+Removing the last CA reference must not silently disable a policy: that remains
+an invalid draft until repaired or explicitly cleared. Other TLS configuration
+and sibling ports survive either narrow edit.

@@ -41,3 +41,24 @@ and no Edgion source was changed in this follow-up.
 This resolves the concrete CA-reference/default-container follow-up recorded in
 GATEWAY-FRONTEND-PROJECTION-EVIDENCE.md. The previous full-suite/browser baseline
 still predates these focused repairs; do not add focused counts to its totals.
+
+
+## Explicit validation removal
+
+The form now offers Clear for a configured default or per-port validation policy.
+Deleting the final CA still leaves an invalid draft, rather than silently disabling
+validation. Explicit Clear omits only validation: the required default/tls object,
+backend client identity, other ports and unknown sibling fields remain intact.
+For per-port policy, retaining `tls: {}` is intentional: Controller projection
+selects that override and does not fall back to the default. Deleting the whole
+port override remains a separate action that restores default inheritance. The
+form explains this distinction; it makes no claim about separate EdgionTls auth.
+
+35 focused tests pass. Four native browser cases pass (25.8 seconds), including
+an extended frontend workflow that clears one port's policy, saves, and reads back
+an intact default plus `perPort: [{port: 443, tls: {}}]`. Build, lint and E2E
+typecheck pass. Run `alignment-gateway-clear-20260928-1790563787718` under
+`/tmp/ws5-center-gateway-clear-20260928/`; logs
+`/tmp/ws5-center-gateway-clear-{tests,build,lint,types}.log`.
+Owned runtime stopped; 70 unchanged seeds retained. This proves configuration
+persistence and source semantics, not a new TLS handshake scenario.

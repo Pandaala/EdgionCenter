@@ -377,3 +377,10 @@ serving group from the backend core alias; invalid kinds no longer resolve to
 same-named objects. All 43 graph tests, build and lint pass. See the serving
 follow-up in [Gateway TLS topology evidence](GATEWAY-TLS-TOPOLOGY-EVIDENCE.md).
 Stale adapter guidance about frontendValidation ownership is corrected.
+
+
+Gateway frontend validation can now be explicitly cleared without deleting backend
+identity or sibling port policies. Clearing a port keeps its empty TLS override;
+deleting the override restores inheritance. Thirty-five focused tests, four native
+browser cases and build/lint/types pass; see the removal follow-up in
+[GATEWAY-FRONTEND-CA-EVIDENCE.md](GATEWAY-FRONTEND-CA-EVIDENCE.md).
