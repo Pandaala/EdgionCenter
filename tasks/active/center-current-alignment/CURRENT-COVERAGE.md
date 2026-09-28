@@ -41,8 +41,8 @@ Center cloud integration is independent of Controller federation.
 - **Focused flow**: resource-specific browser or backend scenario described below.
 - **Open**: missing or narrower evidence; never count it as completion.
 
-The current unfiltered standalone regression passes **173 tests with two
-Kubernetes-only skips**, and the latest full frontend suite passes **835 tests in 117
+The previous unfiltered standalone regression passed **173 tests with two
+Kubernetes-only skips**, and its frontend checkpoint passed **835 tests in 117
 files** (after subsequent focused repairs). Build, lint, E2E types and strict inventory also pass. All 22 CRUD cases
 and both new client-certificate clearing browser cases pass in the same execution.
 See [latest regression evidence](LATEST-REGRESSION-EVIDENCE.md) for the exact
@@ -134,7 +134,7 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 | Menu group | Verified behavior | Remaining evidence boundary |
 |---|---|---|
 | Controller dashboard, operations, topology | Native controls; AI nodes; freshness, polarity, stale/partial/conflict states; grant boundaries | Cross-resource runtime changes beyond the recorded scenarios |
-| Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync; component read-failure/recovery states; deployed Kubernetes owner/non-owner reads, writes, CAS, connection migration and old-fence revocation | Pod crash takeover, post-dispatch transport faults and additional freshness transitions |
+| Center dashboard and Controllers | Registration, counts, proxy CRUD/CAS, watches, reload, offline/reconnect/resync; component read-failure/recovery states; deployed Kubernetes owner/non-owner reads, writes, CAS, connection migration and old-fence revocation | Current-image Pod crash takeover and post-dispatch response loss now have native proof linked above; other freshness transitions are outside those scenarios |
 | RegionRoute | Failover/restore, source-data sync, enable preservation, missing-target recovery; explicit write outcomes; two-Controller east/west traffic, real partial denial and source-sync recovery; clear removes invalid empty target and writes exclude cached status | Concurrent operator races and other terminal outcomes |
 | Global ConfigData inventory | Eight menu leaves; per-type visibility/redaction; native inventory checks; catalog/list recovery and expired-cursor reset components | Additional multi-cluster unavailable/stale transitions |
 | Provider accounts | Native and real Kubernetes browser create/edit, label retention and exact-generation conflict; 52-account pagination; staged SAR permissions, denied-read recovery and credential-value rejection | Metadata-only proof; external credential inspection is separate |
@@ -145,8 +145,9 @@ test-locator failure; TLS passed its focused v2 rerun. Do not describe v1 as gre
 reproduced false-convergence defect and native backend repair. Base behavior
 differs from overlay behavior so fallback cannot masquerade as restoration.
 Two independent Gateways now verify fan-out, permission-induced mixed outcomes
-and recovery through source synchronization. The Kubernetes v5 image predates
-this repair. Current source backend gates pass 876
+and recovery through source synchronization. The historical Kubernetes v5 image predates
+this repair; the current release image supersedes that deployment.
+Current source backend gates pass 876
 workspace and 247 no-default-feature app tests; the matrix retains the unrelated
 English-only failure described in the evidence.
 
@@ -156,7 +157,7 @@ Native federation evidence: 27 lifecycle checks in
 `/tmp/ws5-center-cloud-contract-tests.log` (195 passed; one real-account opt-in ignored).
 Real cloud accounts are optional per `cicd/integration/README.md`.
 
-## Current verification and environment
+## Historical verification and environment checkpoints
 
 - Full frontend baseline: 590 tests in 100 files passed in
   `/tmp/ws5-center-frontend-full-current.log`, before the latest cloud fixes.
@@ -174,7 +175,7 @@ Real cloud accounts are optional per `cicd/integration/README.md`.
   release directory. No Edgion source change or commit was made for that failure.
 - Existing OrbStack workloads and the user's other kind cluster remain untouched.
 
-The current backend matrix passed fmt, clippy, workspace tests, app tests with
+The earlier v2 backend matrix passed fmt, clippy, workspace tests, app tests with
 no default features (242), dependency isolation and kustomize. Its final exit was
 1 at the pre-existing English-only violation in root
 `fix-issue-workflow-generic.zh.md`; the subsequent legacy guard was run separately
@@ -182,16 +183,15 @@ and passed. See `/tmp/ws5-center-current-backend-matrix-v2.log`. External MySQL,
 Kubernetes and federation stages were not opted into that matrix. A 10ms wall-clock
 Cloudflare test race was fixed and passed both focused and matrix runs.
 
-## Latest complete frontend suite
+## Current validation authority
 
-835 tests in 117 files pass in `/tmp/ws5-center-closure-frontend-full.log`.
-Production build, lint, E2E types and inventory pass. The bundle-size warning
-remains. The 173-case standalone browser run predates subsequent Gateway/BTP repairs;
-focused browser evidence supplements it without upgrading its source scope. Earlier 706/751/755/760-test checkpoints remain historical
-in the work log and focused evidence files.
-
-The dedicated kind cluster failure and the separate OrbStack Kubernetes evidence
-are unchanged; this frontend/native pass does not upgrade their validation scope.
+The latest full frontend and browser counts are 848/117 and 174 passed with two
+Kubernetes-only skips, respectively, as linked at the top of this file. The
+backend matrix passes 876 workspace and 247 no-default-feature app tests, with
+the unrelated English-only guard failure retained explicitly. See
+[COMPLETION-AUDIT.md](COMPLETION-AUDIT.md) for exact commands and limits.
+The current Kubernetes image has separate OIDC/capability and forced owner-Pod
+recovery evidence. Old kind-cluster failures do not describe that deployment.
 
 ## Source-to-coverage reconciliation
 
@@ -206,9 +206,10 @@ stream catalogs match the four connection-stage and one TLSRoute-stage variants.
 The backend matrix covers OIDC token/identity validation, SAR identity scoping,
 lease fencing and owner forwarding/no-ambiguous-replay behavior. These checks do
 not prove a real browser OAuth redirect/callback flow or deployed cross-replica
-operation. The original work log also retains open cross-resource traffic,
-attachment, probe and failure scenarios. Consequently this reconciliation proves
-catalog/menu completeness but does not close the overall task.
+operation. Separate native evidence now covers the selected cross-resource traffic,
+attachment, probe and failure scenarios; follow the current evidence links above.
+This source comparison establishes catalog/menu completeness only. The completion
+audit assesses the wider task against those independent runtime artifacts.
 
 The real OAuth browser path now passes against an isolated native Center plus
 the same pinned Dex and oauth2-proxy versions used by the Kubernetes fixture.
@@ -231,7 +232,7 @@ Current provider-account menu evidence is in
 [PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md](PROVIDER-ACCOUNT-KUBERNETES-EVIDENCE.md).
 The current Vite dashboard against the deployed v5 backend passed real Kubernetes
 CRUD/CAS, pagination beyond 50 accounts, and permission-revocation recovery.
-Frontend checks now pass 642 tests, build/lint, E2E types and inventory. All
+That historical frontend checkpoint passed 642 tests, build/lint, E2E types and inventory. All
 provider grants were removed after verification; 52 metadata-only CRDs remain
 in the owned namespace. The embedded v5 image predates these frontend changes.
 
@@ -246,12 +247,13 @@ browser checkpoints pass for current retry values and list failure/recovery.
 Evidence: `/tmp/ws5-center-gatewayconfig-list-20260928/`. This is additional
 focused coverage, not a new full-suite count.
 
-## Next audit actions
+## Reconciled audit actions
 
 The native list-status gap is now repaired across 17 existing status columns.
 [STATUS-SOURCE-GAP.md](STATUS-SOURCE-GAP.md) records current implementation and
-live denial/recovery evidence. Continue the remaining per-resource and menu
-audits below; this focused repair does not complete those audits.
+live denial/recovery evidence. The nested ownership review is complete in
+[FIELD-OWNERSHIP-AUDIT.md](FIELD-OWNERSHIP-AUDIT.md); final scope reconciliation
+is tracked separately in the completion audit.
 
 
 Current deployed Kubernetes authentication proof is recorded in
@@ -272,22 +274,21 @@ adapter/manifest gates; the existing English-only baseline failure remains.
 The temporary proxy grants were removed. Pod crash takeover and transport
 failures after dispatch are not established by connection migration alone.
 
-1. Continue the exact operator/runtime-field audit against all current resource
-   structs. Catalog coverage alone is insufficient: the current pass found the
-   missing ExtensionRef.resolvedNamespace, Gateway TLS resolution and HTTP rule
-   admission/provenance exclusions (now fixed). Shared plugin conditions now
-   exclude SecretMatch.resolvedValues and IP-match resolvedIps in all four
-   stage trees. Continue nested configuration and operator editor coverage;
-   serialization checks do not establish placement-specific runtime acceptance.
-2. Finish capability/permission and asynchronous state transitions in Center
-   menus, including OIDC and owner forwarding evidence. Keep native, component,
-   hermetic transport and unavailable environment evidence distinct.
+1. The exact operator/runtime-field audit now covers all 22 catalog kinds,
+   including nested HTTP/Stream configurations, opaque operator data and typed
+   runtime exclusions. See FIELD-OWNERSHIP-AUDIT.md.
+2. Selected capability/permission, OIDC, owner forwarding, owner-Pod failure and
+   ambiguous post-dispatch transitions have native evidence. Source, component,
+   hermetic adapter and runtime evidence retain their separate scopes.
 3. Current frontend/backend gates and the complete native browser regression
-   are recorded above. Rerun affected checks after further fixes; retain the
-   explicit pre-existing English-only guard limitation.
-4. Reconcile every row with the original objective before claiming completion.
-   Passing editor CRUD never proves Gateway traffic, real DNS propagation or
-   a Kubernetes deployment that has not run.
+   are recorded above. Rerun affected checks after further implementation fixes;
+   retain the pre-existing English-only guard limitation.
+4. Final requirement reconciliation remains active. CRUD does not prove arbitrary
+   Gateway traffic or external DNS propagation. Optional account-backed tests are
+   recorded as validation limits, not successful executions.
+
+The following entries retain chronological focused findings; their old counts
+and pending notes do not supersede the current validation authority above.
 
 
 Metadata/topology request-target follow-up: restricted dependency keys and all

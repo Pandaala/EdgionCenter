@@ -16,7 +16,14 @@ replace the user's full backend/dashboard, resource-by-resource/menu-by-menu sco
 | Exercise local runtime | Isolated native Center + two mTLS Controllers; API readback, real Gateway traffic, and separate OrbStack deployments | Established for recorded scenarios; no blanket conformance claim |
 | Commit Center only, do not push | Center task commits; Edgion ACME and outbound TLS repairs remain local/uncommitted; unrelated work preserved | Scope retained |
 
-Source comparison artifact: `/tmp/ws5-center-closure-source-audit.json`.
+Source comparison revalidated at Center `6b97ed6` against current worktree files:
+`/tmp/ws5-center-final-source-audit-20260928.json` records exact sets and SHA-256
+hashes for all three source inputs. It confirms 22 kinds, 20 first-class routes,
+the restricted-dependency menu and 17 Center leaves. No Edgion history was read.
+Center implementation provenance is unchanged: `git diff --name-only ba012f3 HEAD`
+contains only seven evidence documents; the backend-only diff from `7433d37` is
+empty. The final frontend and native browser log summaries were re-read and
+confirm 848 tests / 117 files and 174 passed / two skips, respectively.
 Current resource/menu details: CURRENT-COVERAGE.md. The opening table in README.md
 is the original historical checkpoint, not an up-to-date pending-work list.
 
