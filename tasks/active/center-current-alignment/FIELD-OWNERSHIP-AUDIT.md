@@ -160,9 +160,38 @@ resourceCatalog. Production build and lint pass. Logs:
 operator references, namespace/port/weight, filters and unknown extensions;
 they do not close the remaining runtime traffic matrix.
 
+## Checked: LinkSys provider mutation boundaries
+
+Checkpoint: 2026-09-28, Center `5e1773e`. All eight current SystemConfig variants
+were inventoried through their configuration structs and imported SecretSlot,
+TlsConfig, ExternalHttpConnection and OutboundRequestSpec shapes. Existing
+catalog exclusions cover the serialized internal material; no Center production
+change is needed for this ownership pass.
+
+| Provider | Internal material paths relative to spec.config |
+| --- | --- |
+| Redis, Etcd, Elasticsearch, OTLP | auth.secret; tls.resolvedCaCertificates / resolvedClientCertificate |
+| Kafka | sasl.password.secret; tls.resolvedCaCertificates / resolvedClientCertificate |
+| Webhook | resolvedSecrets; tls.resolvedCaCertificates / resolvedClientCertificate |
+| HttpDns | connection.tls.resolvedCaCertificates / resolvedClientCertificate |
+| CredentialSource | provider.tls.resolvedCaCertificates / resolvedClientCertificate (defensive exclusion; current Controller clears these before transport and keeps resolved material in its manager) |
+
+The root currentStatus is excluded. unknownFields is serde(skip), and parsed
+Redis/OTLP endpoints are separate runtime types. Redis/Etcd/OTLP auth wrappers
+and Elasticsearch auth variants flatten SecretSlot, so the internal path is
+auth.secret rather than auth.slot.secret. CredentialSource active/previous
+bootstrap references are operator fields, not resolved credential slots.
+Controller authority is handlers/link_sys.rs::drive_standard,
+resolve_for_spec and resolve_credential_source.
+
+37 tests pass across linksys, linksys-redis, linksys-credential-source and
+resourceCatalog. Log: `/tmp/ws5-center-linksys-ownership-tests.log`. This checks
+the mutation/configuration boundary; persistent-provider global TLS lifecycle
+validation remains separate from this inventory.
+
 ## Still to reconcile in the dedicated ownership pass
 
-HTTP/stream plugin configurations and conditions; LinkSys
-variants; AI credential slots; ACME/ConfigData; Kubernetes core resource envelopes.
+HTTP/stream plugin configurations and conditions; AI credential slots;
+ACME/ConfigData; Kubernetes core resource envelopes.
 Earlier repairs and tests remain evidence, but each nested ownership review needs
 an explicit current-source inventory before this audit can be closed.
