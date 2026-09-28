@@ -2,6 +2,7 @@
 
 Checkpoint: 2026-09-28. The overall goal is **active, not complete**.
 This is a current index; [README.md](README.md) retains the chronological evidence.
+[COMPLETION-AUDIT.md](COMPLETION-AUDIT.md) reconciles the objective and remaining work.
 Older process handles and "next" notes there are historical unless revalidated.
 
 ## Scope and authority
@@ -21,8 +22,8 @@ Center cloud integration is independent of Controller federation.
 - **Open**: missing or narrower evidence; never count it as completion.
 
 The current unfiltered standalone regression passes **173 tests with two
-Kubernetes-only skips**, and the full frontend suite passes **804 tests in 116
-files**. Build, lint, E2E types and strict inventory also pass. All 22 CRUD cases
+Kubernetes-only skips**, and the latest full frontend suite passes **835 tests in 117
+files** (after subsequent focused repairs). Build, lint, E2E types and strict inventory also pass. All 22 CRUD cases
 and both new client-certificate clearing browser cases pass in the same execution.
 See [latest regression evidence](LATEST-REGRESSION-EVIDENCE.md) for the exact
 source, runtime and artifact scope. This supersedes the historical standalone
@@ -155,10 +156,10 @@ Cloudflare test race was fixed and passed both focused and matrix runs.
 
 ## Latest complete frontend suite
 
-804 tests in 116 files pass in `/tmp/ws5-center-latest-frontend-full.log`.
+835 tests in 117 files pass in `/tmp/ws5-center-closure-frontend-full.log`.
 Production build, lint, E2E types and inventory pass. The bundle-size warning
-remains. The same production frontend passes the unfiltered 173-case standalone
-browser run above. Earlier 706/751/755/760-test checkpoints remain historical
+remains. The 173-case standalone browser run predates subsequent Gateway/BTP repairs;
+focused browser evidence supplements it without upgrading its source scope. Earlier 706/751/755/760-test checkpoints remain historical
 in the work log and focused evidence files.
 
 The dedicated kind cluster failure and the separate OrbStack Kubernetes evidence

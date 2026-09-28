@@ -17,9 +17,11 @@ verification, and runtime UI/API evidence. Source inspection or unit tests alone
 do not establish complete end-to-end alignment. Center must reach managed
 clusters through Controller federation, never directly through Kubernetes.
 
-## Coverage ledger
+## Initial coverage ledger (historical)
 
-All rows remain open unless explicitly marked complete.
+This table is the initial checkpoint and is retained as history. Several listed
+workflows have since passed. Use [COMPLETION-AUDIT.md](COMPLETION-AUDIT.md) and
+[CURRENT-COVERAGE.md](CURRENT-COVERAGE.md) for current status and remaining work.
 
 | Area | Items | Current status |
 | --- | --- | --- |
@@ -2973,3 +2975,14 @@ submission now enforce that limit, and System trust disables adding CA refs.
 Neutral CA/target labels cover ConfigMap and EdgionBackend. Thirty-eight focused
 tests plus build/lint pass; see the CA-count follow-up in
 [backend TLS evidence](BACKEND-TLS-CLIENT-CERT-EVIDENCE.md).
+
+
+## 2026-09-28 — fresh regression and completion audit
+
+Current source comparison confirms 22 resource kinds, no extra/missing catalog
+entries, and no missing Controller resource menu routes. Center has 17 menu leaves.
+Fresh frontend tests: 835/117 files. Backend matrix passes 876 workspace and 247
+no-default-feature app tests plus format/Clippy/isolation/rendering, then exits at
+the preserved unrelated English-only baseline. Later no-legacy/diff checks pass.
+The full scope is not complete; [COMPLETION-AUDIT.md](COMPLETION-AUDIT.md) replaces
+obsolete generic pending statements with current evidence boundaries and actions.
