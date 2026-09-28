@@ -37,6 +37,14 @@ description: System configuration resource development guide — EdgionGatewayCo
 | outboundTls | verify, validation and clientCertificateRef; preserve reference group/kind/namespace |
 | dnsResolver | linkSysRef, servers and cacheTtl |
 
+### List summaries
+
+The retry column reads `spec.retry.attempts`, including explicit zero; never
+fall back to the removed root `maxRetries`. Source-list failures use the shared
+error/retry view rather than looking like an empty resource inventory. The
+current unbounded list call omits `limit`; the Controller documents that as no
+limit, so it is not a silently truncated cursor page.
+
 ### Editing and validation
 
 - Defaults belong only in create drafts/placeholders. Preserve explicit zero,

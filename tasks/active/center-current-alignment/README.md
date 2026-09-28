@@ -2714,3 +2714,20 @@ before acting on CCI execution files or proposing replacements.
 - [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md) records artifacts and retained
   topology. Renewal is not claimed. No production source changes or new matrix
   claim in this pass; no Edgion edits, commits or push. Overall goal stays active.
+
+
+### 2026-09-28: Gateway configuration list summaries and errors
+
+- Corrected the list's obsolete spec.maxRetries lookup to spec.retry.attempts,
+  preserving explicit zero. The editor already used the current nested field.
+  List read failures now show the shared error/retry view instead of an empty table.
+- Two focused component tests pass, including rejection of a conflicting legacy
+  root value and list failure/recovery. Three native browser checks verify actual
+  retry values 0/3, injected list failure, and recovery to actual rows.
+- Artifacts: `/tmp/ws5-center-gatewayconfig-list-20260928/`; test log:
+  `/tmp/ws5-center-gatewayconfig-list-tests.log`. The two owned, unreferenced
+  configuration fixtures remain on Controller A. No active Gateway references
+  were changed. Full frontend suite remains the prior 706-test checkpoint.
+- Final build and lint passed (`/tmp/ws5-center-gatewayconfig-list-build.log`,
+  `/tmp/ws5-center-gatewayconfig-list-lint.log`); existing bundle-size warning
+  remains. No E2E types or action selectors changed.

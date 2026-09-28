@@ -50,7 +50,7 @@ No row implies complete nested-field coverage or data-plane conformance.
 | Resource | Menu suffix | Focused alignment evidence beyond baseline |
 |---|---|---|
 | GatewayClass | infrastructure/gatewayclasses | Cluster scope; parameter reference; shared status handling |
-| EdgionGatewayConfig | system/config | Current load-balancing controls, body/plugin policy, outbound TLS stripping |
+| EdgionGatewayConfig | system/config | Current load-balancing controls, body/plugin policy, outbound TLS stripping; list reads retry.attempts including zero and exposes failed reads/retry |
 | Gateway | infrastructure/gateways | Native and shared Controller status, listener counts/kinds/conditions; current listener TLS runtime exclusions; protocol-specific TLS mode selection and Form/YAML submission guard |
 | ReferenceGrant | infrastructure/referencegrants | Version boundary and topology authorization projection; actual cross-namespace HTTP backend name/source grant edits drive RefNotPermitted and 500/200 transitions |
 | HTTPRoute | routes/http | Backend AI references, mirror annotations, retry bounds, optional policy clearing; rule admission/provenance exclusions; shared current hostname validation |
@@ -207,6 +207,11 @@ See [ACME-MENU-EVIDENCE.md](ACME-MENU-EVIDENCE.md) for the trigger repair and
 the lifecycle/expiry repair and real Kubernetes issuance proof. The upstream
 [ACME scheduler clear gap](ACME-SCHEDULER-CLEAR-GAP.md) prevents closing the
 renewal audit; initial issuance and certificate loading are separately proven.
+
+Gateway configuration list follow-up: two component tests and three native
+browser checkpoints pass for current retry values and list failure/recovery.
+Evidence: `/tmp/ws5-center-gatewayconfig-list-20260928/`. This is additional
+focused coverage, not a new full-suite count.
 
 ## Next audit actions
 

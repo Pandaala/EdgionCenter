@@ -1,5 +1,5 @@
 /**
- * EdgionGatewayConfig 管理页面（集群级，通常单例）
+ * Cluster-scoped EdgionGatewayConfig resources selected by GatewayClasses.
  */
 
 import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
@@ -14,6 +14,7 @@ import EdgionGatewayConfigEditor from '@/components/ResourceEditor/EdgionGateway
 import { useT } from '@/i18n'
 import { useInvalidateRuntimeStatus } from '@/hooks/useRuntimeResourceStatus'
 import PageHeader from '@/components/PageHeader'
+import ResourceListError from '@/components/resource/ResourceListError'
 import ResourceStatus from '@/components/resource/ResourceStatus'
 import { resourceActionTestId } from '@/components/resource/testIds'
 import { resourceDeleteConfirmProps } from '@/components/resource/confirmTestIds'
@@ -27,7 +28,7 @@ const EdgionGatewayConfigPage = () => {
   const queryClient = useQueryClient()
   const { controllerId } = useParams<{ controllerId?: string }>()
 
-  const { data, isLoading, refetch, dataUpdatedAt } = useQuery({
+  const { data, isLoading, refetch, dataUpdatedAt, error } = useQuery({
     queryKey: ['edgiongatewayconfig', controllerId ?? ''],
     queryFn: () => clusterResourceApi.listAll<K8sResource>('edgiongatewayconfig', { target: mutationTarget }),
   })
@@ -47,8 +48,8 @@ const EdgionGatewayConfigPage = () => {
 
   const columns = [
     { title: t('col.name'), dataIndex: ['metadata', 'name'], key: 'name' },
-    { title: 'MaxRetries', key: 'retries',
-      render: (_: any, r: K8sResource) => r.spec?.maxRetries ?? '-' },
+    { title: t('field.maxRetries'), key: 'retries',
+      render: (_: any, r: K8sResource) => r.spec?.retry?.attempts ?? '-' },
     { title: 'Preflight Mode', key: 'preflight',
       render: (_: any, r: K8sResource) => r.spec?.preflightPolicy?.mode
         ? <Tag>{r.spec.preflightPolicy.mode}</Tag> : '-' },
@@ -72,6 +73,8 @@ const EdgionGatewayConfigPage = () => {
       ),
     },
   ]
+
+  if (error) return <ResourceListError error={error} onRetry={refetch} />
 
   return (
     <div>
