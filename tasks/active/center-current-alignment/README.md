@@ -2758,3 +2758,17 @@ before acting on CCI execution files or proposing replacements.
 - Center evidence is committed independently. The three Edgion repair files remain
   uncommitted, unrelated changes are preserved, and nothing is pushed. Overall
   alignment remains active.
+
+
+### 2026-09-28: Metadata and topology Controller isolation
+
+- Fixed route-scoped caches using the mutable global target for restricted
+  dependency metadata and all 22 topology inventory reads. Both now use the
+  existing captured-target mechanism for HTTP dispatch and cache identity.
+- 38 focused tests pass, including actual Axios dispatch under a deliberately
+  different global Controller and route-switch isolation. Build and lint pass.
+- Two native browser checks confirm ConfigMap metadata and all topology requests
+  stay on Controller A while the global target is B. Default Secret denial remains
+  visible. No fixture resources or policies changed.
+- [READ-TARGET-EVIDENCE.md](READ-TARGET-EVIDENCE.md) records artifacts and limits.
+  Center changes may be committed; nothing is pushed. Overall audit remains active.

@@ -137,7 +137,7 @@ export const resourceApi = {
    */
   listKeys: async (
     kind: ResourceKind,
-    options: { namespace?: string; limit?: number; continue?: string; silent?: boolean } = {}
+    options: { namespace?: string; limit?: number; continue?: string; silent?: boolean; target?: ControllerMutationTarget } = {}
   ): Promise<ListResponse<ResourceKey>> => {
     const params = new URLSearchParams()
     if (options.limit) params.set('limit', String(options.limit))
@@ -146,7 +146,10 @@ export const resourceApi = {
     const path = options.namespace
       ? `/keys/namespaced/${kind}/${options.namespace}${qs}`
       : `/keys/namespaced/${kind}${qs}`
-    const { data } = await apiClient.get(path, { _silent: options.silent } as any)
+    const { data } = await apiClient.get(path, {
+      ...(options.target ? mutationRequestConfig(options.target) : {}),
+      _silent: options.silent,
+    } as AxiosRequestConfig)
     return data
   },
 

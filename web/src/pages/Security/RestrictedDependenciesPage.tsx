@@ -1,8 +1,8 @@
 import { useState } from 'react'
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { Alert, Input, Space, Table, Tabs, Tag } from 'antd'
 import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
 import type { ResourceKey, ResourceKind } from '@/api/types'
 import { resourceApi } from '@/api/resources'
 import { useControllerAccess } from '@/hooks/useControllerAccess'
@@ -15,15 +15,15 @@ import ConfigMapEditor from '@/components/ResourceEditor/ConfigMap/ConfigMapEdit
 type RestrictedKind = Extract<ResourceKind, 'secret' | 'configmap'>
 
 export default function RestrictedDependenciesPage() {
-  const { controllerId } = useParams<{ controllerId?: string }>()
-  const scope = controllerId ?? null
+  const target = useControllerMutationTarget()
+  const scope = target.controllerId
   const access = useControllerAccess(scope, true)
   const [kind, setKind] = useState<RestrictedKind>('secret')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<ResourceKey | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const canList = access.canResource(kind, 'list-keys')
-  const query = useQuery({ queryKey: ['restricted-keys', kind, scope], queryFn: () => resourceApi.listKeys(kind, { silent: true }), enabled: canList, retry: false })
+  const query = useQuery({ queryKey: ['restricted-keys', kind, scope], queryFn: () => resourceApi.listKeys(kind, { silent: true, target }), enabled: canList, retry: false })
   const rows = (canList ? query.data?.data ?? [] : []).filter((row) => `${row.metadata.namespace}/${row.metadata.name}`.toLowerCase().includes(search.toLowerCase()))
   const title = kind === 'secret' ? 'Secret' : 'ConfigMap'
   const open = (resource: ResourceKey | null) => { setSelected(resource); setEditorOpen(true) }

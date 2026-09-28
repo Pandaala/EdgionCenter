@@ -29,7 +29,7 @@ describe('RestrictedDependenciesPage', () => {
     mocks.allowed=true
     mocks.listKeys.mockResolvedValue({success:true,count:1,data:[{apiVersion:'v1',kind:'Secret',metadata:{name:'db-password',namespace:'prod'}}]})
     renderPage()
-    await waitFor(()=>expect(mocks.listKeys).toHaveBeenCalledWith('secret', { silent: true }))
+    await waitFor(()=>expect(mocks.listKeys).toHaveBeenCalledWith('secret', { silent: true, target: { controllerId: null } }))
     expect(await screen.findByText('db-password')).toBeInTheDocument()
     expect(screen.queryByText(/redacted/i)).not.toBeInTheDocument()
   })
@@ -40,7 +40,7 @@ describe('RestrictedDependenciesPage', () => {
     renderPage()
     if (kind === 'ConfigMap') fireEvent.click(screen.getByTestId('configmap-tab'))
     expect(await screen.findByText('cached-dependency')).toBeInTheDocument()
-    await waitFor(() => expect(mocks.listKeys).toHaveBeenCalledWith(kind.toLowerCase(), { silent: true }))
+    await waitFor(() => expect(mocks.listKeys).toHaveBeenCalledWith(kind.toLowerCase(), { silent: true, target: { controllerId: null } }))
     mocks.listKeys.mockRejectedValue(new Error('credential-value-that-must-not-render'))
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     expect(await screen.findByText(`Unable to load ${kind} metadata`)).toBeInTheDocument()

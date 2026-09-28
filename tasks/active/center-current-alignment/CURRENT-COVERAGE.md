@@ -256,3 +256,10 @@ failures after dispatch are not established by connection migration alone.
 4. Reconcile every row with the original objective before claiming completion.
    Passing editor CRUD never proves Gateway traffic, real DNS propagation or
    a Kubernetes deployment that has not run.
+
+
+Metadata/topology request-target follow-up: restricted dependency keys and all
+22 topology inventory reads now bind both cache and HTTP requests to the captured
+route Controller. 38 focused tests, build/lint and two native browser checks pass.
+See [READ-TARGET-EVIDENCE.md](READ-TARGET-EVIDENCE.md). Existing Secret denial is
+preserved; this adds request-isolation evidence, not new inventory permissions.

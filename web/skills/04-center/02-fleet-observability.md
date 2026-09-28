@@ -64,7 +64,11 @@ ACME certificates expiring within 30 days.
 ## Topology semantics
 
 The selected-Controller topology loads all first-class relationship resources and
-metadata-only keys for restricted dependencies. It displays these main chains:
+metadata-only keys for restricted dependencies. Capture the route Controller with
+`useControllerMutationTarget` and pass it to every list/listKeys request, including
+cluster-scoped kinds. The cache key and HTTP target must use the same captured
+identity; the mutable global proxy selection is not a request target. Restricted
+Secret/ConfigMap inventory pages follow the same rule. It displays these main chains:
 
 ```text
 GatewayClass -> Gateway -> Route -> Service -> EndpointSlice -> Backend address

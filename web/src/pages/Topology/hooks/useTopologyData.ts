@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react'
-import { useParams } from 'react-router-dom'
+import { useControllerMutationTarget } from '@/hooks/useControllerMutationTarget'
 import { useQueries } from '@tanstack/react-query'
 import { clusterResourceApi, resourceApi } from '@/api/resources'
 import type { K8sResource, ResourceKind } from '@/api/types'
@@ -486,19 +486,19 @@ export function buildTopologyGraph(resources: TopologyResources, namespaceFilter
 const QUERY_OPTIONS = { staleTime: 30_000, retry: 1 } as const
 
 export function useTopologyData(namespaceFilter: string | null): TopologyData {
-  const { controllerId } = useParams<{ controllerId?: string }>()
-  const cid = controllerId ?? ''
+  const target = useControllerMutationTarget()
+  const cid = target.controllerId ?? ''
   const results = useQueries({
     queries: TOPOLOGY_KINDS.map((kind) => ({
       queryKey: ['topology', kind, cid],
       queryFn: async () => {
         if (RESTRICTED_KINDS.has(kind)) {
-          const response = await resourceApi.listKeys(kind, { silent: true })
+          const response = await resourceApi.listKeys(kind, { silent: true, target })
           return (response.data ?? []).map((key) => ({ ...key })) as K8sResource[]
         }
         const response = CLUSTER_KINDS.has(kind)
-          ? await clusterResourceApi.listAll<K8sResource>(kind, { silent: true })
-          : await resourceApi.listAll<K8sResource>(kind, { silent: true })
+          ? await clusterResourceApi.listAll<K8sResource>(kind, { silent: true, target })
+          : await resourceApi.listAll<K8sResource>(kind, { silent: true, target })
         return response.data ?? []
       },
       ...QUERY_OPTIONS,

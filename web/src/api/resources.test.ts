@@ -47,6 +47,13 @@ describe('resource mutation execution boundary', () => {
     }
   })
 
+  it.each(['east/controller', null])('pins metadata-only reads to captured target %s', async (controllerId) => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { success: true, data: [] } })
+    await resourceApi.listKeys('secret', { namespace: 'app', limit: 20, continue: 'next', silent: true, target: { controllerId } })
+    expect(get).toHaveBeenCalledWith('/keys/namespaced/secret/app?limit=20&continue=next',
+      expect.objectContaining({ baseURL: controllerId ? '/api/v1/proxy/east~controller/api/v1' : '/api/v1', _skipControllerProxy: true, _silent: true }))
+  })
+
   it('reads processed status from the captured Controller without the CRUD API prefix', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({
       data: { success: true, data: { kind: 'HTTPRoute', metadata: { name: 'route' }, status: { parents: [] } } },
