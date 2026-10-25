@@ -14,6 +14,10 @@ describe('dashboard HTTP plugin catalog', () => {
     expect(names('RequestRestriction')).toContain('conditions')
     expect(names('RequestRestriction')).not.toContain('ruleGroups')
     expect(fields('IpRestriction').find((field) => field.name === 'ipSource')?.options).toEqual(['RemoteIp', 'DirectPeerIp'])
+    expect(names('IpRestriction')).toEqual(expect.arrayContaining(['allowRefs', 'denyRefs']))
+    expect(names('IpRestriction')).not.toEqual(expect.arrayContaining(['allow', 'deny']))
+    expect(names('RealIp')).toContain('trustedIpRefs')
+    expect(names('RealIp')).not.toContain('trustedIps')
     expect(names('ProxyRewrite')).toContain('jsonBody')
     expect(names('Dsl')).toEqual(expect.arrayContaining(['maxBodyScanPasses', 'httpMaxRequestBodyBytes', 'rateLimitPolicies']))
     expect(names('ExtProc')).toEqual(expect.arrayContaining(['disableImmediateResponse', 'allowModeOverride', 'allowedOverrideModes']))
@@ -66,15 +70,17 @@ describe('dashboard HTTP plugin catalog', () => {
     const definition = HTTP_PLUGIN_CATALOG.find((entry) => entry.type === 'AiProxy')!
     expect(definition.stages).toEqual(['requestPlugins'])
     expect(definition.fields.map((field) => field.name)).toEqual([
-      'backendSelection', 'injectUsageTracking', 'onUnknownModel', 'modelRoutes', 'tokenQuota',
+      'api', 'conversion', 'usageObservation', 'backendSelection', 'injectUsageTracking', 'onUnknownModel', 'modelRoutes', 'tokenQuota',
     ])
     expect(definition.fields.find((field) => field.name === 'backendSelection')?.defaultValue).toEqual({ type: 'Weighted' })
+    expect(definition.fields.find((field) => field.name === 'api')?.options).toEqual(['openaiChat', 'openaiResponses', 'anthropicMessages'])
+    expect(definition.fields.find((field) => field.name === 'conversion')?.options).toEqual(['chatToAnthropic'])
   })
 
-  it('keeps the 48 registered plugin definitions and type choices consistent', () => {
-    expect(HTTP_PLUGIN_CATALOG).toHaveLength(48)
-    expect(new Set(HTTP_PLUGIN_CATALOG.map((entry) => entry.type)).size).toBe(48)
-    expect(PLUGIN_TYPES).toHaveLength(48)
+  it('keeps the 55 registered plugin definitions and type choices consistent', () => {
+    expect(HTTP_PLUGIN_CATALOG).toHaveLength(55)
+    expect(new Set(HTTP_PLUGIN_CATALOG.map((entry) => entry.type)).size).toBe(55)
+    expect(PLUGIN_TYPES).toHaveLength(55)
     expect([...PLUGIN_TYPES]).toEqual(HTTP_PLUGIN_CATALOG.map((entry) => entry.type))
     expect(PLUGIN_TYPES).not.toContain('ExtensionRef')
   })
@@ -89,7 +95,7 @@ describe('dashboard HTTP plugin catalog', () => {
     expect(pluginTypesForStage('upstreamResponseFilterPlugins')).toEqual([
       'ResponseHeaderModifier', 'DebugAccessLogToHeader', 'ResponseRewrite', 'Dsl', 'Wasm',
     ])
-    expect(pluginTypesForStage('requestPlugins')).toHaveLength(44)
+    expect(pluginTypesForStage('requestPlugins')).toHaveLength(51)
   })
 
   it('publishes a structured field catalog for every non-empty Rust config', () => {

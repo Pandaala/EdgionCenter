@@ -23,7 +23,7 @@ import { mutationDocumentToYaml } from './resource-document'
 export const LINKSYS_RUST_FIELD_MATRIX = {
   redis: ['endpoints','auth','db','timeout','pool','topology','tls'],
   elasticsearch: ['endpoints','auth','tls','timeout','pool','bulk','index'],
-  etcd: ['endpoints','auth','tls','timeout','keepAlive','namespace','autoSyncInterval','maxCallSendSize','maxCallRecvSize','userAgent','rejectOldCluster','observability'],
+  etcd: ['endpoints','auth','tls','timeout','keepAlive','namespace'],
   webhook: ['target','tls','timeoutMs','timeoutMsTemplate','retry','rateLimit','healthCheck','maxResponseBytes','success','statusOnError','request'],
   credentialSource: ['provider','rotation','egress','publication'],
   otlp: ['endpoint','timeoutMs','auth','tls'],
@@ -173,6 +173,21 @@ export function validateLinkSys(resource: LinkSys): void {
       const etcd = config as EtcdConfig
       if (!etcd.endpoints?.length) fail('etcd requires at least one endpoint')
       if (etcd.auth && !etcd.auth.secretRef?.name) fail('etcd auth requires a Secret name')
+      for (const field of ['autoSyncInterval', 'maxCallSendSize', 'maxCallRecvSize', 'userAgent', 'rejectOldCluster', 'observability']) {
+        if (Object.prototype.hasOwnProperty.call(config, field)) fail(`etcd.${field} is not supported by the current Controller`)
+      }
+      if (etcd.timeout && Object.prototype.hasOwnProperty.call(etcd.timeout, 'keepAlive')) fail('etcd.timeout.keepAlive was removed; use keepAlive.time and keepAlive.timeout in seconds')
+      for (const field of ['dial', 'request'] as const) {
+        const value = etcd.timeout?.[field]
+        if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) fail(`etcd.timeout.${field} must be positive milliseconds`)
+      }
+      const keepAlive = etcd.keepAlive
+      if (keepAlive && Object.values(keepAlive).some((value) => value !== undefined)) {
+        for (const field of ['time', 'timeout'] as const) {
+          const value = keepAlive[field]
+          if (value === undefined || !Number.isInteger(value) || value < 1 || value > 86400) fail(`etcd.keepAlive.${field} must be an integer from 1 to 86400 seconds`)
+        }
+      }
       break
     }
     case 'webhook': {

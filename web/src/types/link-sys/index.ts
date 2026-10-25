@@ -20,11 +20,6 @@ export interface LinkTlsConfig {
   clientCertificateRef?: SecretObjectReference
 }
 
-export interface LinkObservability {
-  metrics?: { enabled?: boolean; labels?: Record<string, string> }
-  logging?: { enabled?: boolean; level?: string; slowLogThreshold?: number }
-}
-
 export interface RedisConfig {
   endpoints: string[]
   db?: number
@@ -53,15 +48,9 @@ export interface EtcdConfig {
   endpoints: string[]
   auth?: SecretAuth
   tls?: LinkTlsConfig
-  timeout?: { dial?: number; request?: number; keepAlive?: number }
+  timeout?: { dial?: number; request?: number }
   keepAlive?: { time?: number; timeout?: number; permitWithoutStream?: boolean }
   namespace?: string
-  autoSyncInterval?: number
-  maxCallSendSize?: number
-  maxCallRecvSize?: number
-  userAgent?: string
-  rejectOldCluster?: boolean
-  observability?: LinkObservability
 }
 
 export interface WebhookConfig {
@@ -143,7 +132,7 @@ export interface CredentialSourceConfig {
     retryMaxBackoff?: string
   }
   egress?: { blockPrivate?: boolean }
-  publication?: { persist?: boolean; memoryMaxKeys?: number }
+  publication?: { persist?: boolean }
 }
 
 export type LinkSysConfig =

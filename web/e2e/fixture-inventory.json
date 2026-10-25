@@ -41,7 +41,17 @@
     {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-region-route","file":"resources/operations.yaml"},
     {"kind":"EdgionConfigData","namespace":"__NS_A__","name":"__PREFIX__-region-route-override","file":"resources/operations.yaml"},
     {"kind":"EdgionStreamPlugins","namespace":"__NS_A__","name":"__PREFIX__-global-ip","file":"resources/operations.yaml"},
-    {"kind":"EdgionConfigData","namespace":"__NS_A__","name":"__PREFIX__-global-ip-selector","file":"resources/operations.yaml"}
+    {"kind":"EdgionConfigData","namespace":"__NS_A__","name":"__PREFIX__-global-ip-selector","file":"resources/operations.yaml"},
+    {"kind":"EdgionConfigData","namespace":"__NS_A__","name":"__PREFIX__-office-ips","file":"resources/operations.yaml"},
+    {"kind":"EdgionConfigData","namespace":"__NS_A__","name":"__PREFIX__-test-ips","file":"resources/operations.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-resttographql","file":"resources/current-plugins.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-graphqlguard","file":"resources/current-plugins.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-graphqlsafelist","file":"resources/current-plugins.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-graphqlratelimit","file":"resources/current-plugins.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-graphqloperationrouter","file":"resources/current-plugins.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-grpcjsontranscoder","file":"resources/current-plugins.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-responsecache","file":"resources/current-plugins.yaml"},
+    {"kind":"EdgionPlugins","namespace":"__NS_A__","name":"__PREFIX__-aiproxy","file":"resources/current-plugins.yaml"}
   ],
   "runtimeKinds": ["Namespace","Deployment","Service","ServiceAccount","Role","RoleBinding","ClusterRole","ClusterRoleBinding","ConfigMap","Secret"],
   "runtimeIdentities": [

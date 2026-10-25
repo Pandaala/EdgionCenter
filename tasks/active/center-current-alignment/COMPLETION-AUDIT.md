@@ -1,5 +1,11 @@
 # Completion audit checkpoint
 
+Current acceptance: **2026-10-25**. The updated Controller/Center page audit,
+current validation results and verified running preview are recorded in
+[October revalidation](OCTOBER-2026-REVALIDATION.md). Its final requirement matrix
+supersedes the September checkpoint below. Source remains uncommitted; the
+retained preview runs two Controllers and Gateways with 122 YAML resources.
+
 Date: 2026-09-28. Source checkpoint: `ba012f3` (current full frontend and native browser regression).
 Verdict: **complete for the requested current-source Center alignment review and
 repairs**, following the final reconciliation below. This covers the entire

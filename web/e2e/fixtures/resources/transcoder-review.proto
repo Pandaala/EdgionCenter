@@ -1,0 +1,14 @@
+syntax = "proto3";
+package center.review;
+
+service ReviewService {
+  rpc Check(ReviewRequest) returns (ReviewResponse);
+}
+
+message ReviewRequest {
+  string name = 1;
+}
+
+message ReviewResponse {
+  string status = 1;
+}

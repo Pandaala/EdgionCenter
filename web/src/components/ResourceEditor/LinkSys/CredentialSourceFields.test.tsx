@@ -7,7 +7,7 @@ describe('CredentialSourceFields', () => {
   it('preserves credential rotation, TLS, and publication data on an endpoint edit', () => {
     const config: CredentialSourceConfig = {
       provider: { type: 'oauth2ClientCredentials', tokenEndpoint: 'https://issuer.example/token', clientAuthentication: { activeSecretRef: { name: 'active', namespace: 'edge', kind: 'Secret' }, previousSecretRef: { name: 'previous' } }, scopes: ['read'], tls: { enabled: false, clientCertificateRef: { name: 'client' } } },
-      rotation: { interval: '30m' }, egress: { blockPrivate: false }, publication: { persist: false, memoryMaxKeys: 100 },
+      rotation: { interval: '30m' }, egress: { blockPrivate: false }, publication: { persist: false },
     }
     const onChange = vi.fn()
     render(<CredentialSourceFields config={config} onChange={onChange} readOnly={false} />)

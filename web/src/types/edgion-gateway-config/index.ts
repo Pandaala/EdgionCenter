@@ -6,13 +6,6 @@
 
 import type { K8sObjectMeta } from '@/types/gateway-api/common'
 
-export interface IpGroup {
-  name: string
-  description?: string
-  cidrs: string[]
-  [key: string]: unknown
-}
-
 export interface ObjectReference {
   group?: string
   kind?: string
@@ -64,17 +57,20 @@ export interface EdgionGatewayConfigSpec {
   }
   requestBody?: {
     enabled?: boolean
-    defaultMemoryBufferSize?: string
-    maxMemoryBufferSize?: string
-    defaultMaxBodySize?: string
     maxBodySize?: string
-    storageOperationTimeout?: string
+    storage?: {
+      memoryLimit?: string
+      spillToDisk?: boolean
+      maxBufferedSize?: string
+      operationTimeout?: string
+      [key: string]: unknown
+    }
     [key: string]: unknown
   }
   tcpTimeout?: { idleTimeout?: string; connectTimeout?: string; [key: string]: unknown }
   loadBalancing?: { degradeThreshold?: number; [key: string]: unknown }
   realIp?: {
-    trustedIps?: IpGroup[]
+    trustedIpRefs?: Array<{ name: string; namespace?: string; [key: string]: unknown }>
     realIpHeader?: string
     recursive?: boolean
     maxTrustedHops?: number

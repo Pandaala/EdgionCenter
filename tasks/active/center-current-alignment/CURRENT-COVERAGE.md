@@ -1,5 +1,13 @@
 # Current alignment coverage
 
+Current checkpoint: **2026-10-25, complete**. See
+[October revalidation](OCTOBER-2026-REVALIDATION.md) for the current source and
+objective audit: 22 resource kinds, 55 HTTP plugins, 855 frontend tests and a full
+184-pass browser run (two Kubernetes-only skips). The retained preview has two
+Controllers, two Gateways, real east/west traffic and 122 resource YAML files.
+Backend implementation gates pass; the unrelated English-only baseline remains
+explicit. No commit/push. September acceptance below is historical.
+
 Checkpoint: 2026-09-28. The requested alignment review and repairs are **complete**, with the validation
 limits recorded in the completion audit.
 This is a current index; [README.md](README.md) retains the chronological evidence.

@@ -14,10 +14,8 @@ spec:
     - enable: true
       type: IpRestriction
       config:
-        allow:
+        allowRefs:
           - name: private-networks
-            cidrs:
-              - "10.0.0.0/8"
         defaultAction: deny
 `
 
@@ -30,7 +28,7 @@ export function createEmpty(): EdgionStreamPlugins {
       plugins: [{
         enable: true,
         type: 'IpRestriction',
-        config: { allow: [{ name: 'private-networks', cidrs: [] }], defaultAction: 'deny' },
+        config: { allowRefs: [], defaultAction: 'deny' },
       }],
       tlsRoutePlugins: [],
     },

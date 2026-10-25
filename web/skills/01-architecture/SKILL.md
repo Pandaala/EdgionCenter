@@ -15,7 +15,6 @@ description: Edgion Center project architecture overview — directory structure
 | UI Components | Ant Design | 5.12 |
 | Routing | React Router | 6.20 |
 | Server State | React Query (TanStack) | 5.14 |
-| Client State | Zustand | 4.4 (installed, not yet in use) |
 | HTTP Client | Axios | 1.6 |
 | Code Editor | Monaco Editor (@monaco-editor/react) | 4.6 |
 | Validation | Zod | 4.2 |

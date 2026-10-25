@@ -145,7 +145,8 @@ export function pluginAcceptsBodyRequirement(
   config: Record<string, unknown> | undefined,
 ): boolean {
   if (stage !== 'requestPlugins') return false
-  if (['Wasm', 'AiProxy', 'AiGuard', 'RequestBodyBuffer', 'JsonSchemaValidation', 'FormJsonTransform'].includes(type)) return true
+  if (['Wasm', 'AiProxy', 'AiGuard', 'RequestBodyBuffer', 'JsonSchemaValidation', 'FormJsonTransform',
+    'RestToGraphql', 'GraphqlGuard', 'GraphqlSafelist', 'GraphqlRateLimit', 'GraphqlOperationRouter', 'GrpcJsonTranscoder'].includes(type)) return true
   if (type === 'HmacAuth') return config?.validateRequestBody === true
   if (type === 'ForwardAuth') return config?.forwardBody === true
   if (type === 'ProxyRewrite') return config?.jsonBody != null

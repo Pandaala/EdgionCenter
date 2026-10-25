@@ -1,4 +1,3 @@
-import { isIpOrCidr } from './ip-address'
 import * as yaml from 'js-yaml'
 import type { EdgionGatewayConfig } from '@/types/edgion-gateway-config'
 import { dumpYaml } from './yaml-utils'
@@ -22,7 +21,7 @@ spec:
   retry:
     attempts: 2
   requestBody:
-    defaultMaxBodySize: 32MiB
+    maxBodySize: 32MiB
   preflightPolicy:
     mode: cors-standard
     statusCode: 204
@@ -39,7 +38,7 @@ export function createEmpty(): EdgionGatewayConfig {
         backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s' },
       },
       retry: { attempts: 2 },
-      requestBody: { defaultMaxBodySize: '32MiB' },
+      requestBody: { maxBodySize: '32MiB' },
       preflightPolicy: { mode: 'cors-standard', statusCode: 204 },
     },
   }
@@ -66,7 +65,6 @@ export function fromYaml(yamlStr: string): EdgionGatewayConfig {
   return normalize(yaml.load(yamlStr) as any)
 }
 
-const IP_GROUP_NAME_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$/
 const BYTE_SIZE_UNITS: Array<[string, number]> = [
   ['kib', 1024],
   ['kb', 1024],
@@ -166,7 +164,7 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
     ['spec.tcpTimeout.idleTimeout', spec.tcpTimeout?.idleTimeout],
     ['spec.tcpTimeout.connectTimeout', spec.tcpTimeout?.connectTimeout],
     ['spec.dnsResolver.cacheTtl', spec.dnsResolver?.cacheTtl],
-    ['spec.requestBody.storageOperationTimeout', spec.requestBody?.storageOperationTimeout],
+    ['spec.requestBody.storage.operationTimeout', spec.requestBody?.storage?.operationTimeout],
   ]
   durations.forEach(([path, value]) => {
     if (value !== undefined && (typeof value !== 'string' || !isValidGep2257Duration(value))) {
@@ -175,24 +173,34 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
   })
   if (spec.maxBodySize !== undefined) errors.push('spec.maxBodySize was removed; use spec.requestBody.maxBodySize')
   const body = spec.requestBody ?? {}
-  const sizes = ['defaultMemoryBufferSize', 'maxMemoryBufferSize', 'defaultMaxBodySize', 'maxBodySize'] as const
-  for (const field of sizes) {
-    const value = body[field]
+  const storage = body.storage ?? {}
+  if (typeof body !== 'object' || Array.isArray(body)) errors.push('spec.requestBody must be an object')
+  if (typeof storage !== 'object' || Array.isArray(storage)) errors.push('spec.requestBody.storage must be an object')
+  for (const field of ['defaultMemoryBufferSize', 'maxMemoryBufferSize', 'defaultMaxBodySize', 'storageOperationTimeout']) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) errors.push(`spec.requestBody.${field} was removed; use maxBodySize and storage`)
+  }
+  for (const [path, value] of [
+    ['maxBodySize', body.maxBodySize], ['storage.memoryLimit', storage.memoryLimit], ['storage.maxBufferedSize', storage.maxBufferedSize],
+  ] as const) {
     if (value !== undefined && (typeof value !== 'string' || (parseEdgionByteSize(value) ?? 0) <= 0)) {
-      errors.push(`spec.requestBody.${field} is invalid (expected a positive byte size such as '32MiB')`)
+      errors.push(`spec.requestBody.${path} is invalid (expected a positive byte size such as '32MiB')`)
     }
   }
-  const memoryValue = body.maxMemoryBufferSize ?? body.defaultMemoryBufferSize ?? '128KiB'
-  const bodyValue = body.maxBodySize ?? body.defaultMaxBodySize ?? '32MiB'
-  const memorySize = typeof memoryValue === 'string' ? parseEdgionByteSize(memoryValue) : null
-  const bodySize = typeof bodyValue === 'string' ? parseEdgionByteSize(bodyValue) : null
-  if (memorySize !== null && bodySize !== null && memorySize > bodySize) {
-    errors.push('Effective requestBody memory buffer size must not exceed the effective max body size')
+  const memorySize = typeof (storage.memoryLimit ?? '128KiB') === 'string' ? parseEdgionByteSize(storage.memoryLimit ?? '128KiB') : null
+  const bodySize = typeof (body.maxBodySize ?? '32MiB') === 'string' ? parseEdgionByteSize(body.maxBodySize ?? '32MiB') : null
+  const bufferedSize = storage.maxBufferedSize === undefined ? bodySize
+    : typeof storage.maxBufferedSize === 'string' ? parseEdgionByteSize(storage.maxBufferedSize) : null
+  if (memorySize !== null && bufferedSize !== null && memorySize > bufferedSize) {
+    errors.push('spec.requestBody.storage.memoryLimit must not exceed maxBufferedSize (or inherited maxBodySize)')
+  }
+  if (bufferedSize !== null && bodySize !== null && bufferedSize > bodySize) {
+    errors.push('spec.requestBody.storage.maxBufferedSize must not exceed requestBody.maxBodySize')
   }
   if (body.enabled !== undefined && typeof body.enabled !== 'boolean') errors.push('spec.requestBody.enabled must be a boolean')
-  if (typeof body.storageOperationTimeout === 'string' && isValidGep2257Duration(body.storageOperationTimeout)
-    && !body.storageOperationTimeout.match(/\d+/g)?.some((part) => Number(part) > 0)) {
-    errors.push('spec.requestBody.storageOperationTimeout must be greater than zero')
+  if (storage.spillToDisk !== undefined && typeof storage.spillToDisk !== 'boolean') errors.push('spec.requestBody.storage.spillToDisk must be a boolean')
+  if (typeof storage.operationTimeout === 'string' && isValidGep2257Duration(storage.operationTimeout)
+    && !storage.operationTimeout.match(/\d+/g)?.some((part) => Number(part) > 0)) {
+    errors.push('spec.requestBody.storage.operationTimeout must be greater than zero')
   }
   const degradeThreshold = spec.loadBalancing?.degradeThreshold
   if (degradeThreshold !== undefined && (!Number.isInteger(degradeThreshold) || degradeThreshold < 0 || degradeThreshold > 100)) {
@@ -200,7 +208,8 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
   }
   const realIp = spec.realIp
   if (realIp != null) {
-    if (!Array.isArray(realIp.trustedIps) || realIp.trustedIps.length === 0) errors.push('spec.realIp.trustedIps requires at least one group')
+    if ('trustedIps' in realIp) errors.push('spec.realIp.trustedIps is not supported; use trustedIpRefs')
+    if (!Array.isArray(realIp.trustedIpRefs) || realIp.trustedIpRefs.length === 0) errors.push('spec.realIp.trustedIpRefs requires at least one reference')
     const header = realIp.realIpHeader
     if (header !== undefined && (typeof header !== 'string' || header.length > 256 || !isValidHTTPHeaderName(header))) {
       errors.push('spec.realIp.realIpHeader must be a valid HTTP header name')
@@ -208,16 +217,11 @@ export function validateEdgionGatewayConfig(resource: EdgionGatewayConfig): stri
     const hops = realIp.maxTrustedHops
     if (hops != null && (!Number.isInteger(hops) || hops < 0 || hops > 4294967295)) errors.push('spec.realIp.maxTrustedHops must be an integer from 0 to 4294967295')
   }
-  const groupNames = new Set<string>()
-  const trustedGroups = Array.isArray(realIp?.trustedIps) ? realIp.trustedIps : []
-  trustedGroups.forEach((group, index) => {
-    const path = `spec.realIp.trustedIps[${index}]`
-    if (!group || typeof group !== 'object' || Array.isArray(group)) { errors.push(`${path} must be an object`); return }
-    if (!IP_GROUP_NAME_PATTERN.test(group.name || '')) errors.push(`${path}.name is invalid`)
-    else if (groupNames.has(group.name)) errors.push(`${path}.name must be unique`)
-    else groupNames.add(group.name)
-    if (!Array.isArray(group.cidrs) || !group.cidrs.length) errors.push(`${path}.cidrs requires at least one entry`)
-    if (Array.isArray(group.cidrs)) group.cidrs.forEach((cidr, cidrIndex) => { if (!isIpOrCidr(cidr)) errors.push(`${path}.cidrs[${cidrIndex}] is invalid`) })
+  const trustedRefs = Array.isArray(realIp?.trustedIpRefs) ? realIp.trustedIpRefs : []
+  trustedRefs.forEach((ref, index) => {
+    const path = `spec.realIp.trustedIpRefs[${index}]`
+    if (!ref || typeof ref !== 'object' || Array.isArray(ref)) { errors.push(`${path} must be an object`); return }
+    if (typeof ref.name !== 'string' || !ref.name.trim()) errors.push(`${path}.name is required`)
   })
   spec.globalPluginsRef?.forEach((ref, index) => { if (!ref.name?.trim()) errors.push(`spec.globalPluginsRef[${index}].name is required`) })
   const outbound = spec.outboundTls

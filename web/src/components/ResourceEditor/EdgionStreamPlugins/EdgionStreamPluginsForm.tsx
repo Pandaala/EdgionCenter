@@ -16,12 +16,10 @@ interface Props {
 
 const FIELDS: Record<string, readonly PluginField[]> = {
   IpRestriction: [
-    { name: 'allow', kind: 'array' }, { name: 'deny', kind: 'array' },
     { name: 'defaultAction', kind: 'string', options: ['allow', 'deny'] },
     { name: 'allowRefs', kind: 'array' }, { name: 'denyRefs', kind: 'array' },
   ],
   TlsRouteIpRestriction: [
-    { name: 'allow', kind: 'array' }, { name: 'deny', kind: 'array' },
     { name: 'ipSource', kind: 'string', options: ['RemoteIp', 'DirectPeerIp'] },
     { name: 'message', kind: 'string' }, { name: 'status', kind: 'number' },
     { name: 'defaultAction', kind: 'string', options: ['allow', 'deny'] },

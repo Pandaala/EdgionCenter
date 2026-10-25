@@ -39,6 +39,8 @@ const HTTP_PLUGIN_INTERNAL_TERMINALS = [
   'resolvedOidcClientSecret', 'resolvedSessionSecret', 'resolvedCaCertificates',
   'resolvedClientCertificate', 'resolvedCredential', 'resolvedKeys',
   'resolvedSecretValues', 'resolvedSecrets', 'resolvedValues', 'resolvedIps',
+  'resolvedAllowRefs', 'resolvedDenyRefs', 'resolvedRefs', 'invalidInput',
+  'resolvedDescriptor', 'descriptorError',
   'valuesSet', 'wildcardPatterns',
   'compiledRegex', 'compiledJsonBody', 'compiledPatterns', 'compiledOriginsRegex', 'compiledTemplates',
   'compiledTimingRegex', 'compiledTransformPatterns', 'originsCache', 'ipMatcher',
@@ -74,7 +76,7 @@ const HTTP_PLUGIN_INTERNAL_PATHS: readonly MutationPath[] = HTTP_PLUGIN_STAGES.f
     ['spec', stage, '*', 'config', 'source', 'fetch', 'resolvedAuthHeader'],
     ['spec', stage, '*', 'config', 'source', 'oci', 'resolvedPullSecret'],
     ...[
-      ['backendRef'], ['overrideRef'], ['activeProfileRef'], ['allowRefs', '*'], ['denyRefs', '*'],
+      ['backendRef'], ['overrideRef'], ['activeProfileRef'], ['allowRefs', '*'], ['denyRefs', '*'], ['trustedIpRefs', '*'],
       ['profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'ipRefs', '*'],
       ['profiles', '*', 'requiredRuleGroups', '*', 'anyOfRules', '*', 'config', 'configRefs', '*'],
     ].map((reference) => ['spec', stage, '*', 'config', ...reference, 'refDenied']),
@@ -88,6 +90,8 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'enableReferenceGrantValidation'],
     ['spec', 'outboundTls', 'resolvedCaCertificates'],
     ['spec', 'outboundTls', 'resolvedClientCertificate'],
+    ...['resolvedRefs', 'invalidInput'].map((field) => ['spec', 'realIp', field]),
+    ['spec', 'realIp', 'trustedIpRefs', '*', 'refDenied'],
   ],
   gateway: [
     ['spec', 'currentStatus'],
@@ -104,6 +108,9 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'resolvedStatusController'],
     ['spec', 'resolvedHostnames'], ['spec', 'resolvedListeners'], ['spec', 'invalidRuleIndices'],
     ['spec', 'resolvedRules'], ['spec', 'delegationIssues'],
+    ['spec', 'rules', '*', 'resolvedParentMatch'],
+    ['spec', 'rules', '*', 'filters', '*', 'resolvedExternalAuth'],
+    ['spec', 'rules', '*', 'backendRefs', '*', 'filters', '*', 'resolvedExternalAuth'],
     ['spec', 'rules', '*', 'parsedTimeouts'], ['spec', 'rules', '*', 'parsedRetry'],
     ['spec', 'rules', '*', 'resolvedAiAdmission'],
     ['spec', 'rules', '*', 'resolvedTerminalRouteUid'],
@@ -173,6 +180,7 @@ const EXCLUDED_MUTATION_PATHS = {
   referencegrant: [],
   backendtlspolicy: [
     ['spec', 'currentStatus'],
+    ['spec', 'preparedPrecedence'], ['spec', 'preparedAncestorAdmission'],
     ['spec', 'resolvedTargetClass'],
     ['spec', 'resolvedCaCertificates'], ['spec', 'resolvedClientCertificate'],
     ['spec', 'useSystemCa'],
@@ -192,10 +200,10 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'currentStatus'],
     ...['plugins', 'tlsRoutePlugins'].flatMap((stage) => [
       ['spec', stage, '*', 'policyAction'],
-      ...['ipMatcher', 'allowMatcher', 'denyMatcher', 'intervalDuration', 'effectiveSlots'].map(
+      ...['ipMatcher', 'allowMatcher', 'denyMatcher', 'intervalDuration', 'effectiveSlots', 'resolvedAllowRefs', 'resolvedDenyRefs', 'invalidInput'].map(
         (field) => ['spec', stage, '*', 'config', field],
       ),
-      ...['allowMatcher', 'denyMatcher'].map(
+      ...['allowMatcher', 'denyMatcher', 'resolvedAllowRefs', 'resolvedDenyRefs', 'invalidInput'].map(
         (field) => ['spec', stage, '*', 'config', 'profiles', '*', field],
       ),
       ...['perListener', 'perSourceIp'].map(
@@ -229,6 +237,7 @@ const EXCLUDED_MUTATION_PATHS = {
     ['spec', 'config', 'allowDegradationTemplate'],
   ],
   edgionbackendtrafficpolicy: [
+    ['spec', 'preparedPrecedence'], ['spec', 'preparedAncestorAdmission'],
     ['spec', 'healthCheck', 'active', 'resolvedCaCertificates'],
     ['spec', 'healthCheck', 'active', 'resolvedClientCertificate'],
     ['spec', 'healthCheck', 'active', 'resolvedTlsError'],

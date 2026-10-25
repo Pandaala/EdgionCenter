@@ -17,14 +17,14 @@ describe('credentialSource LinkSys', () => {
     config.provider.scopes = ['read:items', 'write:items']
     config.provider.clientAuthentication.previousSecretRef = { name: 'previous' }
     config.provider.tls = { enabled: false, resolvedCaCertificates: ['[redacted]'], resolvedClientCertificate: '[redacted]' } as any
-    config.publication = { persist: false, memoryMaxKeys: 1 }
+    config.publication = { persist: false }
     config.egress = { blockPrivate: false }
     expect(() => validateLinkSys(resource)).not.toThrow()
     const mutation = fromYaml(toMutationYaml(resource, 'create'))
     expect(mutation.spec.config).not.toHaveProperty('rotation')
     expect(mutation.spec.config).not.toHaveProperty('provider.tls.resolvedCaCertificates')
     expect(mutation.spec.config).not.toHaveProperty('provider.tls.resolvedClientCertificate')
-    expect(mutation.spec.config).toMatchObject({ publication: { persist: false, memoryMaxKeys: 1 }, egress: { blockPrivate: false }, provider: { clientAuthentication: config.provider.clientAuthentication, scopes: config.provider.scopes } })
+    expect(mutation.spec.config).toMatchObject({ publication: { persist: false }, egress: { blockPrivate: false }, provider: { clientAuthentication: config.provider.clientAuthentication, scopes: config.provider.scopes } })
   })
 
   it('rejects unsupported issuers and credential identities', () => {
@@ -58,7 +58,7 @@ describe('credentialSource LinkSys', () => {
     config.rotation = { interval: '30s', requestTimeout: '1s', retryInitialBackoff: '1s', retryMaxBackoff: '15m' }
     expect(() => validateLinkSys(resource)).not.toThrow()
     for (const memoryMaxKeys of [0, 10001, 1.5]) {
-      config.publication = { memoryMaxKeys }
+      config.publication = { memoryMaxKeys } as any
       expect(() => validateLinkSys(resource)).toThrow('memoryMaxKeys')
     }
   })

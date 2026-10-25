@@ -350,8 +350,10 @@ conf_sync:
 # The conf_sync (Controller->Gateway) channel refuses to start without an
 # explicit transport choice; no gateway connects in this harness.
 conf_sync_security:
-  tls:
-    skip_tls: true
+  active: insecure
+  certs:
+    - name: insecure
+      skip_tls: true
 
 center:
   address: "https://127.0.0.1:${CENTER_GRPC_PORT}"
@@ -400,8 +402,10 @@ conf_sync:
   no_sync_kinds: ["ReferenceGrant", "Secret"]
 
 conf_sync_security:
-  tls:
-    skip_tls: true
+  active: insecure
+  certs:
+    - name: insecure
+      skip_tls: true
 
 center:
   address: "https://127.0.0.1:${CENTER_GRPC_PORT}"

@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test'
 import * as yaml from 'js-yaml'
 import { GLOBAL_RESOURCE_DESCRIPTORS } from '../../src/pages/GlobalResources/globalResourceDescriptors.ts'
 import { RESOURCE_CATALOG, type ResourceCatalogEntry } from '../../src/config/resourceCatalog.ts'
-import { readControllerResourceDocument } from '../support/api-oracle.ts'
+import { hasCurrentCondition, pollResource, readControllerProcessedResource, readControllerResourceDocument } from '../support/api-oracle.ts'
 import { controllerPathId } from '../support/controllers.ts'
 import { waitForControllerCapabilities } from '../support/controller-ready.ts'
 import { kubectlJson } from '../support/k8s-oracle.ts'
@@ -1096,11 +1096,11 @@ test('single and batch delete confirmations remove only isolated Services', asyn
 
 const typedLinkSysCases = [
   { type: 'otlp', field: 'linksys-otlp-endpoint', config: { endpoint: 'https://collector.example.test:4317', timeoutMs: 15000, tls: { enabled: false } }, edited: { endpoint: 'https://updated.example.test:4317', timeoutMs: 15000, tls: { enabled: false } }, after: 'https://updated.example.test:4317' },
-  { type: 'credentialSource', field: 'linksys-credential-endpoint', config: { provider: { type: 'oauth2ClientCredentials', tokenEndpoint: 'https://issuer.example.test/token', clientAuthentication: { activeSecretRef: { name: 'missing-bootstrap' } }, scopes: ['read'] }, publication: { persist: false, memoryMaxKeys: 100 } }, edited: { provider: { type: 'oauth2ClientCredentials', tokenEndpoint: 'https://updated.example.test/token', clientAuthentication: { activeSecretRef: { name: 'missing-bootstrap' } }, scopes: ['read'] }, publication: { persist: false, memoryMaxKeys: 100 } }, after: 'https://updated.example.test/token' },
+  { type: 'credentialSource', field: 'linksys-credential-endpoint', config: { provider: { type: 'oauth2ClientCredentials', tokenEndpoint: 'https://issuer.example.test/token', clientAuthentication: { activeSecretRef: { name: 'missing-bootstrap' } }, scopes: ['read'] }, publication: { persist: false } }, edited: { provider: { type: 'oauth2ClientCredentials', tokenEndpoint: 'https://updated.example.test/token', clientAuthentication: { activeSecretRef: { name: 'missing-bootstrap' } }, scopes: ['read'] }, publication: { persist: false } }, after: 'https://updated.example.test/token' },
   { type: 'redis', field: 'Redis connect timeout', config: { endpoints: [], topology: { mode: 'sentinel', sentinel: { masterName: 'primary', sentinels: ['sentinel.example.test:26379'] } }, db: 255, timeout: { connect: '5s', command: '30s' }, pool: { size: 64 } }, edited: { endpoints: [], topology: { mode: 'sentinel', sentinel: { masterName: 'primary', sentinels: ['sentinel.example.test:26379'] } }, db: 255, timeout: { connect: '7s', command: '30s' }, pool: { size: 64 } }, after: '7s' },
   { type: 'kafka', field: 'Kafka maxTopics', config: { brokers: ['broker.example.test:9092'], maxTopics: 64, maxPendingRecords: 1000, maxPendingBytes: 1048576, lingerMs: 0 }, edited: { brokers: ['broker.example.test:9092'], maxTopics: 32, maxPendingRecords: 1000, maxPendingBytes: 1048576, lingerMs: 0 }, after: '32' },
   { type: 'elasticsearch', field: 'Elasticsearch index prefix', config: { endpoints: ['https://es.example.test:9200'], timeout: { connect: 5000, request: 10000 }, pool: { maxIdlePerHost: 2, idleTimeout: 30000 }, bulk: { batchSize: 100, flushInterval: 1000, maxRetries: 2, backoffMs: 100, maxBodyBytes: 1048576, channelSize: 200 }, index: { prefix: 'before', datePattern: '%Y.%m.%d' } }, edited: { endpoints: ['https://es.example.test:9200'], timeout: { connect: 5000, request: 10000 }, pool: { maxIdlePerHost: 2, idleTimeout: 30000 }, bulk: { batchSize: 100, flushInterval: 1000, maxRetries: 2, backoffMs: 100, maxBodyBytes: 1048576, channelSize: 200 }, index: { prefix: 'after', datePattern: '%Y.%m.%d' } }, after: 'after' },
-  { type: 'etcd', field: 'etcd key namespace', config: { endpoints: ['https://etcd.example.test:2379'], namespace: '/before/', timeout: { dial: 5000, request: 10000, keepAlive: 30000 }, keepAlive: { time: 10000, timeout: 5000, permitWithoutStream: false }, autoSyncInterval: 60, maxCallSendSize: 1048576, maxCallRecvSize: 2097152, userAgent: 'center-test', rejectOldCluster: false }, edited: { namespace: '/after/', timeout: { dial: 5000, request: 10000, keepAlive: 30000 }, keepAlive: { time: 10000, timeout: 5000, permitWithoutStream: false }, autoSyncInterval: 60, maxCallSendSize: 1048576, maxCallRecvSize: 2097152, userAgent: 'center-test', rejectOldCluster: false }, after: '/after/' },
+  { type: 'etcd', field: 'etcd key namespace', config: { endpoints: ['https://etcd.example.test:2379'], namespace: '/before/', timeout: { dial: 5000, request: 10000 }, keepAlive: { time: 10, timeout: 5, permitWithoutStream: false } }, edited: { namespace: '/after/', timeout: { dial: 5000, request: 10000 }, keepAlive: { time: 10, timeout: 5, permitWithoutStream: false } }, after: '/after/' },
   { type: 'httpdns', field: 'HTTP DNS URL template', config: { urlTemplate: 'https://dns.example.test/resolve?name={domain}', response: { kind: 'json', ipPath: 'data.ips', ttlPath: 'ttl' }, fallback: { type: 'dns', servers: ['1.1.1.1', '[::1]:5353'] }, connection: { timeoutMs: 2000, tls: { enabled: false } } }, edited: { urlTemplate: 'https://dns2.example.test/resolve?name={domain}', response: { kind: 'json', ipPath: 'data.ips', ttlPath: 'ttl' }, fallback: { type: 'dns', servers: ['1.1.1.1', '[::1]:5353'] }, connection: { timeoutMs: 2000, tls: { enabled: false } } }, after: 'https://dns2.example.test/resolve?name={domain}' },
   { type: 'webhook', field: 'Webhook URL', config: { target: { url: 'https://hook.example.test' }, timeoutMs: 2000, request: { method: { template: 'POST' } }, maxResponseBytes: 4096, success: { body: [{ pointer: '/ok', equals: true }] }, retry: { maxRetries: 2, retryDelayMs: 50, maxDelayMs: 100 } }, edited: { target: { url: 'https://hook2.example.test' }, timeoutMs: 2000, request: { method: { template: 'POST' } }, maxResponseBytes: 4096, success: { body: [{ pointer: '/ok', equals: true }] }, retry: { maxRetries: 2, retryDelayMs: 50, maxDelayMs: 100 } }, after: 'https://hook2.example.test' },
 ]
@@ -1187,3 +1187,68 @@ test('AI backend traffic policy preserves supported sections through the browser
     }
   }
 })
+
+const currentPluginDocuments: Array<Record<string, any>> = []
+yaml.loadAll(Object.entries(fixtureValues).reduce(
+  (source, [token, value]) => source.replaceAll(token, value),
+  readFileSync(new URL('../fixtures/resources/current-plugins.yaml', import.meta.url), 'utf8'),
+), (value) => { if (value) currentPluginDocuments.push(value as Record<string, any>) })
+
+for (const variant of [
+  { type: 'RestToGraphql', field: 'path', after: '/graphql-v2' },
+  { type: 'GraphqlGuard', field: 'maxDepth', after: '9' },
+  { type: 'GraphqlSafelist', field: 'operations[0].query', after: 'query Review { status version }' },
+  { type: 'GraphqlRateLimit', field: 'maxCost', after: '1001' },
+  { type: 'GraphqlOperationRouter', field: 'rules[0].operationName', after: 'ReviewNext' },
+  { type: 'GrpcJsonTranscoder', field: 'maxResponseJsonSize', after: '768k' },
+  { type: 'ResponseCache', field: 'maxTtl', after: '90s' },
+  { type: 'AiProxy', field: 'usageObservation', after: 'provider', select: true },
+]) {
+  test(`current plugin browser form preserves accepted ${variant.type}`, async ({ page, request }) => {
+    const catalog = RESOURCE_CATALOG.get('edgionplugins')!
+    await waitForControllerCapabilities(request, controller, [{ resourceKind: 'edgionplugins', verbs: ['get', 'list', 'create', 'update', 'delete'] }])
+    const document = structuredClone(currentPluginDocuments.find((entry) => entry.spec.requestPlugins[0].type === variant.type)!)
+    const name = `${prefix}-current-ui-${variant.type.toLowerCase()}`
+    document.metadata.name = name
+    const path = itemPath(catalog, namespace, name)
+    const expectAccepted = async (resourceVersion?: string) => pollResource(request,
+      () => readControllerProcessedResource(request, controller, 'EdgionPlugins', namespace, name),
+      (snapshot) => (resourceVersion === undefined || snapshot.resourceVersion === resourceVersion)
+        && hasCurrentCondition(snapshot, { type: 'Accepted', status: 'True' }),
+    )
+    try {
+      await openResourcePage(page, catalog)
+      await createThroughYaml(page, catalog, document)
+      const created = await readControllerResourceDocument(request, controller, 'edgionplugins', 'Namespaced', namespace, name)
+      await expectAccepted(created.metadata.resourceVersion)
+      await (await resourceRow(page, catalog, name)).getByTestId('edgionplugins-row-edit').click()
+      const field = variant.select ? page.getByRole('combobox', { name: variant.field, exact: true }) : page.getByLabel(variant.field, { exact: true })
+      await expect(field).toBeVisible()
+      if (variant.select) {
+        await field.press('ArrowDown')
+        await page.locator('.ant-select-item-option-content').filter({ hasText: variant.after }).click()
+      } else await field.fill(variant.after)
+      await page.getByTestId('editor-yaml-tab').click()
+      const edited = await yamlEditorDocument(page)
+      expect(edited.spec.requestPlugins[1]).toEqual(document.spec.requestPlugins[1])
+      expect(edited.spec.requestPlugins[0].type).toBe(variant.type)
+      expect(edited.spec.requestPlugins[0].config).not.toEqual(document.spec.requestPlugins[0].config)
+      await page.getByTestId('editor-form-tab').click()
+      const saved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes(path))
+      await page.getByTestId('editor-submit').click()
+      const result = await saved
+      expect(result.ok(), await result.text()).toBeTruthy()
+      const stored = await readControllerResourceDocument(request, controller, 'edgionplugins', 'Namespaced', namespace, name)
+      expect(stored.spec.requestPlugins).toEqual(edited.spec.requestPlugins)
+      await expectAccepted(stored.metadata.resourceVersion)
+      await (await resourceRow(page, catalog, name)).getByTestId('edgionplugins-row-delete').click()
+      const deleted = page.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().includes(path))
+      await page.getByTestId('resource-delete-confirm').click()
+      expect((await deleted).ok()).toBeTruthy()
+      await expectApiAbsent(request, path)
+    } finally {
+      const cleanup = await request.delete(path)
+      expect(cleanup.ok() || cleanup.status() === 404, 'Exact current plugin fixture cleanup failed').toBeTruthy()
+    }
+  })
+}

@@ -18,10 +18,10 @@ const fixture: any = {
     server: { enableCompression: true, downstreamKeepaliveRequestLimit: 0 },
     httpTimeout: { client: { readTimeout: '60s', writeTimeout: '61s', keepaliveTimeout: '75s' }, backend: { defaultConnectTimeout: '5s', defaultRequestTimeout: '60s', defaultIdleTimeout: '300s' } },
     retry: { attempts: 0 },
-    requestBody: { defaultMaxBodySize: '32MiB', futureBody: false },
+    requestBody: { maxBodySize: '32MiB', futureBody: false },
     tcpTimeout: { idleTimeout: '1h', connectTimeout: '10s' },
     loadBalancing: { degradeThreshold: 50 },
-    realIp: { trustedIps: [{ name: 'private', description: '', cidrs: ['10.0.0.0/8'], futureGroup: [] }, { name: 'proxy', cidrs: ['192.0.2.1'] }], realIpHeader: 'X-Forwarded-For', recursive: false, maxTrustedHops: 3 },
+    realIp: { trustedIpRefs: [{ name: 'private', namespace: 'networks', futureRef: [] }, { name: 'proxy' }], realIpHeader: 'X-Forwarded-For', recursive: false, maxTrustedHops: 3 },
     securityProtect: { xForwardedForLimit: 200, requireSniHostMatch: false, fallbackSni: '', tlsProxyLogRecord: false, allowLoopbackUpstream: true },
     globalPluginsRef: [{ name: 'one', namespace: 'prod' }, { name: 'two' }],
     accessLogExtern: {
@@ -56,7 +56,7 @@ describe('EdgionGatewayConfig lossless adapter', () => {
     expect(fromYaml).toEqual(fromForm)
     expect(fromForm.status).toBeUndefined()
     expect(fromForm.metadata.resourceVersion).toBe('11')
-    expect(fromForm.spec.realIp.trustedIps).toHaveLength(2)
+    expect(fromForm.spec.realIp.trustedIpRefs).toHaveLength(2)
     expect(fromForm.spec.globalPluginsRef).toHaveLength(2)
     expect(fromForm.spec.accessLogExtern).toEqual(fixture.spec.accessLogExtern)
     expect(fromForm.spec.futureSpec).toEqual({ empty: [], disabled: false })
@@ -77,16 +77,16 @@ describe('EdgionGatewayConfig lossless adapter', () => {
     }
   })
 
-  it('validates duration, body size, CIDR, reference, and DNS resolver constraints', () => {
+  it('validates duration, body size, reference, and DNS resolver constraints', () => {
     expect(validateEdgionGatewayConfig(fixture)).toEqual([])
     const invalid = structuredClone(fixture)
     invalid.spec.tcpTimeout.idleTimeout = 'later'
-    invalid.spec.realIp.trustedIps[0].cidrs = ['999.1.1.1/44']
+    invalid.spec.realIp.trustedIpRefs[0].name = ''
     invalid.spec.outboundTls.validation.caCertificateRefs[0].namespace = ''
     invalid.spec.dnsResolver.linkSysRef = { namespace: '', name: '' }
     const errors = validateEdgionGatewayConfig(invalid).join('\n')
     expect(errors).toContain('not a valid GEP-2257 duration')
-    expect(errors).toContain('cidrs[0] is invalid')
+    expect(errors).toContain('trustedIpRefs[0].name is required')
     expect(errors).toContain('namespace is required')
     expect(errors).toContain('mutually exclusive')
   })
@@ -136,30 +136,45 @@ describe('EdgionGatewayConfig lossless adapter', () => {
 
     for (const value of ['0', '0.5b', '', 'abc', '-1m', '1e400']) {
       const invalid = structuredClone(fixture)
-      invalid.spec.requestBody.defaultMaxBodySize = value
+      invalid.spec.requestBody.maxBodySize = value
       expect(validateEdgionGatewayConfig(invalid)).toContain(
-        "spec.requestBody.defaultMaxBodySize is invalid (expected a positive byte size such as '32MiB')",
+        "spec.requestBody.maxBodySize is invalid (expected a positive byte size such as '32MiB')",
       )
     }
 
     const minimumPositive = structuredClone(fixture)
-    minimumPositive.spec.requestBody.defaultMaxBodySize = '1b'
-    minimumPositive.spec.requestBody.defaultMemoryBufferSize = '1b'
+    minimumPositive.spec.requestBody.maxBodySize = '1b'
+    minimumPositive.spec.requestBody.storage = { memoryLimit: '1b' }
     expect(validateEdgionGatewayConfig(minimumPositive)).toEqual([])
   })
 
   it('resolves request-body overrides and validates the storage deadline', () => {
     const resource = structuredClone(fixture)
-    resource.spec.requestBody = { enabled: false, maxMemoryBufferSize: '2MiB', maxBodySize: '1MiB' }
+    resource.spec.requestBody = { enabled: false, storage: { memoryLimit: '2MiB' }, maxBodySize: '1MiB' }
     expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('must not exceed')
     resource.spec.requestBody.maxBodySize = '4MiB'
     expect(validateEdgionGatewayConfig(resource)).toEqual([])
-    resource.spec.requestBody.storageOperationTimeout = '0s'
-    expect(validateEdgionGatewayConfig(resource)).toContain('spec.requestBody.storageOperationTimeout must be greater than zero')
-    resource.spec.requestBody.storageOperationTimeout = '1ms'
+    resource.spec.requestBody.storage.operationTimeout = '0s'
+    expect(validateEdgionGatewayConfig(resource)).toContain('spec.requestBody.storage.operationTimeout must be greater than zero')
+    resource.spec.requestBody.storage.operationTimeout = '1ms'
     expect(validateEdgionGatewayConfig(resource)).toEqual([])
     resource.spec.maxBodySize = '32MiB'
     expect(validateEdgionGatewayConfig(resource)).toContain('spec.maxBodySize was removed; use spec.requestBody.maxBodySize')
+  })
+
+  it('validates the independent storage capacity and removed fields without changing the document', () => {
+    const resource = structuredClone(fixture)
+    resource.spec.requestBody = { maxBodySize: '8MiB', storage: { memoryLimit: '1MiB', maxBufferedSize: '4MiB', spillToDisk: false, operationTimeout: '2s', futureStorage: [] } }
+    const before = structuredClone(resource)
+    expect(validateEdgionGatewayConfig(resource)).toEqual([])
+    expect((yaml.load(toMutationYaml(resource, 'update')) as any).spec.requestBody).toEqual(resource.spec.requestBody)
+    expect(resource).toEqual(before)
+    for (const maxBufferedSize of ['512KiB', '9MiB']) {
+      resource.spec.requestBody.storage.maxBufferedSize = maxBufferedSize
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('must not exceed')
+    }
+    resource.spec.requestBody = { maxBodySize: '8MiB', defaultMaxBodySize: '4MiB' }
+    expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('defaultMaxBodySize was removed')
   })
 
   it('validates current retries and gateway-owned header targets', () => {
@@ -220,11 +235,11 @@ describe('EdgionGatewayConfig lossless adapter', () => {
 
   it('requires trusted proxies and validates the RealIp read header without write-target restrictions', () => {
     const resource = structuredClone(fixture)
-    for (const trustedIps of [undefined, [], 'invalid']) {
-      resource.spec.realIp.trustedIps = trustedIps
-      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('trustedIps requires at least one group')
+    for (const trustedIpRefs of [undefined, [], 'invalid']) {
+      resource.spec.realIp.trustedIpRefs = trustedIpRefs
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('trustedIpRefs requires at least one reference')
     }
-    resource.spec.realIp.trustedIps = fixture.spec.realIp.trustedIps
+    resource.spec.realIp.trustedIpRefs = fixture.spec.realIp.trustedIpRefs
     for (const realIpHeader of [undefined, 'X-Forwarded-For', 'x'.repeat(256)]) {
       resource.spec.realIp.realIpHeader = realIpHeader
       expect(validateEdgionGatewayConfig(resource)).toEqual([])
@@ -270,11 +285,17 @@ function fromYamlDocument() {
 }
 
 describe('GatewayConfig malformed trusted proxy inputs', () => {
-  it('reports malformed YAML values without throwing or accepting fake IPv6', () => {
-    for (const group of [null, 'invalid', { name: 'proxy', cidrs: '::1' }, { name: 'proxy', cidrs: [null] }, { name: 'proxy', cidrs: ['not:an:ip'] }, { name: 'proxy', cidrs: ['10.0.0.0/8/extra'] }]) {
+  it('rejects removed inline trust instead of silently treating it as an empty reference policy', () => {
+    const resource = createEmpty()
+    resource.spec.realIp = { trustedIps: [{ name: 'old', cidrs: ['10.0.0.0/8'] }], trustedIpRefs: [{ name: 'new' }] }
+    expect(validateEdgionGatewayConfig(resource)).toContain('spec.realIp.trustedIps is not supported; use trustedIpRefs')
+  })
+
+  it('reports malformed reference values without throwing', () => {
+    for (const group of [null, 'invalid', {}, { name: null }, { name: 123 }, { name: '' }, { name: ' ' }]) {
       const resource = createEmpty()
-      resource.spec.realIp = { trustedIps: [group] } as any
-      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('trustedIps[0]')
+      resource.spec.realIp = { trustedIpRefs: [group] } as any
+      expect(validateEdgionGatewayConfig(resource).join(' ')).toContain('trustedIpRefs[0]')
     }
   })
 })

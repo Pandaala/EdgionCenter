@@ -19,7 +19,7 @@ if (mode !== 'standalone' && mode !== 'kubernetes') throw new Error('Resource ac
 const prefix = `eruie2e-${createHash('sha256').update(runId).digest('hex').slice(0, 8)}`
 const render = (value: string) => value.replaceAll('__PREFIX__', prefix)
 const formControls: Partial<Record<string, readonly string[]>> = {
-  edgiongatewayconfig: ['edgiongatewayconfig-ip-group-add', 'edgiongatewayconfig-ip-group-remove'],
+  edgiongatewayconfig: ['edgiongatewayconfig-ip-ref-add', 'edgiongatewayconfig-ip-ref-remove'],
   gateway: ['gateway-address-add', 'gateway-address-remove'],
   httproute: ['httproute-rule-add', 'httproute-rule-remove', 'mirror-tuning-annotations'],
   grpcroute: ['grpcroute-rule-add', 'grpcroute-rule-remove'],

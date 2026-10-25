@@ -8,11 +8,11 @@ import { Form, Input, InputNumber, Switch, Card, Space, Select, Button } from 'a
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import type {
   EdgionGatewayConfig,
-  IpGroup,
   ObjectReference,
   SubjectAltName,
 } from '@/types/edgion-gateway-config'
 import StructuredConfigEditor from '../EdgionPlugins/StructuredConfigEditor'
+import ConfigDataRefsEditor from '../common/ConfigDataRefsEditor'
 import { useT } from '@/i18n'
 
 interface EdgionGatewayConfigFormProps {
@@ -24,20 +24,6 @@ interface EdgionGatewayConfigFormProps {
 
 interface ListProps<T> { value: T[]; onChange: (value: T[]) => void; disabled: boolean; maxItems?: number }
 type UnmaskedKeySource = 'header' | 'respHeader' | 'query' | 'cookie' | 'ctx'
-
-const IpGroupsEditor: React.FC<ListProps<IpGroup>> = ({ value, onChange, disabled }) => {
-  const t = useT()
-  return <Space direction="vertical" style={{ width: '100%' }}>
-    {value.map((group, index) => <Card key={index} size="small" type="inner" title={t('egc.ipGroupTitle', { n: index + 1 })} extra={!disabled && <Button data-testid="edgiongatewayconfig-ip-group-remove" danger type="text" icon={<MinusCircleOutlined />} aria-label={t('btn.deleteIpGroup')} onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />}>
-      <Space wrap>
-        <Form.Item label={t('field.name')} required style={{ marginBottom: 0 }}><Input value={group.name} disabled={disabled} onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} /></Form.Item>
-        <Form.Item label={t('field.descriptionOpt')} style={{ marginBottom: 0 }}><Input value={group.description || ''} disabled={disabled} onChange={(event) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, description: event.target.value || undefined } : item))} /></Form.Item>
-      </Space>
-      <Form.Item label={t('field.cidrs')} required style={{ marginBottom: 0, marginTop: 8 }}><Select mode="tags" value={group.cidrs} tokenSeparators={[',']} disabled={disabled} onChange={(cidrs) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, cidrs } : item))} /></Form.Item>
-    </Card>)}
-    {!disabled && <Button data-testid="edgiongatewayconfig-ip-group-add" type="dashed" block icon={<PlusOutlined />} onClick={() => onChange([...value, { name: '', cidrs: [] }])}>{t('btn.addIpGroup')}</Button>}
-  </Space>
-}
 
 const ObjectRefsEditor: React.FC<ListProps<ObjectReference>> = ({ value, onChange, disabled, maxItems }) => {
   const t = useT()
@@ -169,6 +155,7 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
   const tcpTimeout = data.spec?.tcpTimeout || {}
   const loadBalancing = data.spec?.loadBalancing || {}
   const requestBody = data.spec?.requestBody || {}
+  const bodyStorage = requestBody.storage || {}
   const linkSys = data.spec?.linkSys || {}
   const outboundTls = data.spec?.outboundTls || {}
   const outboundValidation = outboundTls.validation || {}
@@ -307,18 +294,22 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
           <Form.Item label={t('field.enabled')}>
             <Switch checked={requestBody.enabled !== false} disabled={readOnly} onChange={(enabled) => updateSpecBlock('requestBody', { enabled })} />
           </Form.Item>
+          <Form.Item label={t('field.gatewayMaxBodySize')}>
+            <Input value={requestBody.maxBodySize ?? ''} placeholder="32MiB" disabled={readOnly}
+              onChange={(event) => updateSpecBlock('requestBody', { maxBodySize: event.target.value || undefined })} />
+          </Form.Item>
           {([
-            ['defaultMemoryBufferSize', 'field.defaultMemoryBufferSize', '128KiB'],
-            ['maxMemoryBufferSize', 'field.maxMemoryBufferSize', ''],
-            ['defaultMaxBodySize', 'field.defaultMaxBodySize', '32MiB'],
-            ['maxBodySize', 'field.gatewayMaxBodySize', ''],
-            ['storageOperationTimeout', 'field.storageOperationTimeout', '5s'],
-          ] as const).map(([field, label, placeholder]) => (
-            <Form.Item key={field} label={t(label)}>
-              <Input value={requestBody[field] ?? ''} placeholder={placeholder} disabled={readOnly}
-                onChange={(event) => updateSpecBlock('requestBody', { [field]: event.target.value || undefined })} />
+            ['memoryLimit', '128KiB'], ['maxBufferedSize', ''], ['operationTimeout', '5s'],
+          ] as const).map(([field, placeholder]) => (
+            <Form.Item key={field} label={`storage.${field}`}>
+              <Input aria-label={`requestBody.storage.${field}`} value={bodyStorage[field] ?? ''} placeholder={placeholder} disabled={readOnly}
+                onChange={(event) => updateSpecBlock('requestBody', { storage: { ...bodyStorage, [field]: event.target.value || undefined } })} />
             </Form.Item>
           ))}
+          <Form.Item label="storage.spillToDisk">
+            <Switch aria-label="requestBody.storage.spillToDisk" checked={bodyStorage.spillToDisk !== false} disabled={readOnly}
+              onChange={(spillToDisk) => updateSpecBlock('requestBody', { storage: { ...bodyStorage, spillToDisk } })} />
+          </Form.Item>
         </Card>
 
         {/* Real IP */}
@@ -332,7 +323,10 @@ const EdgionGatewayConfigForm: React.FC<EdgionGatewayConfigFormProps> = ({
               style={{ width: 280 }}
             />
           </Form.Item>
-          <Form.Item label={t('field.trustedIps')} style={{ marginBottom: 8 }}><IpGroupsEditor value={realIp.trustedIps || []} onChange={(trustedIps) => updateRealIp({ trustedIps })} disabled={readOnly} /></Form.Item>
+          <Form.Item label="trustedIpRefs" style={{ marginBottom: 8 }}>
+            <ConfigDataRefsEditor value={realIp.trustedIpRefs ?? []} onChange={(trustedIpRefs) => updateRealIp({ trustedIpRefs })} readOnly={readOnly}
+              addButtonProps={{ 'data-testid': 'edgiongatewayconfig-ip-ref-add' }} removeButtonProps={{ 'data-testid': 'edgiongatewayconfig-ip-ref-remove' }} />
+          </Form.Item>
           <Form.Item label={t('field.recursive')} style={{ marginBottom: 0 }}>
             <Switch
               checked={!!realIp.recursive}

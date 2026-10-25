@@ -64,9 +64,37 @@ spec:
         profiles:
           locked:
             defaultAction: deny
-            allow: [{name: office, cidrs: ["10.0.0.0/8"]}]
+            allowRefs: [{name: "__PREFIX__-office-ips"}]
           open:
             defaultAction: deny
-            allow: [{name: test-networks, cidrs: ["192.0.2.0/24", "198.51.100.0/24"]}]
+            allowRefs: [{name: "__PREFIX__-test-ips"}]
         description: Federation E2E global connection policy
         activeProfileRef: {name: "__PREFIX__-global-ip-selector"}
+---
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: "__PREFIX__-office-ips"
+  namespace: "__NS_A__"
+  labels: {edgion.io/e2e-run: "__RUN_ID__"}
+spec:
+  enable: true
+  visibility: Namespace
+  data:
+    type: IpList
+    config:
+      items: [{name: office, cidrs: ["10.0.0.0/8"]}]
+---
+apiVersion: edgion.io/v1
+kind: EdgionConfigData
+metadata:
+  name: "__PREFIX__-test-ips"
+  namespace: "__NS_A__"
+  labels: {edgion.io/e2e-run: "__RUN_ID__"}
+spec:
+  enable: true
+  visibility: Namespace
+  data:
+    type: IpList
+    config:
+      items: [{name: test, cidrs: ["192.0.2.0/24", "198.51.100.0/24"]}]

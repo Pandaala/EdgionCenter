@@ -51,7 +51,7 @@ vi.mock('./EdgionGatewayConfig/EdgionGatewayConfigForm', () => ({
     metadata: { name: 'default', resourceVersion: 'server' },
     spec: {
       httpTimeout: { client: { readTimeout: '60s' } },
-      realIp: { trustedIps: [{ name: 'private', cidrs: ['10.0.0.0/8'] }] },
+      realIp: { trustedIpRefs: [{ name: 'private', namespace: 'networks' }] },
       outboundTls: { verify: true, resolvedCaCertificates: '[redacted]', resolvedClientCertificate: '[redacted]' },
       futureSpec: { preserved: false },
     },

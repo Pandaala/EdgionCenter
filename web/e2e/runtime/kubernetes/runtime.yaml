@@ -199,7 +199,7 @@ data:
       rbac: {allow: [{verbs: ["*"], kinds: ["*"]}]}
       security: {active: fed, certs: [{name: fed, cert: /tls/controller.crt, key: /tls/controller.key, ca: /tls/ca.crt}]}
     logging: {log_level: info, console: true}
-    conf_sync_security: {tls: {skip_tls: true}}
+    conf_sync_security: {active: insecure, certs: [{name: insecure, skip_tls: true}]}
   controller-b.yaml: |
     work_dir: /tmp/edgion
     server: {grpc_listen: "0.0.0.0:12151", admin_listen: "0.0.0.0:12101", probe_listen: "0.0.0.0:12100"}
@@ -216,7 +216,7 @@ data:
       rbac: {allow: [{verbs: ["*"], kinds: ["*"]}]}
       security: {active: fed, certs: [{name: fed, cert: /tls/controller.crt, key: /tls/controller.key, ca: /tls/ca.crt}]}
     logging: {log_level: info, console: true}
-    conf_sync_security: {tls: {skip_tls: true}}
+    conf_sync_security: {active: insecure, certs: [{name: insecure, skip_tls: true}]}
   dex.yaml: |
     issuer: https://__PREFIX__-dex.__PREFIX__-system.svc.cluster.local:5556/dex
     storage: {type: memory}

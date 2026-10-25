@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import Editor, { OnMount } from '@monaco-editor/react'
-import { Alert } from 'antd'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import type { OnMount } from '@monaco-editor/react'
+import { Alert, Spin } from 'antd'
 import * as yaml from 'js-yaml'
 import type { editor } from 'monaco-editor'
 import { useTheme } from '@/theme'
+
+const Editor = lazy(() => import('./MonacoEditor'))
 
 export interface YamlEditorProps {
   value?: string
@@ -103,6 +105,7 @@ const YamlEditor = ({
           style={{ margin: '8px', borderRadius: 'var(--ec-radius-sm)' }}
         />
       )}
+      <Suspense fallback={<div style={{ height, display: 'grid', placeItems: 'center' }}><Spin /></div>}>
       <Editor
         height={height}
         language={language}
@@ -128,6 +131,7 @@ const YamlEditor = ({
           tabSize: 2,
         }}
       />
+      </Suspense>
     </div>
   )
 }

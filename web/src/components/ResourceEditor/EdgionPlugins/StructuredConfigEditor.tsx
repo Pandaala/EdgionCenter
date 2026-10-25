@@ -2,6 +2,7 @@ import { Button, Card, Form, Input, InputNumber, Select, Space, Switch } from 'a
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import type { FieldKind, PluginField } from './pluginCatalog'
 import { useT } from '@/i18n'
+import ConfigDataRefsEditor from '../common/ConfigDataRefsEditor'
 
 function valueKind(value: unknown): FieldKind | 'null' {
   if (value === null) return 'null'
@@ -21,16 +22,17 @@ function defaultForKind(kind: FieldKind | 'null'): unknown {
   return ''
 }
 
-const DynamicValueEditor = ({ value, onChange, readOnly, depth = 0 }: {
+const DynamicValueEditor = ({ value, onChange, readOnly, depth = 0, path }: {
   value: unknown
   onChange: (value: unknown) => void
   readOnly: boolean
   depth?: number
+  path?: string
 }) => {
   const t = useT()
   const kind = valueKind(value)
   if (kind === 'boolean') return <Switch checked={value as boolean} disabled={readOnly} onChange={onChange} />
-  if (kind === 'number') return <InputNumber value={value as number} disabled={readOnly} onChange={(next) => onChange(next ?? 0)} style={{ width: '100%' }} />
+  if (kind === 'number') return <InputNumber aria-label={path} value={value as number} disabled={readOnly} onChange={(next) => onChange(next ?? 0)} style={{ width: '100%' }} />
   if (kind === 'array') {
     const items = value as unknown[]
     return (
@@ -56,6 +58,7 @@ const DynamicValueEditor = ({ value, onChange, readOnly, depth = 0 }: {
                 value={item}
                 readOnly={readOnly}
                 depth={depth + 1}
+                path={path && `${path}[${index}]`}
                 onChange={(nextItem) => {
                   const next = [...items]
                   next[index] = nextItem
@@ -101,7 +104,7 @@ const DynamicValueEditor = ({ value, onChange, readOnly, depth = 0 }: {
                   const next = { ...object }; delete next[key]; onChange(next)
                 }}>{t('btn.remove')}</Button>}
               </Space>
-              <DynamicValueEditor value={item} readOnly={readOnly} depth={depth + 1} onChange={(nextItem) => onChange({ ...object, [key]: nextItem })} />
+              <DynamicValueEditor value={item} readOnly={readOnly} depth={depth + 1} path={path ? `${path}.${key}` : key} onChange={(nextItem) => onChange({ ...object, [key]: nextItem })} />
             </Space>
           </Card>
         ))}
@@ -114,7 +117,7 @@ const DynamicValueEditor = ({ value, onChange, readOnly, depth = 0 }: {
     )
   }
   if (kind === 'null') return <span>{t('plugins.nullValue')}</span>
-  return <Input value={String(value ?? '')} disabled={readOnly} onChange={(event) => onChange(event.target.value)} />
+  return <Input aria-label={path} value={String(value ?? '')} disabled={readOnly} onChange={(event) => onChange(event.target.value)} />
 }
 
 const KnownFieldEditor = ({ field, value, onChange, readOnly }: {
@@ -123,14 +126,18 @@ const KnownFieldEditor = ({ field, value, onChange, readOnly }: {
   onChange: (value: unknown) => void
   readOnly: boolean
 }) => {
+  if (['allowRefs', 'denyRefs', 'trustedIpRefs'].includes(field.name) &&
+      (value === undefined || (Array.isArray(value) && value.every((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))))) {
+    return <ConfigDataRefsEditor value={(value ?? []) as Array<{ name: string; namespace?: string }>} onChange={onChange} readOnly={readOnly} />
+  }
   if (field.options) {
-    return <Select allowClear value={value as string | undefined} disabled={readOnly} options={field.options.map((entry) => ({ value: entry, label: entry }))} onChange={onChange} style={{ width: '100%' }} />
+    return <Select aria-label={field.name} allowClear value={value as string | undefined} disabled={readOnly} options={field.options.map((entry) => ({ value: entry, label: entry }))} onChange={onChange} style={{ width: '100%' }} />
   }
   if (field.kind === 'boolean') return <Select aria-label={field.name} value={value === undefined ? undefined : String(value)} placeholder="—" disabled={readOnly} options={['true', 'false'].map((entry) => ({ value: entry, label: entry }))} onChange={(next) => onChange(next === 'true')} style={{ width: '100%' }} />
-  if (field.kind === 'number') return <InputNumber value={value as number | undefined} disabled={readOnly} onChange={(next) => onChange(next)} style={{ width: '100%' }} />
-  if (field.kind === 'code') return <Input.TextArea value={value as string | undefined} disabled={readOnly} onChange={(event) => onChange(event.target.value)} autoSize={{ minRows: 5, maxRows: 16 }} style={{ fontFamily: 'monospace' }} />
-  if (field.kind === 'string') return <Input value={value as string | undefined} disabled={readOnly} onChange={(event) => onChange(event.target.value)} />
-  return <DynamicValueEditor value={value ?? field.defaultValue ?? defaultForKind(field.kind)} onChange={onChange} readOnly={readOnly} />
+  if (field.kind === 'number') return <InputNumber aria-label={field.name} value={value as number | undefined} disabled={readOnly} onChange={(next) => onChange(next)} style={{ width: '100%' }} />
+  if (field.kind === 'code') return <Input.TextArea aria-label={field.name} value={value as string | undefined} disabled={readOnly} onChange={(event) => onChange(event.target.value)} autoSize={{ minRows: 5, maxRows: 16 }} style={{ fontFamily: 'monospace' }} />
+  if (field.kind === 'string') return <Input aria-label={field.name} value={value as string | undefined} disabled={readOnly} onChange={(event) => onChange(event.target.value)} />
+  return <DynamicValueEditor path={field.name} value={value ?? field.defaultValue ?? defaultForKind(field.kind)} onChange={onChange} readOnly={readOnly} />
 }
 
 export default function StructuredConfigEditor({ fields, value, onChange, readOnly }: {

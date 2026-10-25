@@ -1,4 +1,4 @@
-import { Card, Form, Input, InputNumber, Select, Switch } from 'antd'
+import { Card, Form, Input, Select, Switch } from 'antd'
 import type { CredentialSourceConfig, SecretObjectReference } from '@/types/link-sys'
 import JsonValueField from '../common/JsonValueField'
 
@@ -39,7 +39,6 @@ export default function CredentialSourceFields({ config, onChange, readOnly }: {
       ))}
       <Form.Item label="Block private destinations"><Switch checked={config.egress?.blockPrivate ?? true} disabled={readOnly} onChange={(blockPrivate) => onChange({ ...config, egress: { ...config.egress, blockPrivate } })} /></Form.Item>
       <Form.Item label="Persist published credentials"><Switch checked={config.publication?.persist ?? true} disabled={readOnly} onChange={(persist) => onChange({ ...config, publication: { ...config.publication, persist } })} /></Form.Item>
-      <Form.Item label="Maximum in-memory credential keys"><InputNumber value={config.publication?.memoryMaxKeys} placeholder="10000" min={1} max={10000} precision={0} disabled={readOnly} onChange={(memoryMaxKeys) => onChange({ ...config, publication: { ...config.publication, memoryMaxKeys: memoryMaxKeys ?? undefined } })} /></Form.Item>
     </Card>
   )
 }

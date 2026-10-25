@@ -8,13 +8,6 @@ export const TLS_ROUTE_PLUGIN_TYPES = ['IpRestriction'] as const
 
 import type { K8sObjectMeta } from '@/types/gateway-api/common'
 
-export interface IpGroup {
-  name: string
-  description?: string
-  cidrs: string[]
-  [key: string]: unknown
-}
-
 export interface ConfigDataRef {
   name: string
   namespace?: string
@@ -23,8 +16,6 @@ export interface ConfigDataRef {
 
 /** Stage-1 L4 IpRestriction wire shape. HTTP-only fields are intentionally absent. */
 export interface ConnectionIpRestrictionConfig {
-  allow?: IpGroup[]
-  deny?: IpGroup[]
   defaultAction?: 'allow' | 'deny'
   allowRefs?: ConfigDataRef[]
   denyRefs?: ConfigDataRef[]

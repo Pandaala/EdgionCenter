@@ -168,6 +168,11 @@ describe('EdgionPlugins body requirement capability', () => {
   })
 
   it('mirrors current request-stage Wasm, HmacAuth, and DSL capability gates', () => {
+    for (const type of ['RestToGraphql', 'GraphqlGuard', 'GraphqlSafelist', 'GraphqlRateLimit', 'GraphqlOperationRouter', 'GrpcJsonTranscoder']) {
+      expect(pluginAcceptsBodyRequirement('requestPlugins', type, {})).toBe(true)
+      expect(pluginAcceptsBodyRequirement('upstreamResponseFilterPlugins', type, {})).toBe(false)
+    }
+    expect(pluginAcceptsBodyRequirement('requestPlugins', 'ResponseCache', { graphqlQueries: true })).toBe(false)
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'Wasm', {})).toBe(true)
     expect(pluginAcceptsBodyRequirement('requestPlugins', 'AiProxy', {})).toBe(true)
     expect(pluginAcceptsBodyRequirement('upstreamResponseFilterPlugins', 'AiProxy', {})).toBe(false)

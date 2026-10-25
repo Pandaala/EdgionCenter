@@ -3,6 +3,90 @@ import { buildMutationDocument } from '@/utils/resource-document'
 import { RESOURCE_CATALOG, getResourceCatalogEntry, listFirstClassResources } from './resourceCatalog'
 
 describe('resource catalog', () => {
+  it('removes current route locality and policy admission projections without changing operator data', () => {
+    const document = {
+      apiVersion: 'gateway.networking.k8s.io/v1', kind: 'HTTPRoute', metadata: { name: 'auth' },
+      spec: { rules: [{ resolvedParentMatch: { path: '/old' },
+        filters: [{ type: 'ExternalAuth', resolvedExternalAuth: { namespace: 'old' }, externalAuth: { protocol: 'HTTP', backendRef: { name: 'auth', port: 80 } } }],
+        backendRefs: [{ name: 'api', port: 80, filters: [{ type: 'ExternalAuth', resolvedExternalAuth: { error: 'old error' }, externalAuth: { protocol: 'HTTP' } }] }],
+      }] },
+    }
+    const result: any = buildMutationDocument(document, { resourceKind: 'httproute', mode: 'update' })
+    expect(result.spec.rules[0]).not.toHaveProperty('resolvedParentMatch')
+    expect(result.spec.rules[0].filters[0]).not.toHaveProperty('resolvedExternalAuth')
+    expect(result.spec.rules[0].filters[0].externalAuth).toEqual(document.spec.rules[0].filters[0].externalAuth)
+    expect(result.spec.rules[0].backendRefs[0].filters[0]).not.toHaveProperty('resolvedExternalAuth')
+    for (const kind of ['backendtlspolicy', 'edgionbackendtrafficpolicy'] as const) {
+      const entry = getResourceCatalogEntry(kind)
+      const source = { apiVersion: entry.apiVersion, kind: entry.displayName, metadata: { name: 'policy' }, spec: {
+        preparedPrecedence: { timestamp: 'old' }, preparedAncestorAdmission: { allowed: true },
+        targetRefs: [{ name: 'api' }], future: { preparedPrecedence: 'operator' },
+      } }
+      expect(buildMutationDocument(source, { resourceKind: kind, mode: 'update' }).spec).toEqual({
+        targetRefs: [{ name: 'api' }], future: { preparedPrecedence: 'operator' },
+      })
+    }
+  })
+
+  it('strips transported transcoder descriptors while preserving authored descriptor content and literal maps', () => {
+    const source = {
+      apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'transcode' },
+      spec: { requestPlugins: [
+        { type: 'GrpcJsonTranscoder', config: { descriptor: { type: 'configMapRef', name: 'proto', key: 'descriptor.pb' }, services: ['review.Service'], resolvedDescriptor: [1, 2], descriptorError: 'old error' } },
+        { type: 'Mock', config: { headers: { resolvedDescriptor: 'literal', descriptorError: 'literal' } } },
+      ] },
+    }
+    const before = structuredClone(source)
+    for (const mode of ['create', 'update'] as const) {
+      const result: any = buildMutationDocument(source, { resourceKind: 'edgionplugins', mode })
+      expect(result.spec.requestPlugins[0].config).toEqual({ descriptor: { type: 'configMapRef', name: 'proto', key: 'descriptor.pb' }, services: ['review.Service'] })
+      expect(result.spec.requestPlugins[1]).toEqual(source.spec.requestPlugins[1])
+    }
+    expect(source).toEqual(before)
+  })
+
+  it.each(['create', 'update'] as const)('removes IP read proofs on %s without altering references or opaque data', (mode) => {
+    const ref = { name: 'office', namespace: 'networks' }
+    const proof = { source: { name: 'old-owner' }, slots: [{ name: 'old-list' }] }
+    const runtime = { resolvedAllowRefs: proof, resolvedDenyRefs: proof, invalidInput: true }
+    const authored = { allowRefs: [{ ...ref, refDenied: {} }], denyRefs: [], defaultAction: 'deny' }
+    const literal = { ...runtime, resolvedRefs: proof }
+    const cases = [
+      { kind: 'edgionplugins' as const, document: {
+        apiVersion: 'edgion.io/v1', kind: 'EdgionPlugins', metadata: { name: 'http' },
+        spec: { requestPlugins: [
+          { type: 'IpRestriction', config: { ...authored, ...runtime } },
+          { type: 'RealIp', config: { trustedIpRefs: [{ ...ref, refDenied: {} }], resolvedRefs: proof, invalidInput: true } },
+          { type: 'Mock', config: { headers: literal } },
+        ] },
+      } },
+      { kind: 'edgionstreamplugins' as const, document: {
+        apiVersion: 'edgion.io/v1', kind: 'EdgionStreamPlugins', metadata: { name: 'stream' },
+        spec: {
+          plugins: [{ type: 'GlobalConnectionIpRestriction', config: { profiles: { locked: { ...authored, ...runtime } } } }],
+          tlsRoutePlugins: [{ type: 'IpRestriction', config: { ...authored, ...runtime } }],
+        },
+      } },
+      { kind: 'edgiongatewayconfig' as const, document: {
+        apiVersion: 'edgion.io/v1alpha1', kind: 'EdgionGatewayConfig', metadata: { name: 'global' },
+        spec: { realIp: { trustedIpRefs: [{ ...ref, refDenied: {} }], resolvedRefs: proof, invalidInput: true } },
+      } },
+    ]
+    for (const { kind, document } of cases) {
+      const before = structuredClone(document)
+      const output = buildMutationDocument(document, { resourceKind: kind, mode }) as any
+      if (kind === 'edgionplugins') {
+        expect(output.spec.requestPlugins[0].config).toEqual({ ...authored, allowRefs: [ref] })
+        expect(output.spec.requestPlugins[1].config).toEqual({ trustedIpRefs: [ref] })
+        expect(output.spec.requestPlugins[2].config.headers).toEqual(literal)
+      } else if (kind === 'edgionstreamplugins') {
+        expect(output.spec.plugins[0].config.profiles.locked).toEqual({ ...authored, allowRefs: [ref] })
+        expect(output.spec.tlsRoutePlugins[0].config).toEqual({ ...authored, allowRefs: [ref] })
+      } else expect(output.spec.realIp).toEqual({ trustedIpRefs: [ref] })
+      expect(document).toEqual(before)
+    }
+  })
+
   it.each(['requestPlugins', 'upstreamResponseFilterPlugins', 'upstreamResponseBodyFilterPlugins', 'upstreamResponsePlugins'])(
     'removes resolved dye conditions in %s while retaining authored rules', (stage) => {
       const rule = { name: 'x-tag', on: ['success'], value: 'authored', conditions: { run: { allOf: [{

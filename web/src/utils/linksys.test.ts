@@ -148,7 +148,7 @@ spec:
     expect(LINKSYS_RUST_FIELD_MATRIX.webhook).toContain('healthCheck')
     expect(LINKSYS_RUST_FIELD_MATRIX.webhook).not.toContain('allowDegradation')
     expect(LINKSYS_RUST_FIELD_MATRIX.webhook).not.toContain('allowDegradationTemplate')
-    expect(LINKSYS_RUST_FIELD_MATRIX.etcd).toContain('maxCallRecvSize')
+    expect(LINKSYS_RUST_FIELD_MATRIX.etcd).toEqual(['endpoints', 'auth', 'tls', 'timeout', 'keepAlive', 'namespace'])
     const resource = fromYaml(`apiVersion: edgion.io/v1
 kind: LinkSys
 metadata: {name: resolver, namespace: prod}

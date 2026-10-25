@@ -40,6 +40,5 @@ export function validateCredentialSource(value: LinkSysConfig): void {
     durations[field] = duration!
   }
   if (durations.retryInitialBackoff > durations.retryMaxBackoff) fail('rotation.retryInitialBackoff must not exceed retryMaxBackoff')
-  const maxKeys = config.publication?.memoryMaxKeys ?? 10000
-  if (!Number.isInteger(maxKeys) || maxKeys < 1 || maxKeys > 10000) fail('publication.memoryMaxKeys must be an integer from 1 to 10000')
+  if (config.publication && 'memoryMaxKeys' in config.publication) fail('publication.memoryMaxKeys was removed')
 }

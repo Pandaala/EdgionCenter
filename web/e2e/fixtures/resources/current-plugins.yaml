@@ -1,0 +1,153 @@
+# The inline descriptor is generated from transcoder-review.proto with protoc.
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-resttographql
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: RestToGraphql
+      config:
+        query: query Review { status }
+        operationName: Review
+        path: /graphql
+        variables: []
+    - type: RequestId
+      config: {}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-graphqlguard
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: GraphqlGuard
+      config:
+        mode: enforce
+        maxDepth: 8
+        maxFields: 100
+        allowIntrospection: false
+    - type: RequestId
+      config: {}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-graphqlsafelist
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: GraphqlSafelist
+      config:
+        operations:
+          - query: query Review { status }
+            operationName: Review
+          - query: query Other { version }
+            operationName: Other
+    - type: RequestId
+      config: {}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-graphqlratelimit
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: GraphqlRateLimit
+      config:
+        schema: 'type Query { status: String version: String }'
+        redisRef: __NS_A__/__PREFIX__-redis
+        policies:
+          - rate: 100
+            interval: 1m
+        maxCost: 1000
+        maxDepth: 10
+    - type: RequestId
+      config: {}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-graphqloperationrouter
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: GraphqlOperationRouter
+      config:
+        rules:
+          - operationType: query
+            operationName: Review
+            backendRef:
+              name: __PREFIX__-service
+    - type: RequestId
+      config: {}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-grpcjsontranscoder
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: GrpcJsonTranscoder
+      config:
+        descriptor:
+          type: inline
+          base64: CtYBChd0cmFuc2NvZGVyLXJldmlldy5wcm90bxINY2VudGVyLnJldmlldyIjCg1SZXZpZXdSZXF1ZXN0EhIKBG5hbWUYASABKAlSBG5hbWUiKAoOUmV2aWV3UmVzcG9uc2USFgoGc3RhdHVzGAEgASgJUgZzdGF0dXMyVQoNUmV2aWV3U2VydmljZRJECgVDaGVjaxIcLmNlbnRlci5yZXZpZXcuUmV2aWV3UmVxdWVzdBodLmNlbnRlci5yZXZpZXcuUmV2aWV3UmVzcG9uc2ViBnByb3RvMw==
+        services:
+          - center.review.ReviewService
+        autoMapping: true
+        maxResponseJsonSize: 1m
+    - type: RequestId
+      config: {}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-responsecache
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: ResponseCache
+      config:
+        maxTtl: 60s
+        graphqlQueries: false
+        vary:
+          - type: header
+            name: accept-language
+    - type: RequestId
+      config: {}
+---
+apiVersion: edgion.io/v1
+kind: EdgionPlugins
+metadata:
+  name: __PREFIX__-aiproxy
+  namespace: __NS_A__
+  labels:
+    edgion.io/e2e-run: __RUN_ID__
+spec:
+  requestPlugins:
+    - type: AiProxy
+      config:
+        api: openaiChat
+        usageObservation: 'off'
+        backendSelection:
+          type: Weighted
+    - type: RequestId
+      config: {}

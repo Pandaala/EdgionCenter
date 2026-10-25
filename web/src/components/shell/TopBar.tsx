@@ -95,7 +95,7 @@ export const TopBar = ({ collapsed, onToggleCollapse }: TopBarProps) => {
           letterSpacing: '-0.01em',
         }}
       >
-        Edgion
+        {isCenterMode ? t('center.title') : 'Edgion'}
       </div>
       {isCenterMode && activeControllerId && (
         <>

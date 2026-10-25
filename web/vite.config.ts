@@ -5,6 +5,14 @@ import path from 'path'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: [
+      'monaco-editor/esm/vs/editor/editor.api.js',
+      'monaco-editor/esm/vs/editor/editor.all.js',
+      'monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js',
+      'monaco-editor/esm/vs/language/json/monaco.contribution.js',
+    ],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -44,7 +52,7 @@ export default defineConfig({
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'antd-vendor': ['antd'],
-          'utils': ['axios', '@tanstack/react-query', 'zustand'],
+          'utils': ['axios', '@tanstack/react-query'],
         },
       },
     },
